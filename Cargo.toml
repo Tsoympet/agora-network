@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "core/crates/consensus",
+    "core/crates/state-machine",
+    "core/crates/p2p",
+    "core/crates/rpc",
+    "core/crates/crypto",
+    "core/crates/miner-sidecar",
+    "core/node-bin",
+]
+resolver = "2"
