@@ -14,7 +14,7 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Storage setup:** Five column families (`hot` / `warm` / `archival` / `meta` / `utxo`)
 - [x] **Genesis ignition:** `GenesisBuilder` for Block 0 and fixed supply caps
 - [x] **Consensus core (initial):** GHOSTDAG blue-set ordering + DAA scaffold + leading-zero PoW verify hooks (RandomX / kHeavyHash FFI later)
-- [ ] **P2P handshake:** libp2p gossip + DNS seeder; connect the first two nodes
+- [x] **P2P handshake:** libp2p gossipsub + mempool admission + DNS seeder; two-node local gossip test
 
 ### Stack locks
 

@@ -1,0 +1,18 @@
+[package]
+name = "agora-dns-seeder"
+description = "HTTP peer phonebook for Agora Network bootstrap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "agora-dns-seeder"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = "0.3"

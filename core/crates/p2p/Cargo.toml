@@ -8,6 +8,14 @@ repository.workspace = true
 
 [dependencies]
 agora-types = { workspace = true }
+agora-crypto = { workspace = true }
+borsh = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+futures = { workspace = true }
+libp2p = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tracing-subscriber = "0.3"

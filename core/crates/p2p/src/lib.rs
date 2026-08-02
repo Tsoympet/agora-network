@@ -1,12 +1,17 @@
-//! Peer-to-peer networking surface for Agora.
+//! Peer-to-peer networking for Agora via **libp2p** only.
 //!
-//! All transports must go through libp2p (Phase 4). This crate currently exposes
-//! topic names and a network config so higher layers can wire without inventing APIs.
+//! Provides gossipsub topics, mempool admission, and a swarm runtime used by `agora-node`.
 
 mod config;
 mod error;
+mod mempool;
+mod messages;
+mod network;
 mod topics;
 
 pub use config::NetworkConfig;
 pub use error::P2pError;
-pub use topics::{TOPIC_BLOCKS, TOPIC_TRANSACTIONS};
+pub use mempool::Mempool;
+pub use messages::NetworkMessage;
+pub use network::{dial_addr, NetworkEvent, NetworkHandle, NetworkNode};
+pub use topics::{blocks_topic, transactions_topic, TOPIC_BLOCKS, TOPIC_TRANSACTIONS};
