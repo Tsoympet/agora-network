@@ -146,13 +146,13 @@ mod tests {
             backend.get_balance(&premine).as_base_units(),
             Amount::from_whole(10_000_000).unwrap().as_base_units()
         );
+        let mut denied = NodeBackend::new(
+            Arc::new(StateStore::open("/tmp/agora-node-backend-test2").unwrap()),
+            None,
+            false,
+        );
         assert!(matches!(
-            NodeBackend::new(
-                Arc::new(StateStore::open("/tmp/agora-node-backend-test2").unwrap()),
-                None,
-                false
-            )
-            .fund_address(premine, Amount::from_base_units(1)),
+            denied.fund_address(premine, Amount::from_base_units(1)),
             Err(RpcError::Rejected(_))
         ));
     }

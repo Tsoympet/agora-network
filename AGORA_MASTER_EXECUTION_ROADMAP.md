@@ -57,7 +57,7 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Stratum pool scaffold:** `infrastructure/stratum-pool` (`agora-stratum-pool`) JSON-lines TCP + share validation (SHA-256 stand-in for kHeavyHash)
 - [x] **Testnet faucet scaffold:** `infrastructure/testnet-faucet` rate-limited `/drip` + balance lookup
 - [x] **RPC hardening:** `RpcBackend` + `RpcDispatcher` for tips / block / submit / balance / fund
-- [ ] Wire HTTP JSON-RPC into `agora-node`
+- [x] **Wire HTTP JSON-RPC into `agora-node`:** `NodeBackend` + `AGORA_RPC_BIND` (`POST /rpc`, `/health`)
 - [ ] Link audited kHeavyHash FFI into stratum + consensus PoW verify
 
 ## Directory Structure Reference
