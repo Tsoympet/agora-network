@@ -96,6 +96,10 @@ impl ChainState {
         Ok(None)
     }
 
+    pub fn has_block(&self, hash: &Hash) -> Result<bool, AdmitError> {
+        Ok(self.load_block(hash)?.is_some() || self.dag.contains(hash))
+    }
+
     /// Build a mining template parented to current tips.
     pub fn block_template(&self) -> Result<BlockHeader, AdmitError> {
         let parents = self.tips()?;

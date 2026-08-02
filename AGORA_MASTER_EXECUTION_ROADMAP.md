@@ -66,7 +66,7 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **UTXO apply/revert:** `apply_block` / `revert_journal` + `delete_cf`; wired into `admit_block` with coinbase budget
 - [ ] DAA wiring into templates + admission (`next_difficulty` → `header.bits`)
-- [ ] Compact blocks / IBD fetch on `BlockAnnounce`
+- [x] **Compact blocks / IBD fetch:** `CompactBlock` + `GetBlock` on `BlockAnnounce`; mempool inflate + pending-fetch dedupe
 
 ## Directory Structure Reference
 
