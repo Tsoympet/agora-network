@@ -16,6 +16,12 @@ Intent-Engine (L4) ──solvers──► Bridge-in-a-Box (L3) ──► Distric
                               Ovolos Rollup (L2) ──batches──► Agora L1 BlockDAG
 ```
 
+## Status
+
+- L2 executor: audited `revm` bound via `RevmExecutor` (default feature)
+- L3 messaging: merkle light-client proofs + `MessageTransport`
+- L4: settles intents through Bridge-in-a-Box
+
 See also:
 
 - [`docs/core/ovolos-rollup.md`](../core/ovolos-rollup.md)

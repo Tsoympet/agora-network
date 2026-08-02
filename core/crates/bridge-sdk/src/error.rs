@@ -10,4 +10,8 @@ pub enum BridgeError {
     InsufficientLock,
     #[error("message not claimable: {0}")]
     NotClaimable(String),
+    #[error("invalid light-client proof: {0}")]
+    InvalidProof(String),
+    #[error("transport error: {0}")]
+    Transport(String),
 }

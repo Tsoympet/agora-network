@@ -4,6 +4,7 @@ use agora_types::{Address, Amount, Hash};
 
 use crate::district::DistrictConfig;
 use crate::messages::{BridgeDirection, BridgeMessage, MessageStatus};
+use crate::proof::{verify_inclusion, LightClientProof};
 use crate::BridgeError;
 
 /// In-memory Bridge-in-a-Box runtime for District Chain asset moves.
@@ -79,6 +80,22 @@ impl BridgeBox {
         }
         entry.1 = MessageStatus::Claimed;
         Ok(())
+    }
+
+    /// Claim only after a light-client inclusion proof verifies against `trusted_root`.
+    pub fn claim_mint_with_proof(
+        &mut self,
+        message_id: Hash,
+        proof: &LightClientProof,
+        trusted_root: &Hash,
+    ) -> Result<(), BridgeError> {
+        if proof.message_id != message_id {
+            return Err(BridgeError::InvalidProof("message id mismatch".into()));
+        }
+        if !verify_inclusion(proof, trusted_root) {
+            return Err(BridgeError::InvalidProof("inclusion check failed".into()));
+        }
+        self.claim_mint(message_id)
     }
 
     /// Burn on district and unlock on hub.
