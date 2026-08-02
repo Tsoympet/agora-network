@@ -309,9 +309,20 @@ export function LiveDag() {
                 <li key={tx.tx_id} className="font-mono text-xs md:text-sm">
                   <div className="text-[var(--agora-cyan)]">
                     {tx.is_coinbase ? "coinbase" : "transfer"}{" "}
-                    <span className="text-[var(--agora-ink)]">
+                    <a
+                      href={`#tx`}
+                      className="text-[var(--agora-ink)] hover:underline"
+                      title={`Lookup ${tx.tx_id}`}
+                      onClick={() => {
+                        try {
+                          sessionStorage.setItem("agora_explorer_tx", tx.tx_id);
+                        } catch {
+                          // ignore storage failures
+                        }
+                      }}
+                    >
                       {shortHash(tx.tx_id)}
-                    </span>
+                    </a>
                   </div>
                   <div className="mt-1 text-mist">
                     {tx.inputs.length} in · {tx.outputs.length} out

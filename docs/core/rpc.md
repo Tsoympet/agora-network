@@ -61,7 +61,7 @@ The live backend (`NodeBackend`) reads tips/blocks/UTXOs from `StateStore`, admi
 
 `apps/shared/light-client` provides `createLightClient` + `startTipSync` / `watchTransaction` plus wallet helpers (`getBalance`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) used by:
 
-- `apps/explorer` (live DAG + block tx detail)
+- `apps/explorer` (live DAG + block tx detail + `agora_getTransaction` lookup / pending watch)
 - `apps/desktop` (tip sync, UTXO lookup, signed send + confirmation poll)
 - `apps/mobile` (tip sync, UTXO lookup, signed send + confirmation poll)
 
