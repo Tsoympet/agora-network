@@ -98,14 +98,16 @@ async fn main() {
         allow_fund,
         ?pow_algo,
         template_bits,
+        daa_bits = chain.lock().map(|c| c.difficulty().as_bits()).unwrap_or(template_bits),
         "agora-node foundation boot ok"
     );
     println!(
-        "Agora Network node — peer {} genesis {} rpc http://{} pow={:?}",
+        "Agora Network node — peer {} genesis {} rpc http://{} pow={:?} bits={}",
         handle.peer_id(),
         genesis_hash.to_hex(),
         rpc_bind,
-        pow_algo
+        pow_algo,
+        chain.lock().map(|c| c.difficulty().as_bits()).unwrap_or(template_bits)
     );
 
     tokio::spawn(async move {

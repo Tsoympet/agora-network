@@ -8,7 +8,7 @@ Mining is CPU-heavy and must not share latency-critical threads with consensus, 
 
 ## Loop
 
-1. `agora_getBlockTemplate` → `BlockHeader` (parents = tips, `bits` from `AGORA_TEMPLATE_BITS`)
+1. `agora_getBlockTemplate` → `BlockHeader` (parents = tips, `bits` from live DAA difficulty)
 2. Search nonces with `RandomXPowHasher` until `leading_zero_bits(digest) >= bits`
 3. `agora_submitBlock` with `{ header, transactions: [] }`
 

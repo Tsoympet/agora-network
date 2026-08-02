@@ -140,6 +140,11 @@ impl RpcBackend for NodeBackend {
                 crate::admit::AdmitError::Utxo(msg) => {
                     RpcError::Rejected(format!("utxo: {msg}"))
                 }
+                crate::admit::AdmitError::WrongDifficulty { expected, got } => {
+                    RpcError::Rejected(format!(
+                        "wrong difficulty: expected bits={expected}, got={got}"
+                    ))
+                }
                 other => RpcError::Internal(other.to_string()),
             })?;
         if let Some(net) = &self.net {
@@ -178,8 +183,7 @@ mod tests {
         );
 
         let mut header = backend.get_block_template().unwrap();
-        // bits=0 accepts any RandomX digest.
-        header.bits = 0;
+        assert_eq!(header.bits, 0); // DAA initial bits from bootstrap
         header.nonce = 1;
         let block = Block {
             header: header.clone(),

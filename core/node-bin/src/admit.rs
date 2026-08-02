@@ -1,10 +1,13 @@
 //! Block admission: PoW verify → UTXO apply → DAG/GHOSTDAG → durable store.
+//!
+//! Difficulty (`header.bits`) is driven by [`DaaConfig`] / [`next_difficulty`].
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agora_consensus::{
-    Dag, EmissionSchedule, Ghostdag, GhostdagConfig, LeadingZeroPow, PowAlgorithm, PowVerifier,
+    next_difficulty, DaaConfig, Dag, Difficulty, EmissionSchedule, Ghostdag, GhostdagConfig,
+    LeadingZeroPow, PowAlgorithm, PowVerifier,
 };
 use agora_state_machine::{apply_block, meta_keys, revert_journal, ColumnFamily, StateStore};
 use agora_types::{Block, BlockHeader, Hash};
@@ -14,6 +17,8 @@ use thiserror::Error;
 pub enum AdmitError {
     #[error("invalid proof of work")]
     InvalidPow,
+    #[error("wrong difficulty: expected bits={expected}, got={got}")]
+    WrongDifficulty { expected: u32, got: u32 },
     #[error("missing parent: {0}")]
     MissingParent(String),
     #[error("duplicate block: {0}")]
@@ -33,8 +38,8 @@ pub struct ChainState {
     ghostdag: Ghostdag,
     pow: LeadingZeroPow,
     emission: EmissionSchedule,
-    /// Difficulty bits advertised in block templates.
-    template_bits: u32,
+    daa: DaaConfig,
+    difficulty: Difficulty,
 }
 
 impl ChainState {
@@ -42,7 +47,7 @@ impl ChainState {
         store: Arc<StateStore>,
         genesis: Hash,
         algo: PowAlgorithm,
-        template_bits: u32,
+        initial_bits: u32,
     ) -> Result<Self, AdmitError> {
         let mut dag = Dag::new();
         dag.insert(genesis, vec![])
@@ -51,13 +56,22 @@ impl ChainState {
         ghostdag
             .add_block(&dag, genesis)
             .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+
+        let daa = DaaConfig {
+            // Allow bits=0 testnets when operators start at zero.
+            min_level: if initial_bits == 0 { 0 } else { 1 },
+            ..DaaConfig::default()
+        };
+        let difficulty = load_or_init_difficulty(&store, initial_bits)?;
+
         Ok(Self {
             store,
             dag,
             ghostdag,
             pow: LeadingZeroPow::new(algo),
             emission: EmissionSchedule::default(),
-            template_bits,
+            daa,
+            difficulty,
         })
     }
 
@@ -67,6 +81,10 @@ impl ChainState {
 
     pub fn pow_algorithm(&self) -> PowAlgorithm {
         self.pow.algorithm()
+    }
+
+    pub fn difficulty(&self) -> Difficulty {
+        self.difficulty
     }
 
     pub fn tips(&self) -> Result<Vec<Hash>, AdmitError> {
@@ -96,7 +114,7 @@ impl ChainState {
         Ok(None)
     }
 
-    /// Build a mining template parented to current tips.
+    /// Build a mining template parented to current tips with DAA `bits`.
     pub fn block_template(&self) -> Result<BlockHeader, AdmitError> {
         let parents = self.tips()?;
         let timestamp_ms = SystemTime::now()
@@ -107,16 +125,13 @@ impl ChainState {
             version: 1,
             parents,
             timestamp_ms,
-            bits: self.template_bits,
+            bits: self.difficulty.as_bits(),
             nonce: 0,
             tx_root: Hash::ZERO,
         })
     }
 
     /// Estimate blue score for coinbase budgeting before GHOSTDAG colors the block.
-    ///
-    /// Uses `max(parent.blue_score) + 1`, which matches chain growth and is a safe
-    /// upper bound for merge blocks in this scaffold.
     fn estimate_blue_score(&self, parents: &[Hash]) -> u64 {
         if parents.is_empty() {
             return 1;
@@ -129,7 +144,35 @@ impl ChainState {
             .saturating_add(1)
     }
 
-    /// Verify PoW, apply UTXOs, persist, then update GHOSTDAG.
+    /// Walk the selected-parent spine collecting timestamps oldest → newest.
+    fn timestamp_window(&self, tip: Hash) -> Result<Vec<u64>, AdmitError> {
+        let want = (self.daa.window_size as usize).saturating_add(1);
+        let mut newest_first = Vec::with_capacity(want.min(64));
+        let mut cursor = Some(tip);
+        while let Some(hash) = cursor {
+            if newest_first.len() >= want {
+                break;
+            }
+            if let Some(block) = self.load_block(&hash)? {
+                newest_first.push(block.header.timestamp_ms);
+            }
+            cursor = self.ghostdag.selected_parent(&hash);
+        }
+        newest_first.reverse();
+        Ok(newest_first)
+    }
+
+    fn persist_difficulty(&self) -> Result<(), AdmitError> {
+        self.store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::DAA_DIFFICULTY,
+                &self.difficulty.level.to_le_bytes(),
+            )
+            .map_err(|e| AdmitError::Storage(e.to_string()))
+    }
+
+    /// Verify PoW + DAA bits, apply UTXOs, persist, update GHOSTDAG, retarget difficulty.
     pub fn admit_block(&mut self, block: Block) -> Result<Hash, AdmitError> {
         let id = block.id();
         if self.dag.contains(&id) {
@@ -139,6 +182,14 @@ impl ChainState {
             if !self.dag.contains(parent) {
                 return Err(AdmitError::MissingParent(parent.to_hex()));
             }
+        }
+
+        let expected = self.difficulty.as_bits();
+        if block.header.bits != expected {
+            return Err(AdmitError::WrongDifficulty {
+                expected,
+                got: block.header.bits,
+            });
         }
 
         let pow_hash = self.pow.hasher().pow_hash(&block.header);
@@ -164,6 +215,10 @@ impl ChainState {
             .add_block(&self.dag, id)
             .map_err(|e| AdmitError::Consensus(e.to_string()))?;
 
+        let window = self.timestamp_window(id)?;
+        self.difficulty = next_difficulty(&self.daa, self.difficulty, &window);
+        self.persist_difficulty()?;
+
         Ok(id)
     }
 
@@ -188,5 +243,87 @@ impl ChainState {
             .put_cf(ColumnFamily::Meta, meta_keys::TIPS, &tips_bytes)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
         Ok(())
+    }
+}
+
+fn load_or_init_difficulty(
+    store: &StateStore,
+    initial_bits: u32,
+) -> Result<Difficulty, AdmitError> {
+    if let Some(bytes) = store
+        .get_cf(ColumnFamily::Meta, meta_keys::DAA_DIFFICULTY)
+        .map_err(|e| AdmitError::Storage(e.to_string()))?
+    {
+        if bytes.len() == 4 {
+            let level = u32::from_le_bytes(bytes.try_into().unwrap());
+            return Ok(Difficulty::new(level));
+        }
+    }
+    let difficulty = Difficulty::new(initial_bits);
+    store
+        .put_cf(
+            ColumnFamily::Meta,
+            meta_keys::DAA_DIFFICULTY,
+            &difficulty.level.to_le_bytes(),
+        )
+        .map_err(|e| AdmitError::Storage(e.to_string()))?;
+    Ok(difficulty)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agora_consensus::{PowHasher, RandomXPowHasher};
+    use agora_state_machine::GenesisBuilder;
+
+    #[test]
+    fn rejects_wrong_bits_and_persists_difficulty() {
+        let store = Arc::new(StateStore::open("/tmp/agora-daa-admit").unwrap());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain =
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap();
+        assert_eq!(chain.difficulty().as_bits(), 0);
+        assert_eq!(chain.block_template().unwrap().bits, 0);
+
+        let mut header = chain.block_template().unwrap();
+        header.bits = 3;
+        header.nonce = 1;
+        assert!(matches!(
+            chain.admit_block(Block {
+                header,
+                transactions: vec![],
+            }),
+            Err(AdmitError::WrongDifficulty { expected: 0, got: 3 })
+        ));
+
+        // Admit a valid bits=0 block, then force a retarget from the spine window.
+        let mut header = chain.block_template().unwrap();
+        header.nonce = 9;
+        header.timestamp_ms = 1;
+        let digest = RandomXPowHasher.pow_hash(&header);
+        LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&header, &digest)
+            .unwrap();
+        let id = chain
+            .admit_block(Block {
+                header,
+                transactions: vec![],
+            })
+            .unwrap();
+
+        chain.daa.window_size = 2;
+        chain.daa.target_block_time_ms = 10_000;
+        chain.difficulty = Difficulty::new(4);
+        let window = chain.timestamp_window(id).unwrap();
+        assert!(window.len() >= 2);
+        let next = next_difficulty(&chain.daa, chain.difficulty, &window);
+        assert!(next.level > 4);
+        chain.difficulty = next;
+        chain.persist_difficulty().unwrap();
+
+        let reloaded =
+            ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0).unwrap();
+        assert_eq!(reloaded.difficulty().as_bits(), next.level);
+        assert_eq!(reloaded.block_template().unwrap().bits, next.level);
     }
 }
