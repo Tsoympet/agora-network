@@ -11,8 +11,8 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Initialize Monorepo:** Workspace root + Cargo members (`types`, `crypto`, `consensus`, `state-machine`, `p2p`, `rpc`, `miner-sidecar`, `node-bin`)
 - [x] **Core crate assembly (scaffold):** Compiling stubs for consensus, state-machine, p2p, rpc
 - [x] **Cryptography & types:** Shared `borsh`/`ts-rs` types (`Amount`, `Hash`, `Transaction`, `Block`); BIP-39/44 + secp256k1 tx sign/verify
-- [ ] **Storage setup:** Initialize RocksDB with the defined column families (hot / warm / archival + metadata)
-- [ ] **Genesis ignition:** `GenesisBuilder` for Block 0 and fixed supply caps
+- [x] **Storage setup:** Five column families (`hot` / `warm` / `archival` / `meta` / `utxo`)
+- [x] **Genesis ignition:** `GenesisBuilder` for Block 0 and fixed supply caps
 - [x] **Consensus core (initial):** GHOSTDAG blue-set ordering + DAA scaffold + leading-zero PoW verify hooks (RandomX / kHeavyHash FFI later)
 - [ ] **P2P handshake:** libp2p gossip + DNS seeder; connect the first two nodes
 

@@ -1,7 +1,9 @@
-/// Logical storage zones for BlockDAG state.
+use crate::columns::ColumnFamily;
+
+/// Logical storage zones for BlockDAG state (subset of column families).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StateZone {
-    /// Recent tips and UTXOs required for sub-second validation.
+    /// Recent tips and headers required for sub-second validation.
     Hot,
     /// Pruned-but-queryable history for RPC / explorer.
     Warm,
@@ -10,11 +12,11 @@ pub enum StateZone {
 }
 
 impl StateZone {
-    pub fn column_family(self) -> &'static str {
+    pub fn column_family(self) -> ColumnFamily {
         match self {
-            Self::Hot => "zone_hot",
-            Self::Warm => "zone_warm",
-            Self::Archival => "zone_archival",
+            Self::Hot => ColumnFamily::Hot,
+            Self::Warm => ColumnFamily::Warm,
+            Self::Archival => ColumnFamily::Archival,
         }
     }
 }

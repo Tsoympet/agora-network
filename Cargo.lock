@@ -78,6 +78,7 @@ version = "0.1.0"
 dependencies = [
  "agora-consensus",
  "agora-types",
+ "borsh",
  "rocksdb",
  "thiserror",
  "tracing",

@@ -2,19 +2,31 @@
 
 Applies consensus-ordered blocks to durable storage.
 
-## Triple-zone model
+## Column families (5)
 
-| Zone | Column family | Purpose |
+| CF | Name | Purpose |
 | --- | --- | --- |
-| Hot | `zone_hot` | Tips + balances needed for sub-second validation |
-| Warm | `zone_warm` | Recent history for RPC / explorer |
-| Archival | `zone_archival` | Long-term data, slower media OK |
+| Hot | `cf_hot` | Tips + recent headers for sub-second validation |
+| Warm | `cf_warm` | Recent history for RPC / explorer |
+| Archival | `cf_archival` | Long-term block payloads |
+| Meta | `cf_meta` | Genesis hash, supply caps, tips set |
+| UTXO | `cf_utxo` | Spendable outputs keyed by outpoint |
 
-Splitting zones avoids forcing tip validation through cold compaction paths.
+Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
 
-## Storage
+## Genesis
 
-- Engine: `rocksdb` (enable crate feature `rocksdb`; requires a C++ toolchain)
-- Default/dev builds use an in-memory map so `cargo test --workspace` stays portable
-- Rocks open path creates missing column families
-- Block apply/revert atomicity is Phase 3 work
+`GenesisBuilder` constructs Block 0 (premine coinbase), then `ignite` writes:
+
+- genesis block into hot + archival
+- `meta/genesis_hash`, `meta/max_supply`, `meta/premine`, `meta/tips`
+- premine UTXO into `cf_utxo`
+
+Default caps: max supply 100,000,000 AGORA; premine 10,000,000 AGORA.
+
+## Storage backends
+
+- Default/dev: in-memory map (portable CI)
+- `--features rocksdb`: durable RocksDB (requires C++ toolchain)
+
+Block apply/revert atomicity beyond genesis is follow-on work.

@@ -18,3 +18,4 @@ dist/
 # Local node data
 *.db
 /data/
+data/

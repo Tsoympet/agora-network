@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use crate::columns::ColumnFamily;
 use crate::{StateError, StateZone};
 
 /// State backend used by the node.
@@ -41,8 +42,8 @@ impl StateStore {
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
-        let cfs = [StateZone::Hot, StateZone::Warm, StateZone::Archival]
-            .map(|z| ColumnFamilyDescriptor::new(z.column_family(), Options::default()));
+        let cfs = ColumnFamily::ALL
+            .map(|cf| ColumnFamilyDescriptor::new(cf.name(), Options::default()));
 
         let db = DB::open_cf_descriptors(&opts, path, cfs)
             .map_err(|e| StateError::Storage(e.to_string()))?;
@@ -52,54 +53,72 @@ impl StateStore {
         })
     }
 
-    pub fn put(&self, zone: StateZone, key: &[u8], value: &[u8]) -> Result<(), StateError> {
+    pub fn put_cf(&self, cf: ColumnFamily, key: &[u8], value: &[u8]) -> Result<(), StateError> {
         match &self.inner {
             Inner::Memory(map) => {
                 let mut guard = map
                     .lock()
                     .map_err(|_| StateError::Storage("lock poisoned".into()))?;
-                guard.insert((zone as u8, key.to_vec()), value.to_vec());
+                guard.insert((cf as u8, key.to_vec()), value.to_vec());
                 Ok(())
             }
             #[cfg(feature = "rocksdb")]
             Inner::Rocks(db) => {
-                let cf = db
-                    .cf_handle(zone.column_family())
-                    .ok_or(StateError::UnknownZone)?;
-                db.put_cf(cf, key, value)
+                let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                db.put_cf(handle, key, value)
                     .map_err(|e| StateError::Storage(e.to_string()))
             }
         }
     }
 
-    pub fn get(&self, zone: StateZone, key: &[u8]) -> Result<Option<Vec<u8>>, StateError> {
+    pub fn get_cf(&self, cf: ColumnFamily, key: &[u8]) -> Result<Option<Vec<u8>>, StateError> {
         match &self.inner {
             Inner::Memory(map) => {
                 let guard = map
                     .lock()
                     .map_err(|_| StateError::Storage("lock poisoned".into()))?;
-                Ok(guard.get(&(zone as u8, key.to_vec())).cloned())
+                Ok(guard.get(&(cf as u8, key.to_vec())).cloned())
             }
             #[cfg(feature = "rocksdb")]
             Inner::Rocks(db) => {
-                let cf = db
-                    .cf_handle(zone.column_family())
-                    .ok_or(StateError::UnknownZone)?;
-                db.get_cf(cf, key)
+                let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                db.get_cf(handle, key)
                     .map_err(|e| StateError::Storage(e.to_string()))
             }
         }
+    }
+
+    pub fn put(&self, zone: StateZone, key: &[u8], value: &[u8]) -> Result<(), StateError> {
+        self.put_cf(zone.column_family(), key, value)
+    }
+
+    pub fn get(&self, zone: StateZone, key: &[u8]) -> Result<Option<Vec<u8>>, StateError> {
+        self.get_cf(zone.column_family(), key)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::columns::meta_keys;
 
     #[test]
-    fn memory_roundtrip() {
+    fn five_column_families_roundtrip() {
         let store = StateStore::open("/tmp/agora-state-test").expect("open");
-        store.put(StateZone::Hot, b"k", b"v").expect("put");
-        assert_eq!(store.get(StateZone::Hot, b"k").expect("get"), Some(b"v".to_vec()));
+        for cf in ColumnFamily::ALL {
+            let key = format!("k-{}", cf.name());
+            store.put_cf(cf, key.as_bytes(), b"v").expect("put");
+            assert_eq!(
+                store.get_cf(cf, key.as_bytes()).expect("get"),
+                Some(b"v".to_vec())
+            );
+        }
+        store
+            .put_cf(ColumnFamily::Meta, meta_keys::MAX_SUPPLY, &1_000u64.to_le_bytes())
+            .unwrap();
+        assert!(store
+            .get_cf(ColumnFamily::Meta, meta_keys::MAX_SUPPLY)
+            .unwrap()
+            .is_some());
     }
 }
