@@ -10,7 +10,7 @@ use agora_consensus::{
     LeadingZeroPow, PowAlgorithm, PowVerifier,
 };
 use agora_state_machine::{apply_block, meta_keys, revert_journal, ColumnFamily, StateStore};
-use agora_types::{Block, BlockHeader, Hash};
+use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -118,20 +118,41 @@ impl ChainState {
         Ok(self.load_block(hash)?.is_some() || self.dag.contains(hash))
     }
 
-    /// Build a mining template parented to current tips with DAA `bits`.
-    pub fn block_template(&self) -> Result<BlockHeader, AdmitError> {
+    /// Build a mining template parented to current tips with a coinbase payout.
+    ///
+    /// Coinbase value follows [`EmissionSchedule::reward_at_blue_score`] for the
+    /// estimated next blue score. `tx_root` commits to that coinbase so PoW binds
+    /// the reward output.
+    pub fn block_template(&self, payout: Address) -> Result<Block, AdmitError> {
         let parents = self.tips()?;
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        Ok(BlockHeader {
-            version: 1,
-            parents,
+        let reward = self
+            .emission
+            .reward_at_blue_score(self.estimate_blue_score(&parents));
+        // Nonce = timestamp keeps coinbase txids unique across templates.
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(reward),
+                address: payout,
+            }],
             timestamp_ms,
-            bits: self.difficulty.as_bits(),
-            nonce: 0,
-            tx_root: Hash::ZERO,
+        );
+        let tx_root = Block::compute_tx_root(std::slice::from_ref(&coinbase));
+        Ok(Block {
+            header: BlockHeader {
+                version: 1,
+                parents,
+                timestamp_ms,
+                bits: self.difficulty.as_bits(),
+                nonce: 0,
+                tx_root,
+            },
+            transactions: vec![coinbase],
         })
     }
 
@@ -287,33 +308,30 @@ mod tests {
         let mut chain =
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap();
         assert_eq!(chain.difficulty().as_bits(), 0);
-        assert_eq!(chain.block_template().unwrap().bits, 0);
+        assert_eq!(
+            chain.block_template(Address::ZERO).unwrap().header.bits,
+            0
+        );
 
-        let mut header = chain.block_template().unwrap();
-        header.bits = 3;
-        header.nonce = 1;
+        let mut bad = chain.block_template(Address::ZERO).unwrap();
+        bad.header.bits = 3;
+        bad.header.nonce = 1;
         assert!(matches!(
-            chain.admit_block(Block {
-                header,
-                transactions: vec![],
-            }),
+            chain.admit_block(bad),
             Err(AdmitError::WrongDifficulty { expected: 0, got: 3 })
         ));
 
-        // Admit a valid bits=0 block, then force a retarget from the spine window.
-        let mut header = chain.block_template().unwrap();
-        header.nonce = 9;
-        header.timestamp_ms = 1;
-        let digest = RandomXPowHasher.pow_hash(&header);
+        // Admit a valid bits=0 coinbase block, then force a retarget from the spine window.
+        let mut block = chain.block_template(Address::ZERO).unwrap();
+        block.header.nonce = 9;
+        block.header.timestamp_ms = 1;
+        let digest = RandomXPowHasher.pow_hash(&block.header);
         LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&header, &digest)
+            .verify(&block.header, &digest)
             .unwrap();
-        let id = chain
-            .admit_block(Block {
-                header,
-                transactions: vec![],
-            })
-            .unwrap();
+        assert_eq!(block.transactions.len(), 1);
+        assert!(block.transactions[0].inputs.is_empty());
+        let id = chain.admit_block(block).unwrap();
 
         chain.daa.window_size = 2;
         chain.daa.target_block_time_ms = 10_000;
@@ -328,6 +346,9 @@ mod tests {
         let reloaded =
             ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0).unwrap();
         assert_eq!(reloaded.difficulty().as_bits(), next.level);
-        assert_eq!(reloaded.block_template().unwrap().bits, next.level);
+        assert_eq!(
+            reloaded.block_template(Address::ZERO).unwrap().header.bits,
+            next.level
+        );
     }
 }

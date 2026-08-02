@@ -78,9 +78,9 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 }))
             }
             RpcMethod::GetBlockTemplate => {
-                let header = self.backend.get_block_template()?;
+                let block = self.backend.get_block_template()?;
                 // Keep native serde shape (`Hash` as byte arrays) for miner-sidecar.
-                Ok(serde_json::to_value(header)
+                Ok(serde_json::to_value(block)
                     .map_err(|e| RpcError::Internal(e.to_string()))?)
             }
             RpcMethod::SubmitBlock => {

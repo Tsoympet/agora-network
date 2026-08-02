@@ -11,7 +11,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_submitTransaction` | UTXO-check + admit a signed tx into the mempool and gossip it |
 | `agora_getBalance` | Address balance (UTXO scan + optional testnet overlay) |
 | `agora_fundAddress` | Testnet credit path (disabled on node unless allowed) |
-| `agora_getBlockTemplate` | Mining template header (tips as parents) |
+| `agora_getBlockTemplate` | Mining template block (tips as parents + coinbase) |
 | `agora_submitBlock` | Admit a mined block (PoW verify + store + gossip) |
 
 ## Dispatch
@@ -30,6 +30,7 @@ Wired in `core/node-bin`:
 | `AGORA_RPC_ALLOW_FUND` | unset | When `1`/`true`, enable `agora_fundAddress` |
 | `AGORA_POW_ALGO` | `randomx` | `randomx` or `kheavyhash` for admission / templates |
 | `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty (`header.bits`); retargets after admits |
+| `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout address (40-char hex) for templates |
 
 Endpoints:
 
@@ -38,7 +39,7 @@ Endpoints:
 - CORS enabled (`Access-Control-Allow-Origin: *`) for browser explorers; `OPTIONS` preflight supported
 
 `agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`).  
-`agora_getBlockTemplate` keeps native serde hashes (byte arrays) for the miner sidecar.
+`agora_getBlockTemplate` returns a full `Block` (native serde hashes as byte arrays) with a coinbase paying `AGORA_MINER_ADDRESS` for the emission reward at the estimated next blue score; `header.tx_root` commits to that coinbase.
 
 Example:
 

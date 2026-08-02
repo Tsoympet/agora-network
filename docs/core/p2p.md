@@ -98,4 +98,4 @@ AGORA_DNS_SEEDER=http://127.0.0.1:18080 AGORA_SEEDER_REFRESH_SECS=60 cargo run -
 ## Follow-ons
 
 - [x] Mempool UTXO pre-checks before gossip admission
-- Coinbase outputs in mining templates
+- [x] Coinbase outputs in mining templates

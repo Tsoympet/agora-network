@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use agora_p2p::{Mempool, NetworkHandle, NetworkMessage};
 use agora_rpc::{RpcBackend, RpcError};
 use agora_state_machine::{validate_mempool_tx, ColumnFamily, StateStore};
-use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
+use agora_types::{Address, Amount, Block, Hash, Transaction, TxOut};
 use borsh::BorshDeserialize;
 
 use crate::admit::ChainState;
@@ -35,6 +35,8 @@ pub struct NodeBackend {
     /// When true, `agora_fundAddress` credits an overlay balance (testnet only).
     allow_fund: bool,
     fund_overlay: HashMap<Address, Amount>,
+    /// Coinbase payout address for `agora_getBlockTemplate`.
+    miner_address: Address,
 }
 
 impl NodeBackend {
@@ -44,6 +46,7 @@ impl NodeBackend {
         net: Option<NetworkHandle>,
         allow_fund: bool,
         mempool: Arc<Mutex<Mempool>>,
+        miner_address: Address,
     ) -> Self {
         Self {
             chain,
@@ -52,6 +55,7 @@ impl NodeBackend {
             net,
             allow_fund,
             fund_overlay: HashMap::new(),
+            miner_address,
         }
     }
 
@@ -126,11 +130,11 @@ impl RpcBackend for NodeBackend {
         Ok(self.get_balance(&address))
     }
 
-    fn get_block_template(&self) -> Result<BlockHeader, RpcError> {
+    fn get_block_template(&self) -> Result<Block, RpcError> {
         self.chain
             .lock()
             .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
-            .block_template()
+            .block_template(self.miner_address)
             .map_err(|e| RpcError::Internal(e.to_string()))
     }
 
@@ -195,27 +199,33 @@ mod tests {
         let chain = Arc::new(Mutex::new(
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap(),
         ));
-        let mut backend = NodeBackend::new(chain.clone(), store, None, false, mempool);
+        let miner = Address([1u8; 20]);
+        let mut backend = NodeBackend::new(chain.clone(), store, None, false, mempool, miner);
         assert_eq!(backend.dag_tips(), vec![genesis]);
         assert_eq!(
             backend.get_balance(&premine).as_base_units(),
             Amount::from_whole(10_000_000).unwrap().as_base_units()
         );
 
-        let mut header = backend.get_block_template().unwrap();
-        assert_eq!(header.bits, 0); // DAA initial bits from bootstrap
-        header.nonce = 1;
-        let block = Block {
-            header: header.clone(),
-            transactions: vec![],
-        };
-        let pow = RandomXPowHasher.pow_hash(&header);
+        let mut block = backend.get_block_template().unwrap();
+        assert_eq!(block.header.bits, 0); // DAA initial bits from bootstrap
+        assert_eq!(block.transactions.len(), 1);
+        assert!(block.transactions[0].inputs.is_empty());
+        assert_eq!(block.transactions[0].outputs[0].address, miner);
+        assert_eq!(
+            block.header.tx_root,
+            Block::compute_tx_root(&block.transactions)
+        );
+        block.header.nonce = 1;
+        let pow = RandomXPowHasher.pow_hash(&block.header);
         agora_consensus::LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&header, &pow)
+            .verify(&block.header, &pow)
             .unwrap();
+        let reward = block.transactions[0].outputs[0].value;
         let id = backend.submit_block(block).unwrap();
         assert_ne!(id, genesis);
         assert!(backend.dag_tips().contains(&id));
+        assert_eq!(backend.get_balance(&miner), reward);
     }
 
     #[test]
@@ -242,7 +252,8 @@ mod tests {
         let chain = Arc::new(Mutex::new(
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap(),
         ));
-        let mut backend = NodeBackend::new(chain, store, None, false, mempool);
+        let mut backend =
+            NodeBackend::new(chain, store, None, false, mempool, Address::ZERO);
 
         let mut bad = Transaction::unsigned(
             1,

@@ -17,7 +17,7 @@ use agora_p2p::{
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{GenesisBuilder, StateStore};
-use agora_types::{Block, Hash};
+use agora_types::{Address, Block, Hash};
 use tracing::{info, warn};
 
 use crate::admit::ChainState;
@@ -190,12 +190,17 @@ async fn main() {
         std::env::var("AGORA_RPC_ALLOW_FUND").as_deref(),
         Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
     );
+    let miner_address = std::env::var("AGORA_MINER_ADDRESS")
+        .ok()
+        .and_then(|s| Address::from_hex(&s))
+        .unwrap_or(Address::ZERO);
     let backend = NodeBackend::new(
         chain.clone(),
         store.clone(),
         Some(handle.clone()),
         allow_fund,
         mempool.clone(),
+        miner_address,
     );
     let dispatcher = Arc::new(tokio::sync::Mutex::new(RpcDispatcher::new(backend)));
     tokio::spawn(serve_rpc(rpc_bind.clone(), dispatcher.clone()));
@@ -206,6 +211,7 @@ async fn main() {
         genesis = %genesis_hash.to_hex(),
         %rpc_bind,
         allow_fund,
+        miner = %miner_address.to_hex(),
         ?pow_algo,
         template_bits,
         daa_bits = chain.lock().map(|c| c.difficulty().as_bits()).unwrap_or(template_bits),
