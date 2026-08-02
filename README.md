@@ -71,6 +71,7 @@ TypeScript bindings for shared types are generated under `core/crates/types/bind
 # Optional: AGORA_LISTEN, AGORA_BOOTSTRAP, AGORA_DATA, AGORA_RPC_BIND,
 #           AGORA_RPC_ALLOW_FUND, AGORA_POW_ALGO, AGORA_TEMPLATE_BITS,
 #           AGORA_MINER_ADDRESS, AGORA_PREMINE_ADDRESS, AGORA_MIN_RELAY_FEE
+# PeerId persists at $AGORA_DATA/p2p/identity.key across restarts.
 cargo run -p agora-node
 # Local testnet helpers (single-node + two-node IBD smoke):
 #   ./scripts/local_testnet.sh              # print runbook
