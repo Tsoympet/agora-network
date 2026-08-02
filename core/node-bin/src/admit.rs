@@ -2,6 +2,7 @@
 //!
 //! Difficulty (`header.bits`) is driven by [`DaaConfig`] / [`next_difficulty`].
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -51,13 +52,7 @@ impl ChainState {
         algo: PowAlgorithm,
         initial_bits: u32,
     ) -> Result<Self, AdmitError> {
-        let mut dag = Dag::new();
-        dag.insert(genesis, vec![])
-            .map_err(|e| AdmitError::Consensus(e.to_string()))?;
-        let mut ghostdag = Ghostdag::new(GhostdagConfig::default());
-        ghostdag
-            .add_block(&dag, genesis)
-            .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+        let (dag, ghostdag) = rebuild_dag_from_store(store.as_ref(), genesis)?;
 
         let daa = DaaConfig {
             // Allow bits=0 testnets when operators start at zero.
@@ -284,6 +279,85 @@ impl ChainState {
     }
 }
 
+fn load_block_bytes(store: &StateStore, hash: &Hash) -> Result<Option<Block>, AdmitError> {
+    for cf in [ColumnFamily::Hot, ColumnFamily::Warm, ColumnFamily::Archival] {
+        if let Some(bytes) = store
+            .get_cf(cf, hash.as_bytes())
+            .map_err(|e| AdmitError::Storage(e.to_string()))?
+        {
+            let block = borsh::from_slice(&bytes)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            return Ok(Some(block));
+        }
+    }
+    Ok(None)
+}
+
+fn load_tips_meta(store: &StateStore) -> Result<Vec<Hash>, AdmitError> {
+    let bytes = store
+        .get_cf(ColumnFamily::Meta, meta_keys::TIPS)
+        .map_err(|e| AdmitError::Storage(e.to_string()))?
+        .unwrap_or_default();
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
+    borsh::from_slice(&bytes).map_err(|e| AdmitError::Storage(e.to_string()))
+}
+
+/// Rebuild in-memory DAG/GHOSTDAG from durable tips → genesis ancestors.
+fn rebuild_dag_from_store(store: &StateStore, genesis: Hash) -> Result<(Dag, Ghostdag), AdmitError> {
+    let mut tips = load_tips_meta(store)?;
+    if tips.is_empty() {
+        tips.push(genesis);
+    }
+
+    let mut pending: HashMap<Hash, Block> = HashMap::new();
+    let mut stack = tips;
+    while let Some(hash) = stack.pop() {
+        if hash == genesis || pending.contains_key(&hash) {
+            continue;
+        }
+        let block = load_block_bytes(store, &hash)?.ok_or_else(|| {
+            AdmitError::Storage(format!("missing block {} while rebuilding dag", hash.to_hex()))
+        })?;
+        for parent in &block.header.parents {
+            stack.push(*parent);
+        }
+        pending.insert(hash, block);
+    }
+
+    let mut dag = Dag::new();
+    dag.insert(genesis, vec![])
+        .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+    let mut ghostdag = Ghostdag::new(GhostdagConfig::default());
+    ghostdag
+        .add_block(&dag, genesis)
+        .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+
+    while !pending.is_empty() {
+        let ready: Vec<Hash> = pending
+            .iter()
+            .filter(|(_, block)| block.header.parents.iter().all(|p| dag.contains(p)))
+            .map(|(hash, _)| *hash)
+            .collect();
+        if ready.is_empty() {
+            return Err(AdmitError::Storage(
+                "cannot rebuild dag: missing parents or cycle".into(),
+            ));
+        }
+        for hash in ready {
+            let block = pending.remove(&hash).expect("ready hash");
+            dag.insert(hash, block.header.parents.clone())
+                .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+            ghostdag
+                .add_block(&dag, hash)
+                .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+        }
+    }
+
+    Ok((dag, ghostdag))
+}
+
 fn load_or_init_difficulty(
     store: &StateStore,
     initial_bits: u32,
@@ -316,7 +390,7 @@ mod tests {
 
     #[test]
     fn rejects_wrong_bits_and_persists_difficulty() {
-        let store = Arc::new(StateStore::open("/tmp/agora-daa-admit").unwrap());
+        let store = Arc::new(StateStore::open_in_memory());
         let genesis = GenesisBuilder::default().ignite(&store).unwrap();
         let mut chain =
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap();
@@ -375,5 +449,27 @@ mod tests {
                 .bits,
             next.level
         );
+    }
+
+    #[test]
+    fn bootstrap_rebuilds_dag_from_store_tips() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain =
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap();
+        let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
+        block.header.nonce = 3;
+        let digest = RandomXPowHasher.pow_hash(&block.header);
+        LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&block.header, &digest)
+            .unwrap();
+        let id = chain.admit_block(block).unwrap();
+
+        let reloaded =
+            ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0).unwrap();
+        assert!(reloaded.has_block(&id).unwrap());
+        assert!(reloaded.tips().unwrap().contains(&id));
+        let child = reloaded.block_template(Address::ZERO, &[]).unwrap();
+        assert!(child.header.parents.contains(&id));
     }
 }

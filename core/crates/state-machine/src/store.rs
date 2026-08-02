@@ -7,8 +7,9 @@ use crate::{StateError, StateZone};
 
 /// State backend used by the node.
 ///
-/// Default build keeps an in-memory map so the workspace compiles without a C++
-/// toolchain. Enable `--features rocksdb` for durable column-family storage.
+/// - [`StateStore::open_in_memory`] — portable tests / CI without a C++ toolchain
+/// - [`StateStore::open`] — RocksDB when built with `--features rocksdb` (node default);
+///   otherwise falls back to an in-memory map (path ignored)
 pub struct StateStore {
     inner: Inner,
 }
@@ -20,6 +21,14 @@ enum Inner {
 }
 
 impl StateStore {
+    /// Ephemeral map — isolated unit tests and feature-less CI builds.
+    pub fn open_in_memory() -> Self {
+        Self {
+            inner: Inner::Memory(Arc::new(Mutex::new(HashMap::new()))),
+        }
+    }
+
+    /// Open durable storage at `path` when the `rocksdb` feature is enabled.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StateError> {
         #[cfg(feature = "rocksdb")]
         {
@@ -28,15 +37,18 @@ impl StateStore {
         #[cfg(not(feature = "rocksdb"))]
         {
             let _ = path;
-            Ok(Self {
-                inner: Inner::Memory(Arc::new(Mutex::new(HashMap::new()))),
-            })
+            Ok(Self::open_in_memory())
         }
     }
 
     #[cfg(feature = "rocksdb")]
     fn open_rocks(path: impl AsRef<Path>) -> Result<Self, StateError> {
         use rocksdb::{ColumnFamilyDescriptor, Options, DB};
+
+        if let Some(parent) = path.as_ref().parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| StateError::Storage(e.to_string()))?;
+        }
 
         let mut opts = Options::default();
         opts.create_if_missing(true);
@@ -155,7 +167,7 @@ mod tests {
 
     #[test]
     fn five_column_families_roundtrip() {
-        let store = StateStore::open("/tmp/agora-state-test").expect("open");
+        let store = StateStore::open_in_memory();
         for cf in ColumnFamily::ALL {
             let key = format!("k-{}", cf.name());
             store.put_cf(cf, key.as_bytes(), b"v").expect("put");
@@ -171,5 +183,35 @@ mod tests {
             .get_cf(ColumnFamily::Meta, meta_keys::MAX_SUPPLY)
             .unwrap()
             .is_some());
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn rocksdb_persists_across_reopen() {
+        let dir = std::env::temp_dir().join(format!(
+            "agora-rocksdb-reopen-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let store = StateStore::open(&dir).unwrap();
+            store
+                .put_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH, &[7u8; 32])
+                .unwrap();
+        }
+        {
+            let store = StateStore::open(&dir).unwrap();
+            assert_eq!(
+                store
+                    .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
+                    .unwrap(),
+                Some(vec![7u8; 32])
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

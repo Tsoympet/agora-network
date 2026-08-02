@@ -122,6 +122,18 @@ impl GenesisBuilder {
         let _ = &self.emission; // schedule is consulted by consensus; retained for API completeness.
         Ok(genesis_hash)
     }
+
+    /// Return the existing genesis hash from meta, or [`ignite`] a fresh chain.
+    pub fn load_or_ignite(&self, store: &StateStore) -> Result<Hash, StateError> {
+        if let Some(bytes) = store.get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)? {
+            if bytes.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                return Ok(Hash(arr));
+            }
+        }
+        self.ignite(store)
+    }
 }
 
 #[cfg(test)]
@@ -130,7 +142,7 @@ mod tests {
 
     #[test]
     fn genesis_ignition_writes_caps_and_utxo() {
-        let store = StateStore::open("/tmp/agora-genesis-test").unwrap();
+        let store = StateStore::open_in_memory();
         let premine = Address([7u8; 20]);
         let hash = GenesisBuilder::default()
             .with_premine_address(premine)

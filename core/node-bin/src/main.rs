@@ -158,13 +158,14 @@ async fn main() {
     let data_dir = std::env::var("AGORA_DATA").unwrap_or_else(|_| "data/agora-node".into());
     let store = Arc::new(StateStore::open(&data_dir).expect("open state store"));
     let genesis_hash = GenesisBuilder::default()
-        .ignite(store.as_ref())
-        .expect("genesis ignition");
+        .load_or_ignite(store.as_ref())
+        .expect("genesis load_or_ignite");
 
     let chain = Arc::new(Mutex::new(
         ChainState::bootstrap(store.clone(), genesis_hash, pow_algo, template_bits)
             .expect("chain bootstrap"),
     ));
+    info!(%data_dir, "state store opened");
     let mempool = Arc::new(Mutex::new(Mempool::new(10_000)));
 
     let mut seeder_book = net_cfg.dns_seeder_url.as_ref().map(|url| {

@@ -10,6 +10,11 @@ repository.workspace = true
 name = "agora-node"
 path = "src/main.rs"
 
+[features]
+default = ["rocksdb"]
+# Durable column-family storage (requires C++ toolchain / libstdc++).
+rocksdb = ["agora-state-machine/rocksdb"]
+
 [dependencies]
 agora-types = { workspace = true }
 agora-crypto = { workspace = true }

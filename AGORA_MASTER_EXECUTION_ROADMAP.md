@@ -100,6 +100,11 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Stratum → live node:** poll `agora_getBlockTemplate`, kHeavyHash share validate, `agora_submitBlock` on network difficulty
 - [x] **Faucet → spendable UTXOs:** `agora_fundAddress` mints `cf_utxo`; faucet drips via live node RPC
 
+## Phase 10: Durable node storage — done
+
+- [x] **RocksDB default on `agora-node`:** feature `rocksdb` on by default; `AGORA_DATA` opens durable CFs
+- [x] **Genesis resume + DAG reload:** `load_or_ignite` + rebuild GHOSTDAG from durable tips on boot
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.
@@ -124,7 +129,7 @@ agora-network/
 cargo check --workspace
 cargo test --workspace
 
-# Optional durable storage backend
+# Optional durable storage backend (agora-node enables rocksdb by default)
 cargo check -p agora-state-machine --features rocksdb
 
 # Node / miner binaries
