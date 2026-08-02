@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Agora Network",
+    "slug": "agora-network",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "agora",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#101218"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "network.agora.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#101218"
+      },
+      "package": "network.agora.mobile"
+    },
+    "web": {
+      "favicon": "./assets/icon.png"
+    },
+    "plugins": [],
+    "extra": {
+      "agoraBrand": {
+        "obsidian": "#101218",
+        "gold": "#C59835",
+        "cyan": "#06BBDF",
+        "fonts": {
+          "display": "Cinzel",
+          "ui": "Inter"
+        }
+      }
+    }
+  }
+}

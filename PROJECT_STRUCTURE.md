@@ -5,6 +5,7 @@ Workspace boundaries for the Agora Network monorepo. Do not place code outside i
 ```
 agora-network/
 ├── apps/                   # Client applications
+│   ├── shared/brand/       # Agora_Brand_System.css, tokens, Nexus + marks
 │   ├── desktop/            # Tauri + RandomX Sidecar
 │   ├── mobile/             # React Native (Expo) Light Client
 │   └── explorer/           # Web-based BlockDAG Visualizer

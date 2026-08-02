@@ -1,0 +1,9 @@
+@import "../../shared/brand/Agora_Brand_System.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+#root {
+  min-height: 100vh;
+}

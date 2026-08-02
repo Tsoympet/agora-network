@@ -69,6 +69,16 @@ cargo run -p agora-miner-sidecar
 cargo run -p agora-dns-seeder
 ```
 
+### Clients (brand system)
+
+```bash
+# Explorer (Vite + Tailwind + Agora_Brand_System.css)
+cd apps/explorer && npm install && npm run dev
+
+# Desktop / mobile shells use Nexus icon + shared brand tokens
+# See apps/shared/brand and docs/brand/BRAND_SYSTEM.md
+```
+
 ## Stack Rules (summary)
 
 - Rust + Tokio; `borsh` serialization; `rocksdb` state
