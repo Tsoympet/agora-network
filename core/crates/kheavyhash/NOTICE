@@ -1,0 +1,11 @@
+agora-kheavyhash vendors the kHeavyHash proof-of-work digest algorithm from
+rusty-kaspa (https://github.com/kaspanet/rusty-kaspa), originally published as
+the `kaspa-hashes` / `kaspa-pow` crates.
+
+Copyright (c) Kaspa developers
+Licensed under the ISC License (see LICENSE-ISC).
+
+Modifications for Agora Network:
+- Removed wasm-bindgen / workflow-wasm dependencies
+- Use the portable `keccak` crate for Keccak-f[1600] (no architecture asm)
+- Thin Agora-facing `calculate_pow` API

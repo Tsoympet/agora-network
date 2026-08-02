@@ -12,7 +12,7 @@ External services that sit beside the Agora node.
 
 - Bind: `AGORA_STRATUM_BIND` (default `0.0.0.0:3333`)
 - Methods: `mining.subscribe`, `mining.authorize`, `mining.submit`
-- PoW hash is a SHA-256 stand-in until audited kHeavyHash FFI is linked
+- PoW hash uses audited Kaspa kHeavyHash via `agora_consensus::KHeavyHashPowHasher`
 
 ```bash
 cargo run -p agora-stratum-pool

@@ -58,7 +58,9 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Testnet faucet scaffold:** `infrastructure/testnet-faucet` rate-limited `/drip` + balance lookup
 - [x] **RPC hardening:** `RpcBackend` + `RpcDispatcher` for tips / block / submit / balance / fund
 - [x] **Wire HTTP JSON-RPC into `agora-node`:** `NodeBackend` + `AGORA_RPC_BIND` (`POST /rpc`, `/health`)
-- [ ] Link audited kHeavyHash FFI into stratum + consensus PoW verify
+- [x] **kHeavyHash PoW:** vendored `agora-kheavyhash` (Kaspa ISC) + `KHeavyHashPowHasher` in consensus/stratum
+- [ ] RandomX FFI for CPU miner-sidecar
+- [ ] Call `PowVerifier` from block admission in the node
 
 ## Directory Structure Reference
 

@@ -1,3 +1,4 @@
+use agora_consensus::{KHeavyHashPowHasher, LeadingZeroPow, PowHasher};
 use agora_types::{BlockHeader, Hash};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -7,7 +8,7 @@ use sha2::{Digest, Sha256};
 pub struct MiningJob {
     pub job_id: String,
     pub header: BlockHeader,
-    /// Required leading zero bits until full kHeavyHash FFI lands.
+    /// Required leading zero bits on the kHeavyHash digest.
     pub difficulty_bits: u32,
 }
 
@@ -28,9 +29,7 @@ impl MiningJob {
     }
 
     pub fn pow_hash(&self, nonce: u64) -> Hash {
-        // Stand-in for kHeavyHash: SHA-256(borsh(header)).
-        // Swap for audited kHeavyHash when the ASIC library is linked.
-        self.with_nonce(nonce).hash()
+        KHeavyHashPowHasher.pow_hash(&self.with_nonce(nonce))
     }
 
     pub fn meets_target(&self, hash: &Hash) -> bool {
@@ -39,16 +38,7 @@ impl MiningJob {
 }
 
 pub fn leading_zero_bits(hash: &Hash) -> u32 {
-    let mut count = 0u32;
-    for byte in hash.as_bytes() {
-        if *byte == 0 {
-            count += 8;
-            continue;
-        }
-        count += byte.leading_zeros();
-        break;
-    }
-    count
+    LeadingZeroPow::leading_zero_bits(hash)
 }
 
 /// Compact share identity to reject duplicates.

@@ -9,5 +9,6 @@ repository.workspace = true
 [dependencies]
 agora-types = { workspace = true }
 agora-crypto = { workspace = true }
+agora-kheavyhash = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
