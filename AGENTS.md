@@ -23,3 +23,14 @@ Agora Network is a sovereign, multi-layer BlockDAG blockchain.
 - Comments explain **why**, not what.
 - Optimize for a sub-second BlockDAG: prefer references and zero-copy; avoid unnecessary clones.
 - Every major `core/` module needs a matching markdown file under `docs/`.
+
+## Cursor Cloud specific instructions
+
+This repo is currently a **Rust-only workspace**. The `apps/*` clients (desktop/mobile/explorer) and `infrastructure/{stratum-pool,testnet-faucet}` dirs are empty scaffolds — there is no JS/TS/Node project to install yet. All buildable/runnable code is the Cargo workspace.
+
+- **Toolchain:** pinned to `stable` via `rust-toolchain.toml` (rustup auto-installs it on first cargo invocation). `rustfmt` + `clippy` components are declared there.
+- **Standard commands** live in [`README.md`](README.md) (check/test/run/binaries) — use those; they are accurate. The update script only runs `cargo fetch`; the first `cargo build`/`check`/`test` in a fresh VM still compiles the dependency graph (libp2p, secp256k1, etc.) and takes a few minutes.
+- **Runnable binaries:** `agora-node` (full node: genesis + libp2p gossip), `agora-miner` (sidecar; Phase 6 stub that only prints a startup line), `agora-dns-seeder` (HTTP peer phonebook on `127.0.0.1:18080`, endpoints `/health`, `GET|POST /peers`).
+- **Node env vars:** `AGORA_LISTEN` (default `/ip4/0.0.0.0/tcp/16111`), `AGORA_BOOTSTRAP` (comma-separated multiaddrs), `AGORA_DATA` (default `data/agora-node`). To bootstrap a second node to a first, the `AGORA_BOOTSTRAP` multiaddr **must include the `/p2p/<peer-id>` suffix** printed in the first node's boot logs, not just the ip/tcp part.
+- **`rocksdb` optional feature gotcha:** `cargo check -p agora-state-machine --features rocksdb` fails under the default `c++` (clang 18) because clang selects gcc-14's libstdc++ but only `libstdc++-13-dev` headers are installed. Build it with `CXX=g++ CC=gcc cargo check -p agora-state-machine --features rocksdb` (gcc-13 has matching headers). The default workspace build does **not** need this — rocksdb is off by default and the node runs on an in-memory state store.
+- **Formatting:** `cargo fmt --all -- --check` currently reports pre-existing diffs in `core/node-bin/src/main.rs` and `infrastructure/dns-seeder/src/main.rs`; `cargo clippy --workspace` passes with only warnings.
