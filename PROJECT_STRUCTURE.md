@@ -13,6 +13,7 @@ agora-network/
 │   ├── crates/
 │   │   ├── types/          # Shared BlockDAG types + ts-rs bindings
 │   │   ├── consensus/      # GHOSTDAG, DAA, PoW, Emission
+│   │   ├── kheavyhash/     # Audited Kaspa kHeavyHash digest (vendored)
 │   │   ├── state-machine/  # RocksDB, Triple-Zone Logic
 │   │   ├── p2p/            # Gossipsub, Mempool, Compact Blocks
 │   │   ├── rpc/            # CEX Gateway, JSON-RPC, REST API
@@ -41,11 +42,12 @@ agora-network/
 | --- | --- | --- |
 | `core/crates/types` | `borsh`, `serde`, `ts-rs` | Networking, storage, UI |
 | `core/crates/crypto` | `types`, audited crypto crates | Consensus policy, P2P |
+| `core/crates/kheavyhash` | `keccak` (vendored Kaspa algo) | Networking, consensus policy |
 | `core/crates/governance` | `types` | Networking, UI, storage |
 | `core/crates/ovolos-rollup` | `types` | P2P, UI |
 | `core/crates/bridge-sdk` | `types` | Consensus internals, UI |
 | `core/crates/intent-engine` | `types`, `bridge-sdk` | Consensus internals, UI |
-| `core/crates/consensus` | `types`, `crypto` | Disk I/O, UI, RPC transport |
+| `core/crates/consensus` | `types`, `crypto`, `kheavyhash` | Disk I/O, UI, RPC transport |
 | `core/crates/state-machine` | `types`, `consensus` | libp2p, UI |
 | `core/crates/p2p` | `types`, `consensus` | RocksDB, UI |
 | `core/crates/rpc` | `types`, node services | Mining loops, UI frameworks |

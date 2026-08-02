@@ -1,7 +1,7 @@
 //! kHeavyHash ASIC stratum pool for Agora Network.
 //!
-//! Aggregates miner shares against job templates. PoW hashing currently uses a
-//! SHA-256 stand-in until the audited kHeavyHash library is linked.
+//! Aggregates miner shares against job templates. Share PoW uses the audited
+//! Kaspa kHeavyHash digest via `agora_consensus::KHeavyHashPowHasher`.
 
 mod error;
 mod job;

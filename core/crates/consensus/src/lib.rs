@@ -14,4 +14,7 @@ pub use daa::{next_difficulty, DaaConfig, Difficulty};
 pub use emission::EmissionSchedule;
 pub use error::ConsensusError;
 pub use ghostdag::{Ghostdag, GhostdagConfig, GhostdagData, OrderedBlock};
-pub use pow::{AcceptAllPow, LeadingZeroPow, PowAlgorithm, PowVerifier};
+pub use pow::{
+    hasher_for, AcceptAllPow, KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher,
+    PowVerifier, Sha256PowHasher,
+};

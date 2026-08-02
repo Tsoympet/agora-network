@@ -1,0 +1,14 @@
+[package]
+name = "agora-kheavyhash"
+description = "Audited Kaspa kHeavyHash PoW digest (vendored, no wasm deps)"
+version.workspace = true
+edition.workspace = true
+license = "ISC"
+repository.workspace = true
+
+[dependencies]
+# Keccak-f[1600] permutation used by Kaspa's PowHash / KHeavyHash (audited crate).
+keccak = "0.1"
+
+[dev-dependencies]
+sha3 = "0.10"

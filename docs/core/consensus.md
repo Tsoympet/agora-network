@@ -27,12 +27,23 @@ Production will key windows off blue-work; the scaffold uses timestamps to lock 
 
 ## PoW
 
-| Algorithm | Target hardware | Integration |
+| Algorithm | Target hardware | Hasher |
 | --- | --- | --- |
-| RandomX | CPU | `miner-sidecar` |
-| kHeavyHash | ASIC | `infrastructure/stratum-pool` |
+| RandomX | CPU (`miner-sidecar`) | `Sha256PowHasher` stand-in until RandomX FFI |
+| kHeavyHash | ASIC (`stratum-pool`) | `KHeavyHashPowHasher` → `agora-kheavyhash` |
 
-Verification is trait-based (`PowVerifier`). Until RandomX/kHeavyHash FFI lands, `LeadingZeroPow` treats `header.bits` as required leading zero bits on `SHA-256(borsh(header))`.
+Traits:
+
+- `PowHasher` — compute digest for a `BlockHeader`
+- `PowVerifier` — check digest + difficulty (`LeadingZeroPow` uses `header.bits` as leading-zero requirement)
+
+### kHeavyHash (`agora-kheavyhash`)
+
+Vendored from rusty-kaspa (`kaspa-hashes` / `kaspa-pow`, ISC). Pipeline:
+
+1. Pre-PoW commitment = `SHA-256(borsh(header))` with `nonce = 0` and `timestamp_ms = 0`
+2. Kaspa `PowHash::new(pre, timestamp).finalize_with_nonce(nonce)`
+3. `Matrix::generate(pre).heavy_hash(...)` (includes final `KHeavyHash` cSHAKE domain)
 
 ## Emission
 

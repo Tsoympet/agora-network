@@ -2,6 +2,7 @@
 members = [
     "core/crates/types",
     "core/crates/crypto",
+    "core/crates/kheavyhash",
     "core/crates/consensus",
     "core/crates/state-machine",
     "core/crates/p2p",
@@ -27,6 +28,7 @@ repository = "https://github.com/Tsoympet/agora-network"
 [workspace.dependencies]
 agora-types = { path = "core/crates/types" }
 agora-crypto = { path = "core/crates/crypto" }
+agora-kheavyhash = { path = "core/crates/kheavyhash" }
 agora-consensus = { path = "core/crates/consensus" }
 agora-state-machine = { path = "core/crates/state-machine" }
 agora-p2p = { path = "core/crates/p2p" }
