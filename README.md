@@ -49,7 +49,7 @@ cargo check --workspace
 # Run unit tests
 cargo test --workspace
 
-# Optional: durable RocksDB backend (needs g++ / libstdc++)
+# Optional: check state-machine RocksDB feature in isolation (agora-node enables it by default)
 cargo check -p agora-state-machine --features rocksdb
 
 # GHOSTDAG partition fuzzer
@@ -66,6 +66,8 @@ TypeScript bindings for shared types are generated under `core/crates/types/bind
 
 ```bash
 # Full node (libp2p gossip + HTTP JSON-RPC + PoW admission).
+# RocksDB under AGORA_DATA (default data/agora-node). Memory-only:
+#   cargo run -p agora-node --no-default-features
 # Optional: AGORA_LISTEN, AGORA_BOOTSTRAP, AGORA_DATA, AGORA_RPC_BIND,
 #           AGORA_RPC_ALLOW_FUND, AGORA_POW_ALGO, AGORA_TEMPLATE_BITS
 cargo run -p agora-node

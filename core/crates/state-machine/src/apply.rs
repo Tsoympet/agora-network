@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn apply_transfer_spends_premine_and_reverts() {
-        let store = StateStore::open("/tmp/agora-apply-utxo").unwrap();
+        let store = StateStore::open_in_memory();
         let seed = seed_from_mnemonic(PHRASE, "").unwrap();
         let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
         let to = derive_bip44(&seed, &Bip44Path::external(1))
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn validate_mempool_tx_accepts_premine_spend() {
-        let store = StateStore::open("/tmp/agora-validate-mempool-ok").unwrap();
+        let store = StateStore::open_in_memory();
         let seed = seed_from_mnemonic(PHRASE, "").unwrap();
         let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
         let to = derive_bip44(&seed, &Bip44Path::external(1))
@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn validate_mempool_tx_rejects_coinbase_and_missing_utxo() {
-        let store = StateStore::open("/tmp/agora-validate-mempool-bad").unwrap();
+        let store = StateStore::open_in_memory();
         GenesisBuilder::default().ignite(&store).unwrap();
         let coinbase = Transaction::unsigned(
             1,
@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn rejects_oversized_coinbase() {
-        let store = StateStore::open("/tmp/agora-apply-coinbase").unwrap();
+        let store = StateStore::open_in_memory();
         GenesisBuilder::default().ignite(&store).unwrap();
         let coinbase = Transaction::unsigned(
             1,

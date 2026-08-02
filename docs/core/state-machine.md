@@ -41,8 +41,10 @@ Outpoint keys are `tx_id || index_le` (36 bytes), same as genesis.
 
 ## Storage backends
 
-- Default/dev: in-memory map (portable CI)
-- `--features rocksdb`: durable RocksDB (requires C++ toolchain)
+- [`StateStore::open_in_memory`] — ephemeral map for unit tests / portable CI
+- [`StateStore::open(path)`] — **RocksDB** when built with `--features rocksdb` (enabled by default on `agora-node`); otherwise falls back to in-memory (path ignored)
+
+`agora-node` defaults to RocksDB under `AGORA_DATA` (default `data/agora-node`). On boot it uses `GenesisBuilder::load_or_ignite` and rebuilds the in-memory DAG/GHOSTDAG from durable tips.
 
 ## Node wiring
 

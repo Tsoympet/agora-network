@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn genesis_tips_and_admit_easy_block() {
-        let store = Arc::new(StateStore::open("/tmp/agora-node-backend-admit").unwrap());
+        let store = Arc::new(StateStore::open_in_memory());
         let mempool = Arc::new(Mutex::new(Mempool::new(64)));
         let premine = Address([9u8; 20]);
         let genesis = GenesisBuilder::default()
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn submit_transaction_requires_live_utxo() {
-        let store = Arc::new(StateStore::open("/tmp/agora-node-backend-mempool-utxo").unwrap());
+        let store = Arc::new(StateStore::open_in_memory());
         let mempool = Arc::new(Mutex::new(Mempool::new(64)));
         let seed = seed_from_mnemonic(PHRASE, "").unwrap();
         let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn template_includes_mempool_tx_and_evicts_on_submit() {
-        let store = Arc::new(StateStore::open("/tmp/agora-node-backend-assemble").unwrap());
+        let store = Arc::new(StateStore::open_in_memory());
         let mempool = Arc::new(Mutex::new(Mempool::new(64)));
         let seed = seed_from_mnemonic(PHRASE, "").unwrap();
         let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn fund_address_mints_spendable_utxo() {
-        let store = Arc::new(StateStore::open("/tmp/agora-node-backend-fund-utxo").unwrap());
+        let store = Arc::new(StateStore::open_in_memory());
         let mempool = Arc::new(Mutex::new(Mempool::new(64)));
         let seed = seed_from_mnemonic(PHRASE, "").unwrap();
         let funded = derive_bip44(&seed, &Bip44Path::external(5)).unwrap();
