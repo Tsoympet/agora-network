@@ -1,0 +1,27 @@
+[package]
+name = "agora-stratum-pool"
+description = "kHeavyHash ASIC stratum pool for Agora Network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "agora-stratum-pool"
+path = "src/main.rs"
+
+[dependencies]
+agora-types = { workspace = true }
+agora-consensus = { workspace = true }
+borsh = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -1,0 +1,209 @@
+use agora_types::{Address, Amount, Hash, Transaction};
+use serde_json::{json, Value};
+
+use crate::backend::RpcBackend;
+use crate::error::RpcError;
+use crate::methods::{RpcMethod, RpcRequest, RpcResponse};
+
+/// Dispatches JSON-RPC style requests against an [`RpcBackend`].
+#[derive(Debug)]
+pub struct RpcDispatcher<B: RpcBackend> {
+    backend: B,
+}
+
+impl<B: RpcBackend> RpcDispatcher<B> {
+    pub fn new(backend: B) -> Self {
+        Self { backend }
+    }
+
+    pub fn backend(&self) -> &B {
+        &self.backend
+    }
+
+    pub fn backend_mut(&mut self) -> &mut B {
+        &mut self.backend
+    }
+
+    pub fn handle(&mut self, req: RpcRequest) -> RpcResponse {
+        let id = req.id.clone();
+        match self.dispatch(&req) {
+            Ok(result) => RpcResponse::ok(id, result),
+            Err(err) => RpcResponse::err(id, &err),
+        }
+    }
+
+    fn dispatch(&mut self, req: &RpcRequest) -> Result<Value, RpcError> {
+        let method = RpcMethod::parse(&req.method)
+            .ok_or_else(|| RpcError::MethodNotFound(req.method.clone()))?;
+        match method {
+            RpcMethod::GetDagTips => {
+                let tips: Vec<String> = self
+                    .backend
+                    .dag_tips()
+                    .into_iter()
+                    .map(|h| h.to_hex())
+                    .collect();
+                Ok(json!(tips))
+            }
+            RpcMethod::GetBlock => {
+                let hash = param_hash(&req.params, "hash")?;
+                let block = self
+                    .backend
+                    .get_block(&hash)
+                    .ok_or_else(|| RpcError::NotFound(hash.to_hex()))?;
+                Ok(serde_json::to_value(block)
+                    .map_err(|e| RpcError::Internal(e.to_string()))?)
+            }
+            RpcMethod::SubmitTransaction => {
+                let tx: Transaction = serde_json::from_value(single_or_named(&req.params, "tx")?)
+                    .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+                let id = self.backend.submit_transaction(tx)?;
+                Ok(json!({ "tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetBalance => {
+                let address = param_address(&req.params, "address")?;
+                let bal = self.backend.get_balance(&address);
+                Ok(json!({
+                    "address": address.to_hex(),
+                    "balance": bal.as_base_units(),
+                }))
+            }
+            RpcMethod::FundAddress => {
+                let address = param_address(&req.params, "address")?;
+                let amount = param_amount(&req.params, "amount")?;
+                let bal = self.backend.fund_address(address, amount)?;
+                Ok(json!({
+                    "address": address.to_hex(),
+                    "balance": bal.as_base_units(),
+                }))
+            }
+        }
+    }
+}
+
+fn single_or_named(params: &Value, key: &str) -> Result<Value, RpcError> {
+    if let Some(obj) = params.as_object() {
+        return obj
+            .get(key)
+            .cloned()
+            .ok_or_else(|| RpcError::InvalidParams(format!("missing `{key}`")));
+    }
+    if let Some(arr) = params.as_array() {
+        return arr
+            .first()
+            .cloned()
+            .ok_or_else(|| RpcError::InvalidParams(format!("missing `{key}`")));
+    }
+    // Allow bare value.
+    if !params.is_null() {
+        return Ok(params.clone());
+    }
+    Err(RpcError::InvalidParams(format!("missing `{key}`")))
+}
+
+fn param_hash(params: &Value, key: &str) -> Result<Hash, RpcError> {
+    let v = single_or_named(params, key)?;
+    let s = v
+        .as_str()
+        .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be hex string")))?;
+    Hash::from_hex(s).ok_or_else(|| RpcError::InvalidParams(format!("invalid hash `{s}`")))
+}
+
+fn param_address(params: &Value, key: &str) -> Result<Address, RpcError> {
+    let v = single_or_named(params, key)?;
+    let s = v
+        .as_str()
+        .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be hex string")))?;
+    Address::from_hex(s).ok_or_else(|| RpcError::InvalidParams(format!("invalid address `{s}`")))
+}
+
+fn param_amount(params: &Value, key: &str) -> Result<Amount, RpcError> {
+    // Support object `{address, amount}` or array `[address, amount]`.
+    let amount_val = if let Some(obj) = params.as_object() {
+        obj.get(key)
+            .cloned()
+            .ok_or_else(|| RpcError::InvalidParams(format!("missing `{key}`")))?
+    } else if let Some(arr) = params.as_array() {
+        arr.get(1)
+            .cloned()
+            .ok_or_else(|| RpcError::InvalidParams(format!("missing `{key}`")))?
+    } else {
+        return Err(RpcError::InvalidParams(format!("missing `{key}`")));
+    };
+
+    let units = amount_val
+        .as_u64()
+        .or_else(|| amount_val.as_str().and_then(|s| s.parse().ok()))
+        .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be u64")))?;
+    Ok(Amount::from_base_units(units))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::InMemoryBackend;
+    use agora_types::{Block, BlockHeader, TxOut};
+
+    #[test]
+    fn tips_balance_submit_fund() {
+        let mut backend = InMemoryBackend::new();
+        let genesis = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
+        };
+        let genesis_id = genesis.id();
+        backend.insert_block(genesis);
+
+        let mut rpc = RpcDispatcher::new(backend);
+        let tips = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getDagTips".into(),
+            params: json!([]),
+        });
+        assert_eq!(
+            tips.result.unwrap(),
+            json!([genesis_id.to_hex()])
+        );
+
+        let addr = Address::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let funded = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_fundAddress".into(),
+            params: json!({"address": addr.to_hex(), "amount": 500u64}),
+        });
+        assert_eq!(
+            funded.result.unwrap()["balance"],
+            json!(500)
+        );
+
+        let bal = rpc.handle(RpcRequest {
+            id: None,
+            method: "agora_getBalance".into(),
+            params: json!([addr.to_hex()]),
+        });
+        assert_eq!(bal.result.unwrap()["balance"], json!(500));
+
+        let tx = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(1),
+                address: addr,
+            }],
+            1,
+        );
+        let submitted = rpc.handle(RpcRequest {
+            id: Some(json!(3)),
+            method: "agora_submitTransaction".into(),
+            params: json!(tx),
+        });
+        assert!(submitted.result.unwrap()["tx_id"].as_str().is_some());
+    }
+}

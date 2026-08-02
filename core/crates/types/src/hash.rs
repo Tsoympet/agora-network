@@ -24,6 +24,17 @@ impl Hash {
         hex::encode(self.0)
     }
 
+    pub fn from_hex(s: &str) -> Option<Self> {
+        let s = s.strip_prefix("0x").unwrap_or(s);
+        let bytes = hex::decode(s).ok()?;
+        if bytes.len() != 32 {
+            return None;
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&bytes);
+        Some(Self(out))
+    }
+
     /// Domain-separated SHA-256 for consensus object IDs.
     pub fn hash_bytes(bytes: &[u8]) -> Self {
         let digest = Sha256::digest(bytes);

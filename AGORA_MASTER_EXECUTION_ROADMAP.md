@@ -52,6 +52,14 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] Bind production EVM (`revm`) behind `EvmExecutor` (`RevmExecutor`, feature `revm` default-on)
 - [x] District light-client merkle proofs + `MessageTransport` / `InMemoryTransport`
 
+## Phase 5: Infrastructure & RPC surface — in progress
+
+- [x] **Stratum pool scaffold:** `infrastructure/stratum-pool` (`agora-stratum-pool`) JSON-lines TCP + share validation (SHA-256 stand-in for kHeavyHash)
+- [x] **Testnet faucet scaffold:** `infrastructure/testnet-faucet` rate-limited `/drip` + balance lookup
+- [x] **RPC hardening:** `RpcBackend` + `RpcDispatcher` for tips / block / submit / balance / fund
+- [ ] Wire HTTP JSON-RPC into `agora-node`
+- [ ] Link audited kHeavyHash FFI into stratum + consensus PoW verify
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.
@@ -82,6 +90,11 @@ cargo check -p agora-state-machine --features rocksdb
 # Node / miner binaries
 cargo run -p agora-node
 cargo run -p agora-miner-sidecar
+
+# Infrastructure
+cargo run -p agora-dns-seeder
+cargo run -p agora-stratum-pool
+cargo run -p agora-testnet-faucet
 ```
 
 > To build an empire, first stabilize the capital. Then, expand the provinces. Then, empower the citizens.

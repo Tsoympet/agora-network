@@ -73,6 +73,12 @@ cargo run -p agora-miner-sidecar
 
 # Bootstrap peer phonebook (optional: AGORA_SEEDER_BIND, AGORA_SEEDER_PEERS)
 cargo run -p agora-dns-seeder
+
+# kHeavyHash stratum pool (optional: AGORA_STRATUM_BIND)
+cargo run -p agora-stratum-pool
+
+# Testnet faucet (optional: AGORA_FAUCET_BIND, AGORA_FAUCET_DRIP, AGORA_FAUCET_COOLDOWN_SECS)
+cargo run -p agora-testnet-faucet
 ```
 
 ### Clients (brand system)
