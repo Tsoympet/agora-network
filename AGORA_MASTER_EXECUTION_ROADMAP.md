@@ -1,108 +1,81 @@
-# Agora Master Execution Roadmap
+🏛️ Agora Network: Master Execution Roadmap
 
-Architecture and delivery sequence for Agora Network. Prefer implementing against this plan over inventing parallel designs.
+This document is your definitive command center. It bridges the gap between the architectural theory and the physical implementation of the Agora Network.
 
-## Vision
+🚀 Phase 1: Foundation (The Ignition)
 
-A sovereign, multi-layer BlockDAG with sub-second confirmation targets:
-- **Consensus layer:** GHOSTDAG ordering, DAA, dual PoW (RandomX CPU + kHeavyHash ASIC)
-- **State layer:** RocksDB-backed triple-zone state machine
-- **Network layer:** libp2p gossip, mempool, compact block relay
-- **Access layer:** JSON-RPC / REST for wallets, explorer, and CEX gateways
-- **Clients:** Tauri desktop, Expo mobile, web explorer (Obsidian & Gold)
+Goal: Compile the L1 BlockDAG and achieve P2P connectivity.
 
-## Phase 0 — Foundation (current)
+Steps:
 
-- [x] Monorepo directory layout
-- [x] Cargo workspace membership
-- [x] Compiling crate stubs for all `core/` members
-- [x] `PROJECT_STRUCTURE.md` + this roadmap
-- [x] Cursor / agent guidelines committed
-- [x] Module docs under `docs/core/`
+Initialize Monorepo: Create workspace root and set up cargo workspace members.
 
-**Exit criteria:** `cargo check --workspace` succeeds; boundaries and roadmap are documented.
+Core Crate Assembly: Implement consensus, state-machine, and p2p.
 
-## Phase 1 — Cryptography & Types
+Storage Setup: Initialize RocksDB with the 5 defined Column Families.
 
-- Shared BlockDAG primitives in `core/crates/types` (`Block`, `Transaction`, `Hash`, amounts)
-- `borsh` encode/decode for consensus objects
-- `ts-rs` bindings for client consumption
-- `core/crates/crypto`: BIP-39 mnemonic, BIP-44 paths, secp256k1 sign/verify only
+Genesis Ignition: Run the GenesisBuilder to generate Block 0 and fix supply caps.
 
-**Exit criteria:** Wallet key derivation + tx signing round-trip tests pass; TS types generate cleanly.
+P2P Handshake: Deploy the DNS Seeder to a cloud provider and connect the first two nodes.
 
-## Phase 2 — Consensus Core
+🎨 Phase 2: Branding & Identity (The Look & Feel)
 
-- GHOSTDAG blue-set selection and block ordering (`docs/core/consensus.md`)
-- Difficulty Adjustment Algorithm (DAA) for sub-second DAG tips
-- PoW verification hooks for RandomX and kHeavyHash
-- Emission schedule module (no ad-hoc reward logic elsewhere)
+Assets:
 
-**Exit criteria:** Deterministic GHOSTDAG ordering tests on synthetic DAGs; PoW verify API stable.
+TLT: Talanton (Scales)
 
-## Phase 3 — State Machine
+DRC: Drachma (Helmet)
 
-- RocksDB column families for blocks, UTXO/account zones, and metadata
-- Triple-zone logic: hot / warm / archival separation
-- Atomic apply/revert of consensus-ordered blocks
+OBL: Ovolos (Shield/Spears)
 
-**Exit criteria:** Restart-safe state apply; property tests for zone transitions.
+Implementation:
 
-## Phase 4 — P2P & Mempool
+Replace placeholder icons in the UI with branded assets.
 
-- libp2p identity, gossipsub topics for blocks/txs
-- Mempool admission rules aligned with consensus validation
-- Compact block / IBD scaffolding
+Apply Agora_Brand_System.css to all frontends.
 
-**Exit criteria:** Two local nodes exchange txs and blocks over libp2p.
+Set the "Nexus Icon" (your gold 'A') as the primary app icon in Tauri/Expo configurations.
 
-## Phase 5 — Node Binary & RPC
+🛡️ Phase 3: Launch Security (Anti-Whale & Governance)
 
-- `node-bin` wires consensus + state + p2p
-- JSON-RPC / REST surface for balances, submit tx, DAG tips
-- CEX gateway-friendly endpoints (rate limits, auth hooks)
+Governance: Implement the Quadratic Voting formula: $EffectiveVotes = \sqrt{RawBalance}$.
 
-**Exit criteria:** Single-node smoke test via RPC; faucet can fund a test address.
+Whale Protection: Enforce the 5% hard cap on voting power.
 
-## Phase 6 — Mining
+Testing: Run the ghostdag_fuzzer.rs script to stress-test the BlockDAG against partitioned network simulations.
 
-- `miner-sidecar`: RandomX CPU mining against node template RPC
-- `infrastructure/stratum-pool`: kHeavyHash ASIC aggregation
-- Template / share validation path documented
+🛠️ Phase 4: Scaling (Day 2 Growth)
 
-**Exit criteria:** CPU sidecar finds valid testnet blocks; stratum accepts mock shares.
+Phase 4.1 (L2): Deploy the Ovolos Optimistic Rollup for EVM smart contract scaling.
 
-## Phase 7 — Clients
+Phase 4.2 (L3): Develop the "Bridge-in-a-Box" SDK for custom District Chains (Gaming/Privacy).
 
-- Desktop (Tauri): wallet + optional local miner sidecar
-- Mobile (Expo): light client / watch-only + send via RPC
-- Explorer: BlockDAG visualizer using brand system (Cinzel / Inter, Obsidian & Gold)
+Phase 4.3 (L4): Implement the Intent-Engine for AI-driven asset orchestration.
 
-**Exit criteria:** End-to-end send on testnet from desktop or mobile; explorer renders DAG tips.
+📦 Directory Structure Reference
 
-## Phase 8 — Testnet Hardening
+agora-network/
+├── core/                   # Rust Consensus & State
+├── apps/
+│   ├── desktop/            # Tauri + RandomX Sidecar
+│   └── explorer/           # BlockDAG Visualization
+└── infrastructure/
+    ├── dns-seeder/         # Node Discovery
+    ├── stratum-pool/       # ASIC Mining
+    └── testnet-faucet/     # Dev Liquidity
 
-- DNS seeder, faucet, observability
-- Sync, reorg, and adversarial peer drills
-- Documentation freeze for external integrators
 
-**Exit criteria:** Public testnet runs with external miners and wallet builds.
+⚡ Immediate First Commands
 
-## Non-Goals (until roadmap says otherwise)
+# 1. Setup workspace
+mkdir agora-network && cd agora-network
+cargo new core --lib
 
-- Custom cryptographic primitives
-- Consensus logic inside `apps/`
-- Replacing libp2p with an alternate networking stack
-- EVM / smart-contract execution (not in scope until a later roadmap revision)
+# 2. Add dependencies (Add these to Cargo.toml)
+# libp2p, revm, borsh, serde, tokio, rocksdb, axum, bip39
 
-## Dependency Direction
+# 3. Compile the base node
+cargo build --release
 
-```
-types ← crypto ← consensus ← state-machine
-                 ↘         ↗
-                   p2p → node-bin ← rpc
-                              ↑
-                        miner-sidecar
-```
 
-Apps and infrastructure talk to the node only through RPC/P2P APIs.
+“To build an empire, first stabilize the capital. Then, expand the provinces. Then, empower the citizens.”
