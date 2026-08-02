@@ -59,8 +59,14 @@ TypeScript bindings for shared types are generated under `core/crates/types/bind
 ### Binaries
 
 ```bash
+# Full node (libp2p gossip). Optional: AGORA_LISTEN, AGORA_BOOTSTRAP, AGORA_DATA
 cargo run -p agora-node
+
+# CPU miner sidecar
 cargo run -p agora-miner-sidecar
+
+# Bootstrap peer phonebook (optional: AGORA_SEEDER_BIND, AGORA_SEEDER_PEERS)
+cargo run -p agora-dns-seeder
 ```
 
 ## Stack Rules (summary)

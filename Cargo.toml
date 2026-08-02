@@ -8,6 +8,7 @@ members = [
     "core/crates/rpc",
     "core/crates/miner-sidecar",
     "core/node-bin",
+    "infrastructure/dns-seeder",
 ]
 resolver = "2"
 
@@ -39,3 +40,15 @@ bip39 = { version = "2.1", features = ["rand"] }
 bip32 = "0.5"
 sha2 = "0.10"
 hex = "0.4"
+futures = "0.3"
+libp2p = { version = "0.56", features = [
+    "tokio",
+    "tcp",
+    "noise",
+    "yamux",
+    "gossipsub",
+    "macros",
+    "identify",
+    "dns",
+] }
+serde_json = "1.0"
