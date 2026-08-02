@@ -1,0 +1,22 @@
+[package]
+name = "agora-node"
+description = "Agora Network full node entrypoint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "agora-node"
+path = "src/main.rs"
+
+[dependencies]
+agora-types = { workspace = true }
+agora-crypto = { workspace = true }
+agora-consensus = { workspace = true }
+agora-state-machine = { workspace = true }
+agora-p2p = { workspace = true }
+agora-rpc = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = "0.3"

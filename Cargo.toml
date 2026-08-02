@@ -1,11 +1,39 @@
 [workspace]
 members = [
+    "core/crates/types",
+    "core/crates/crypto",
     "core/crates/consensus",
     "core/crates/state-machine",
     "core/crates/p2p",
     "core/crates/rpc",
-    "core/crates/crypto",
     "core/crates/miner-sidecar",
     "core/node-bin",
 ]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Tsoympet/agora-network"
+
+[workspace.dependencies]
+agora-types = { path = "core/crates/types" }
+agora-crypto = { path = "core/crates/crypto" }
+agora-consensus = { path = "core/crates/consensus" }
+agora-state-machine = { path = "core/crates/state-machine" }
+agora-p2p = { path = "core/crates/p2p" }
+agora-rpc = { path = "core/crates/rpc" }
+
+borsh = { version = "1.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+tokio = { version = "1.43", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tracing = "0.1"
+ts-rs = { version = "10.1", features = ["serde-compat"] }
+
+# Audited cryptography only — never replace with custom implementations.
+secp256k1 = { version = "0.30", features = ["global-context", "rand", "std"] }
+bip39 = { version = "2.1", features = ["rand"] }
+sha2 = "0.10"
+hex = "0.4"

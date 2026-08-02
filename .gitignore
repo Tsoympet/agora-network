@@ -1,0 +1,20 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Node / clients (future)
+node_modules/
+dist/
+.next/
+.expo/
+
+# Local node data
+*.db
+/data/

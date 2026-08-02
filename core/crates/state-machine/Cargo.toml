@@ -1,0 +1,19 @@
+[package]
+name = "agora-state-machine"
+description = "RocksDB-backed triple-zone state machine for Agora Network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# Enable durable RocksDB storage (requires a C++ toolchain / libstdc++).
+rocksdb = ["dep:rocksdb"]
+
+[dependencies]
+agora-types = { workspace = true }
+agora-consensus = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+rocksdb = { version = "0.22", optional = true }
