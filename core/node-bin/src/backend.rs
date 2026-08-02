@@ -6,8 +6,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agora_p2p::{
     Mempool, NetworkHandle, NetworkMessage, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT,
 };
-use agora_rpc::{RpcBackend, RpcError, UtxoEntry};
-use agora_state_machine::{outpoint_key, validate_mempool_tx, ColumnFamily, StateStore};
+use agora_rpc::{RpcBackend, RpcError, TxLookup, UtxoEntry};
+use agora_state_machine::{
+    lookup_tx_location, outpoint_key, validate_mempool_tx, ColumnFamily, StateStore,
+};
 use agora_types::{Address, Amount, Block, Hash, OutPoint, Transaction, TxOut};
 use borsh::BorshDeserialize;
 
@@ -129,6 +131,31 @@ impl RpcBackend for NodeBackend {
             .ok()
             .and_then(|g| g.load_block(hash).ok())
             .flatten()
+    }
+
+    fn get_transaction(&self, tx_id: &Hash) -> Result<TxLookup, RpcError> {
+        {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            if let Some(tx) = pool.get(tx_id) {
+                return Ok(TxLookup::pending(tx.clone(), pool.fee_of(tx_id)));
+            }
+        }
+        let Some((block_id, index)) = lookup_tx_location(self.store.as_ref(), tx_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        else {
+            return Ok(TxLookup::unknown(*tx_id));
+        };
+        let block = self.get_block(&block_id);
+        let Some(block) = block else {
+            return Ok(TxLookup::unknown(*tx_id));
+        };
+        let Some(tx) = block.transactions.get(index as usize) else {
+            return Ok(TxLookup::unknown(*tx_id));
+        };
+        Ok(TxLookup::confirmed(tx.clone(), block_id, index))
     }
 
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError> {
@@ -426,6 +453,10 @@ mod tests {
         sign_transaction(&mut transfer, &from).unwrap();
         let tx_id = backend.submit_transaction(transfer.clone()).unwrap();
 
+        let pending = backend.get_transaction(&tx_id).unwrap();
+        assert_eq!(pending.status.as_str(), "pending");
+        assert_eq!(pending.fee, Some(fee));
+
         let mut block = backend.get_block_template().unwrap();
         assert_eq!(block.transactions.len(), 2);
         assert!(block.transactions[0].inputs.is_empty());
@@ -447,13 +478,18 @@ mod tests {
         agora_consensus::LeadingZeroPow::new(PowAlgorithm::RandomX)
             .verify(&block.header, &pow)
             .unwrap();
-        backend.submit_block(block).unwrap();
+        let block_id = backend.submit_block(block).unwrap();
         assert!(!mempool.lock().unwrap().contains(&tx_id));
         assert_eq!(
             backend.get_balance(&to).as_base_units(),
             Amount::from_whole(1).unwrap().as_base_units()
         );
         assert_eq!(backend.get_balance(&miner).as_base_units(), emission + fee);
+
+        let confirmed = backend.get_transaction(&tx_id).unwrap();
+        assert_eq!(confirmed.status.as_str(), "confirmed");
+        assert_eq!(confirmed.block_id, Some(block_id));
+        assert_eq!(confirmed.index, Some(1));
     }
 
     #[test]

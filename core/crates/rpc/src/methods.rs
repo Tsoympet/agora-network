@@ -8,6 +8,7 @@ use crate::error::RpcError;
 pub enum RpcMethod {
     GetDagTips,
     GetBlock,
+    GetTransaction,
     SubmitTransaction,
     GetBalance,
     GetUtxos,
@@ -21,6 +22,7 @@ impl RpcMethod {
         match self {
             Self::GetDagTips => "agora_getDagTips",
             Self::GetBlock => "agora_getBlock",
+            Self::GetTransaction => "agora_getTransaction",
             Self::SubmitTransaction => "agora_submitTransaction",
             Self::GetBalance => "agora_getBalance",
             Self::GetUtxos => "agora_getUtxos",
@@ -34,6 +36,7 @@ impl RpcMethod {
         match name {
             "agora_getDagTips" => Some(Self::GetDagTips),
             "agora_getBlock" => Some(Self::GetBlock),
+            "agora_getTransaction" => Some(Self::GetTransaction),
             "agora_submitTransaction" => Some(Self::SubmitTransaction),
             "agora_getBalance" => Some(Self::GetBalance),
             "agora_getUtxos" => Some(Self::GetUtxos),

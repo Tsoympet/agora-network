@@ -53,6 +53,11 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .ok_or_else(|| RpcError::NotFound(hash.to_hex()))?;
                 Ok(block_to_explorer_json(&block))
             }
+            RpcMethod::GetTransaction => {
+                let tx_id = param_hash(&req.params, "tx_id")?;
+                let lookup = self.backend.get_transaction(&tx_id)?;
+                Ok(tx_lookup_to_json(&lookup))
+            }
             RpcMethod::SubmitTransaction => {
                 let raw = tx_param(&req.params)?;
                 let tx: Transaction = serde_json::from_value(raw)
@@ -136,6 +141,17 @@ fn tx_to_explorer_json(tx: &Transaction) -> Value {
         })).collect::<Vec<_>>(),
         "nonce": tx.nonce,
         "is_coinbase": tx.inputs.is_empty(),
+    })
+}
+
+fn tx_lookup_to_json(lookup: &crate::backend::TxLookup) -> Value {
+    json!({
+        "tx_id": lookup.tx_id.to_hex(),
+        "status": lookup.status.as_str(),
+        "block_id": lookup.block_id.map(|h| h.to_hex()),
+        "index": lookup.index,
+        "fee": lookup.fee,
+        "transaction": lookup.transaction.as_ref().map(tx_to_explorer_json),
     })
 }
 
@@ -315,9 +331,49 @@ mod tests {
         let submitted = rpc.handle(RpcRequest {
             id: Some(json!(3)),
             method: "agora_submitTransaction".into(),
-            params: json!(tx),
+            params: json!(tx.clone()),
         });
-        assert!(submitted.result.unwrap()["tx_id"].as_str().is_some());
+        let tx_id = submitted.result.unwrap()["tx_id"].as_str().unwrap().to_string();
+
+        let pending = rpc.handle(RpcRequest {
+            id: Some(json!(31)),
+            method: "agora_getTransaction".into(),
+            params: json!({"tx_id": tx_id}),
+        });
+        let pending_res = pending.result.unwrap();
+        assert_eq!(pending_res["status"], json!("pending"));
+        assert!(pending_res["transaction"].is_object());
+
+        let unknown = rpc.handle(RpcRequest {
+            id: Some(json!(32)),
+            method: "agora_getTransaction".into(),
+            params: json!({"tx_id": Hash::ZERO.to_hex()}),
+        });
+        assert_eq!(unknown.result.unwrap()["status"], json!("unknown"));
+
+        let mined = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![genesis_id],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 1,
+                tx_root: Block::compute_tx_root(std::slice::from_ref(&tx)),
+            },
+            transactions: vec![tx],
+        };
+        let mined_id = mined.id();
+        rpc.backend_mut().insert_block(mined);
+
+        let confirmed = rpc.handle(RpcRequest {
+            id: Some(json!(33)),
+            method: "agora_getTransaction".into(),
+            params: json!({"tx_id": tx_id}),
+        });
+        let confirmed_res = confirmed.result.unwrap();
+        assert_eq!(confirmed_res["status"], json!("confirmed"));
+        assert_eq!(confirmed_res["block_id"], json!(mined_id.to_hex()));
+        assert_eq!(confirmed_res["index"], json!(0));
 
         let block = rpc.handle(RpcRequest {
             id: Some(json!(4)),

@@ -6,7 +6,9 @@ export {
   type LightClientConfig,
   type LightTx,
   type LightTxIn,
+  type LightTxLookup,
   type LightTxOut,
+  type LightTxStatus,
   type LightUtxo,
   type LightUtxoSet,
   type RpcStatus,
@@ -18,6 +20,7 @@ export {
   type TipSyncOptions,
   type TipSyncSnapshot,
 } from "./tipSync";
+export { watchTransaction, type TxWatchOptions } from "./txWatch";
 export {
   addressFromMnemonic,
   buildSignedTransfer,

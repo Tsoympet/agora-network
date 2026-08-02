@@ -8,6 +8,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | --- | --- |
 | `agora_getDagTips` | Current DAG tips (hex hashes) |
 | `agora_getBlock` | Block by hash |
+| `agora_getTransaction` | Lookup by `tx_id`: `pending` (mempool) / `confirmed` (indexed) / `unknown` |
 | `agora_submitTransaction` | UTXO-check + admit a signed tx into the mempool and gossip it |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
@@ -42,6 +43,8 @@ Endpoints:
 - CORS enabled (`Access-Control-Allow-Origin: *`) for browser explorers; `OPTIONS` preflight supported
 
 `agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`, and hex `transactions` with inputs/outputs).  
+`agora_getTransaction` returns `{ tx_id, status, block_id, index, fee, transaction }` — wallets should poll until `confirmed` (missing txs return `status: "unknown"`, not an RPC error). Confirmed locations are indexed in `cf_warm` (`tx/` ‖ tx_id → block_id ‖ index) on admit / genesis.  
+
 `agora_getBlockTemplate` returns a full `Block` (native serde hashes as byte arrays) with a coinbase paying `AGORA_MINER_ADDRESS` for **emission + Σ transfer fees** at the estimated next blue score, followed by up to 128 mempool transfers (fee-desc, then `tx_id`); `header.tx_root` commits to that body. `agora_submitBlock` rejects `tx_root` mismatches and evicts included/conflicting mempool txs. Mempool admission requires `fee ≥ AGORA_MIN_RELAY_FEE`; fees are paid to the miner via the coinbase (not burned).
 
 Example:
@@ -56,10 +59,10 @@ The live backend (`NodeBackend`) reads tips/blocks/UTXOs from `StateStore`, admi
 
 ## Light clients
 
-`apps/shared/light-client` provides `createLightClient` + `startTipSync` plus wallet helpers (`getBalance`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) used by:
+`apps/shared/light-client` provides `createLightClient` + `startTipSync` / `watchTransaction` plus wallet helpers (`getBalance`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) used by:
 
 - `apps/explorer` (live DAG + block tx detail)
-- `apps/desktop` (tip sync, UTXO lookup, signed send)
-- `apps/mobile` (tip sync, UTXO lookup, signed send)
+- `apps/desktop` (tip sync, UTXO lookup, signed send + confirmation poll)
+- `apps/mobile` (tip sync, UTXO lookup, signed send + confirmation poll)
 
 Default endpoint: `http://127.0.0.1:8545/rpc` (explorer/desktop may proxy `/rpc`).
