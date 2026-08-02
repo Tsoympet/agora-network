@@ -49,8 +49,20 @@ Integration test `two_node_gossip` dials two local nodes and exchanges a signed 
 
 Bind with `AGORA_SEEDER_BIND` (default `127.0.0.1:18080`). Preload via `AGORA_SEEDER_PEERS`.
 
+### Node wiring
+
+`agora-node` reads `AGORA_DNS_SEEDER` (host or full URL) into `NetworkConfig::dns_seeder_url`:
+
+1. On boot, `fetch_seeder_peers` merges seeder results with `AGORA_BOOTSTRAP` (capped by `max_peers`) and dials
+2. On first `Listening` event, `register_with_seeder` POSTs the dialable multiaddr (`0.0.0.0` → `127.0.0.1`)
+
+```bash
+cargo run -p agora-dns-seeder
+AGORA_DNS_SEEDER=http://127.0.0.1:18080 cargo run -p agora-node
+```
+
 ## Follow-ons
 
-- Pull peers from seeder URL inside `NetworkConfig::dns_seeder_url`
 - Request-response transport for `GetBlock` (avoid mesh-wide full-block replies)
 - Peer scoring & mesh tuning for sub-second DAGs
+- Periodic seeder refresh / re-register

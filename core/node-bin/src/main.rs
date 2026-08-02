@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use agora_consensus::{EmissionSchedule, PowAlgorithm};
 use agora_p2p::{
-    reconstruct_compact_block, Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage,
+    dial_addr, fetch_seeder_peers_best_effort, merge_bootstrap_peers, reconstruct_compact_block,
+    register_with_seeder, Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage,
     NetworkNode, PendingFetches, ReconstructError,
 };
 use agora_rpc::RpcDispatcher;
@@ -89,10 +90,17 @@ async fn main() {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let dns_seeder = std::env::var("AGORA_DNS_SEEDER")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
-    let net_cfg = NetworkConfig::default()
+    let mut net_cfg = NetworkConfig::default()
         .with_listen(listen)
         .with_bootstrap(bootstrap.clone());
+    if let Some(url) = &dns_seeder {
+        net_cfg = net_cfg.with_dns_seeder(url.clone());
+    }
 
     let data_dir = std::env::var("AGORA_DATA").unwrap_or_else(|_| "data/agora-node".into());
     let store = Arc::new(StateStore::open(&data_dir).expect("open state store"));
@@ -106,8 +114,15 @@ async fn main() {
     ));
     let mempool = Arc::new(Mutex::new(Mempool::new(10_000)));
 
+    let seeder_peers = if let Some(url) = net_cfg.dns_seeder_url.clone() {
+        fetch_seeder_peers_best_effort(&url).await
+    } else {
+        Vec::new()
+    };
+    let dial_peers = merge_bootstrap_peers(&bootstrap, &seeder_peers, net_cfg.max_peers);
+
     let (handle, mut events, node) = NetworkNode::build(&net_cfg).expect("p2p build");
-    for peer in &bootstrap {
+    for peer in &dial_peers {
         if let Err(err) = handle.dial(peer) {
             warn!(error = %err, peer, "bootstrap dial failed");
         }
@@ -138,6 +153,8 @@ async fn main() {
         ?pow_algo,
         template_bits,
         daa_bits = chain.lock().map(|c| c.difficulty().as_bits()).unwrap_or(template_bits),
+        dns_seeder = net_cfg.dns_seeder_url.as_deref().unwrap_or(""),
+        dial_peers = dial_peers.len(),
         "agora-node foundation boot ok"
     );
     println!(
@@ -150,11 +167,30 @@ async fn main() {
     );
 
     let net = handle.clone();
+    let seeder_url = net_cfg.dns_seeder_url.clone();
+    let local_peer = handle.peer_id();
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));
+        let mut registered = false;
         while let Some(event) = events.recv().await {
             match event {
-                NetworkEvent::Listening(addr) => info!(%addr, "p2p listening"),
+                NetworkEvent::Listening(addr) => {
+                    info!(%addr, "p2p listening");
+                    if !registered {
+                        if let Some(url) = &seeder_url {
+                            let dialable = dial_addr(&addr, local_peer);
+                            match register_with_seeder(url, &dialable.to_string()).await {
+                                Ok(()) => {
+                                    registered = true;
+                                    info!(%dialable, "registered dialable addr with dns seeder");
+                                }
+                                Err(err) => {
+                                    warn!(error = %err, "dns seeder register failed")
+                                }
+                            }
+                        }
+                    }
+                }
                 NetworkEvent::PeerConnected(peer) => info!(%peer, "peer connected"),
                 NetworkEvent::PeerDisconnected(peer) => info!(%peer, "peer disconnected"),
                 NetworkEvent::Message {

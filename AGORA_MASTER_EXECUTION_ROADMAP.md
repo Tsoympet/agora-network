@@ -62,11 +62,17 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **RandomX FFI:** `RandomXPowHasher` via `rust-randomx` (feature `randomx`) + miner-sidecar template loop
 - [x] **Block admission:** `ChainState::admit_block` runs `PowVerifier`, wired to gossip + `agora_submitBlock`
 
-## Phase 5b: L1 state close-out — in progress
+## Phase 5b: L1 state close-out — done
 
 - [x] **UTXO apply/revert:** `apply_block` / `revert_journal` + `delete_cf`; wired into `admit_block` with coinbase budget
 - [x] **DAA wiring:** templates + admission use `Difficulty.level` as `bits`; retarget + `meta/daa_difficulty`
-- [ ] Compact blocks / IBD fetch on `BlockAnnounce`
+- [x] **Compact blocks / IBD fetch:** `CompactBlock` + `GetBlock` on `BlockAnnounce`; mempool inflate + pending-fetch dedupe
+
+## Phase 5c: P2P hardening — in progress
+
+- [x] **DNS seeder pull:** `AGORA_DNS_SEEDER` → `fetch_seeder_peers` + dial merge; register dialable addr on listen
+- [ ] Request-response transport for `GetBlock`
+- [ ] Peer scoring & mesh tuning for sub-second DAGs
 
 ## Directory Structure Reference
 

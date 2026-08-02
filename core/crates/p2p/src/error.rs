@@ -12,4 +12,6 @@ pub enum P2pError {
     MempoolRejected(String),
     #[error("decode error: {0}")]
     Decode(String),
+    #[error("dns seeder error: {0}")]
+    Seeder(String),
 }
