@@ -119,9 +119,13 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Fee + DAA:** min relay fee, fee-ordered `select_transfers`, blue-work-weighted DAA window
 - [x] **Local testnet runbook:** `scripts/local_testnet.sh`
 
-## Phase 13: Miner economics — in progress
+## Phase 13: Miner economics — done
 
 - [x] **Fee → miner coinbase:** templates and `apply_block` pay `emission + Σ(in−out)` to `AGORA_MINER_ADDRESS`
+
+## Phase 14: Tx confirmation — in progress
+
+- [x] **`agora_getTransaction`:** mempool / `cf_warm` index / unknown + light-client `watchTransaction` + desktop/mobile status
 
 ## Directory Structure Reference
 

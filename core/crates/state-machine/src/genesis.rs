@@ -91,6 +91,7 @@ impl GenesisBuilder {
 
         store.put_cf(ColumnFamily::Archival, genesis_hash.as_bytes(), &block_bytes)?;
         store.put_cf(ColumnFamily::Hot, genesis_hash.as_bytes(), &block_bytes)?;
+        crate::tx_index::index_block_transactions(store, &block)?;
         store.put_cf(
             ColumnFamily::Meta,
             meta_keys::GENESIS_HASH,

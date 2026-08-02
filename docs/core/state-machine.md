@@ -41,6 +41,8 @@ Helpers: `transfer_fee` / `sum_transfer_fees` for template assembly.
 
 Outpoint keys are `tx_id || index_le` (36 bytes), same as genesis.
 
+Transaction index (`cf_warm`): key `tx/` ‖ `tx_id`, value `block_id` ‖ `index` LE — written on genesis ignite and every `persist_block` for `agora_getTransaction`.
+
 ## Storage backends
 
 - [`StateStore::open_in_memory`] — ephemeral map for unit tests / portable CI

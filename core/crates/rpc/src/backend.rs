@@ -11,10 +11,76 @@ pub struct UtxoEntry {
     pub value: Amount,
 }
 
+/// Mempool / confirmed / missing status for `agora_getTransaction`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxStatus {
+    Pending,
+    Confirmed,
+    Unknown,
+}
+
+impl TxStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Confirmed => "confirmed",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Result of looking up a transaction by id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TxLookup {
+    pub tx_id: Hash,
+    pub status: TxStatus,
+    pub block_id: Option<Hash>,
+    pub index: Option<u32>,
+    pub fee: Option<u64>,
+    pub transaction: Option<Transaction>,
+}
+
+impl TxLookup {
+    pub fn unknown(tx_id: Hash) -> Self {
+        Self {
+            tx_id,
+            status: TxStatus::Unknown,
+            block_id: None,
+            index: None,
+            fee: None,
+            transaction: None,
+        }
+    }
+
+    pub fn pending(tx: Transaction, fee: Option<u64>) -> Self {
+        Self {
+            tx_id: tx.tx_id(),
+            status: TxStatus::Pending,
+            block_id: None,
+            index: None,
+            fee,
+            transaction: Some(tx),
+        }
+    }
+
+    pub fn confirmed(tx: Transaction, block_id: Hash, index: u32) -> Self {
+        Self {
+            tx_id: tx.tx_id(),
+            status: TxStatus::Confirmed,
+            block_id: Some(block_id),
+            index: Some(index),
+            fee: None,
+            transaction: Some(tx),
+        }
+    }
+}
+
 /// Node-facing surface the RPC dispatcher calls into.
 pub trait RpcBackend: Send {
     fn dag_tips(&self) -> Vec<Hash>;
     fn get_block(&self, hash: &Hash) -> Option<Block>;
+    /// Mempool → confirmed index → unknown (never hard-errors on missing).
+    fn get_transaction(&self, tx_id: &Hash) -> Result<TxLookup, RpcError>;
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
     /// Live UTXO set for wallet coin selection.
@@ -35,6 +101,8 @@ pub struct InMemoryBackend {
     balances: HashMap<Address, Amount>,
     utxos: HashMap<OutPoint, TxOut>,
     mempool: HashMap<Hash, Transaction>,
+    /// `tx_id` → `(block_id, index)` for confirmed txs.
+    tx_index: HashMap<Hash, (Hash, u32)>,
     template_bits: u32,
     fund_nonce: u64,
 }
@@ -58,6 +126,11 @@ impl InMemoryBackend {
                 .retain(|t| !block.header.parents.iter().any(|p| p == t));
             self.tips.push(id);
         }
+        for (index, tx) in block.transactions.iter().enumerate() {
+            let tx_id = tx.tx_id();
+            self.tx_index.insert(tx_id, (id, index as u32));
+            self.mempool.remove(&tx_id);
+        }
         self.blocks.insert(id, block);
     }
 }
@@ -69,6 +142,20 @@ impl RpcBackend for InMemoryBackend {
 
     fn get_block(&self, hash: &Hash) -> Option<Block> {
         self.blocks.get(hash).cloned()
+    }
+
+    fn get_transaction(&self, tx_id: &Hash) -> Result<TxLookup, RpcError> {
+        if let Some(tx) = self.mempool.get(tx_id) {
+            return Ok(TxLookup::pending(tx.clone(), None));
+        }
+        if let Some((block_id, index)) = self.tx_index.get(tx_id).copied() {
+            if let Some(block) = self.blocks.get(&block_id) {
+                if let Some(tx) = block.transactions.get(index as usize) {
+                    return Ok(TxLookup::confirmed(tx.clone(), block_id, index));
+                }
+            }
+        }
+        Ok(TxLookup::unknown(*tx_id))
     }
 
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError> {

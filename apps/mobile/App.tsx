@@ -16,6 +16,8 @@ import {
   sendTransfer,
   shortHash,
   startTipSync,
+  watchTransaction,
+  type LightTxLookup,
   type LightUtxo,
   type TipSyncSnapshot,
 } from "../shared/light-client";
@@ -55,11 +57,25 @@ export default function App() {
   const [sendBusy, setSendBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastTxId, setLastTxId] = useState<string | null>(null);
+  const [txLookup, setTxLookup] = useState<LightTxLookup | null>(null);
   const [derivedAddress, setDerivedAddress] = useState<string | null>(null);
 
   useEffect(() => startTipSync({ client, pollMs: POLL_MS, onUpdate: setSnap }), [
     client,
   ]);
+
+  useEffect(() => {
+    if (!lastTxId) {
+      setTxLookup(null);
+      return;
+    }
+    return watchTransaction({
+      client,
+      txId: lastTxId,
+      pollMs: POLL_MS,
+      onUpdate: setTxLookup,
+    });
+  }, [client, lastTxId]);
 
   const statusColor =
     snap.status === "ok"
@@ -120,6 +136,7 @@ export default function App() {
     setSendBusy(true);
     setSendError(null);
     setLastTxId(null);
+    setTxLookup(null);
     try {
       const { tx_id, built } = await sendTransfer(client, {
         mnemonic,
@@ -286,7 +303,10 @@ export default function App() {
         {sendError ? <Text style={styles.error}>{sendError}</Text> : null}
         {lastTxId ? (
           <Text style={[styles.tipRow, { color: agoraBrand.colors.cyan }]}>
-            submitted {shortHash(lastTxId)}
+            {shortHash(lastTxId)} · {txLookup?.status ?? "pending"}
+            {txLookup?.status === "confirmed" && txLookup.block_id
+              ? ` @ ${shortHash(txLookup.block_id)}`
+              : ""}
           </Text>
         ) : null}
       </ScrollView>

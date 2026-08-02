@@ -8,6 +8,7 @@ mod columns;
 mod error;
 mod genesis;
 mod store;
+mod tx_index;
 mod utxo;
 mod zones;
 
@@ -19,5 +20,9 @@ pub use columns::{meta_keys, ColumnFamily};
 pub use error::StateError;
 pub use genesis::{GenesisBuilder, SupplyCaps};
 pub use store::StateStore;
+pub use tx_index::{
+    decode_tx_location, encode_tx_location, index_block_transactions, lookup_tx_location,
+    tx_index_key,
+};
 pub use utxo::{outpoint_key, outpoint_key_parts};
 pub use zones::StateZone;

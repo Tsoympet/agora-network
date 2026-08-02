@@ -11,7 +11,8 @@ use agora_consensus::{
     EmissionSchedule, Ghostdag, GhostdagConfig, LeadingZeroPow, PowAlgorithm, PowVerifier,
 };
 use agora_state_machine::{
-    apply_block, meta_keys, revert_journal, sum_transfer_fees, ColumnFamily, StateStore,
+    apply_block, index_block_transactions, meta_keys, revert_journal, sum_transfer_fees,
+    ColumnFamily, StateStore,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -282,6 +283,8 @@ impl ChainState {
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
         self.store
             .put_cf(ColumnFamily::Archival, id.as_bytes(), &block_bytes)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        index_block_transactions(self.store.as_ref(), block)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
 
         let mut tips = self.tips()?;

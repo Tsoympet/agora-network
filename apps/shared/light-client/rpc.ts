@@ -54,6 +54,17 @@ export type SubmitTxResult = {
   tx_id: string;
 };
 
+export type LightTxStatus = "pending" | "confirmed" | "unknown";
+
+export type LightTxLookup = {
+  tx_id: string;
+  status: LightTxStatus;
+  block_id: string | null;
+  index: number | null;
+  fee: number | null;
+  transaction: LightTx | null;
+};
+
 export type RpcStatus = "idle" | "ok" | "error";
 
 export type LightClientConfig = {
@@ -66,6 +77,7 @@ export type LightClient = {
   call: <T>(method: string, params?: unknown) => Promise<T>;
   getDagTips: () => Promise<string[]>;
   getBlock: (hash: string) => Promise<LightBlock>;
+  getTransaction: (txId: string) => Promise<LightTxLookup>;
   getBalance: (address: string) => Promise<LightBalance>;
   getUtxos: (address: string) => Promise<LightUtxoSet>;
   /** Submit a signed transaction JSON body (native serde / byte-array hashes). */
@@ -103,6 +115,8 @@ export function createLightClient(config: LightClientConfig): LightClient {
     call,
     getDagTips: () => call<string[]>("agora_getDagTips", []),
     getBlock: (hash: string) => call<LightBlock>("agora_getBlock", { hash }),
+    getTransaction: (txId: string) =>
+      call<LightTxLookup>("agora_getTransaction", { tx_id: txId }),
     getBalance: (address: string) =>
       call<LightBalance>("agora_getBalance", { address }),
     getUtxos: (address: string) =>
