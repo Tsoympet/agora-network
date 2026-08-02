@@ -205,6 +205,7 @@ name = "agora-stratum-pool"
 version = "0.1.0"
 dependencies = [
  "agora-consensus",
+ "agora-rpc",
  "agora-types",
  "borsh",
  "hex",

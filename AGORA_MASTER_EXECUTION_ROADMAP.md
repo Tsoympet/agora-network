@@ -95,6 +95,11 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **`tx_root` on admit:** `admit_block` rejects body/header mismatches
 - [x] **Mempool eviction:** `evict_for_block` on RPC + gossip admit frees reserved outpoints
 
+## Phase 9: Mining infra wiring — in progress
+
+- [x] **Stratum → live node:** poll `agora_getBlockTemplate`, kHeavyHash share validate, `agora_submitBlock` on network difficulty
+- [ ] **Faucet → spendable UTXOs:** drip creates real `cf_utxo` credits (not overlay-only)
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

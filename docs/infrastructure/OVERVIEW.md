@@ -11,11 +11,15 @@ External services that sit beside the Agora node.
 ## Stratum pool
 
 - Bind: `AGORA_STRATUM_BIND` (default `0.0.0.0:3333`)
-- Methods: `mining.subscribe`, `mining.authorize`, `mining.submit`
+- RPC: `AGORA_RPC_URL` (default `http://127.0.0.1:8545/rpc`) — polls `agora_getBlockTemplate`, submits network shares via `agora_submitBlock`
+- Poll: `AGORA_STRATUM_POLL_MS` (default `2000`)
+- Methods: `mining.subscribe`, `mining.authorize`, `mining.submit` (+ `mining.notify` after subscribe/authorize)
 - PoW hash uses audited Kaspa kHeavyHash via `agora_consensus::KHeavyHashPowHasher`
+- Run the node with `AGORA_POW_ALGO=kheavyhash` so submitted blocks verify
 
 ```bash
-cargo run -p agora-stratum-pool
+AGORA_POW_ALGO=kheavyhash AGORA_TEMPLATE_BITS=1 cargo run -p agora-node
+AGORA_RPC_URL=http://127.0.0.1:8545/rpc cargo run -p agora-stratum-pool
 ```
 
 ## Testnet faucet

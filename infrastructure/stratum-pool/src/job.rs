@@ -1,5 +1,5 @@
 use agora_consensus::{KHeavyHashPowHasher, LeadingZeroPow, PowHasher};
-use agora_types::{BlockHeader, Hash};
+use agora_types::{Block, BlockHeader, Hash};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -7,29 +7,33 @@ use sha2::{Digest, Sha256};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MiningJob {
     pub job_id: String,
-    pub header: BlockHeader,
-    /// Required leading zero bits on the kHeavyHash digest.
+    /// Full template block (coinbase + transfers); PoW mines `header.nonce`.
+    pub block: Block,
+    /// Required leading zero bits on the kHeavyHash digest (network `header.bits`).
     pub difficulty_bits: u32,
 }
 
 impl MiningJob {
-    pub fn new(job_id: impl Into<String>, header: BlockHeader, difficulty_bits: u32) -> Self {
+    pub fn new(job_id: impl Into<String>, block: Block, difficulty_bits: u32) -> Self {
         Self {
             job_id: job_id.into(),
-            header,
+            block,
             difficulty_bits,
         }
     }
 
-    pub fn with_nonce(&self, nonce: u64) -> BlockHeader {
-        BlockHeader {
-            nonce,
-            ..self.header.clone()
-        }
+    pub fn header(&self) -> &BlockHeader {
+        &self.block.header
+    }
+
+    pub fn with_nonce(&self, nonce: u64) -> Block {
+        let mut block = self.block.clone();
+        block.header.nonce = nonce;
+        block
     }
 
     pub fn pow_hash(&self, nonce: u64) -> Hash {
-        KHeavyHashPowHasher.pow_hash(&self.with_nonce(nonce))
+        KHeavyHashPowHasher.pow_hash(&self.with_nonce(nonce).header)
     }
 
     pub fn meets_target(&self, hash: &Hash) -> bool {
