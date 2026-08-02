@@ -38,17 +38,19 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] Explorer branded landing (Cinzel / Inter, Obsidian & Gold)
 - Brand tokens: Obsidian `#101218`, Burnished Gold `#C59835`, Aegean Cyan `#06BBDF`
 
-## Phase 3: Launch Security (Anti-Whale & Governance) — in progress
+## Phase 3: Launch Security (Anti-Whale & Governance)
 
 - [x] **Governance:** Quadratic voting — `EffectiveVotes = floor(sqrt(RawBalance))` (`agora-governance`)
 - [x] **Whale protection:** 5% hard cap on countable balance vs total supply
 - [x] **Testing:** `ghostdag_fuzzer` + partition fuzz tests for GHOSTDAG merge scenarios
 
-## Phase 4: Scaling (Day 2 Growth)
+## Phase 4: Scaling (Day 2 Growth) — in progress
 
-- **4.1 (L2):** Ovolos Optimistic Rollup for EVM smart-contract scaling
-- **4.2 (L3):** Bridge-in-a-Box SDK for custom District Chains (gaming / privacy)
-- **4.3 (L4):** Intent-Engine for AI-driven asset orchestration
+- [x] **4.1 (L2):** Ovolos optimistic rollup scaffold (`agora-ovolos-rollup`) — batches, challenge window, fraud-proof hooks, pluggable `EvmExecutor`
+- [x] **4.2 (L3):** Bridge-in-a-Box SDK (`agora-bridge-sdk`) — District configs + lock/mint & burn/unlock
+- [x] **4.3 (L4):** Intent-Engine scaffold (`agora-intent-engine`) — intents, solver trait, bridge settlement
+- [ ] Bind production EVM (`revm`) behind `EvmExecutor`
+- [ ] District light-client proofs / production messaging transport
 
 ## Directory Structure Reference
 

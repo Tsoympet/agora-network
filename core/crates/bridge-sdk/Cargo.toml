@@ -1,0 +1,13 @@
+[package]
+name = "agora-bridge-sdk"
+description = "Bridge-in-a-Box SDK for Agora District Chains (L3)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+agora-types = { workspace = true }
+borsh = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

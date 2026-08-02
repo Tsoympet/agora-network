@@ -1,0 +1,15 @@
+[package]
+name = "agora-ovolos-rollup"
+description = "Ovolos optimistic rollup (L2) for EVM smart-contract scaling"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+agora-types = { workspace = true }
+borsh = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

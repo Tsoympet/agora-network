@@ -1,0 +1,14 @@
+[package]
+name = "agora-intent-engine"
+description = "Intent-Engine for AI-driven asset orchestration (L4)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+agora-types = { workspace = true }
+agora-bridge-sdk = { workspace = true }
+borsh = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
