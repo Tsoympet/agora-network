@@ -8,6 +8,20 @@ Network communications for Agora **must** use `libp2p`.
 - Pub/sub: Gossipsub (strict validation, signed messages)
 - Payloads: `borsh`-encoded `NetworkMessage`
 
+## Mesh tuning & peer scoring
+
+`NetworkConfig::gossip` (`GossipTuning`) defaults target sub-second BlockDAG tips:
+
+| Knob | Default |
+| --- | --- |
+| heartbeat | 200ms |
+| mesh_n / low / high | 6 / 4 / 12 |
+| mesh_outbound_min | 2 |
+| flood_publish | true |
+| peer scoring | on |
+
+Peer scoring uses gossipsub P1–P7 with Agora topic weights (`agora/blocks/1` = 1.0, `agora/txs/1` = 0.5). Soft mesh-delivery thresholds avoid graylisting tiny local meshes. `agora-node` also sets application scores (`reward_peer` / `penalize_peer`) when RR/gossip blocks admit or reject.
+
 ## Topics (v1)
 
 | Topic | Payload |
@@ -68,5 +82,5 @@ AGORA_DNS_SEEDER=http://127.0.0.1:18080 cargo run -p agora-node
 
 ## Follow-ons
 
-- Peer scoring & mesh tuning for sub-second DAGs
 - Periodic seeder refresh / re-register
+- Connection-limits behaviour tied to `max_peers`

@@ -77,6 +77,17 @@ fn request_block_if_missing(
     }
 }
 
+fn score_peer(net: &NetworkHandle, peer: PeerId, good: bool) {
+    let result = if good {
+        net.reward_peer(peer)
+    } else {
+        net.penalize_peer(peer)
+    };
+    if let Err(err) = result {
+        warn!(%peer, error = %err, "peer score update failed");
+    }
+}
+
 fn gossip_getblock_fallback(pending: &mut PendingFetches, net: &NetworkHandle, hash: Hash) {
     // Allow a single gossip retry after RR failure by clearing the pending slot.
     pending.complete(&hash);
@@ -246,9 +257,11 @@ async fn main() {
                         pending.complete(&hash);
                         match admit_gossip_block(&chain, block) {
                             Ok(id) => {
+                                score_peer(&net, peer, true);
                                 info!(%peer, block = %id.to_hex(), "admitted rr getblock")
                             }
                             Err(err) => {
+                                score_peer(&net, peer, false);
                                 warn!(%peer, error = %err, "rejected rr getblock")
                             }
                         }
@@ -269,6 +282,7 @@ async fn main() {
                         %error,
                         "getblock rr failure — gossip fallback"
                     );
+                    score_peer(&net, peer, false);
                     gossip_getblock_fallback(&mut pending, &net, hash);
                 }
                 NetworkEvent::Message {
@@ -281,9 +295,11 @@ async fn main() {
                         pending.complete(&id);
                         match admit_gossip_block(&chain, block) {
                             Ok(id) => {
+                                score_peer(&net, peer, true);
                                 info!(%peer, %topic, block = %id.to_hex(), "admitted gossip block")
                             }
                             Err(err) => {
+                                score_peer(&net, peer, false);
                                 warn!(%peer, %topic, error = %err, "rejected gossip block")
                             }
                         }
@@ -309,18 +325,24 @@ async fn main() {
                             Ok(block) => {
                                 pending.complete(&hash);
                                 match admit_gossip_block(&chain, block) {
-                                    Ok(id) => info!(
-                                        %peer,
-                                        %topic,
-                                        block = %id.to_hex(),
-                                        "admitted compact block"
-                                    ),
-                                    Err(err) => warn!(
-                                        %peer,
-                                        %topic,
-                                        error = %err,
-                                        "rejected compact block"
-                                    ),
+                                    Ok(id) => {
+                                        score_peer(&net, peer, true);
+                                        info!(
+                                            %peer,
+                                            %topic,
+                                            block = %id.to_hex(),
+                                            "admitted compact block"
+                                        );
+                                    }
+                                    Err(err) => {
+                                        score_peer(&net, peer, false);
+                                        warn!(
+                                            %peer,
+                                            %topic,
+                                            error = %err,
+                                            "rejected compact block"
+                                        );
+                                    }
                                 }
                             }
                             Err(ReconstructError::MissingShortIds(n)) => {

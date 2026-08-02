@@ -1,3 +1,5 @@
+use crate::scoring::GossipTuning;
+
 /// libp2p node configuration.
 #[derive(Debug, Clone)]
 pub struct NetworkConfig {
@@ -8,6 +10,8 @@ pub struct NetworkConfig {
     pub bootstrap: Vec<String>,
     /// Optional DNS seeder HTTP endpoint (e.g. `http://127.0.0.1:18080/peers`).
     pub dns_seeder_url: Option<String>,
+    /// Gossipsub mesh + peer-score tuning for sub-second DAG tips.
+    pub gossip: GossipTuning,
 }
 
 impl Default for NetworkConfig {
@@ -17,6 +21,7 @@ impl Default for NetworkConfig {
             max_peers: 64,
             bootstrap: Vec::new(),
             dns_seeder_url: None,
+            gossip: GossipTuning::default(),
         }
     }
 }
@@ -44,6 +49,11 @@ impl NetworkConfig {
 
     pub fn with_max_peers(mut self, max_peers: u32) -> Self {
         self.max_peers = max_peers.max(1);
+        self
+    }
+
+    pub fn with_gossip_tuning(mut self, gossip: GossipTuning) -> Self {
+        self.gossip = gossip;
         self
     }
 }

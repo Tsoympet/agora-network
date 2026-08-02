@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use agora_types::{Block, Hash};
 use futures::StreamExt;
-use libp2p::gossipsub::{self, IdentTopic, MessageAuthenticity, ValidationMode};
+use libp2p::gossipsub::{self, IdentTopic, MessageAuthenticity};
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, ProtocolSupport, ResponseChannel};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
@@ -15,6 +15,7 @@ use tracing::{debug, info, warn};
 
 use crate::getblock::{getblock_protocol, GetBlockRequest, GetBlockResponse};
 use crate::messages::NetworkMessage;
+use crate::scoring::{enable_peer_scoring, APP_SCORE_BAD_PEER, APP_SCORE_GOOD_PEER};
 use crate::topics::{blocks_topic, transactions_topic};
 use crate::{NetworkConfig, P2pError};
 
@@ -65,6 +66,7 @@ enum Command {
         request_id: request_response::InboundRequestId,
         block: Option<Block>,
     },
+    SetAppScore { peer: PeerId, score: f64 },
     Shutdown,
 }
 
@@ -110,6 +112,23 @@ impl NetworkHandle {
             .map_err(|_| P2pError::Network("swarm task stopped".into()))
     }
 
+    /// Adjust gossipsub application-specific peer score (P5).
+    pub fn set_application_score(&self, peer: PeerId, score: f64) -> Result<(), P2pError> {
+        self.commands
+            .send(Command::SetAppScore { peer, score })
+            .map_err(|_| P2pError::Network("swarm task stopped".into()))
+    }
+
+    /// Convenience: bump a peer that delivered useful IBD / gossip work.
+    pub fn reward_peer(&self, peer: PeerId) -> Result<(), P2pError> {
+        self.set_application_score(peer, APP_SCORE_GOOD_PEER)
+    }
+
+    /// Convenience: penalize a peer that sent rejectable payloads.
+    pub fn penalize_peer(&self, peer: PeerId) -> Result<(), P2pError> {
+        self.set_application_score(peer, APP_SCORE_BAD_PEER)
+    }
+
     pub fn shutdown(&self) {
         let _ = self.commands.send(Command::Shutdown);
     }
@@ -140,18 +159,22 @@ impl NetworkNode {
             gossipsub::MessageId::from(hasher.finish().to_string())
         };
 
-        let gossipsub_config = gossipsub::ConfigBuilder::default()
-            .heartbeat_interval(Duration::from_millis(500))
-            .validation_mode(ValidationMode::Strict)
-            .message_id_fn(message_id_fn)
-            .build()
-            .map_err(|e| P2pError::Gossip(e.to_string()))?;
+        let gossipsub_config = config.gossip.build_config(message_id_fn)?;
 
         let mut gossipsub = gossipsub::Behaviour::new(
             MessageAuthenticity::Signed(id_keys.clone()),
             gossipsub_config,
         )
         .map_err(|e| P2pError::Gossip(e.to_string()))?;
+
+        if config.gossip.peer_scoring {
+            enable_peer_scoring(&mut gossipsub)?;
+            info!(
+                heartbeat_ms = config.gossip.heartbeat_interval.as_millis() as u64,
+                mesh_n = config.gossip.mesh_n,
+                "gossipsub peer scoring enabled"
+            );
+        }
 
         gossipsub
             .subscribe(&transactions_topic())
@@ -370,6 +393,14 @@ impl NetworkNode {
                         }
                         Some(Command::RespondGetBlock { request_id, block }) => {
                             self.respond_get_block(request_id, block);
+                        }
+                        Some(Command::SetAppScore { peer, score }) => {
+                            let ok = self
+                                .swarm
+                                .behaviour_mut()
+                                .gossipsub
+                                .set_application_score(&peer, score);
+                            debug!(%peer, score, applied = ok, "application peer score");
                         }
                         Some(Command::Shutdown) | None => break,
                     }
