@@ -9,11 +9,13 @@ Cargo.lock.bak
 .DS_Store
 *.swp
 
-# Node / clients (future)
+# Node / clients
 node_modules/
 dist/
 .next/
 .expo/
+apps/**/dist/
+apps/**/.turbo/
 
 # Local node data
 *.db

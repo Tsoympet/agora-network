@@ -1,0 +1,213 @@
+/**
+ * Agora Brand System — Obsidian & Gold
+ * Source of truth for client visual tokens. Import into every frontend.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Inter:wght@400;500;600&display=swap");
+
+:root {
+  /* Core palette */
+  --agora-obsidian: #101218;
+  --agora-obsidian-elevated: #171b24;
+  --agora-obsidian-mist: #1e2430;
+  --agora-gold: #c59835;
+  --agora-gold-soft: #d4af5a;
+  --agora-gold-deep: #9a7424;
+  --agora-cyan: #06bbdf;
+  --agora-cyan-soft: #3dcee8;
+  --agora-ink: #e8e6e1;
+  --agora-ink-muted: #9aa0ab;
+  --agora-line: rgba(197, 152, 53, 0.28);
+
+  /* Semantic */
+  --agora-bg: var(--agora-obsidian);
+  --agora-fg: var(--agora-ink);
+  --agora-accent: var(--agora-gold);
+  --agora-accent-secondary: var(--agora-cyan);
+  --agora-danger: #d65a5a;
+
+  /* Type */
+  --font-display: "Cinzel", "Times New Roman", serif;
+  --font-ui: "Inter", "Segoe UI", sans-serif;
+
+  /* Motion */
+  --ease-presence: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 220ms;
+  --dur-med: 480ms;
+  --dur-slow: 900ms;
+
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--agora-bg);
+  color: var(--agora-fg);
+  font-family: var(--font-ui);
+  font-weight: 400;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-image:
+    radial-gradient(ellipse 90% 60% at 50% -10%, rgba(197, 152, 53, 0.16), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 85% 20%, rgba(6, 187, 223, 0.08), transparent 50%),
+    linear-gradient(180deg, #101218 0%, #0c0e14 100%);
+  background-attachment: fixed;
+}
+
+/* Typography */
+.agora-brand,
+.agora-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--agora-gold);
+}
+
+.agora-display {
+  color: var(--agora-ink);
+}
+
+.agora-eyebrow {
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--agora-cyan);
+}
+
+.agora-lede {
+  color: var(--agora-ink-muted);
+  font-size: 1.05rem;
+  max-width: 36rem;
+}
+
+/* Controls */
+.agora-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  padding: 0.85rem 1.35rem;
+  font-family: var(--font-ui);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) var(--ease-presence),
+    background-color var(--dur-fast) var(--ease-presence),
+    border-color var(--dur-fast) var(--ease-presence),
+    color var(--dur-fast) var(--ease-presence);
+}
+
+.agora-btn:active {
+  transform: translateY(1px);
+}
+
+.agora-btn-primary {
+  background: linear-gradient(180deg, var(--agora-gold-soft), var(--agora-gold));
+  color: #16120a;
+}
+
+.agora-btn-primary:hover {
+  background: linear-gradient(180deg, #e0c06a, var(--agora-gold-soft));
+}
+
+.agora-btn-ghost {
+  background: transparent;
+  border-color: var(--agora-line);
+  color: var(--agora-ink);
+}
+
+.agora-btn-ghost:hover {
+  border-color: var(--agora-gold);
+  color: var(--agora-gold);
+}
+
+/* Motion primitives */
+@keyframes agora-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes agora-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@keyframes agora-dag-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-2%, -1%, 0);
+  }
+}
+
+.agora-rise {
+  animation: agora-rise var(--dur-med) var(--ease-presence) both;
+}
+
+.agora-rise-delay-1 {
+  animation-delay: 80ms;
+}
+
+.agora-rise-delay-2 {
+  animation-delay: 160ms;
+}
+
+.agora-rise-delay-3 {
+  animation-delay: 240ms;
+}
+
+.agora-glow {
+  animation: agora-glow-pulse 4.5s ease-in-out infinite;
+}
+
+.agora-dag-drift {
+  animation: agora-dag-drift 18s linear infinite alternate;
+}
+
+/* Asset helpers */
+.agora-icon {
+  display: block;
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.agora-icon-lg {
+  width: 4.5rem;
+  height: 4.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agora-rise,
+  .agora-glow,
+  .agora-dag-drift {
+    animation: none !important;
+  }
+}

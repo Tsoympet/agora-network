@@ -22,20 +22,21 @@ This document is the definitive command center. It bridges architectural theory 
 - Mining: RandomX (CPU sidecar), kHeavyHash (stratum pool)
 - Clients: Tauri desktop, Expo mobile, web explorer
 
-## Phase 2: Branding & Identity (The Look & Feel)
+## Phase 2: Branding & Identity (The Look & Feel) — in progress
 
 ### Assets
 
-- **TLT:** Talanton (Scales)
-- **DRC:** Drachma (Helmet)
-- **OBL:** Ovolos (Shield/Spears)
+- [x] **TLT:** Talanton (Scales) — `apps/shared/brand/assets/talanton.svg`
+- [x] **DRC:** Drachma (Helmet) — `apps/shared/brand/assets/drachma.svg`
+- [x] **OBL:** Ovolos (Shield/Spears) — `apps/shared/brand/assets/ovolos.svg`
+- [x] **Nexus Icon:** gold `A` — `apps/shared/brand/assets/nexus-icon.svg` / `.png`
 
 ### Implementation
 
-- Replace placeholder icons in the UI with branded assets
-- Apply `Agora_Brand_System.css` to all frontends
-- Set the Nexus Icon (gold `A`) as the primary app icon in Tauri/Expo
-- Brand tokens: Obsidian `#101218`, Burnished Gold `#C59835`, Aegean Cyan `#06BBDF` (Cinzel / Inter)
+- [x] Apply `Agora_Brand_System.css` across explorer, desktop, and mobile shells
+- [x] Set Nexus as primary app icon in Tauri (`src-tauri/icons`) and Expo (`app.json`)
+- [x] Explorer branded landing (Cinzel / Inter, Obsidian & Gold)
+- Brand tokens: Obsidian `#101218`, Burnished Gold `#C59835`, Aegean Cyan `#06BBDF`
 
 ## Phase 3: Launch Security (Anti-Whale & Governance)
 
