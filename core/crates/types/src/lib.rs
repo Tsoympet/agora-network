@@ -2,15 +2,73 @@
 //!
 //! Consensus-critical encoding uses `borsh`. Client bindings are generated with `ts-rs`.
 
+mod amount;
+mod block;
 mod hash;
 mod transaction;
-mod block;
 
+pub use amount::Amount;
 pub use block::{Block, BlockHeader};
 pub use hash::Hash;
-pub use transaction::{Address, Transaction, TxOut};
+pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 
-/// Regenerates TypeScript bindings into `bindings/` when tests run with the export feature path.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use borsh::{BorshDeserialize, BorshSerialize};
+
+    #[test]
+    fn amount_whole_conversion() {
+        let one = Amount::from_whole(1).expect("1 AGORA");
+        assert_eq!(one.as_base_units(), 100_000_000);
+        assert_eq!(one.checked_add(one).unwrap().as_base_units(), 200_000_000);
+    }
+
+    #[test]
+    fn transaction_borsh_roundtrip_and_id_stable() {
+        let tx = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: Hash::ZERO,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_base_units(42),
+                address: Address::ZERO,
+            }],
+            7,
+        );
+        let bytes = borsh::to_vec(&tx).unwrap();
+        let decoded = Transaction::try_from_slice(&bytes).unwrap();
+        assert_eq!(tx, decoded);
+        assert_eq!(tx.tx_id(), decoded.tx_id());
+        assert!(!tx.signing_bytes().is_empty());
+    }
+
+    #[test]
+    fn block_tx_root_deterministic() {
+        let tx = Transaction::unsigned(1, vec![], vec![], 1);
+        let root = Block::compute_tx_root(std::slice::from_ref(&tx));
+        let header = BlockHeader {
+            version: 1,
+            parents: vec![Hash::ZERO],
+            timestamp_ms: 1,
+            bits: 1,
+            nonce: 0,
+            tx_root: root,
+        };
+        let block = Block {
+            header: header.clone(),
+            transactions: vec![tx],
+        };
+        assert_eq!(block.id(), header.hash());
+        assert_eq!(Block::compute_tx_root(&block.transactions), root);
+    }
+}
+
+/// Regenerates TypeScript bindings into `bindings/` when tests run.
 #[cfg(test)]
 mod ts_export {
     use super::*;
@@ -18,9 +76,12 @@ mod ts_export {
 
     #[test]
     fn export_shared_types() {
-        // Export path keeps apps/ and core/ aligned after type changes.
+        Amount::export_all().expect("export Amount");
         Hash::export_all().expect("export Hash");
         Address::export_all().expect("export Address");
+        OutPoint::export_all().expect("export OutPoint");
+        TxIn::export_all().expect("export TxIn");
+        TxOut::export_all().expect("export TxOut");
         Transaction::export_all().expect("export Transaction");
         BlockHeader::export_all().expect("export BlockHeader");
         Block::export_all().expect("export Block");

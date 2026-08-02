@@ -1,81 +1,84 @@
-🏛️ Agora Network: Master Execution Roadmap
+# Agora Network: Master Execution Roadmap
 
-This document is your definitive command center. It bridges the gap between the architectural theory and the physical implementation of the Agora Network.
+This document is the definitive command center. It bridges architectural theory and physical implementation of the Agora Network.
 
-🚀 Phase 1: Foundation (The Ignition)
+## Phase 1: Foundation (The Ignition) — in progress
 
-Goal: Compile the L1 BlockDAG and achieve P2P connectivity.
+**Goal:** Compile the L1 BlockDAG and achieve P2P connectivity.
 
-Steps:
+### Steps
 
-Initialize Monorepo: Create workspace root and set up cargo workspace members.
+- [x] **Initialize Monorepo:** Workspace root + Cargo members (`types`, `crypto`, `consensus`, `state-machine`, `p2p`, `rpc`, `miner-sidecar`, `node-bin`)
+- [x] **Core crate assembly (scaffold):** Compiling stubs for consensus, state-machine, p2p, rpc
+- [x] **Cryptography & types:** Shared `borsh`/`ts-rs` types (`Amount`, `Hash`, `Transaction`, `Block`); BIP-39/44 + secp256k1 tx sign/verify
+- [x] **Storage setup:** Five column families (`hot` / `warm` / `archival` / `meta` / `utxo`)
+- [x] **Genesis ignition:** `GenesisBuilder` for Block 0 and fixed supply caps
+- [x] **Consensus core (initial):** GHOSTDAG blue-set ordering + DAA scaffold + leading-zero PoW verify hooks (RandomX / kHeavyHash FFI later)
+- [ ] **P2P handshake:** libp2p gossip + DNS seeder; connect the first two nodes
 
-Core Crate Assembly: Implement consensus, state-machine, and p2p.
+### Stack locks
 
-Storage Setup: Initialize RocksDB with the 5 defined Column Families.
+- Serialization: `borsh` | State: `rocksdb` | P2P: `libp2p` | Crypto: `secp256k1` / `bip39` / `bip32`
+- Mining: RandomX (CPU sidecar), kHeavyHash (stratum pool)
+- Clients: Tauri desktop, Expo mobile, web explorer
 
-Genesis Ignition: Run the GenesisBuilder to generate Block 0 and fix supply caps.
+## Phase 2: Branding & Identity (The Look & Feel)
 
-P2P Handshake: Deploy the DNS Seeder to a cloud provider and connect the first two nodes.
+### Assets
 
-🎨 Phase 2: Branding & Identity (The Look & Feel)
+- **TLT:** Talanton (Scales)
+- **DRC:** Drachma (Helmet)
+- **OBL:** Ovolos (Shield/Spears)
 
-Assets:
+### Implementation
 
-TLT: Talanton (Scales)
+- Replace placeholder icons in the UI with branded assets
+- Apply `Agora_Brand_System.css` to all frontends
+- Set the Nexus Icon (gold `A`) as the primary app icon in Tauri/Expo
+- Brand tokens: Obsidian `#101218`, Burnished Gold `#C59835`, Aegean Cyan `#06BBDF` (Cinzel / Inter)
 
-DRC: Drachma (Helmet)
+## Phase 3: Launch Security (Anti-Whale & Governance)
 
-OBL: Ovolos (Shield/Spears)
+- **Governance:** Quadratic voting — `EffectiveVotes = sqrt(RawBalance)`
+- **Whale protection:** Enforce the 5% hard cap on voting power
+- **Testing:** `ghostdag_fuzzer` stress-tests against partitioned network simulations
 
-Implementation:
+## Phase 4: Scaling (Day 2 Growth)
 
-Replace placeholder icons in the UI with branded assets.
+- **4.1 (L2):** Ovolos Optimistic Rollup for EVM smart-contract scaling
+- **4.2 (L3):** Bridge-in-a-Box SDK for custom District Chains (gaming / privacy)
+- **4.3 (L4):** Intent-Engine for AI-driven asset orchestration
 
-Apply Agora_Brand_System.css to all frontends.
+## Directory Structure Reference
 
-Set the "Nexus Icon" (your gold 'A') as the primary app icon in Tauri/Expo configurations.
+See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.
 
-🛡️ Phase 3: Launch Security (Anti-Whale & Governance)
-
-Governance: Implement the Quadratic Voting formula: $EffectiveVotes = \sqrt{RawBalance}$.
-
-Whale Protection: Enforce the 5% hard cap on voting power.
-
-Testing: Run the ghostdag_fuzzer.rs script to stress-test the BlockDAG against partitioned network simulations.
-
-🛠️ Phase 4: Scaling (Day 2 Growth)
-
-Phase 4.1 (L2): Deploy the Ovolos Optimistic Rollup for EVM smart contract scaling.
-
-Phase 4.2 (L3): Develop the "Bridge-in-a-Box" SDK for custom District Chains (Gaming/Privacy).
-
-Phase 4.3 (L4): Implement the Intent-Engine for AI-driven asset orchestration.
-
-📦 Directory Structure Reference
-
+```
 agora-network/
 ├── core/                   # Rust Consensus & State
 ├── apps/
 │   ├── desktop/            # Tauri + RandomX Sidecar
+│   ├── mobile/             # Expo light client
 │   └── explorer/           # BlockDAG Visualization
 └── infrastructure/
     ├── dns-seeder/         # Node Discovery
     ├── stratum-pool/       # ASIC Mining
     └── testnet-faucet/     # Dev Liquidity
+```
 
+## Immediate Commands
 
-⚡ Immediate First Commands
+```bash
+# Check / test the workspace
+cargo check --workspace
+cargo test --workspace
 
-# 1. Setup workspace
-mkdir agora-network && cd agora-network
-cargo new core --lib
+# Optional durable storage backend
+cargo check -p agora-state-machine --features rocksdb
 
-# 2. Add dependencies (Add these to Cargo.toml)
-# libp2p, revm, borsh, serde, tokio, rocksdb, axum, bip39
+# Node / miner binaries
+cargo run -p agora-node
+cargo run -p agora-miner-sidecar
+```
 
-# 3. Compile the base node
-cargo build --release
-
-
-“To build an empire, first stabilize the capital. Then, expand the provinces. Then, empower the citizens.”
+> To build an empire, first stabilize the capital. Then, expand the provinces. Then, empower the citizens.

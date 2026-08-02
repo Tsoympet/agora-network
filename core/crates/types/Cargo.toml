@@ -12,3 +12,4 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true }
 hex = { workspace = true }
+sha2 = { workspace = true }

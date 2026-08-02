@@ -35,5 +35,7 @@ ts-rs = { version = "10.1", features = ["serde-compat"] }
 # Audited cryptography only — never replace with custom implementations.
 secp256k1 = { version = "0.30", features = ["global-context", "rand", "std"] }
 bip39 = { version = "2.1", features = ["rand"] }
+# BIP-32 CKD used to realize BIP-44 paths; secret bytes are then loaded into secp256k1.
+bip32 = "0.5"
 sha2 = "0.10"
 hex = "0.4"
