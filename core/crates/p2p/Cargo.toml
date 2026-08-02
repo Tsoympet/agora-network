@@ -1,0 +1,13 @@
+[package]
+name = "agora-p2p"
+description = "libp2p networking, gossipsub, and mempool relay for Agora Network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+agora-types = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

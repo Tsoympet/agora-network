@@ -1,0 +1,17 @@
+[package]
+name = "agora-miner-sidecar"
+description = "Standalone RandomX CPU miner sidecar for Agora Network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "agora-miner"
+path = "src/main.rs"
+
+[dependencies]
+agora-types = { workspace = true }
+agora-crypto = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

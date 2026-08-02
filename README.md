@@ -1,6 +1,17 @@
 # Agora Network
 
-A BlockDAG-based decentralized network built with Rust.
+A sovereign, multi-layer BlockDAG blockchain built in Rust.
+
+**Branding:** Obsidian & Gold — Agora Obsidian `#101218`, Burnished Gold `#C59835`, Aegean Cyan `#06BBDF`.
+
+## Documentation
+
+| Doc | Purpose |
+| --- | --- |
+| [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) | Workspace boundaries |
+| [`AGORA_MASTER_EXECUTION_ROADMAP.md`](AGORA_MASTER_EXECUTION_ROADMAP.md) | Phased architecture plan |
+| [`AGENTS.md`](AGENTS.md) | AI / contributor system rules |
+| [`docs/core/`](docs/core/) | Per-module protocol notes |
 
 ## Repository Structure
 
@@ -12,27 +23,50 @@ agora-network/
 │   └── explorer/           # Web-based BlockDAG Visualizer
 ├── core/                   # Rust Consensus & State
 │   ├── crates/
+│   │   ├── types/          # Shared types + ts-rs bindings
 │   │   ├── consensus/      # GHOSTDAG, DAA, PoW, Emission
 │   │   ├── state-machine/  # RocksDB, Triple-Zone Logic
 │   │   ├── p2p/            # Gossipsub, Mempool, Compact Blocks
 │   │   ├── rpc/            # CEX Gateway, JSON-RPC, REST API
-│   │   ├── crypto/         # BIP-39/44 Wallet, Signatures
+│   │   ├── crypto/         # BIP-39/44 Wallet, secp256k1
 │   │   └── miner-sidecar/  # Standalone Binary for CPU Mining
 │   └── node-bin/           # Main entry point for the node
 ├── docs/                   # Architectural & Scaling Blueprints
 ├── infrastructure/         # External services
-│   ├── dns-seeder/         # Node discovery phonebook
-│   ├── stratum-pool/       # ASIC Mining aggregation
-│   └── testnet-faucet/     # Dev Liquidity
 ├── scripts/                # Launch & Build utilities
-├── Cargo.toml              # Workspace definitions
-└── README.md
+└── Cargo.toml              # Workspace definitions
 ```
 
 ## Getting Started
 
-Run the setup script to initialize the monorepo structure:
+```bash
+# Optional: ensure directory layout
+bash scripts/setup_agora.sh
+
+# Build / check the Rust workspace
+cargo check --workspace
+
+# Run unit tests
+cargo test --workspace
+
+# Optional: durable RocksDB backend (needs g++ / libstdc++)
+cargo check -p agora-state-machine --features rocksdb
+```
+
+TypeScript bindings for shared types are generated under `core/crates/types/bindings/` when `agora-types` tests run.
+
+
+### Binaries
 
 ```bash
-bash scripts/setup_agora.sh
+cargo run -p agora-node
+cargo run -p agora-miner-sidecar
 ```
+
+## Stack Rules (summary)
+
+- Rust + Tokio; `borsh` serialization; `rocksdb` state
+- Crypto: secp256k1 / BIP-39 only (no custom crypto)
+- P2P: libp2p
+- Mining: RandomX (CPU), kHeavyHash (ASIC)
+- Clients: Tailwind + Cinzel / Inter brand system

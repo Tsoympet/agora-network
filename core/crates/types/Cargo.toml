@@ -1,0 +1,14 @@
+[package]
+name = "agora-types"
+description = "Shared BlockDAG types and ts-rs bindings for Agora Network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+borsh = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+ts-rs = { workspace = true }
+hex = { workspace = true }

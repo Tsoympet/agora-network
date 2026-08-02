@@ -1,0 +1,15 @@
+[package]
+name = "agora-crypto"
+description = "BIP-39/44 wallet and secp256k1 signatures for Agora Network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+agora-types = { workspace = true }
+bip39 = { workspace = true }
+secp256k1 = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
