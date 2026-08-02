@@ -152,7 +152,10 @@ impl NetworkNode {
     pub fn build(
         config: &NetworkConfig,
     ) -> Result<(NetworkHandle, mpsc::UnboundedReceiver<NetworkEvent>, Self), P2pError> {
-        let id_keys = Keypair::generate_ed25519();
+        let id_keys = config
+            .identity
+            .clone()
+            .unwrap_or_else(Keypair::generate_ed25519);
         let peer_id = id_keys.public().to_peer_id();
 
         let message_id_fn = |message: &gossipsub::Message| {

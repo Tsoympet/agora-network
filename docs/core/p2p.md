@@ -58,6 +58,10 @@ Mining templates pull up to `DEFAULT_TEMPLATE_TX_LIMIT` (128) transfers via `sel
 `NetworkNode::build` constructs a swarm, subscribes to both topics, and emits `NetworkEvent`s (`Listening`, `PeerConnected`, `Message`, …).  
 `NetworkNode::run` drives the swarm loop.
 
+### Persistent identity
+
+`agora-node` loads or creates `$AGORA_DATA/p2p/identity.key` (libp2p protobuf ed25519) before building the swarm. `NetworkConfig::identity` carries the keypair; when unset (tests), `build` still generates an ephemeral key. PeerId is therefore stable across restarts for the same datadir.
+
 Integration test `two_node_gossip` dials two local nodes and exchanges a signed transaction.
 
 ## Connection limits
@@ -99,7 +103,7 @@ AGORA_DNS_SEEDER=http://127.0.0.1:18080 AGORA_SEEDER_REFRESH_SECS=60 cargo run -
 
 ## Two-node local smoke
 
-`scripts/local_testnet.sh` boots a seeder + two nodes with separate datadirs / listen / RPC ports. Peer IDs are ephemeral each boot, so discovery goes through the seeder (not a hardcoded `/p2p/<id>` bootstrap).
+`scripts/local_testnet.sh` boots a seeder + two nodes with separate datadirs / listen / RPC ports. Each node persists its libp2p identity at `$AGORA_DATA/p2p/identity.key` (protobuf-encoded ed25519), so PeerIds survive restarts. Fresh wipe-two still generates new keys; discovery continues through the seeder (or stable `/p2p/<id>` bootstrap once you know the PeerId).
 
 | Role | Data | Listen | RPC | Notes |
 | --- | --- | --- | --- | --- |
@@ -132,3 +136,4 @@ Optional tx gossip: `agora_submitTransaction` on A → `agora_getTransaction` on
 - [x] Mempool transfers in mining templates + eviction on admit
 - [x] Two-node local seeder + gossip/IBD runbook
 - [x] Automated mined-block IBD smoke (`smoke-ibd`)
+- [x] Persistent libp2p identity (`$AGORA_DATA/p2p/identity.key`)

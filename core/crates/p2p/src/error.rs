@@ -14,4 +14,6 @@ pub enum P2pError {
     Decode(String),
     #[error("dns seeder error: {0}")]
     Seeder(String),
+    #[error("identity error: {0}")]
+    Identity(String),
 }

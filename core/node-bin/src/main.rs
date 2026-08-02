@@ -11,9 +11,9 @@ use std::time::Duration;
 
 use agora_consensus::{EmissionSchedule, PowAlgorithm};
 use agora_p2p::{
-    dial_addr, fetch_seeder_peers_best_effort, merge_bootstrap_peers, reconstruct_compact_block,
-    Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage, NetworkNode, PeerId,
-    PendingFetches, ReconstructError, SeederBook,
+    dial_addr, fetch_seeder_peers_best_effort, load_or_generate_identity, merge_bootstrap_peers,
+    reconstruct_compact_block, Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage,
+    NetworkNode, PeerId, PendingFetches, ReconstructError, SeederBook,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{GenesisBuilder, StateStore};
@@ -156,6 +156,15 @@ async fn main() {
     }
 
     let data_dir = std::env::var("AGORA_DATA").unwrap_or_else(|_| "data/agora-node".into());
+    let identity_path = std::path::Path::new(&data_dir).join("p2p").join("identity.key");
+    let identity = load_or_generate_identity(&identity_path).expect("p2p identity");
+    info!(
+        path = %identity_path.display(),
+        peer = %identity.public().to_peer_id(),
+        "p2p identity ready"
+    );
+    net_cfg = net_cfg.with_identity(identity);
+
     let store = Arc::new(StateStore::open(&data_dir).expect("open state store"));
     let premine_address = std::env::var("AGORA_PREMINE_ADDRESS")
         .ok()

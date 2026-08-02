@@ -131,9 +131,13 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **Two-node gossip/IBD smoke:** `local_testnet.sh` `seeder` / `node-a` / `node-b` / `tips` + p2p runbook
 
-## Phase 16: Mined-block IBD proof — in progress
+## Phase 16: Mined-block IBD proof — done
 
 - [x] **`smoke-ibd`:** `AGORA_MINE_MAX_BLOCKS=1` miner exit + script waits for A/B tip convergence after mine
+
+## Phase 17: Persistent P2P identity — in progress
+
+- [x] **Stable PeerId:** `$AGORA_DATA/p2p/identity.key` (libp2p protobuf) load-or-generate on `agora-node` boot
 
 ## Directory Structure Reference
 

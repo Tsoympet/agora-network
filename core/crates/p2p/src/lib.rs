@@ -7,6 +7,7 @@ mod config;
 mod error;
 mod getblock;
 mod ibd;
+mod identity;
 mod limits;
 mod mempool;
 mod messages;
@@ -17,6 +18,7 @@ mod topics;
 
 pub use config::NetworkConfig;
 pub use error::P2pError;
+pub use identity::{load_or_generate_identity, save_identity};
 pub use getblock::{GetBlockRequest, GetBlockResponse, GETBLOCK_PROTOCOL};
 pub use ibd::{
     reconstruct_compact_block, short_ids_for_block, tx_short_id, PendingFetches, ReconstructError,
