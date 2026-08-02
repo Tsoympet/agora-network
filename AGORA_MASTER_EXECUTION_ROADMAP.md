@@ -84,10 +84,10 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Explorer live DAG:** poll tips + parent layer from node RPC; SVG live field in `apps/explorer`
 - [x] **Desktop / mobile tip sync:** shared `apps/shared/light-client` polls `agora_getDagTips` + `agora_getBlock`
 
-## Phase 7: L1 mempool hardening — in progress
+## Phase 7: L1 mempool hardening — done
 
 - [x] **Mempool UTXO pre-checks:** `validate_mempool_tx` + reserved outpoints on RPC and gossip admit
-- [ ] **Coinbase outputs in mining templates:** include reward payout in `get_block_template` / miner path
+- [x] **Coinbase outputs in mining templates:** `block_template` builds emission coinbase + `tx_root`; miner submits full block (`AGORA_MINER_ADDRESS`)
 
 ## Directory Structure Reference
 

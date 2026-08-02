@@ -9,7 +9,7 @@
 
 use agora_consensus::{LeadingZeroPow, PowHasher, RandomXPowHasher};
 use agora_rpc::{RpcRequest, RpcResponse};
-use agora_types::{Block, BlockHeader};
+use agora_types::Block;
 use serde_json::json;
 use tracing::{info, warn};
 
@@ -46,7 +46,7 @@ async fn mine_one_round(
     nonce_cursor: &mut u64,
 ) -> Result<Option<String>, String> {
     let template = rpc_call(rpc_url, "agora_getBlockTemplate", json!([])).await?;
-    let mut header: BlockHeader = serde_json::from_value(
+    let mut block: Block = serde_json::from_value(
         template
             .result
             .ok_or_else(|| format!("template error: {:?}", template.error))?,
@@ -57,20 +57,16 @@ async fn mine_one_round(
     const WINDOW: u64 = 256;
     let start = *nonce_cursor;
     for n in start..start.saturating_add(WINDOW) {
-        header.nonce = n;
-        let digest = hasher.pow_hash(&header);
-        if LeadingZeroPow::leading_zero_bits(&digest) >= header.bits {
-            let block = Block {
-                header: header.clone(),
-                transactions: vec![],
-            };
-            let submitted = rpc_call(rpc_url, "agora_submitBlock", json!(block)).await?;
+        block.header.nonce = n;
+        let digest = hasher.pow_hash(&block.header);
+        if LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits {
+            let submitted = rpc_call(rpc_url, "agora_submitBlock", json!(block.clone())).await?;
             *nonce_cursor = n.wrapping_add(1);
             let id = submitted
                 .result
                 .and_then(|v| v.get("block_id").cloned())
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| header.hash().to_hex());
+                .unwrap_or_else(|| block.header.hash().to_hex());
             return Ok(Some(id));
         }
     }

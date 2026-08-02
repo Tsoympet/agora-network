@@ -12,8 +12,8 @@ pub trait RpcBackend: Send {
     fn get_balance(&self, address: &Address) -> Amount;
     /// Testnet / faucet credit path. Production node backends may reject this.
     fn fund_address(&mut self, address: Address, amount: Amount) -> Result<Amount, RpcError>;
-    /// Mining template for the CPU sidecar / stratum.
-    fn get_block_template(&self) -> Result<BlockHeader, RpcError>;
+    /// Mining template (header + coinbase txs) for the CPU sidecar / stratum.
+    fn get_block_template(&self) -> Result<Block, RpcError>;
     /// Admit a mined block after PoW verification (node) or local insert (tests).
     fn submit_block(&mut self, block: Block) -> Result<Hash, RpcError>;
 }
@@ -87,14 +87,17 @@ impl RpcBackend for InMemoryBackend {
         Ok(*entry)
     }
 
-    fn get_block_template(&self) -> Result<BlockHeader, RpcError> {
-        Ok(BlockHeader {
-            version: 1,
-            parents: self.tips.clone(),
-            timestamp_ms: 0,
-            bits: self.template_bits,
-            nonce: 0,
-            tx_root: Hash::ZERO,
+    fn get_block_template(&self) -> Result<Block, RpcError> {
+        Ok(Block {
+            header: BlockHeader {
+                version: 1,
+                parents: self.tips.clone(),
+                timestamp_ms: 0,
+                bits: self.template_bits,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
         })
     }
 
