@@ -18,10 +18,14 @@ agora-network/
 │   │   ├── rpc/            # CEX Gateway, JSON-RPC, REST API
 │   │   ├── crypto/         # BIP-39/44 Wallet, secp256k1 Signatures
 │   │   ├── governance/     # Quadratic voting + anti-whale caps
+│   │   ├── ovolos-rollup/  # L2 optimistic rollup (EVM batches)
+│   │   ├── bridge-sdk/     # L3 Bridge-in-a-Box for District Chains
+│   │   ├── intent-engine/  # L4 intent orchestration
 │   │   └── miner-sidecar/  # Standalone Binary for CPU Mining
 │   └── node-bin/           # Main entry point for the node
 ├── docs/                   # Architectural & Scaling Blueprints
-│   └── core/               # One markdown file per major core module
+│   ├── core/               # One markdown file per major core module
+│   └── scaling/            # L2/L3/L4 overview
 ├── infrastructure/         # External services
 │   ├── dns-seeder/         # Node discovery phonebook
 │   ├── stratum-pool/       # ASIC Mining aggregation
@@ -38,6 +42,9 @@ agora-network/
 | `core/crates/types` | `borsh`, `serde`, `ts-rs` | Networking, storage, UI |
 | `core/crates/crypto` | `types`, audited crypto crates | Consensus policy, P2P |
 | `core/crates/governance` | `types` | Networking, UI, storage |
+| `core/crates/ovolos-rollup` | `types` | P2P, UI |
+| `core/crates/bridge-sdk` | `types` | Consensus internals, UI |
+| `core/crates/intent-engine` | `types`, `bridge-sdk` | Consensus internals, UI |
 | `core/crates/consensus` | `types`, `crypto` | Disk I/O, UI, RPC transport |
 | `core/crates/state-machine` | `types`, `consensus` | libp2p, UI |
 | `core/crates/p2p` | `types`, `consensus` | RocksDB, UI |

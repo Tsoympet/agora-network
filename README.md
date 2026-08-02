@@ -54,6 +54,9 @@ cargo check -p agora-state-machine --features rocksdb
 
 # GHOSTDAG partition fuzzer
 cargo run -p agora-consensus --bin ghostdag_fuzzer -- 64
+
+# Scaling layers (L2/L3/L4)
+cargo test -p agora-ovolos-rollup -p agora-bridge-sdk -p agora-intent-engine
 ```
 
 TypeScript bindings for shared types are generated under `core/crates/types/bindings/` when `agora-types` tests run.

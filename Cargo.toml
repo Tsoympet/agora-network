@@ -8,6 +8,9 @@ members = [
     "core/crates/rpc",
     "core/crates/miner-sidecar",
     "core/crates/governance",
+    "core/crates/ovolos-rollup",
+    "core/crates/bridge-sdk",
+    "core/crates/intent-engine",
     "core/node-bin",
     "infrastructure/dns-seeder",
 ]
@@ -27,6 +30,9 @@ agora-state-machine = { path = "core/crates/state-machine" }
 agora-p2p = { path = "core/crates/p2p" }
 agora-rpc = { path = "core/crates/rpc" }
 agora-governance = { path = "core/crates/governance" }
+agora-ovolos-rollup = { path = "core/crates/ovolos-rollup" }
+agora-bridge-sdk = { path = "core/crates/bridge-sdk" }
+agora-intent-engine = { path = "core/crates/intent-engine" }
 
 borsh = { version = "1.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }

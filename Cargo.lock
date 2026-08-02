@@ -38,6 +38,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "agora-bridge-sdk"
+version = "0.1.0"
+dependencies = [
+ "agora-types",
+ "borsh",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "agora-consensus"
 version = "0.1.0"
 dependencies = [
@@ -80,6 +90,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "agora-intent-engine"
+version = "0.1.0"
+dependencies = [
+ "agora-bridge-sdk",
+ "agora-types",
+ "borsh",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "agora-miner-sidecar"
 version = "0.1.0"
 dependencies = [
@@ -102,6 +123,18 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "agora-ovolos-rollup"
+version = "0.1.0"
+dependencies = [
+ "agora-types",
+ "borsh",
+ "serde",
+ "sha2",
+ "thiserror 2.0.19",
+ "tracing",
 ]
 
 [[package]]
