@@ -47,7 +47,9 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 
 ## Mempool
 
-`Mempool::admit` verifies secp256k1 signatures via `agora-crypto` before accepting a tx. Unsigned or invalid txs are rejected at the gossip edge. `get_by_short_id` supports compact inflation.
+`Mempool::admit` verifies secp256k1 signatures, rejects coinbase-shaped txs (`inputs` empty), and reserves input outpoints so two pool txs cannot double-spend. `get_by_short_id` supports compact inflation.
+
+`agora-node` runs `validate_mempool_tx` (live `cf_utxo` + mempool reserved set) under the same lock before admit on both RPC `agora_submitTransaction` and gossip `Transaction` messages. Missing, foreign, overspending, or already-reserved inputs are rejected at the edge.
 
 ## Runtime
 
@@ -95,5 +97,5 @@ AGORA_DNS_SEEDER=http://127.0.0.1:18080 AGORA_SEEDER_REFRESH_SECS=60 cargo run -
 
 ## Follow-ons
 
-- Mempool UTXO pre-checks before gossip admission
+- [x] Mempool UTXO pre-checks before gossip admission
 - Coinbase outputs in mining templates
