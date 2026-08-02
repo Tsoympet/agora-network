@@ -1,12 +1,12 @@
 //! Live [`RpcBackend`] backed by chain admission + mempool.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use agora_p2p::{Mempool, NetworkHandle, NetworkMessage, DEFAULT_TEMPLATE_TX_LIMIT};
 use agora_rpc::{RpcBackend, RpcError};
-use agora_state_machine::{validate_mempool_tx, ColumnFamily, StateStore};
-use agora_types::{Address, Amount, Block, Hash, Transaction, TxOut};
+use agora_state_machine::{outpoint_key, validate_mempool_tx, ColumnFamily, StateStore};
+use agora_types::{Address, Amount, Block, Hash, OutPoint, Transaction, TxOut};
 use borsh::BorshDeserialize;
 
 use crate::admit::ChainState;
@@ -32,9 +32,10 @@ pub struct NodeBackend {
     store: Arc<StateStore>,
     mempool: Arc<Mutex<Mempool>>,
     net: Option<NetworkHandle>,
-    /// When true, `agora_fundAddress` credits an overlay balance (testnet only).
+    /// When true, `agora_fundAddress` mints spendable `cf_utxo` credits (testnet).
     allow_fund: bool,
-    fund_overlay: HashMap<Address, Amount>,
+    /// Monotonic nonce so faucet mints never collide on outpoint keys.
+    fund_nonce: u64,
     /// Coinbase payout address for `agora_getBlockTemplate`.
     miner_address: Address,
 }
@@ -54,7 +55,7 @@ impl NodeBackend {
             mempool,
             net,
             allow_fund,
-            fund_overlay: HashMap::new(),
+            fund_nonce: 0,
             miner_address,
         }
     }
@@ -105,13 +106,7 @@ impl RpcBackend for NodeBackend {
     }
 
     fn get_balance(&self, address: &Address) -> Amount {
-        let utxo = self.utxo_balance(address).unwrap_or(Amount::ZERO);
-        let overlay = self
-            .fund_overlay
-            .get(address)
-            .copied()
-            .unwrap_or(Amount::ZERO);
-        utxo.checked_add(overlay).unwrap_or(utxo)
+        self.utxo_balance(address).unwrap_or(Amount::ZERO)
     }
 
     fn fund_address(&mut self, address: Address, amount: Amount) -> Result<Amount, RpcError> {
@@ -123,11 +118,33 @@ impl RpcBackend for NodeBackend {
         if amount.as_base_units() == 0 {
             return Err(RpcError::InvalidParams("amount must be > 0".into()));
         }
-        let entry = self.fund_overlay.entry(address).or_insert(Amount::ZERO);
-        *entry = entry
-            .checked_add(amount)
-            .ok_or_else(|| RpcError::Internal("balance overflow".into()))?;
-        Ok(self.get_balance(&address))
+        self.fund_nonce = self.fund_nonce.saturating_add(1);
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        // Synthetic outpoint — testnet mint only; not a consensus coinbase.
+        let tx_id = Hash::hash_borsh(&(
+            b"agora_fund",
+            address,
+            amount.as_base_units(),
+            self.fund_nonce,
+            timestamp_ms,
+        ));
+        let out = TxOut {
+            value: amount,
+            address,
+        };
+        let key = outpoint_key(&OutPoint {
+            tx_id,
+            index: 0,
+        });
+        let bytes =
+            borsh::to_vec(&out).map_err(|e| RpcError::Internal(e.to_string()))?;
+        self.store
+            .put_cf(ColumnFamily::Utxo, &key, &bytes)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        self.utxo_balance(&address)
     }
 
     fn get_block_template(&self) -> Result<Block, RpcError> {
@@ -388,5 +405,77 @@ mod tests {
             backend.get_balance(&to).as_base_units(),
             Amount::from_whole(1).unwrap().as_base_units()
         );
+    }
+
+    #[test]
+    fn fund_address_mints_spendable_utxo() {
+        let store = Arc::new(StateStore::open("/tmp/agora-node-backend-fund-utxo").unwrap());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let funded = derive_bip44(&seed, &Bip44Path::external(5)).unwrap();
+        let payee = derive_bip44(&seed, &Bip44Path::external(6))
+            .unwrap()
+            .address();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(Address([9u8; 20]))
+            .ignite(&store)
+            .unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap(),
+        ));
+        let mut backend =
+            NodeBackend::new(chain, store.clone(), None, true, mempool, Address::ZERO);
+
+        let drip = Amount::from_base_units(5_000);
+        assert_eq!(
+            backend.fund_address(funded.address(), drip).unwrap(),
+            drip
+        );
+        assert_eq!(backend.get_balance(&funded.address()), drip);
+
+        let (op, out) = {
+            let mut found = None;
+            store
+                .for_each_cf(ColumnFamily::Utxo, |key, value| {
+                    let tx_out = TxOut::try_from_slice(value)
+                        .map_err(|e| agora_state_machine::StateError::Storage(e.to_string()))?;
+                    if tx_out.address == funded.address() && key.len() == 36 {
+                        let mut tx_bytes = [0u8; 32];
+                        tx_bytes.copy_from_slice(&key[..32]);
+                        let index = u32::from_le_bytes(key[32..36].try_into().unwrap());
+                        found = Some((
+                            OutPoint {
+                                tx_id: Hash(tx_bytes),
+                                index,
+                            },
+                            tx_out,
+                        ));
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            found.expect("minted utxo")
+        };
+        assert_eq!(out.value, drip);
+
+        let mut spend = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: op,
+            }],
+            vec![TxOut {
+                value: drip,
+                address: payee,
+            }],
+            1,
+        );
+        sign_transaction(&mut spend, &funded).unwrap();
+        backend.submit_transaction(spend).unwrap();
+        let mut block = backend.get_block_template().unwrap();
+        assert_eq!(block.transactions.len(), 2);
+        block.header.nonce = 1;
+        backend.submit_block(block).unwrap();
+        assert_eq!(backend.get_balance(&funded.address()), Amount::ZERO);
+        assert_eq!(backend.get_balance(&payee), drip);
     }
 }

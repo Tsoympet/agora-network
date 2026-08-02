@@ -70,7 +70,7 @@ async fn handle_request(req: &str, faucet: &Arc<Mutex<FaucetService>>) -> String
                 }
             };
             let mut guard = faucet.lock().await;
-            match guard.drip(address) {
+            match guard.drip(address).await {
                 Ok(bal) => http_response(
                     200,
                     &serde_json::json!({
@@ -96,15 +96,17 @@ async fn handle_request(req: &str, faucet: &Arc<Mutex<FaucetService>>) -> String
                 None => return http_response(400, r#"{"error":"invalid address"}"#),
             };
             let guard = faucet.lock().await;
-            let bal = guard.balance(&address);
-            http_response(
-                200,
-                &serde_json::json!({
-                    "address": address.to_hex(),
-                    "balance": bal.as_base_units(),
-                })
-                .to_string(),
-            )
+            match guard.balance(&address).await {
+                Ok(bal) => http_response(
+                    200,
+                    &serde_json::json!({
+                        "address": address.to_hex(),
+                        "balance": bal.as_base_units(),
+                    })
+                    .to_string(),
+                ),
+                Err(err) => http_response(502, &format!(r#"{{"error":"{err}"}}"#)),
+            }
         }
         _ => http_response(404, r#"{"error":"not found"}"#),
     }
