@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::scoring::GossipTuning;
 
 /// libp2p node configuration.
@@ -10,6 +12,9 @@ pub struct NetworkConfig {
     pub bootstrap: Vec<String>,
     /// Optional DNS seeder HTTP endpoint (e.g. `http://127.0.0.1:18080/peers`).
     pub dns_seeder_url: Option<String>,
+    /// How often to re-fetch seeder peers and re-register (default 60s).
+    /// Set to `Duration::ZERO` to disable periodic refresh.
+    pub seeder_refresh_interval: Duration,
     /// Gossipsub mesh + peer-score tuning for sub-second DAG tips.
     pub gossip: GossipTuning,
 }
@@ -21,6 +26,7 @@ impl Default for NetworkConfig {
             max_peers: 64,
             bootstrap: Vec::new(),
             dns_seeder_url: None,
+            seeder_refresh_interval: Duration::from_secs(60),
             gossip: GossipTuning::default(),
         }
     }
@@ -54,6 +60,11 @@ impl NetworkConfig {
 
     pub fn with_gossip_tuning(mut self, gossip: GossipTuning) -> Self {
         self.gossip = gossip;
+        self
+    }
+
+    pub fn with_seeder_refresh_interval(mut self, interval: Duration) -> Self {
+        self.seeder_refresh_interval = interval;
         self
     }
 }

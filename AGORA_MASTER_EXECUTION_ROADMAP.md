@@ -74,6 +74,11 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **GetBlock request-response:** `/agora/getblock/1` CBOR RR to announcing peer; gossip fallback on failure
 - [x] **Peer scoring & mesh tuning:** 200ms heartbeat, mesh 4–12, flood publish, gossipsub scores + app-score hooks
 
+## Phase 5d: P2P ops polish — in progress
+
+- [x] **Periodic seeder refresh:** `SeederBook` + `AGORA_SEEDER_REFRESH_SECS` re-fetch/dial/re-register
+- [ ] Connection-limits behaviour tied to `max_peers`
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.
