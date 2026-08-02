@@ -317,7 +317,7 @@ export function App() {
       >
         <p className="agora-eyebrow">Send</p>
         <p style={{ marginTop: "0.55rem", fontSize: "0.85rem", color: "var(--agora-ink-muted)" }}>
-          BIP-39 mnemonic → m/44&apos;/8888&apos;/0&apos;/0/0. Fee is burned (min relay 1).
+          BIP-39 mnemonic → m/44&apos;/8888&apos;/0&apos;/0/0. Fee paid to miner (min relay 1).
         </p>
         <form
           onSubmit={onSend}

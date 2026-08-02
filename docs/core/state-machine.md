@@ -26,12 +26,14 @@ Default caps: max supply 100,000,000 AGORA; premine 10,000,000 AGORA.
 
 ## UTXO apply / revert
 
-`apply_block(store, block, coinbase_reward)` mutates `cf_utxo` and returns a `UtxoJournal`:
+`apply_block(store, block, emission_reward)` mutates `cf_utxo` and returns a `UtxoJournal`. Transfer fees (`in − out`) are summed first; the coinbase budget is `emission_reward + fees`:
 
 | Tx kind | Rules |
 | --- | --- |
-| Coinbase (`inputs` empty) | At most one per block; outputs ≤ `coinbase_reward` |
-| Transfer | secp256k1 verify; each input owned by signer; input value ≥ output value |
+| Coinbase (`inputs` empty) | At most one per block; outputs ≤ emission + Σ fees |
+| Transfer | secp256k1 verify; each input owned by signer; input value ≥ output value (surplus → miner) |
+
+Helpers: `transfer_fee` / `sum_transfer_fees` for template assembly.
 
 `revert_journal` restores spent outputs and deletes created ones (used if persistence fails after apply).
 

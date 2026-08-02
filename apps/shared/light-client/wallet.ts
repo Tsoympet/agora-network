@@ -142,7 +142,7 @@ export async function signTransactionBody(
   return { publicKey, signature: compact };
 }
 
-/** Greedy coin selection + change; fee is implicit burn (in - out). */
+/** Greedy coin selection + change; fee (`in − out`) is paid to the block miner. */
 export async function buildSignedTransfer(options: {
   mnemonic: string;
   accountIndex?: number;
