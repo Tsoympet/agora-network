@@ -39,7 +39,7 @@ Endpoints:
 - CORS enabled (`Access-Control-Allow-Origin: *`) for browser explorers; `OPTIONS` preflight supported
 
 `agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`).  
-`agora_getBlockTemplate` returns a full `Block` (native serde hashes as byte arrays) with a coinbase paying `AGORA_MINER_ADDRESS` for the emission reward at the estimated next blue score; `header.tx_root` commits to that coinbase.
+`agora_getBlockTemplate` returns a full `Block` (native serde hashes as byte arrays) with a coinbase paying `AGORA_MINER_ADDRESS` for the emission reward at the estimated next blue score, followed by up to 128 mempool transfers (`tx_id` order); `header.tx_root` commits to that body. `agora_submitBlock` rejects `tx_root` mismatches and evicts included/conflicting mempool txs.
 
 Example:
 

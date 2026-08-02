@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use agora_p2p::{Mempool, NetworkHandle, NetworkMessage};
+use agora_p2p::{Mempool, NetworkHandle, NetworkMessage, DEFAULT_TEMPLATE_TX_LIMIT};
 use agora_rpc::{RpcBackend, RpcError};
 use agora_state_machine::{validate_mempool_tx, ColumnFamily, StateStore};
 use agora_types::{Address, Amount, Block, Hash, Transaction, TxOut};
@@ -131,10 +131,15 @@ impl RpcBackend for NodeBackend {
     }
 
     fn get_block_template(&self) -> Result<Block, RpcError> {
+        let transfers = self
+            .mempool
+            .lock()
+            .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?
+            .select_transfers(DEFAULT_TEMPLATE_TX_LIMIT);
         self.chain
             .lock()
             .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
-            .block_template(self.miner_address)
+            .block_template(self.miner_address, &transfers)
             .map_err(|e| RpcError::Internal(e.to_string()))
     }
 
@@ -162,8 +167,14 @@ impl RpcBackend for NodeBackend {
                         "wrong difficulty: expected bits={expected}, got={got}"
                     ))
                 }
+                crate::admit::AdmitError::BadTxRoot => {
+                    RpcError::Rejected("tx_root mismatch".into())
+                }
                 other => RpcError::Internal(other.to_string()),
             })?;
+        if let Ok(mut pool) = self.mempool.lock() {
+            pool.evict_for_block(&block);
+        }
         if let Some(net) = &self.net {
             // Prefer compact + announce; peers inflate from mempool or issue GetBlock.
             let _ = net.publish_message(NetworkMessage::compact_from_block(&block));
@@ -303,5 +314,79 @@ mod tests {
         conflict.nonce = 3;
         sign_transaction(&mut conflict, &from).unwrap();
         assert!(backend.submit_transaction(conflict).is_err());
+    }
+
+    #[test]
+    fn template_includes_mempool_tx_and_evicts_on_submit() {
+        let store = Arc::new(StateStore::open("/tmp/agora-node-backend-assemble").unwrap());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let to = derive_bip44(&seed, &Bip44Path::external(1))
+            .unwrap()
+            .address();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(from.address())
+            .ignite(&store)
+            .unwrap();
+        let genesis_block = {
+            let bytes = store
+                .get_cf(ColumnFamily::Hot, genesis.as_bytes())
+                .unwrap()
+                .unwrap();
+            Block::try_from_slice(&bytes).unwrap()
+        };
+        let premine_txid = genesis_block.transactions[0].tx_id();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap(),
+        ));
+        let miner = Address([2u8; 20]);
+        let mut backend = NodeBackend::new(chain, store, None, false, mempool.clone(), miner);
+
+        let premine = Amount::from_whole(10_000_000).unwrap();
+        let mut transfer = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: premine_txid,
+                    index: 0,
+                },
+            }],
+            vec![
+                TxOut {
+                    value: Amount::from_whole(1).unwrap(),
+                    address: to,
+                },
+                TxOut {
+                    value: Amount::from_base_units(
+                        premine.as_base_units() - Amount::from_whole(1).unwrap().as_base_units(),
+                    ),
+                    address: from.address(),
+                },
+            ],
+            7,
+        );
+        sign_transaction(&mut transfer, &from).unwrap();
+        let tx_id = backend.submit_transaction(transfer.clone()).unwrap();
+
+        let mut block = backend.get_block_template().unwrap();
+        assert_eq!(block.transactions.len(), 2);
+        assert!(block.transactions[0].inputs.is_empty());
+        assert_eq!(block.transactions[1].tx_id(), tx_id);
+        assert_eq!(
+            block.header.tx_root,
+            Block::compute_tx_root(&block.transactions)
+        );
+        block.header.nonce = 1;
+        let pow = RandomXPowHasher.pow_hash(&block.header);
+        agora_consensus::LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&block.header, &pow)
+            .unwrap();
+        backend.submit_block(block).unwrap();
+        assert!(!mempool.lock().unwrap().contains(&tx_id));
+        assert_eq!(
+            backend.get_balance(&to).as_base_units(),
+            Amount::from_whole(1).unwrap().as_base_units()
+        );
     }
 }

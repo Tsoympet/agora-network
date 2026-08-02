@@ -89,6 +89,12 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Mempool UTXO pre-checks:** `validate_mempool_tx` + reserved outpoints on RPC and gossip admit
 - [x] **Coinbase outputs in mining templates:** `block_template` builds emission coinbase + `tx_root`; miner submits full block (`AGORA_MINER_ADDRESS`)
 
+## Phase 8: Block assembly — done
+
+- [x] **Mempool → template:** `select_transfers` fills templates after coinbase (cap 128, sorted by `tx_id`)
+- [x] **`tx_root` on admit:** `admit_block` rejects body/header mismatches
+- [x] **Mempool eviction:** `evict_for_block` on RPC + gossip admit frees reserved outpoints
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

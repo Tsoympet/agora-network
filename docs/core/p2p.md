@@ -51,6 +51,8 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 
 `agora-node` runs `validate_mempool_tx` (live `cf_utxo` + mempool reserved set) under the same lock before admit on both RPC `agora_submitTransaction` and gossip `Transaction` messages. Missing, foreign, overspending, or already-reserved inputs are rejected at the edge.
 
+Mining templates pull up to `DEFAULT_TEMPLATE_TX_LIMIT` (128) transfers via `select_transfers` (deterministic `tx_id` order) after the coinbase. On block admit (RPC or gossip), `evict_for_block` drops included txs and any remaining conflicts on the same outpoints.
+
 ## Runtime
 
 `NetworkNode::build` constructs a swarm, subscribes to both topics, and emits `NetworkEvent`s (`Listening`, `PeerConnected`, `Message`, …).  
@@ -99,3 +101,4 @@ AGORA_DNS_SEEDER=http://127.0.0.1:18080 AGORA_SEEDER_REFRESH_SECS=60 cargo run -
 
 - [x] Mempool UTXO pre-checks before gossip admission
 - [x] Coinbase outputs in mining templates
+- [x] Mempool transfers in mining templates + eviction on admit
