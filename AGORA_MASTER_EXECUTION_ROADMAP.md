@@ -79,10 +79,10 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Periodic seeder refresh:** `SeederBook` + `AGORA_SEEDER_REFRESH_SECS` re-fetch/dial/re-register
 - [x] **Connection limits:** `libp2p` connection_limits from `max_peers` / `AGORA_MAX_PEERS`
 
-## Phase 6: Clients & visibility — in progress
+## Phase 6: Clients & visibility — done
 
 - [x] **Explorer live DAG:** poll tips + parent layer from node RPC; SVG live field in `apps/explorer`
-- [ ] Desktop / mobile light-client tip sync against HTTP JSON-RPC
+- [x] **Desktop / mobile tip sync:** shared `apps/shared/light-client` polls `agora_getDagTips` + `agora_getBlock`
 
 ## Directory Structure Reference
 
