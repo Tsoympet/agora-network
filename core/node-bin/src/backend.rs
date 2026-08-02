@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agora_p2p::{Mempool, NetworkHandle, NetworkMessage, DEFAULT_TEMPLATE_TX_LIMIT};
-use agora_rpc::{RpcBackend, RpcError};
+use agora_rpc::{RpcBackend, RpcError, UtxoEntry};
 use agora_state_machine::{outpoint_key, validate_mempool_tx, ColumnFamily, StateStore};
 use agora_types::{Address, Amount, Block, Hash, OutPoint, Transaction, TxOut};
 use borsh::BorshDeserialize;
@@ -62,19 +62,40 @@ impl NodeBackend {
 
     fn utxo_balance(&self, address: &Address) -> Result<Amount, RpcError> {
         let mut total = Amount::ZERO;
+        for entry in self.list_utxos(address)? {
+            total = total
+                .checked_add(entry.value)
+                .ok_or_else(|| RpcError::Internal("balance overflow".into()))?;
+        }
+        Ok(total)
+    }
+
+    fn list_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError> {
+        let mut out = Vec::new();
         self.store
-            .for_each_cf(ColumnFamily::Utxo, |_key, value| {
-                let out = TxOut::try_from_slice(value)
-                    .map_err(|e| agora_state_machine::StateError::Storage(e.to_string()))?;
-                if &out.address == address {
-                    total = total.checked_add(out.value).ok_or_else(|| {
-                        agora_state_machine::StateError::Storage("balance overflow".into())
-                    })?;
+            .for_each_cf(ColumnFamily::Utxo, |key, value| {
+                if key.len() != 36 {
+                    return Ok(());
                 }
+                let tx_out = TxOut::try_from_slice(value)
+                    .map_err(|e| agora_state_machine::StateError::Storage(e.to_string()))?;
+                if &tx_out.address != address {
+                    return Ok(());
+                }
+                let mut tx_bytes = [0u8; 32];
+                tx_bytes.copy_from_slice(&key[..32]);
+                let index = u32::from_le_bytes(key[32..36].try_into().unwrap());
+                out.push(UtxoEntry {
+                    outpoint: OutPoint {
+                        tx_id: Hash(tx_bytes),
+                        index,
+                    },
+                    value: tx_out.value,
+                });
                 Ok(())
             })
             .map_err(|e| RpcError::Internal(e.to_string()))?;
-        Ok(total)
+        Ok(out)
     }
 }
 
@@ -107,6 +128,10 @@ impl RpcBackend for NodeBackend {
 
     fn get_balance(&self, address: &Address) -> Amount {
         self.utxo_balance(address).unwrap_or(Amount::ZERO)
+    }
+
+    fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError> {
+        self.list_utxos(address)
     }
 
     fn fund_address(&mut self, address: Address, amount: Amount) -> Result<Amount, RpcError> {
@@ -432,6 +457,9 @@ mod tests {
             drip
         );
         assert_eq!(backend.get_balance(&funded.address()), drip);
+        let minted = backend.get_utxos(&funded.address()).unwrap();
+        assert_eq!(minted.len(), 1);
+        assert_eq!(minted[0].value, drip);
 
         let (op, out) = {
             let mut found = None;

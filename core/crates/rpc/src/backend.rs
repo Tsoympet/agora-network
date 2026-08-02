@@ -1,8 +1,15 @@
 use std::collections::HashMap;
 
-use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction};
+use agora_types::{Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TxOut};
 
 use crate::error::RpcError;
+
+/// Spendable UTXO returned by `agora_getUtxos`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UtxoEntry {
+    pub outpoint: OutPoint,
+    pub value: Amount,
+}
 
 /// Node-facing surface the RPC dispatcher calls into.
 pub trait RpcBackend: Send {
@@ -10,6 +17,8 @@ pub trait RpcBackend: Send {
     fn get_block(&self, hash: &Hash) -> Option<Block>;
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
+    /// Live UTXO set for wallet coin selection.
+    fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError>;
     /// Testnet / faucet credit path. Production node backends may reject this.
     fn fund_address(&mut self, address: Address, amount: Amount) -> Result<Amount, RpcError>;
     /// Mining template (header + coinbase txs) for the CPU sidecar / stratum.
@@ -24,8 +33,10 @@ pub struct InMemoryBackend {
     tips: Vec<Hash>,
     blocks: HashMap<Hash, Block>,
     balances: HashMap<Address, Amount>,
+    utxos: HashMap<OutPoint, TxOut>,
     mempool: HashMap<Hash, Transaction>,
     template_bits: u32,
+    fund_nonce: u64,
 }
 
 impl InMemoryBackend {
@@ -76,10 +87,40 @@ impl RpcBackend for InMemoryBackend {
             .unwrap_or(Amount::ZERO)
     }
 
+    fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError> {
+        Ok(self
+            .utxos
+            .iter()
+            .filter(|(_, out)| &out.address == address)
+            .map(|(op, out)| UtxoEntry {
+                outpoint: *op,
+                value: out.value,
+            })
+            .collect())
+    }
+
     fn fund_address(&mut self, address: Address, amount: Amount) -> Result<Amount, RpcError> {
         if amount.as_base_units() == 0 {
             return Err(RpcError::InvalidParams("amount must be > 0".into()));
         }
+        self.fund_nonce = self.fund_nonce.saturating_add(1);
+        let tx_id = Hash::hash_borsh(&(
+            b"agora_fund_mem",
+            address,
+            amount.as_base_units(),
+            self.fund_nonce,
+        ));
+        let op = OutPoint {
+            tx_id,
+            index: 0,
+        };
+        self.utxos.insert(
+            op,
+            TxOut {
+                value: amount,
+                address,
+            },
+        );
         let entry = self.balances.entry(address).or_insert(Amount::ZERO);
         *entry = entry
             .checked_add(amount)

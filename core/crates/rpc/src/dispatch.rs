@@ -68,6 +68,18 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     "balance": bal.as_base_units(),
                 }))
             }
+            RpcMethod::GetUtxos => {
+                let address = param_address(&req.params, "address")?;
+                let utxos = self.backend.get_utxos(&address)?;
+                Ok(json!({
+                    "address": address.to_hex(),
+                    "utxos": utxos.iter().map(|u| json!({
+                        "tx_id": u.outpoint.tx_id.to_hex(),
+                        "index": u.outpoint.index,
+                        "value": u.value.as_base_units(),
+                    })).collect::<Vec<_>>(),
+                }))
+            }
             RpcMethod::FundAddress => {
                 let address = param_address(&req.params, "address")?;
                 let amount = param_amount(&req.params, "amount")?;
@@ -257,6 +269,16 @@ mod tests {
             params: json!([addr.to_hex()]),
         });
         assert_eq!(bal.result.unwrap()["balance"], json!(500));
+
+        let utxos = rpc.handle(RpcRequest {
+            id: Some(json!(21)),
+            method: "agora_getUtxos".into(),
+            params: json!({"address": addr.to_hex()}),
+        });
+        let utxo_list = utxos.result.unwrap()["utxos"].as_array().unwrap().clone();
+        assert_eq!(utxo_list.len(), 1);
+        assert_eq!(utxo_list[0]["value"], json!(500));
+        assert_eq!(utxo_list[0]["index"], json!(0));
 
         let tx = Transaction::unsigned(
             1,
