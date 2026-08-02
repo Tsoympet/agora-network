@@ -35,6 +35,8 @@ Default caps: max supply 100,000,000 AGORA; premine 10,000,000 AGORA.
 
 `revert_journal` restores spent outputs and deletes created ones (used if persistence fails after apply).
 
+`validate_mempool_tx(store, tx, reserved)` is the read-only counterpart for mempool / gossip admission: rejects coinbase-shaped txs, missing or foreign inputs, reserved double-spends, and outputs that exceed input value — without mutating `cf_utxo`.
+
 Outpoint keys are `tx_id || index_le` (36 bytes), same as genesis.
 
 ## Storage backends

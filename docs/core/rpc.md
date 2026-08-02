@@ -8,7 +8,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | --- | --- |
 | `agora_getDagTips` | Current DAG tips (hex hashes) |
 | `agora_getBlock` | Block by hash |
-| `agora_submitTransaction` | Admit a signed tx into the mempool and gossip it |
+| `agora_submitTransaction` | UTXO-check + admit a signed tx into the mempool and gossip it |
 | `agora_getBalance` | Address balance (UTXO scan + optional testnet overlay) |
 | `agora_fundAddress` | Testnet credit path (disabled on node unless allowed) |
 | `agora_getBlockTemplate` | Mining template header (tips as parents) |

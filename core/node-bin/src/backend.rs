@@ -5,11 +5,26 @@ use std::sync::{Arc, Mutex};
 
 use agora_p2p::{Mempool, NetworkHandle, NetworkMessage};
 use agora_rpc::{RpcBackend, RpcError};
-use agora_state_machine::{ColumnFamily, StateStore};
+use agora_state_machine::{validate_mempool_tx, ColumnFamily, StateStore};
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use borsh::BorshDeserialize;
 
 use crate::admit::ChainState;
+
+/// UTXO + signature + mempool reservation checks, then admit under one lock.
+pub(crate) fn admit_transaction(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: Transaction,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    validate_mempool_tx(store, &tx, pool.reserved())
+        .map_err(|e| RpcError::Rejected(format!("utxo: {e}")))?;
+    pool.admit(tx)
+        .map_err(|e| RpcError::Rejected(e.to_string()))
+}
 
 /// Node RPC surface: tips/blocks from store, signed tx → mempool + gossip.
 pub struct NodeBackend {
@@ -76,12 +91,7 @@ impl RpcBackend for NodeBackend {
     }
 
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError> {
-        let id = self
-            .mempool
-            .lock()
-            .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?
-            .admit(tx.clone())
-            .map_err(|e| RpcError::Rejected(e.to_string()))?;
+        let id = admit_transaction(&self.store, &self.mempool, tx.clone())?;
         if let Some(net) = &self.net {
             if let Err(err) = net.publish_message(NetworkMessage::Transaction(tx)) {
                 return Err(RpcError::Internal(err.to_string()));
@@ -164,8 +174,13 @@ mod tests {
     use super::*;
     use crate::admit::ChainState;
     use agora_consensus::{PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
-    use agora_state_machine::GenesisBuilder;
-    use agora_types::{Address, Block};
+    use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
+    use agora_state_machine::{ColumnFamily, GenesisBuilder};
+    use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
+    use borsh::BorshDeserialize;
+
+    const PHRASE: &str =
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
     #[test]
     fn genesis_tips_and_admit_easy_block() {
@@ -201,5 +216,81 @@ mod tests {
         let id = backend.submit_block(block).unwrap();
         assert_ne!(id, genesis);
         assert!(backend.dag_tips().contains(&id));
+    }
+
+    #[test]
+    fn submit_transaction_requires_live_utxo() {
+        let store = Arc::new(StateStore::open("/tmp/agora-node-backend-mempool-utxo").unwrap());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let to = derive_bip44(&seed, &Bip44Path::external(1))
+            .unwrap()
+            .address();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(from.address())
+            .ignite(&store)
+            .unwrap();
+        let genesis_block = {
+            let bytes = store
+                .get_cf(ColumnFamily::Hot, genesis.as_bytes())
+                .unwrap()
+                .unwrap();
+            Block::try_from_slice(&bytes).unwrap()
+        };
+        let premine_txid = genesis_block.transactions[0].tx_id();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap(),
+        ));
+        let mut backend = NodeBackend::new(chain, store, None, false, mempool);
+
+        let mut bad = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: Hash::ZERO,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_base_units(1),
+                address: to,
+            }],
+            1,
+        );
+        sign_transaction(&mut bad, &from).unwrap();
+        assert!(backend.submit_transaction(bad).is_err());
+
+        let premine = Amount::from_whole(10_000_000).unwrap();
+        let mut good = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: premine_txid,
+                    index: 0,
+                },
+            }],
+            vec![
+                TxOut {
+                    value: Amount::from_whole(1).unwrap(),
+                    address: to,
+                },
+                TxOut {
+                    value: Amount::from_base_units(
+                        premine.as_base_units() - Amount::from_whole(1).unwrap().as_base_units(),
+                    ),
+                    address: from.address(),
+                },
+            ],
+            2,
+        );
+        sign_transaction(&mut good, &from).unwrap();
+        let id = backend.submit_transaction(good.clone()).unwrap();
+        assert_eq!(id, good.tx_id());
+        // Second spend of the same outpoint must fail while the first is reserved.
+        let mut conflict = good.clone();
+        conflict.nonce = 3;
+        sign_transaction(&mut conflict, &from).unwrap();
+        assert!(backend.submit_transaction(conflict).is_err());
     }
 }

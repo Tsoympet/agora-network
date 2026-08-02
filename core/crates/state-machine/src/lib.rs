@@ -11,7 +11,7 @@ mod store;
 mod utxo;
 mod zones;
 
-pub use apply::{apply_block, balance_of, revert_journal, UtxoJournal};
+pub use apply::{apply_block, balance_of, revert_journal, validate_mempool_tx, UtxoJournal};
 pub use columns::{meta_keys, ColumnFamily};
 pub use error::StateError;
 pub use genesis::{GenesisBuilder, SupplyCaps};

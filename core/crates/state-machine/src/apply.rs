@@ -202,6 +202,61 @@ pub fn revert_journal(store: &StateStore, journal: &UtxoJournal) -> Result<(), S
     Ok(())
 }
 
+/// Read-only UTXO checks for mempool / gossip admission (does not mutate `cf_utxo`).
+///
+/// Rejects coinbase-shaped txs (`inputs` empty), missing / foreign / already-reserved
+/// outpoints, and transfers whose outputs exceed input value.
+pub fn validate_mempool_tx(
+    store: &StateStore,
+    tx: &Transaction,
+    reserved: &HashSet<OutPoint>,
+) -> Result<(), StateError> {
+    if tx.inputs.is_empty() {
+        return Err(StateError::InvalidTx(
+            "coinbase not allowed in mempool".into(),
+        ));
+    }
+    verify_transaction(tx).map_err(|e| StateError::InvalidTx(e.to_string()))?;
+    let signer = signer_address(tx).map_err(|e| StateError::InvalidTx(e.to_string()))?;
+
+    let mut input_value = 0u64;
+    let mut seen: HashSet<OutPoint> = HashSet::new();
+    for input in &tx.inputs {
+        let op = input.previous_outpoint;
+        if !seen.insert(op) || reserved.contains(&op) {
+            return Err(StateError::DoubleSpend(format!(
+                "{}:{}",
+                op.tx_id.to_hex(),
+                op.index
+            )));
+        }
+        let out = load_utxo(store, &op)?;
+        if out.address != signer {
+            return Err(StateError::InvalidTx(format!(
+                "input {}:{} not owned by signer",
+                op.tx_id.to_hex(),
+                op.index
+            )));
+        }
+        input_value = input_value
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("input value overflow".into()))?;
+    }
+
+    let mut output_value = 0u64;
+    for out in &tx.outputs {
+        output_value = output_value
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("output value overflow".into()))?;
+    }
+    if input_value < output_value {
+        return Err(StateError::InvalidTx(format!(
+            "insufficient funds: in={input_value} out={output_value}"
+        )));
+    }
+    Ok(())
+}
+
 /// Sum of all UTXO values for `address` (same scan used by RPC balances).
 pub fn balance_of(store: &StateStore, address: &agora_types::Address) -> Result<Amount, StateError> {
     let mut total = Amount::ZERO;
@@ -220,6 +275,8 @@ pub fn balance_of(store: &StateStore, address: &agora_types::Address) -> Result<
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
     use agora_types::{Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TxIn, TxOut};
 
@@ -310,6 +367,95 @@ mod tests {
         );
         let _ = Address::ZERO;
         let _ = Hash::ZERO;
+    }
+
+    #[test]
+    fn validate_mempool_tx_accepts_premine_spend() {
+        let store = StateStore::open("/tmp/agora-validate-mempool-ok").unwrap();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let to = derive_bip44(&seed, &Bip44Path::external(1))
+            .unwrap()
+            .address();
+        let genesis_hash = GenesisBuilder::default()
+            .with_premine_address(from.address())
+            .ignite(&store)
+            .unwrap();
+        let genesis = {
+            let bytes = store
+                .get_cf(ColumnFamily::Hot, genesis_hash.as_bytes())
+                .unwrap()
+                .unwrap();
+            Block::try_from_slice(&bytes).unwrap()
+        };
+        let premine_txid = genesis.transactions[0].tx_id();
+        let mut tx = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: premine_txid,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_whole(1).unwrap(),
+                address: to,
+            }],
+            1,
+        );
+        sign_transaction(&mut tx, &from).unwrap();
+        validate_mempool_tx(&store, &tx, &HashSet::new()).unwrap();
+
+        let mut reserved = HashSet::new();
+        reserved.insert(OutPoint {
+            tx_id: premine_txid,
+            index: 0,
+        });
+        assert!(matches!(
+            validate_mempool_tx(&store, &tx, &reserved),
+            Err(StateError::DoubleSpend(_))
+        ));
+    }
+
+    #[test]
+    fn validate_mempool_tx_rejects_coinbase_and_missing_utxo() {
+        let store = StateStore::open("/tmp/agora-validate-mempool-bad").unwrap();
+        GenesisBuilder::default().ignite(&store).unwrap();
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(1),
+                address: Address::ZERO,
+            }],
+            0,
+        );
+        assert!(matches!(
+            validate_mempool_tx(&store, &coinbase, &HashSet::new()),
+            Err(StateError::InvalidTx(_))
+        ));
+
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let kp = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let mut missing = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: Hash::ZERO,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_base_units(1),
+                address: kp.address(),
+            }],
+            1,
+        );
+        sign_transaction(&mut missing, &kp).unwrap();
+        assert!(matches!(
+            validate_mempool_tx(&store, &missing, &HashSet::new()),
+            Err(StateError::MissingUtxo(_))
+        ));
     }
 
     #[test]

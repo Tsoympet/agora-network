@@ -21,7 +21,7 @@ use agora_types::{Block, Hash};
 use tracing::{info, warn};
 
 use crate::admit::ChainState;
-use crate::backend::NodeBackend;
+use crate::backend::{admit_transaction, NodeBackend};
 use crate::http::serve_rpc;
 
 fn parse_pow_algo() -> PowAlgorithm {
@@ -192,7 +192,7 @@ async fn main() {
     );
     let backend = NodeBackend::new(
         chain.clone(),
-        store,
+        store.clone(),
         Some(handle.clone()),
         allow_fund,
         mempool.clone(),
@@ -456,15 +456,18 @@ async fn main() {
                         }
                     }
                     NetworkMessage::Transaction(tx) => {
-                        match mempool.lock() {
-                            Ok(mut pool) => {
-                                if let Err(err) = pool.admit(tx) {
-                                    warn!(%peer, %topic, error = %err, "tx gossip rejected");
-                                } else {
-                                    info!(%peer, %topic, "tx gossip admitted");
-                                }
+                        match admit_transaction(store.as_ref(), &mempool, tx) {
+                            Ok(id) => {
+                                info!(
+                                    %peer,
+                                    %topic,
+                                    tx = %id.to_hex(),
+                                    "tx gossip admitted"
+                                );
                             }
-                            Err(_) => warn!(%peer, %topic, "mempool lock poisoned"),
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "tx gossip rejected");
+                            }
                         }
                     }
                 },
