@@ -244,8 +244,19 @@ impl NetworkNode {
 }
 
 /// Format a dialable address that embeds the peer id (`/ip4/.../tcp/.../p2p/<peer>`).
+///
+/// Rewrites `/ip4/0.0.0.0` → `/ip4/127.0.0.1` so seeder registrations are reachable locally.
 pub fn dial_addr(listen: &Multiaddr, peer_id: PeerId) -> Multiaddr {
-    let mut addr = listen.clone();
-    addr.push(libp2p::multiaddr::Protocol::P2p(peer_id));
+    use libp2p::multiaddr::Protocol;
+    let mut addr = Multiaddr::empty();
+    for proto in listen.iter() {
+        match proto {
+            Protocol::Ip4(ip) if ip.is_unspecified() => {
+                addr.push(Protocol::Ip4(std::net::Ipv4Addr::LOCALHOST));
+            }
+            other => addr.push(other),
+        }
+    }
+    addr.push(Protocol::P2p(peer_id));
     addr
 }

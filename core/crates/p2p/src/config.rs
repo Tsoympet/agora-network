@@ -31,4 +31,19 @@ impl NetworkConfig {
         self.bootstrap = peers;
         self
     }
+
+    pub fn with_dns_seeder(mut self, url: impl Into<String>) -> Self {
+        let url = url.into();
+        self.dns_seeder_url = if url.trim().is_empty() {
+            None
+        } else {
+            Some(crate::normalize_seeder_url(&url))
+        };
+        self
+    }
+
+    pub fn with_max_peers(mut self, max_peers: u32) -> Self {
+        self.max_peers = max_peers.max(1);
+        self
+    }
 }

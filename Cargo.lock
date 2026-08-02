@@ -167,6 +167,7 @@ dependencies = [
  "borsh",
  "futures",
  "libp2p",
+ "serde_json",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
