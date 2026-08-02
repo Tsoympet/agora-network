@@ -35,11 +35,19 @@ fn parse_pow_algo() -> PowAlgorithm {
     }
 }
 
-fn admit_gossip_block(chain: &Arc<Mutex<ChainState>>, block: Block) -> Result<Hash, String> {
-    chain
+fn admit_gossip_block(
+    chain: &Arc<Mutex<ChainState>>,
+    mempool: &Arc<Mutex<Mempool>>,
+    block: Block,
+) -> Result<Hash, String> {
+    let id = chain
         .lock()
         .map_err(|_| "chain lock poisoned".to_string())
-        .and_then(|mut guard| guard.admit_block(block).map_err(|e| e.to_string()))
+        .and_then(|mut guard| guard.admit_block(block.clone()).map_err(|e| e.to_string()))?;
+    if let Ok(mut pool) = mempool.lock() {
+        pool.evict_for_block(&block);
+    }
+    Ok(id)
 }
 
 fn request_block_if_missing(
@@ -316,7 +324,7 @@ async fn main() {
                 NetworkEvent::GetBlockResponse { peer, hash, block } => match block {
                     Some(block) => {
                         pending.complete(&hash);
-                        match admit_gossip_block(&chain, block) {
+                        match admit_gossip_block(&chain, &mempool, block) {
                             Ok(id) => {
                                 score_peer(&net, peer, true);
                                 info!(%peer, block = %id.to_hex(), "admitted rr getblock")
@@ -354,7 +362,7 @@ async fn main() {
                     NetworkMessage::Block(block) => {
                         let id = block.id();
                         pending.complete(&id);
-                        match admit_gossip_block(&chain, block) {
+                        match admit_gossip_block(&chain, &mempool, block) {
                             Ok(id) => {
                                 score_peer(&net, peer, true);
                                 info!(%peer, %topic, block = %id.to_hex(), "admitted gossip block")
@@ -385,7 +393,7 @@ async fn main() {
                         match reconstruct_compact_block(header, &short_ids, lookup) {
                             Ok(block) => {
                                 pending.complete(&hash);
-                                match admit_gossip_block(&chain, block) {
+                                match admit_gossip_block(&chain, &mempool, block) {
                                     Ok(id) => {
                                         score_peer(&net, peer, true);
                                         info!(

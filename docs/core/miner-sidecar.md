@@ -8,7 +8,7 @@ Mining is CPU-heavy and must not share latency-critical threads with consensus, 
 
 ## Loop
 
-1. `agora_getBlockTemplate` → full `Block` (parents = tips, `bits` from live DAA, coinbase payout, `tx_root` committed)
+1. `agora_getBlockTemplate` → full `Block` (parents = tips, `bits` from live DAA, coinbase + mempool transfers, `tx_root` committed)
 2. Search nonces with `RandomXPowHasher` until `leading_zero_bits(digest) >= bits`
 3. `agora_submitBlock` with the template block (coinbase included) and the found nonce
 

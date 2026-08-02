@@ -29,6 +29,8 @@ pub enum AdmitError {
     Consensus(String),
     #[error("utxo: {0}")]
     Utxo(String),
+    #[error("tx_root mismatch")]
+    BadTxRoot,
 }
 
 /// Shared chain state mutated by RPC submit and gossip admission.
@@ -118,12 +120,16 @@ impl ChainState {
         Ok(self.load_block(hash)?.is_some() || self.dag.contains(hash))
     }
 
-    /// Build a mining template parented to current tips with a coinbase payout.
+    /// Build a mining template parented to current tips with coinbase + transfers.
     ///
     /// Coinbase value follows [`EmissionSchedule::reward_at_blue_score`] for the
-    /// estimated next blue score. `tx_root` commits to that coinbase so PoW binds
-    /// the reward output.
-    pub fn block_template(&self, payout: Address) -> Result<Block, AdmitError> {
+    /// estimated next blue score. `tx_root` commits to coinbase followed by
+    /// `transfers` so PoW binds the full body.
+    pub fn block_template(
+        &self,
+        payout: Address,
+        transfers: &[Transaction],
+    ) -> Result<Block, AdmitError> {
         let parents = self.tips()?;
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -142,7 +148,10 @@ impl ChainState {
             }],
             timestamp_ms,
         );
-        let tx_root = Block::compute_tx_root(std::slice::from_ref(&coinbase));
+        let mut transactions = Vec::with_capacity(1 + transfers.len());
+        transactions.push(coinbase);
+        transactions.extend(transfers.iter().cloned());
+        let tx_root = Block::compute_tx_root(&transactions);
         Ok(Block {
             header: BlockHeader {
                 version: 1,
@@ -152,7 +161,7 @@ impl ChainState {
                 nonce: 0,
                 tx_root,
             },
-            transactions: vec![coinbase],
+            transactions,
         })
     }
 
@@ -215,6 +224,10 @@ impl ChainState {
                 expected,
                 got: block.header.bits,
             });
+        }
+
+        if block.header.tx_root != Block::compute_tx_root(&block.transactions) {
+            return Err(AdmitError::BadTxRoot);
         }
 
         let pow_hash = self.pow.hasher().pow_hash(&block.header);
@@ -309,11 +322,11 @@ mod tests {
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap();
         assert_eq!(chain.difficulty().as_bits(), 0);
         assert_eq!(
-            chain.block_template(Address::ZERO).unwrap().header.bits,
+            chain.block_template(Address::ZERO, &[]).unwrap().header.bits,
             0
         );
 
-        let mut bad = chain.block_template(Address::ZERO).unwrap();
+        let mut bad = chain.block_template(Address::ZERO, &[]).unwrap();
         bad.header.bits = 3;
         bad.header.nonce = 1;
         assert!(matches!(
@@ -321,8 +334,16 @@ mod tests {
             Err(AdmitError::WrongDifficulty { expected: 0, got: 3 })
         ));
 
+        let mut bad_root = chain.block_template(Address::ZERO, &[]).unwrap();
+        bad_root.header.tx_root = Hash::ZERO;
+        bad_root.header.nonce = 2;
+        assert!(matches!(
+            chain.admit_block(bad_root),
+            Err(AdmitError::BadTxRoot)
+        ));
+
         // Admit a valid bits=0 coinbase block, then force a retarget from the spine window.
-        let mut block = chain.block_template(Address::ZERO).unwrap();
+        let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
         block.header.nonce = 9;
         block.header.timestamp_ms = 1;
         let digest = RandomXPowHasher.pow_hash(&block.header);
@@ -347,7 +368,11 @@ mod tests {
             ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0).unwrap();
         assert_eq!(reloaded.difficulty().as_bits(), next.level);
         assert_eq!(
-            reloaded.block_template(Address::ZERO).unwrap().header.bits,
+            reloaded
+                .block_template(Address::ZERO, &[])
+                .unwrap()
+                .header
+                .bits,
             next.level
         );
     }

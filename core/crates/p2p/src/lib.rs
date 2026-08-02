@@ -22,7 +22,7 @@ pub use ibd::{
     reconstruct_compact_block, short_ids_for_block, tx_short_id, PendingFetches, ReconstructError,
 };
 pub use limits::{connection_limits_behaviour, connection_limits_for_max_peers};
-pub use mempool::Mempool;
+pub use mempool::{Mempool, DEFAULT_TEMPLATE_TX_LIMIT};
 pub use messages::NetworkMessage;
 pub use libp2p::PeerId;
 pub use network::{dial_addr, NetworkEvent, NetworkHandle, NetworkNode};
