@@ -97,8 +97,33 @@ cargo run -p agora-dns-seeder
 AGORA_DNS_SEEDER=http://127.0.0.1:18080 AGORA_SEEDER_REFRESH_SECS=60 cargo run -p agora-node
 ```
 
+## Two-node local smoke
+
+`scripts/local_testnet.sh` boots a seeder + two nodes with separate datadirs / listen / RPC ports. Peer IDs are ephemeral each boot, so discovery goes through the seeder (not a hardcoded `/p2p/<id>` bootstrap).
+
+| Role | Data | Listen | RPC | Notes |
+| --- | --- | --- | --- | --- |
+| seeder | — | `127.0.0.1:18080` | — | `AGORA_SEEDER_BIND` |
+| node-a | `data/agora-node-a` | `/ip4/127.0.0.1/tcp/16111` | `:8545` | fund enabled; registers dialable addr |
+| node-b | `data/agora-node-b` | `/ip4/127.0.0.1/tcp/16112` | `:8546` | `AGORA_SEEDER_REFRESH_SECS=5` |
+
+```bash
+./scripts/local_testnet.sh wipe-two
+./scripts/local_testnet.sh seeder          # terminal 0
+./scripts/local_testnet.sh node-a          # terminal 1 — wait for "registered dialable addr"
+curl -s http://127.0.0.1:18080/peers
+./scripts/local_testnet.sh node-b          # terminal 2 — both should log "peer connected"
+AGORA_RPC_URL=http://127.0.0.1:8545/rpc ./scripts/local_testnet.sh miner
+./scripts/local_testnet.sh tips            # A and B tip sets should match after gossip/IBD
+```
+
+**Smoke proof:** mine a block on A; B’s `agora_getDagTips` must include A’s new tip (CompactBlock / `GetBlock` IBD). Do **not** use `agora_fundAddress` as the gossip check — it only mints locally on the node that handles the RPC.
+
+Optional tx gossip: `agora_submitTransaction` on A → `agora_getTransaction` on B returns `status: "pending"`.
+
 ## Follow-ons
 
 - [x] Mempool UTXO pre-checks before gossip admission
 - [x] Coinbase outputs in mining templates
 - [x] Mempool transfers in mining templates + eviction on admit
+- [x] Two-node local seeder + gossip/IBD runbook
