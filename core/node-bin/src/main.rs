@@ -133,10 +133,15 @@ async fn main() {
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(60);
+    let max_peers = std::env::var("AGORA_MAX_PEERS")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(64);
 
     let mut net_cfg = NetworkConfig::default()
         .with_listen(listen)
         .with_bootstrap(bootstrap.clone())
+        .with_max_peers(max_peers)
         .with_seeder_refresh_interval(Duration::from_secs(seeder_refresh_secs));
     if let Some(url) = &dns_seeder {
         net_cfg = net_cfg.with_dns_seeder(url.clone());
@@ -206,6 +211,7 @@ async fn main() {
         daa_bits = chain.lock().map(|c| c.difficulty().as_bits()).unwrap_or(template_bits),
         dns_seeder = net_cfg.dns_seeder_url.as_deref().unwrap_or(""),
         seeder_refresh_secs,
+        max_peers = net_cfg.max_peers,
         dial_peers = dial_peers.len(),
         "agora-node foundation boot ok"
     );

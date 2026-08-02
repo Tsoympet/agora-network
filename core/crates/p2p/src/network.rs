@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use crate::getblock::{getblock_protocol, GetBlockRequest, GetBlockResponse};
+use crate::limits::connection_limits_behaviour;
 use crate::messages::NetworkMessage;
 use crate::scoring::{enable_peer_scoring, APP_SCORE_BAD_PEER, APP_SCORE_GOOD_PEER};
 use crate::topics::{blocks_topic, transactions_topic};
@@ -25,6 +26,7 @@ type GetBlockBehaviour = request_response::cbor::Behaviour<GetBlockRequest, GetB
 pub struct AgoraBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub getblock: GetBlockBehaviour,
+    pub connection_limits: libp2p::connection_limits::Behaviour,
 }
 
 /// Events surfaced to the node runtime.
@@ -188,9 +190,13 @@ impl NetworkNode {
             request_response::Config::default(),
         );
 
+        let connection_limits = connection_limits_behaviour(config.max_peers);
+        info!(max_peers = config.max_peers, "connection limits enabled");
+
         let behaviour = AgoraBehaviour {
             gossipsub,
             getblock,
+            connection_limits,
         };
 
         let mut swarm = SwarmBuilder::with_existing_identity(id_keys)
@@ -439,6 +445,12 @@ impl NetworkNode {
                         },
                         SwarmEvent::Behaviour(AgoraBehaviourEvent::Getblock(ev)) => {
                             self.handle_getblock_event(ev);
+                        }
+                        SwarmEvent::IncomingConnectionError { error, .. } => {
+                            warn!(error = %error, "incoming connection failed (limits or handshake)");
+                        }
+                        SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                            warn!(?peer_id, error = %error, "outgoing connection failed (limits or dial)");
                         }
                         _ => {}
                     }

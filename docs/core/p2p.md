@@ -56,6 +56,18 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 
 Integration test `two_node_gossip` dials two local nodes and exchanges a signed transaction.
 
+## Connection limits
+
+`libp2p::connection_limits` is wired from `NetworkConfig::max_peers` (`AGORA_MAX_PEERS`, default `64`):
+
+| Limit | Value |
+| --- | --- |
+| max established (total / in / out) | `max_peers` |
+| max established per peer | 1 |
+| max pending in / out | `2 * max_peers` |
+
+Exceeded dials/accepts surface as swarm connection errors (logged).
+
 ## DNS seeder
 
 `infrastructure/dns-seeder` (`agora-dns-seeder`) is an HTTP phonebook:
@@ -83,4 +95,4 @@ AGORA_DNS_SEEDER=http://127.0.0.1:18080 AGORA_SEEDER_REFRESH_SECS=60 cargo run -
 
 ## Follow-ons
 
-- Connection-limits behaviour tied to `max_peers`
+- Explorer / client live tip subscription over RPC

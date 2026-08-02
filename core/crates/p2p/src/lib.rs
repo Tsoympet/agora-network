@@ -7,6 +7,7 @@ mod config;
 mod error;
 mod getblock;
 mod ibd;
+mod limits;
 mod mempool;
 mod messages;
 mod network;
@@ -20,6 +21,7 @@ pub use getblock::{GetBlockRequest, GetBlockResponse, GETBLOCK_PROTOCOL};
 pub use ibd::{
     reconstruct_compact_block, short_ids_for_block, tx_short_id, PendingFetches, ReconstructError,
 };
+pub use limits::{connection_limits_behaviour, connection_limits_for_max_peers};
 pub use mempool::Mempool;
 pub use messages::NetworkMessage;
 pub use libp2p::PeerId;
