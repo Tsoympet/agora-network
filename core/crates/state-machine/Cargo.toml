@@ -13,8 +13,12 @@ rocksdb = ["dep:rocksdb"]
 
 [dependencies]
 agora-types = { workspace = true }
+agora-crypto = { workspace = true }
 agora-consensus = { workspace = true }
 borsh = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 rocksdb = { version = "0.22", optional = true }
+
+[dev-dependencies]
+agora-crypto = { workspace = true }

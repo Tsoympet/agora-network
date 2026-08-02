@@ -33,7 +33,7 @@ impl Address {
 
 /// Reference to a previous transaction output spent by an input.
 #[derive(
-    Clone, Copy, PartialEq, Eq, Debug, Default,
+    Clone, Copy, PartialEq, Eq, Hash, Debug, Default,
     BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]

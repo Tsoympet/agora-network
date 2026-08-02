@@ -1,12 +1,12 @@
-//! Block admission: PoW verify → DAG/GHOSTDAG → durable store.
+//! Block admission: PoW verify → UTXO apply → DAG/GHOSTDAG → durable store.
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agora_consensus::{
-    Dag, Ghostdag, GhostdagConfig, LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier,
+    Dag, EmissionSchedule, Ghostdag, GhostdagConfig, LeadingZeroPow, PowAlgorithm, PowVerifier,
 };
-use agora_state_machine::{meta_keys, ColumnFamily, StateStore};
+use agora_state_machine::{apply_block, meta_keys, revert_journal, ColumnFamily, StateStore};
 use agora_types::{Block, BlockHeader, Hash};
 use thiserror::Error;
 
@@ -22,6 +22,8 @@ pub enum AdmitError {
     Storage(String),
     #[error("consensus: {0}")]
     Consensus(String),
+    #[error("utxo: {0}")]
+    Utxo(String),
 }
 
 /// Shared chain state mutated by RPC submit and gossip admission.
@@ -30,6 +32,7 @@ pub struct ChainState {
     dag: Dag,
     ghostdag: Ghostdag,
     pow: LeadingZeroPow,
+    emission: EmissionSchedule,
     /// Difficulty bits advertised in block templates.
     template_bits: u32,
 }
@@ -53,6 +56,7 @@ impl ChainState {
             dag,
             ghostdag,
             pow: LeadingZeroPow::new(algo),
+            emission: EmissionSchedule::default(),
             template_bits,
         })
     }
@@ -109,7 +113,23 @@ impl ChainState {
         })
     }
 
-    /// Verify PoW with [`LeadingZeroPow`], then persist and update GHOSTDAG.
+    /// Estimate blue score for coinbase budgeting before GHOSTDAG colors the block.
+    ///
+    /// Uses `max(parent.blue_score) + 1`, which matches chain growth and is a safe
+    /// upper bound for merge blocks in this scaffold.
+    fn estimate_blue_score(&self, parents: &[Hash]) -> u64 {
+        if parents.is_empty() {
+            return 1;
+        }
+        parents
+            .iter()
+            .filter_map(|p| self.ghostdag.blue_score(p))
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1)
+    }
+
+    /// Verify PoW, apply UTXOs, persist, then update GHOSTDAG.
     pub fn admit_block(&mut self, block: Block) -> Result<Hash, AdmitError> {
         let id = block.id();
         if self.dag.contains(&id) {
@@ -126,8 +146,30 @@ impl ChainState {
             .verify(&block.header, &pow_hash)
             .map_err(|_| AdmitError::InvalidPow)?;
 
+        let reward = self
+            .emission
+            .reward_at_blue_score(self.estimate_blue_score(&block.header.parents));
+        let journal = apply_block(self.store.as_ref(), &block, reward)
+            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+
+        if let Err(err) = self.persist_block(&block, id) {
+            let _ = revert_journal(self.store.as_ref(), &journal);
+            return Err(err);
+        }
+
+        self.dag
+            .insert(id, block.header.parents.clone())
+            .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+        self.ghostdag
+            .add_block(&self.dag, id)
+            .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+
+        Ok(id)
+    }
+
+    fn persist_block(&self, block: &Block, id: Hash) -> Result<(), AdmitError> {
         let block_bytes =
-            borsh::to_vec(&block).map_err(|e| AdmitError::Storage(e.to_string()))?;
+            borsh::to_vec(block).map_err(|e| AdmitError::Storage(e.to_string()))?;
         self.store
             .put_cf(ColumnFamily::Hot, id.as_bytes(), &block_bytes)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -145,14 +187,6 @@ impl ChainState {
         self.store
             .put_cf(ColumnFamily::Meta, meta_keys::TIPS, &tips_bytes)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
-
-        self.dag
-            .insert(id, block.header.parents.clone())
-            .map_err(|e| AdmitError::Consensus(e.to_string()))?;
-        self.ghostdag
-            .add_block(&self.dag, id)
-            .map_err(|e| AdmitError::Consensus(e.to_string()))?;
-
-        Ok(id)
+        Ok(())
     }
 }
