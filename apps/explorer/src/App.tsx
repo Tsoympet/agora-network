@@ -1,4 +1,5 @@
 import { DagField } from "./components/DagField";
+import { LiveDag } from "./components/LiveDag";
 import { MarkRow } from "./components/MarkRow";
 
 export default function App() {
@@ -15,9 +16,14 @@ export default function App() {
             AGORA
           </span>
         </div>
-        <a href="#marks" className="agora-btn agora-btn-ghost text-sm agora-rise agora-rise-delay-2">
-          Marks
-        </a>
+        <nav className="flex items-center gap-4 agora-rise agora-rise-delay-2">
+          <a href="#live" className="agora-btn agora-btn-ghost text-sm">
+            Live DAG
+          </a>
+          <a href="#marks" className="agora-btn agora-btn-ghost text-sm">
+            Marks
+          </a>
+        </nav>
       </header>
 
       <main>
@@ -33,8 +39,8 @@ export default function App() {
               for wallets, miners, and the public square.
             </p>
             <div className="mt-8 flex flex-wrap gap-3 agora-rise agora-rise-delay-3">
-              <a className="agora-btn agora-btn-primary" href="#marks">
-                Enter the square
+              <a className="agora-btn agora-btn-primary" href="#live">
+                Watch the tips
               </a>
               <a
                 className="agora-btn agora-btn-ghost"
@@ -46,6 +52,13 @@ export default function App() {
               </a>
             </div>
           </div>
+        </section>
+
+        <section
+          id="live"
+          className="relative border-t border-[var(--agora-line)] px-6 py-20 md:px-10"
+        >
+          <LiveDag />
         </section>
 
         <section
