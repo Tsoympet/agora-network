@@ -1,6 +1,7 @@
 import { DagField } from "./components/DagField";
 import { LiveDag } from "./components/LiveDag";
 import { MarkRow } from "./components/MarkRow";
+import { TxLookup } from "./components/TxLookup";
 
 export default function App() {
   return (
@@ -19,6 +20,9 @@ export default function App() {
         <nav className="flex items-center gap-4 agora-rise agora-rise-delay-2">
           <a href="#live" className="agora-btn agora-btn-ghost text-sm">
             Live DAG
+          </a>
+          <a href="#tx" className="agora-btn agora-btn-ghost text-sm">
+            Tx lookup
           </a>
           <a href="#marks" className="agora-btn agora-btn-ghost text-sm">
             Marks
@@ -59,6 +63,13 @@ export default function App() {
           className="relative border-t border-[var(--agora-line)] px-6 py-20 md:px-10"
         >
           <LiveDag />
+        </section>
+
+        <section
+          id="tx"
+          className="relative border-t border-[var(--agora-line)] px-6 py-20 md:px-10"
+        >
+          <TxLookup />
         </section>
 
         <section

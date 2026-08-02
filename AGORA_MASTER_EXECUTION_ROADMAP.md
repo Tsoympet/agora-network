@@ -135,9 +135,13 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **`smoke-ibd`:** `AGORA_MINE_MAX_BLOCKS=1` miner exit + script waits for A/B tip convergence after mine
 
-## Phase 17: Persistent P2P identity — in progress
+## Phase 17: Persistent P2P identity — done
 
 - [x] **Stable PeerId:** `$AGORA_DATA/p2p/identity.key` (libp2p protobuf) load-or-generate on `agora-node` boot
+
+## Phase 18: Explorer tx lookup — in progress
+
+- [x] **Explorer `agora_getTransaction` UI:** `#tx` lookup + pending watch; Live DAG txs deep-link
 
 ## Directory Structure Reference
 
