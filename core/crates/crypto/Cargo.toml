@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 agora-types = { workspace = true }
 bip39 = { workspace = true }
+bip32 = { workspace = true }
 secp256k1 = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }

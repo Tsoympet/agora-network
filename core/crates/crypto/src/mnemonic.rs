@@ -14,8 +14,7 @@ pub fn generate_mnemonic() -> Result<String, CryptoError> {
 pub fn seed_from_mnemonic(phrase: &str, passphrase: &str) -> Result<[u8; 64], CryptoError> {
     let mnemonic = Mnemonic::parse_in_normalized(Language::English, phrase)
         .map_err(|e| CryptoError::InvalidMnemonic(e.to_string()))?;
-    let seed = mnemonic.to_seed(passphrase);
-    Ok(seed)
+    Ok(mnemonic.to_seed(passphrase))
 }
 
 /// Compact fingerprint of a seed for logging without leaking key material.

@@ -1,11 +1,18 @@
 //! Audited cryptography for Agora Network.
 //!
-//! All signing uses secp256k1. Do not add custom elliptic-curve or hash constructions here.
+//! All signing uses secp256k1. Do not add custom elliptic-curve constructions here.
+//! BIP-44 paths are realized via the `bip32` crate; secrets are imported into `secp256k1`.
 
+mod address;
+mod bip44;
 mod error;
-mod mnemonic;
 mod keys;
+mod mnemonic;
+mod transaction;
 
+pub use address::address_from_pubkey;
+pub use bip44::{derive_bip44, Bip44Path, AGORA_COIN_TYPE};
 pub use error::CryptoError;
 pub use keys::{KeyPair, PublicKeyBytes, SignatureBytes};
 pub use mnemonic::{generate_mnemonic, seed_fingerprint, seed_from_mnemonic};
+pub use transaction::{sign_transaction, signer_address, verify_transaction};

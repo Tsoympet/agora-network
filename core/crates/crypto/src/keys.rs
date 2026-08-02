@@ -2,7 +2,9 @@ use secp256k1::ecdsa::Signature;
 use secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
 use sha2::{Digest, Sha256};
 
+use crate::address::address_from_pubkey;
 use crate::CryptoError;
+use agora_types::Address;
 
 pub type PublicKeyBytes = [u8; 33];
 pub type SignatureBytes = [u8; 64];
@@ -14,19 +16,27 @@ pub struct KeyPair {
 }
 
 impl KeyPair {
-    /// Derive a keypair from the first 32 bytes of a BIP-39 seed.
-    ///
-    /// Full BIP-44 path hardening lands in a follow-up; this keeps Phase 1 signing usable.
-    pub fn from_seed(seed: &[u8; 64]) -> Result<Self, CryptoError> {
+    pub fn from_secret_bytes(secret: &[u8]) -> Result<Self, CryptoError> {
         let secp = Secp256k1::new();
-        let secret = SecretKey::from_slice(&seed[..32])
+        let secret = SecretKey::from_slice(secret)
             .map_err(|e| CryptoError::Secp256k1(e.to_string()))?;
         let public = PublicKey::from_secret_key(&secp, &secret);
         Ok(Self { secret, public })
     }
 
+    /// Derive a keypair from the first 32 bytes of a BIP-39 seed (account-less shortcut).
+    ///
+    /// Prefer [`crate::derive_bip44`] for wallet accounts.
+    pub fn from_seed(seed: &[u8; 64]) -> Result<Self, CryptoError> {
+        Self::from_secret_bytes(&seed[..32])
+    }
+
     pub fn public_key_bytes(&self) -> PublicKeyBytes {
         self.public.serialize()
+    }
+
+    pub fn address(&self) -> Address {
+        address_from_pubkey(&self.public_key_bytes())
     }
 
     pub fn sign(&self, message: &[u8]) -> Result<SignatureBytes, CryptoError> {
@@ -38,10 +48,14 @@ impl KeyPair {
         Ok(sig.serialize_compact())
     }
 
-    pub fn verify(pubkey: &PublicKeyBytes, message: &[u8], signature: &SignatureBytes) -> Result<(), CryptoError> {
+    pub fn verify(
+        pubkey: &PublicKeyBytes,
+        message: &[u8],
+        signature: &SignatureBytes,
+    ) -> Result<(), CryptoError> {
         let secp = Secp256k1::verification_only();
-        let public = PublicKey::from_slice(pubkey)
-            .map_err(|e| CryptoError::Secp256k1(e.to_string()))?;
+        let public =
+            PublicKey::from_slice(pubkey).map_err(|e| CryptoError::Secp256k1(e.to_string()))?;
         let digest = Sha256::digest(message);
         let msg = Message::from_digest_slice(&digest)
             .map_err(|e| CryptoError::Secp256k1(e.to_string()))?;
@@ -65,5 +79,6 @@ mod tests {
         let msg = b"agora-network";
         let sig = kp.sign(msg).expect("sign");
         KeyPair::verify(&kp.public_key_bytes(), msg, &sig).expect("verify");
+        assert_ne!(kp.address(), Address::ZERO);
     }
 }

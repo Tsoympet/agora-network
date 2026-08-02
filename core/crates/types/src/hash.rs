@@ -1,5 +1,6 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
 /// 32-byte digest used for block and transaction identifiers.
@@ -22,10 +23,30 @@ impl Hash {
     pub fn to_hex(&self) -> String {
         hex::encode(self.0)
     }
+
+    /// Domain-separated SHA-256 for consensus object IDs.
+    pub fn hash_bytes(bytes: &[u8]) -> Self {
+        let digest = Sha256::digest(bytes);
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&digest);
+        Self(out)
+    }
+
+    /// Hash the borsh encoding of a consensus object.
+    pub fn hash_borsh<T: BorshSerialize>(value: &T) -> Self {
+        let bytes = borsh::to_vec(value).expect("borsh serialize is infallible for our types");
+        Self::hash_bytes(&bytes)
+    }
 }
 
 impl AsRef<[u8]> for Hash {
     fn as_ref(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl From<[u8; 32]> for Hash {
+    fn from(value: [u8; 32]) -> Self {
+        Self(value)
     }
 }
