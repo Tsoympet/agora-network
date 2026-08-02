@@ -121,6 +121,8 @@ dependencies = [
  "agora-rpc",
  "agora-state-machine",
  "agora-types",
+ "borsh",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

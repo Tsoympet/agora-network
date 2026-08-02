@@ -62,7 +62,7 @@ async fn main() {
     );
     let backend = NodeBackend::new(store, Some(handle.clone()), allow_fund);
     let dispatcher = Arc::new(Mutex::new(RpcDispatcher::new(backend)));
-    tokio::spawn(serve_rpc(rpc_bind.clone(), dispatcher));
+    tokio::spawn(serve_rpc(rpc_bind.clone(), dispatcher.clone()));
 
     info!(
         k = ghostdag.config().k,

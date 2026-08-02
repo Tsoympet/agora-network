@@ -14,8 +14,11 @@ use crate::backend::NodeBackend;
 ///
 /// - `GET /health` → `{"ok":true}`
 /// - `POST /` or `POST /rpc` → body is [`RpcRequest`] JSON
-pub async fn serve_rpc(bind: &str, dispatcher: Arc<Mutex<RpcDispatcher<NodeBackend>>>) {
-    let listener = TcpListener::bind(bind).await.expect("bind rpc");
+pub async fn serve_rpc(
+    bind: String,
+    dispatcher: Arc<Mutex<RpcDispatcher<NodeBackend>>>,
+) {
+    let listener = TcpListener::bind(&bind).await.expect("bind rpc");
     info!(%bind, "agora-node JSON-RPC listening");
 
     loop {
