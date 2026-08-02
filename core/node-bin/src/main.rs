@@ -137,6 +137,7 @@ async fn main() {
         allow_fund,
         ?pow_algo,
         template_bits,
+        daa_bits = chain.lock().map(|c| c.difficulty().as_bits()).unwrap_or(template_bits),
         "agora-node foundation boot ok"
     );
     println!(
@@ -145,7 +146,7 @@ async fn main() {
         genesis_hash.to_hex(),
         rpc_bind,
         pow_algo,
-        template_bits
+        chain.lock().map(|c| c.difficulty().as_bits()).unwrap_or(template_bits)
     );
 
     let net = handle.clone();
