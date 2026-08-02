@@ -179,6 +179,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "agora-stratum-pool"
+version = "0.1.0"
+dependencies = [
+ "agora-consensus",
+ "agora-types",
+ "borsh",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "agora-testnet-faucet"
+version = "0.1.0"
+dependencies = [
+ "agora-rpc",
+ "agora-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "agora-types"
 version = "0.1.0"
 dependencies = [
