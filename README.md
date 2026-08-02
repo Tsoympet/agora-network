@@ -81,7 +81,8 @@ cargo run -p agora-dns-seeder
 # kHeavyHash stratum pool (optional: AGORA_STRATUM_BIND)
 cargo run -p agora-stratum-pool
 
-# Testnet faucet (optional: AGORA_FAUCET_BIND, AGORA_FAUCET_DRIP, AGORA_FAUCET_COOLDOWN_SECS)
+# Testnet faucet → live node UTXO mints (node needs AGORA_RPC_ALLOW_FUND=1)
+# optional: AGORA_FAUCET_BIND, AGORA_FAUCET_DRIP, AGORA_FAUCET_COOLDOWN_SECS, AGORA_RPC_URL
 cargo run -p agora-testnet-faucet
 ```
 
