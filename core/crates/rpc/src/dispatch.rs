@@ -55,7 +55,8 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .map_err(|e| RpcError::Internal(e.to_string()))?)
             }
             RpcMethod::SubmitTransaction => {
-                let tx: Transaction = serde_json::from_value(single_or_named(&req.params, "tx")?)
+                let raw = tx_param(&req.params)?;
+                let tx: Transaction = serde_json::from_value(raw)
                     .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
                 let id = self.backend.submit_transaction(tx)?;
                 Ok(json!({ "tx_id": id.to_hex() }))
@@ -99,6 +100,20 @@ fn single_or_named(params: &Value, key: &str) -> Result<Value, RpcError> {
         return Ok(params.clone());
     }
     Err(RpcError::InvalidParams(format!("missing `{key}`")))
+}
+
+/// Accept `{ "tx": {...} }`, `[tx]`, or a bare transaction object.
+fn tx_param(params: &Value) -> Result<Value, RpcError> {
+    if let Some(obj) = params.as_object() {
+        if let Some(tx) = obj.get("tx") {
+            return Ok(tx.clone());
+        }
+        if obj.contains_key("version") && obj.contains_key("outputs") {
+            return Ok(params.clone());
+        }
+        return Err(RpcError::InvalidParams("missing `tx`".into()));
+    }
+    single_or_named(params, "tx")
 }
 
 fn param_hash(params: &Value, key: &str) -> Result<Hash, RpcError> {
