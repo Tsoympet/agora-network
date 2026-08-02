@@ -11,6 +11,8 @@ pub enum RpcMethod {
     SubmitTransaction,
     GetBalance,
     FundAddress,
+    GetBlockTemplate,
+    SubmitBlock,
 }
 
 impl RpcMethod {
@@ -21,6 +23,8 @@ impl RpcMethod {
             Self::SubmitTransaction => "agora_submitTransaction",
             Self::GetBalance => "agora_getBalance",
             Self::FundAddress => "agora_fundAddress",
+            Self::GetBlockTemplate => "agora_getBlockTemplate",
+            Self::SubmitBlock => "agora_submitBlock",
         }
     }
 
@@ -31,6 +35,8 @@ impl RpcMethod {
             "agora_submitTransaction" => Some(Self::SubmitTransaction),
             "agora_getBalance" => Some(Self::GetBalance),
             "agora_fundAddress" => Some(Self::FundAddress),
+            "agora_getBlockTemplate" => Some(Self::GetBlockTemplate),
+            "agora_submitBlock" => Some(Self::SubmitBlock),
             _ => None,
         }
     }

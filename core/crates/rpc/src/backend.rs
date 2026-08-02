@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use agora_types::{Address, Amount, Block, Hash, Transaction};
+use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction};
 
 use crate::error::RpcError;
 
@@ -12,6 +12,10 @@ pub trait RpcBackend: Send {
     fn get_balance(&self, address: &Address) -> Amount;
     /// Testnet / faucet credit path. Production node backends may reject this.
     fn fund_address(&mut self, address: Address, amount: Amount) -> Result<Amount, RpcError>;
+    /// Mining template for the CPU sidecar / stratum.
+    fn get_block_template(&self) -> Result<BlockHeader, RpcError>;
+    /// Admit a mined block after PoW verification (node) or local insert (tests).
+    fn submit_block(&mut self, block: Block) -> Result<Hash, RpcError>;
 }
 
 /// In-memory ledger used by unit tests and the local faucet scaffold.
@@ -21,11 +25,15 @@ pub struct InMemoryBackend {
     blocks: HashMap<Hash, Block>,
     balances: HashMap<Address, Amount>,
     mempool: HashMap<Hash, Transaction>,
+    template_bits: u32,
 }
 
 impl InMemoryBackend {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            template_bits: 0,
+            ..Self::default()
+        }
     }
 
     pub fn set_tips(&mut self, tips: Vec<Hash>) {
@@ -35,7 +43,6 @@ impl InMemoryBackend {
     pub fn insert_block(&mut self, block: Block) {
         let id = block.id();
         if !self.tips.contains(&id) {
-            // Replace parents that are still tip with the new block when present.
             self.tips
                 .retain(|t| !block.header.parents.iter().any(|p| p == t));
             self.tips.push(id);
@@ -78,5 +85,22 @@ impl RpcBackend for InMemoryBackend {
             .checked_add(amount)
             .ok_or_else(|| RpcError::Internal("balance overflow".into()))?;
         Ok(*entry)
+    }
+
+    fn get_block_template(&self) -> Result<BlockHeader, RpcError> {
+        Ok(BlockHeader {
+            version: 1,
+            parents: self.tips.clone(),
+            timestamp_ms: 0,
+            bits: self.template_bits,
+            nonce: 0,
+            tx_root: Hash::ZERO,
+        })
+    }
+
+    fn submit_block(&mut self, block: Block) -> Result<Hash, RpcError> {
+        let id = block.id();
+        self.insert_block(block);
+        Ok(id)
     }
 }

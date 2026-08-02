@@ -6,9 +6,16 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["randomx"]
+# Official RandomX bindings (needs cmake + g++ / libstdc++).
+randomx = ["dep:rust-randomx"]
+
 [dependencies]
 agora-types = { workspace = true }
 agora-crypto = { workspace = true }
 agora-kheavyhash = { workspace = true }
+borsh = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+rust-randomx = { workspace = true, optional = true }

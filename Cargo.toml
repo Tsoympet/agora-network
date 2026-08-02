@@ -65,3 +65,5 @@ libp2p = { version = "0.56", features = [
 ] }
 serde_json = "1.0"
 revm = { version = "42", default-features = false, features = ["std", "secp256k1", "portable"] }
+# Official RandomX via rust-randomx (cmake + libstdc++; see .cargo/config.toml).
+rust-randomx = "0.7.6"

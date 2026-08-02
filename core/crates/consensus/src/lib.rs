@@ -16,5 +16,5 @@ pub use error::ConsensusError;
 pub use ghostdag::{Ghostdag, GhostdagConfig, GhostdagData, OrderedBlock};
 pub use pow::{
     hasher_for, AcceptAllPow, KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher,
-    PowVerifier, Sha256PowHasher,
+    PowVerifier, RandomXPowHasher, Sha256PowHasher,
 };

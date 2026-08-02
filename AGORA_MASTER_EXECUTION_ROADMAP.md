@@ -59,8 +59,8 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **RPC hardening:** `RpcBackend` + `RpcDispatcher` for tips / block / submit / balance / fund
 - [x] **Wire HTTP JSON-RPC into `agora-node`:** `NodeBackend` + `AGORA_RPC_BIND` (`POST /rpc`, `/health`)
 - [x] **kHeavyHash PoW:** vendored `agora-kheavyhash` (Kaspa ISC) + `KHeavyHashPowHasher` in consensus/stratum
-- [ ] RandomX FFI for CPU miner-sidecar
-- [ ] Call `PowVerifier` from block admission in the node
+- [x] **RandomX FFI:** `RandomXPowHasher` via `rust-randomx` (feature `randomx`) + miner-sidecar template loop
+- [x] **Block admission:** `ChainState::admit_block` runs `PowVerifier`, wired to gossip + `agora_submitBlock`
 
 ## Directory Structure Reference
 
