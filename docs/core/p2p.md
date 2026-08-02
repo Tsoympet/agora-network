@@ -51,7 +51,7 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 
 `agora-node` runs `validate_mempool_tx` (live `cf_utxo` + mempool reserved set) under the same lock before admit on both RPC `agora_submitTransaction` and gossip `Transaction` messages. Missing, foreign, overspending, or already-reserved inputs are rejected at the edge. The implicit fee must be ≥ `AGORA_MIN_RELAY_FEE` (default 1); admission stores the fee for template ordering.
 
-Mining templates pull up to `DEFAULT_TEMPLATE_TX_LIMIT` (128) transfers via `select_transfers` (fee descending, then `tx_id`) after the coinbase. On block admit (RPC or gossip), `evict_for_block` drops included txs and any remaining conflicts on the same outpoints.
+Mining templates pull up to `DEFAULT_TEMPLATE_TX_LIMIT` (128) transfers via `select_transfers` (fee descending, then `tx_id`) after the coinbase. Coinbase value is emission plus those transfer fees. On block admit (RPC or gossip), `evict_for_block` drops included txs and any remaining conflicts on the same outpoints.
 
 ## Runtime
 

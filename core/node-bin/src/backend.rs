@@ -430,6 +430,14 @@ mod tests {
         assert_eq!(block.transactions.len(), 2);
         assert!(block.transactions[0].inputs.is_empty());
         assert_eq!(block.transactions[1].tx_id(), tx_id);
+        let coinbase_value = block.transactions[0].outputs[0].value.as_base_units();
+        // Next block after genesis (blue_score 1) estimates blue_score 2.
+        let emission = agora_consensus::EmissionSchedule::default().reward_at_blue_score(2);
+        assert_eq!(
+            coinbase_value,
+            emission + fee,
+            "coinbase should be emission + transfer fee"
+        );
         assert_eq!(
             block.header.tx_root,
             Block::compute_tx_root(&block.transactions)
@@ -445,6 +453,7 @@ mod tests {
             backend.get_balance(&to).as_base_units(),
             Amount::from_whole(1).unwrap().as_base_units()
         );
+        assert_eq!(backend.get_balance(&miner).as_base_units(), emission + fee);
     }
 
     #[test]

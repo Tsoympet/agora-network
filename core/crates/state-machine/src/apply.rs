@@ -19,18 +19,61 @@ pub struct UtxoJournal {
     pub created: Vec<OutPoint>,
 }
 
+/// Implicit fee of a transfer (`input − output`) against the live UTXO set.
+pub fn transfer_fee(store: &StateStore, tx: &Transaction) -> Result<u64, StateError> {
+    if tx.inputs.is_empty() {
+        return Ok(0);
+    }
+    let mut input_value = 0u64;
+    for input in &tx.inputs {
+        let out = load_utxo(store, &input.previous_outpoint)?;
+        input_value = input_value
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("input value overflow".into()))?;
+    }
+    let mut output_value = 0u64;
+    for out in &tx.outputs {
+        output_value = output_value
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("output value overflow".into()))?;
+    }
+    if input_value < output_value {
+        return Err(StateError::InvalidTx(format!(
+            "insufficient funds: in={input_value} out={output_value}"
+        )));
+    }
+    Ok(input_value - output_value)
+}
+
+/// Sum of transfer fees in `txs` (coinbase-shaped entries contribute 0).
+pub fn sum_transfer_fees(store: &StateStore, txs: &[Transaction]) -> Result<u64, StateError> {
+    let mut total = 0u64;
+    for tx in txs {
+        total = total
+            .checked_add(transfer_fee(store, tx)?)
+            .ok_or_else(|| StateError::InvalidTx("fee overflow".into()))?;
+    }
+    Ok(total)
+}
+
 /// Apply all transactions in `block` to `cf_utxo`.
 ///
 /// Rules:
-/// - At most one coinbase (`inputs` empty); its outputs must total ≤ `coinbase_reward`
+/// - At most one coinbase (`inputs` empty); its outputs must total
+///   ≤ `emission_reward + Σ transfer fees`
 /// - Non-coinbase txs must verify secp256k1 auth; each spent UTXO must belong to the signer
-/// - Input value ≥ output value (difference is implicit fee / burn)
+/// - Input value ≥ output value (difference is the fee paid to the coinbase miner)
 /// - No double-spends within the block or against the live set
 pub fn apply_block(
     store: &StateStore,
     block: &Block,
-    coinbase_reward: u64,
+    emission_reward: u64,
 ) -> Result<UtxoJournal, StateError> {
+    let fees = sum_transfer_fees(store, &block.transactions)?;
+    let coinbase_budget = emission_reward
+        .checked_add(fees)
+        .ok_or_else(|| StateError::Coinbase("reward overflow".into()))?;
+
     let mut journal = UtxoJournal::default();
     let mut spent_in_block: HashSet<OutPoint> = HashSet::new();
     let mut created_in_block: HashMap<OutPoint, TxOut> = HashMap::new();
@@ -42,7 +85,7 @@ pub fn apply_block(
             if coinbases > 1 {
                 return Err(StateError::Coinbase("multiple coinbase txs".into()));
             }
-            apply_coinbase(store, tx, coinbase_reward, &mut journal, &mut created_in_block)?;
+            apply_coinbase(store, tx, coinbase_budget, &mut journal, &mut created_in_block)?;
         } else {
             apply_transfer(
                 store,
@@ -459,6 +502,80 @@ mod tests {
             validate_mempool_tx(&store, &missing, &HashSet::new()),
             Err(StateError::MissingUtxo(_))
         ));
+    }
+
+    #[test]
+    fn coinbase_may_claim_emission_plus_transfer_fees() {
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let to = derive_bip44(&seed, &Bip44Path::external(1))
+            .unwrap()
+            .address();
+        let miner = Address([3u8; 20]);
+        let genesis_hash = GenesisBuilder::default()
+            .with_premine_address(from.address())
+            .ignite(&store)
+            .unwrap();
+        let genesis = {
+            let bytes = store
+                .get_cf(ColumnFamily::Hot, genesis_hash.as_bytes())
+                .unwrap()
+                .unwrap();
+            Block::try_from_slice(&bytes).unwrap()
+        };
+        let premine_txid = genesis.transactions[0].tx_id();
+        let premine = Amount::from_whole(10_000_000).unwrap().as_base_units();
+        let pay = Amount::from_whole(1).unwrap().as_base_units();
+        let fee = 5u64;
+        let mut transfer = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: premine_txid,
+                    index: 0,
+                },
+            }],
+            vec![
+                TxOut {
+                    value: Amount::from_base_units(pay),
+                    address: to,
+                },
+                TxOut {
+                    value: Amount::from_base_units(premine - pay - fee),
+                    address: from.address(),
+                },
+            ],
+            9,
+        );
+        sign_transaction(&mut transfer, &from).unwrap();
+        assert_eq!(transfer_fee(&store, &transfer).unwrap(), fee);
+
+        let emission = 100u64;
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(emission + fee),
+                address: miner,
+            }],
+            0,
+        );
+        let txs = vec![coinbase, transfer];
+        let block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![genesis_hash],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Block::compute_tx_root(&txs),
+            },
+            transactions: txs,
+        };
+        apply_block(&store, &block, emission).unwrap();
+        assert_eq!(balance_of(&store, &miner).unwrap().as_base_units(), emission + fee);
+        assert_eq!(balance_of(&store, &to).unwrap().as_base_units(), pay);
     }
 
     #[test]

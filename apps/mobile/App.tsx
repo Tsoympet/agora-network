@@ -229,7 +229,7 @@ export default function App() {
 
         <Text style={styles.eyebrow}>Send</Text>
         <Text style={styles.meta}>
-          BIP-39 → m/44&apos;/8888&apos;/0&apos;/0/0 · fee burned (min 1)
+          BIP-39 → m/44&apos;/8888&apos;/0&apos;/0/0 · fee to miner (min 1)
         </Text>
         <TextInput
           value={mnemonic}

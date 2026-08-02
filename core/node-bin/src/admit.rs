@@ -10,7 +10,9 @@ use agora_consensus::{
     next_difficulty_weighted, work_from_bits, DaaConfig, DaaSample, Dag, Difficulty,
     EmissionSchedule, Ghostdag, GhostdagConfig, LeadingZeroPow, PowAlgorithm, PowVerifier,
 };
-use agora_state_machine::{apply_block, meta_keys, revert_journal, ColumnFamily, StateStore};
+use agora_state_machine::{
+    apply_block, meta_keys, revert_journal, sum_transfer_fees, ColumnFamily, StateStore,
+};
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
 
@@ -117,9 +119,9 @@ impl ChainState {
 
     /// Build a mining template parented to current tips with coinbase + transfers.
     ///
-    /// Coinbase value follows [`EmissionSchedule::reward_at_blue_score`] for the
-    /// estimated next blue score. `tx_root` commits to coinbase followed by
-    /// `transfers` so PoW binds the full body.
+    /// Coinbase value is emission ([`EmissionSchedule::reward_at_blue_score`]) plus
+    /// the sum of transfer fees (`in − out`) so miners collect relay fees.
+    /// `tx_root` commits to coinbase followed by `transfers` so PoW binds the full body.
     pub fn block_template(
         &self,
         payout: Address,
@@ -130,9 +132,14 @@ impl ChainState {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        let reward = self
+        let emission = self
             .emission
             .reward_at_blue_score(self.estimate_blue_score(&parents));
+        let fees = sum_transfer_fees(self.store.as_ref(), transfers)
+            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        let reward = emission
+            .checked_add(fees)
+            .ok_or_else(|| AdmitError::Utxo("coinbase reward overflow".into()))?;
         // Nonce = timestamp keeps coinbase txids unique across templates.
         let coinbase = Transaction::unsigned(
             1,
@@ -241,10 +248,11 @@ impl ChainState {
             .verify(&block.header, &pow_hash)
             .map_err(|_| AdmitError::InvalidPow)?;
 
-        let reward = self
+        // Emission only — `apply_block` adds transfer fees into the coinbase budget.
+        let emission = self
             .emission
             .reward_at_blue_score(self.estimate_blue_score(&block.header.parents));
-        let journal = apply_block(self.store.as_ref(), &block, reward)
+        let journal = apply_block(self.store.as_ref(), &block, emission)
             .map_err(|e| AdmitError::Utxo(e.to_string()))?;
 
         if let Err(err) = self.persist_block(&block, id) {
