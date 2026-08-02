@@ -62,6 +62,8 @@ libp2p = { version = "0.56", features = [
     "macros",
     "identify",
     "dns",
+    "request-response",
+    "cbor",
 ] }
 serde_json = "1.0"
 revm = { version = "42", default-features = false, features = ["std", "secp256k1", "portable"] }

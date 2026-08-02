@@ -13,7 +13,7 @@ use agora_consensus::{EmissionSchedule, PowAlgorithm};
 use agora_p2p::{
     dial_addr, fetch_seeder_peers_best_effort, merge_bootstrap_peers, reconstruct_compact_block,
     register_with_seeder, Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage,
-    NetworkNode, PendingFetches, ReconstructError,
+    NetworkNode, PeerId, PendingFetches, ReconstructError,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{GenesisBuilder, StateStore};
@@ -46,6 +46,7 @@ fn request_block_if_missing(
     chain: &Arc<Mutex<ChainState>>,
     pending: &mut PendingFetches,
     net: &NetworkHandle,
+    peer: PeerId,
     hash: Hash,
 ) {
     let have = chain
@@ -58,12 +59,35 @@ fn request_block_if_missing(
         return;
     }
     if pending.request(hash) {
-        if let Err(err) = net.publish_message(NetworkMessage::GetBlock { hash }) {
-            warn!(error = %err, hash = %hash.to_hex(), "getblock publish failed");
-            pending.complete(&hash);
+        // Prefer direct request-response to the announcing peer (no mesh flood).
+        if let Err(err) = net.request_block(peer, hash) {
+            warn!(
+                error = %err,
+                %peer,
+                hash = %hash.to_hex(),
+                "getblock rr failed to enqueue — falling back to gossip"
+            );
+            if let Err(err) = net.publish_message(NetworkMessage::GetBlock { hash }) {
+                warn!(error = %err, hash = %hash.to_hex(), "getblock gossip fallback failed");
+                pending.complete(&hash);
+            }
         } else {
-            info!(hash = %hash.to_hex(), "ibd getblock requested");
+            info!(%peer, hash = %hash.to_hex(), "ibd getblock rr requested");
         }
+    }
+}
+
+fn gossip_getblock_fallback(pending: &mut PendingFetches, net: &NetworkHandle, hash: Hash) {
+    // Allow a single gossip retry after RR failure by clearing the pending slot.
+    pending.complete(&hash);
+    if !pending.request(hash) {
+        return;
+    }
+    if let Err(err) = net.publish_message(NetworkMessage::GetBlock { hash }) {
+        warn!(error = %err, hash = %hash.to_hex(), "getblock gossip fallback failed");
+        pending.complete(&hash);
+    } else {
+        info!(hash = %hash.to_hex(), "ibd getblock gossip fallback");
     }
 }
 
@@ -193,6 +217,60 @@ async fn main() {
                 }
                 NetworkEvent::PeerConnected(peer) => info!(%peer, "peer connected"),
                 NetworkEvent::PeerDisconnected(peer) => info!(%peer, "peer disconnected"),
+                NetworkEvent::GetBlockRequest {
+                    peer,
+                    hash,
+                    request_id,
+                } => {
+                    let block = chain
+                        .lock()
+                        .ok()
+                        .and_then(|g| g.load_block(&hash).ok())
+                        .flatten();
+                    let found = block.is_some();
+                    if let Err(err) = net.respond_get_block(request_id, block) {
+                        warn!(
+                            %peer,
+                            hash = %hash.to_hex(),
+                            error = %err,
+                            "getblock rr respond failed"
+                        );
+                    } else if found {
+                        info!(%peer, hash = %hash.to_hex(), "served getblock rr");
+                    } else {
+                        info!(%peer, hash = %hash.to_hex(), "getblock rr miss");
+                    }
+                }
+                NetworkEvent::GetBlockResponse { peer, hash, block } => match block {
+                    Some(block) => {
+                        pending.complete(&hash);
+                        match admit_gossip_block(&chain, block) {
+                            Ok(id) => {
+                                info!(%peer, block = %id.to_hex(), "admitted rr getblock")
+                            }
+                            Err(err) => {
+                                warn!(%peer, error = %err, "rejected rr getblock")
+                            }
+                        }
+                    }
+                    None => {
+                        warn!(
+                            %peer,
+                            hash = %hash.to_hex(),
+                            "getblock rr remote miss — gossip fallback"
+                        );
+                        gossip_getblock_fallback(&mut pending, &net, hash);
+                    }
+                },
+                NetworkEvent::GetBlockFailure { peer, hash, error } => {
+                    warn!(
+                        %peer,
+                        hash = %hash.to_hex(),
+                        %error,
+                        "getblock rr failure — gossip fallback"
+                    );
+                    gossip_getblock_fallback(&mut pending, &net, hash);
+                }
                 NetworkEvent::Message {
                     peer,
                     topic,
@@ -253,7 +331,7 @@ async fn main() {
                                     hash = %hash.to_hex(),
                                     "compact miss — requesting full block"
                                 );
-                                request_block_if_missing(&chain, &mut pending, &net, hash);
+                                request_block_if_missing(&chain, &mut pending, &net, peer, hash);
                             }
                             Err(ReconstructError::TxRootMismatch) => {
                                 warn!(
@@ -262,15 +340,16 @@ async fn main() {
                                     hash = %hash.to_hex(),
                                     "compact tx_root mismatch — requesting full block"
                                 );
-                                request_block_if_missing(&chain, &mut pending, &net, hash);
+                                request_block_if_missing(&chain, &mut pending, &net, peer, hash);
                             }
                         }
                     }
                     NetworkMessage::BlockAnnounce { hash } => {
                         info!(%peer, %topic, announce = %hash.to_hex(), "block announce");
-                        request_block_if_missing(&chain, &mut pending, &net, hash);
+                        request_block_if_missing(&chain, &mut pending, &net, peer, hash);
                     }
                     NetworkMessage::GetBlock { hash } => {
+                        // Legacy / RR-fallback path: still answer over gossip when asked.
                         let served = chain
                             .lock()
                             .ok()
@@ -284,14 +363,18 @@ async fn main() {
                                         %peer,
                                         hash = %hash.to_hex(),
                                         error = %err,
-                                        "getblock serve failed"
+                                        "getblock gossip serve failed"
                                     );
                                 } else {
-                                    info!(%peer, hash = %hash.to_hex(), "served getblock");
+                                    info!(%peer, hash = %hash.to_hex(), "served getblock gossip");
                                 }
                             }
                             None => {
-                                info!(%peer, hash = %hash.to_hex(), "getblock miss — block unknown locally");
+                                info!(
+                                    %peer,
+                                    hash = %hash.to_hex(),
+                                    "getblock gossip miss — block unknown locally"
+                                );
                             }
                         }
                     }

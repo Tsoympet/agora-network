@@ -22,9 +22,14 @@ After a block is admitted locally, `agora-node` gossips:
 1. `CompactBlock { header, short_ids }` — BIP152-style short ids (first 8 bytes of each `tx_id`)
 2. `BlockAnnounce { hash }` — hash-only tip signal
 
-Receivers try `reconstruct_compact_block` against the local mempool. On miss (or hash-only announce without a body), they publish `GetBlock { hash }` (deduped via `PendingFetches`). Peers that hold the block reply with a full `Block`.
+Receivers try `reconstruct_compact_block` against the local mempool. On miss (or hash-only announce without a body), they request the body from the announcing peer over **`/agora/getblock/1`** (libp2p request-response, CBOR). `PendingFetches` dedupes in-flight hashes. If request-response fails, the node falls back to gossip `GetBlock` / `Block`.
 
-Empty-tx templates reconstruct immediately (no mempool lookup). Integration test: `compact_block_ibd`.
+Empty-tx templates reconstruct immediately (no mempool lookup).
+
+| Test | Covers |
+| --- | --- |
+| `compact_block_ibd` | gossip announce / compact wire path |
+| `getblock_request_response` | direct `/agora/getblock/1` roundtrip |
 
 ## Mempool
 
@@ -63,6 +68,5 @@ AGORA_DNS_SEEDER=http://127.0.0.1:18080 cargo run -p agora-node
 
 ## Follow-ons
 
-- Request-response transport for `GetBlock` (avoid mesh-wide full-block replies)
 - Peer scoring & mesh tuning for sub-second DAGs
 - Periodic seeder refresh / re-register

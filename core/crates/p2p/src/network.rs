@@ -1,22 +1,29 @@
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash as StdHash, Hasher};
 use std::time::Duration;
 
+use agora_types::{Block, Hash};
 use futures::StreamExt;
 use libp2p::gossipsub::{self, IdentTopic, MessageAuthenticity, ValidationMode};
 use libp2p::identity::Keypair;
+use libp2p::request_response::{self, ProtocolSupport, ResponseChannel};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::{Multiaddr, PeerId, Swarm, SwarmBuilder};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use crate::getblock::{getblock_protocol, GetBlockRequest, GetBlockResponse};
 use crate::messages::NetworkMessage;
 use crate::topics::{blocks_topic, transactions_topic};
 use crate::{NetworkConfig, P2pError};
 
+type GetBlockBehaviour = request_response::cbor::Behaviour<GetBlockRequest, GetBlockResponse>;
+
 #[derive(NetworkBehaviour)]
 pub struct AgoraBehaviour {
     pub gossipsub: gossipsub::Behaviour,
+    pub getblock: GetBlockBehaviour,
 }
 
 /// Events surfaced to the node runtime.
@@ -30,11 +37,34 @@ pub enum NetworkEvent {
         topic: String,
         message: NetworkMessage,
     },
+    /// Inbound `/agora/getblock/1` request — respond via [`NetworkHandle::respond_get_block`].
+    GetBlockRequest {
+        peer: PeerId,
+        hash: Hash,
+        request_id: request_response::InboundRequestId,
+    },
+    /// Outbound getblock completed (block may be missing on the remote).
+    GetBlockResponse {
+        peer: PeerId,
+        hash: Hash,
+        block: Option<Block>,
+    },
+    /// Outbound getblock failed; caller may fall back to gossip `GetBlock`.
+    GetBlockFailure {
+        peer: PeerId,
+        hash: Hash,
+        error: String,
+    },
 }
 
 enum Command {
     Dial(String),
     Publish(NetworkMessage),
+    RequestBlock { peer: PeerId, hash: Hash },
+    RespondGetBlock {
+        request_id: request_response::InboundRequestId,
+        block: Option<Block>,
+    },
     Shutdown,
 }
 
@@ -62,16 +92,39 @@ impl NetworkHandle {
             .map_err(|_| P2pError::Network("swarm task stopped".into()))
     }
 
+    /// Request a full block body from a connected peer over request-response.
+    pub fn request_block(&self, peer: PeerId, hash: Hash) -> Result<(), P2pError> {
+        self.commands
+            .send(Command::RequestBlock { peer, hash })
+            .map_err(|_| P2pError::Network("swarm task stopped".into()))
+    }
+
+    /// Answer an inbound [`NetworkEvent::GetBlockRequest`].
+    pub fn respond_get_block(
+        &self,
+        request_id: request_response::InboundRequestId,
+        block: Option<Block>,
+    ) -> Result<(), P2pError> {
+        self.commands
+            .send(Command::RespondGetBlock { request_id, block })
+            .map_err(|_| P2pError::Network("swarm task stopped".into()))
+    }
+
     pub fn shutdown(&self) {
         let _ = self.commands.send(Command::Shutdown);
     }
 }
 
-/// libp2p gossip node for Agora.
+/// libp2p gossip + getblock request-response node for Agora.
 pub struct NetworkNode {
     swarm: Swarm<AgoraBehaviour>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
     command_rx: mpsc::UnboundedReceiver<Command>,
+    inbound_channels: HashMap<
+        request_response::InboundRequestId,
+        ResponseChannel<GetBlockResponse>,
+    >,
+    outbound_hashes: HashMap<request_response::OutboundRequestId, Hash>,
 }
 
 impl NetworkNode {
@@ -107,7 +160,15 @@ impl NetworkNode {
             .subscribe(&blocks_topic())
             .map_err(|e| P2pError::Gossip(e.to_string()))?;
 
-        let behaviour = AgoraBehaviour { gossipsub };
+        let getblock = request_response::cbor::Behaviour::new(
+            [(getblock_protocol(), ProtocolSupport::Full)],
+            request_response::Config::default(),
+        );
+
+        let behaviour = AgoraBehaviour {
+            gossipsub,
+            getblock,
+        };
 
         let mut swarm = SwarmBuilder::with_existing_identity(id_keys)
             .with_tokio()
@@ -147,6 +208,8 @@ impl NetworkNode {
                 swarm,
                 event_tx,
                 command_rx,
+                inbound_channels: HashMap::new(),
+                outbound_hashes: HashMap::new(),
             },
         ))
     }
@@ -184,6 +247,108 @@ impl NetworkNode {
         }
     }
 
+    fn request_block(&mut self, peer: PeerId, hash: Hash) {
+        let id = self
+            .swarm
+            .behaviour_mut()
+            .getblock
+            .send_request(&peer, GetBlockRequest::new(hash));
+        self.outbound_hashes.insert(id, hash);
+        debug!(%peer, hash = %hash.to_hex(), %id, "getblock request sent");
+    }
+
+    fn respond_get_block(
+        &mut self,
+        request_id: request_response::InboundRequestId,
+        block: Option<Block>,
+    ) {
+        let Some(channel) = self.inbound_channels.remove(&request_id) else {
+            warn!(%request_id, "getblock response channel missing");
+            return;
+        };
+        let response = match block {
+            Some(b) => GetBlockResponse::found(b),
+            None => GetBlockResponse::missing(),
+        };
+        if self
+            .swarm
+            .behaviour_mut()
+            .getblock
+            .send_response(channel, response)
+            .is_err()
+        {
+            warn!(%request_id, "getblock send_response failed (channel closed)");
+        }
+    }
+
+    fn handle_getblock_event(
+        &mut self,
+        event: request_response::Event<GetBlockRequest, GetBlockResponse>,
+    ) {
+        match event {
+            request_response::Event::Message { peer, message, .. } => match message {
+                request_response::Message::Request {
+                    request_id,
+                    request,
+                    channel,
+                } => {
+                    self.inbound_channels.insert(request_id, channel);
+                    let _ = self.event_tx.send(NetworkEvent::GetBlockRequest {
+                        peer,
+                        hash: request.hash,
+                        request_id,
+                    });
+                }
+                request_response::Message::Response {
+                    request_id,
+                    response,
+                } => {
+                    let hash = self
+                        .outbound_hashes
+                        .remove(&request_id)
+                        .unwrap_or(Hash::ZERO);
+                    let _ = self.event_tx.send(NetworkEvent::GetBlockResponse {
+                        peer,
+                        hash,
+                        block: response.block,
+                    });
+                }
+            },
+            request_response::Event::OutboundFailure {
+                peer,
+                request_id,
+                error,
+                ..
+            } => {
+                let hash = self
+                    .outbound_hashes
+                    .remove(&request_id)
+                    .unwrap_or(Hash::ZERO);
+                let _ = self.event_tx.send(NetworkEvent::GetBlockFailure {
+                    peer,
+                    hash,
+                    error: error.to_string(),
+                });
+            }
+            request_response::Event::InboundFailure {
+                peer,
+                request_id,
+                error,
+                ..
+            } => {
+                self.inbound_channels.remove(&request_id);
+                warn!(%peer, %request_id, error = %error, "getblock inbound failure");
+            }
+            request_response::Event::ResponseSent {
+                peer,
+                request_id,
+                ..
+            } => {
+                debug!(%peer, %request_id, "getblock response sent");
+            }
+        }
+    }
+
     /// Drive the swarm until shutdown.
     pub async fn run(mut self) {
         loop {
@@ -199,6 +364,12 @@ impl NetworkNode {
                             if let Err(err) = self.publish_message(&message) {
                                 warn!(error = %err, "publish failed");
                             }
+                        }
+                        Some(Command::RequestBlock { peer, hash }) => {
+                            self.request_block(peer, hash);
+                        }
+                        Some(Command::RespondGetBlock { request_id, block }) => {
+                            self.respond_get_block(request_id, block);
                         }
                         Some(Command::Shutdown) | None => break,
                     }
@@ -235,6 +406,9 @@ impl NetworkNode {
                             }
                             Err(err) => warn!(error = %err, "failed to decode gossip payload"),
                         },
+                        SwarmEvent::Behaviour(AgoraBehaviourEvent::Getblock(ev)) => {
+                            self.handle_getblock_event(ev);
+                        }
                         _ => {}
                     }
                 }
