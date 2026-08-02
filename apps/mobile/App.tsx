@@ -11,7 +11,9 @@ import {
 } from "react-native";
 import { agoraBrand } from "../shared/brand/tokens";
 import {
+  addressFromMnemonic,
   createLightClient,
+  sendTransfer,
   shortHash,
   startTipSync,
   type LightUtxo,
@@ -45,6 +47,15 @@ export default function App() {
   const [utxos, setUtxos] = useState<LightUtxo[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletBusy, setWalletBusy] = useState(false);
+
+  const [mnemonic, setMnemonic] = useState("");
+  const [toAddress, setToAddress] = useState("");
+  const [amount, setAmount] = useState("1");
+  const [fee, setFee] = useState("1");
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [lastTxId, setLastTxId] = useState<string | null>(null);
+  const [derivedAddress, setDerivedAddress] = useState<string | null>(null);
 
   useEffect(() => startTipSync({ client, pollMs: POLL_MS, onUpdate: setSnap }), [
     client,
@@ -83,6 +94,55 @@ export default function App() {
     }
   }
 
+  function onDerive() {
+    try {
+      const hex = addressFromMnemonic(mnemonic);
+      setDerivedAddress(hex);
+      setAddress(hex);
+      setSendError(null);
+    } catch (err) {
+      setDerivedAddress(null);
+      setSendError(err instanceof Error ? err.message : "invalid mnemonic");
+    }
+  }
+
+  async function onSend() {
+    const amt = Number(amount);
+    const feeN = Number(fee);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setSendError("Amount must be a positive number");
+      return;
+    }
+    if (!Number.isFinite(feeN) || feeN < 1) {
+      setSendError("Fee must be ≥ 1 (min relay)");
+      return;
+    }
+    setSendBusy(true);
+    setSendError(null);
+    setLastTxId(null);
+    try {
+      const { tx_id, built } = await sendTransfer(client, {
+        mnemonic,
+        toAddressHex: toAddress.trim(),
+        amount: Math.floor(amt),
+        fee: Math.floor(feeN),
+      });
+      setLastTxId(tx_id);
+      setDerivedAddress(built.from);
+      setAddress(built.from);
+      const [bal, set] = await Promise.all([
+        client.getBalance(built.from),
+        client.getUtxos(built.from),
+      ]);
+      setBalance(bal.balance);
+      setUtxos(set.utxos);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "send failed");
+    } finally {
+      setSendBusy(false);
+    }
+  }
+
   return (
     <View style={styles.shell}>
       <StatusBar style="light" />
@@ -90,8 +150,8 @@ export default function App() {
         <Image source={require("./assets/icon.png")} style={styles.icon} />
         <Text style={styles.brand}>Agora Network</Text>
         <Text style={styles.lede}>
-          Light client shell. Tip sync and UTXO lookup follow the live DAG over
-          HTTP JSON-RPC.
+          Light client shell. Tip sync, UTXO lookup, and signed BIP-44 sends
+          follow the live DAG over HTTP JSON-RPC.
         </Text>
 
         <Text style={styles.eyebrow}>Light client</Text>
@@ -166,6 +226,69 @@ export default function App() {
             </Text>
           ))}
         </View>
+
+        <Text style={styles.eyebrow}>Send</Text>
+        <Text style={styles.meta}>
+          BIP-39 → m/44&apos;/8888&apos;/0&apos;/0/0 · fee burned (min 1)
+        </Text>
+        <TextInput
+          value={mnemonic}
+          onChangeText={setMnemonic}
+          placeholder="mnemonic"
+          placeholderTextColor={agoraBrand.colors.inkMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          multiline
+          style={[styles.input, styles.mnemonic]}
+        />
+        <Pressable onPress={onDerive} style={styles.lookupBtn}>
+          <Text style={styles.lookupLabel}>Derive address</Text>
+        </Pressable>
+        {derivedAddress ? (
+          <Text style={styles.tipRow}>{derivedAddress}</Text>
+        ) : null}
+        <TextInput
+          value={toAddress}
+          onChangeText={setToAddress}
+          placeholder="to address (40-hex)"
+          placeholderTextColor={agoraBrand.colors.inkMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={styles.input}
+        />
+        <View style={styles.walletRow}>
+          <TextInput
+            value={amount}
+            onChangeText={setAmount}
+            placeholder="amount"
+            placeholderTextColor={agoraBrand.colors.inkMuted}
+            keyboardType="numeric"
+            style={styles.input}
+          />
+          <TextInput
+            value={fee}
+            onChangeText={setFee}
+            placeholder="fee"
+            placeholderTextColor={agoraBrand.colors.inkMuted}
+            keyboardType="numeric"
+            style={styles.input}
+          />
+        </View>
+        <Pressable
+          onPress={onSend}
+          disabled={sendBusy}
+          style={styles.lookupBtn}
+        >
+          <Text style={styles.lookupLabel}>
+            {sendBusy ? "Signing…" : "Sign & send"}
+          </Text>
+        </Pressable>
+        {sendError ? <Text style={styles.error}>{sendError}</Text> : null}
+        {lastTxId ? (
+          <Text style={[styles.tipRow, { color: agoraBrand.colors.cyan }]}>
+            submitted {shortHash(lastTxId)}
+          </Text>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -233,6 +356,7 @@ const styles = StyleSheet.create({
     color: agoraBrand.colors.ink,
     fontSize: 13,
     fontFamily: "monospace",
+    marginTop: 8,
   },
   footer: {
     marginTop: 20,
@@ -247,6 +371,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    marginTop: 12,
     borderWidth: 1,
     borderColor: agoraBrand.colors.gold,
     color: agoraBrand.colors.ink,
@@ -255,11 +380,17 @@ const styles = StyleSheet.create({
     fontFamily: "monospace",
     fontSize: 13,
   },
+  mnemonic: {
+    minHeight: 72,
+    textAlignVertical: "top",
+  },
   lookupBtn: {
+    marginTop: 12,
     borderWidth: 1,
     borderColor: agoraBrand.colors.gold,
     paddingHorizontal: 14,
     paddingVertical: 10,
+    alignSelf: "flex-start",
   },
   lookupLabel: {
     color: agoraBrand.colors.gold,

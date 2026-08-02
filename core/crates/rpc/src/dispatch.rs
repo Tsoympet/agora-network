@@ -109,10 +109,33 @@ impl<B: RpcBackend> RpcDispatcher<B> {
 /// Hex-friendly block JSON for wallets / explorer (hashes as hex strings).
 fn block_to_explorer_json(block: &Block) -> Value {
     let id = block.id().to_hex();
+    let transactions: Vec<Value> = block
+        .transactions
+        .iter()
+        .map(tx_to_explorer_json)
+        .collect();
     json!({
         "id": id,
         "header": header_to_explorer_json(&block.header, Some(id)),
         "tx_count": block.transactions.len(),
+        "transactions": transactions,
+    })
+}
+
+fn tx_to_explorer_json(tx: &Transaction) -> Value {
+    json!({
+        "tx_id": tx.tx_id().to_hex(),
+        "version": tx.version,
+        "inputs": tx.inputs.iter().map(|i| json!({
+            "tx_id": i.previous_outpoint.tx_id.to_hex(),
+            "index": i.previous_outpoint.index,
+        })).collect::<Vec<_>>(),
+        "outputs": tx.outputs.iter().map(|o| json!({
+            "value": o.value.as_base_units(),
+            "address": o.address.to_hex(),
+        })).collect::<Vec<_>>(),
+        "nonce": tx.nonce,
+        "is_coinbase": tx.inputs.is_empty(),
     })
 }
 
@@ -305,5 +328,6 @@ mod tests {
         assert_eq!(result["id"], json!(genesis_id.to_hex()));
         assert!(result["header"]["parents"].as_array().unwrap().is_empty());
         assert_eq!(result["tx_count"], json!(0));
+        assert!(result["transactions"].as_array().unwrap().is_empty());
     }
 }

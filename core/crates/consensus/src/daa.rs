@@ -44,26 +44,54 @@ impl Difficulty {
     }
 }
 
-/// Compute next difficulty from window timestamps (ms) ordered oldest → newest.
+/// One sample on the selected-parent spine for work-weighted DAA.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DaaSample {
+    pub timestamp_ms: u64,
+    /// Cumulative blue work at this block (monotonic along the spine).
+    pub blue_work: u128,
+}
+
+/// Approximate work contributed by a block with the given leading-zero `bits`.
+pub fn work_from_bits(bits: u32) -> u128 {
+    1u128 << bits.min(63)
+}
+
+/// Compute next difficulty from window samples ordered oldest → newest.
 ///
-/// Uses blue-work windows in production; this scaffold keys off observed timestamps only.
-pub fn next_difficulty(
+/// Intervals are weighted by blue-work deltas so harder (higher-work) blocks
+/// pull the observed spacing more than soft tips.
+pub fn next_difficulty_weighted(
     config: &DaaConfig,
     current: Difficulty,
-    window_timestamps_ms: &[u64],
+    samples: &[DaaSample],
 ) -> Difficulty {
-    if window_timestamps_ms.len() < 2 {
-        return current;
-    }
-    let first = window_timestamps_ms[0];
-    let last = *window_timestamps_ms.last().expect("len >= 2");
-    if last <= first {
+    if samples.len() < 2 {
         return current;
     }
 
-    let observed = (last - first) as f64;
-    let expected =
-        config.target_block_time_ms as f64 * (window_timestamps_ms.len() as f64 - 1.0);
+    let mut weighted_dt = 0f64;
+    let mut total_work = 0f64;
+    for window in samples.windows(2) {
+        let older = window[0];
+        let newer = window[1];
+        if newer.timestamp_ms <= older.timestamp_ms {
+            continue;
+        }
+        let work_delta = newer.blue_work.saturating_sub(older.blue_work).max(1) as f64;
+        let dt = (newer.timestamp_ms - older.timestamp_ms) as f64;
+        weighted_dt += dt * work_delta;
+        total_work += work_delta;
+    }
+    if total_work <= 0.0 || weighted_dt <= 0.0 {
+        return current;
+    }
+
+    let observed = weighted_dt / total_work;
+    let intervals = (samples.len() as f64 - 1.0).max(1.0);
+    // Compare mean observed spacing to target (work-normalized mean ≈ raw mean when work is uniform).
+    let expected = config.target_block_time_ms as f64;
+    let _ = intervals; // spacing already averaged by work weights
     let mut factor = expected / observed;
     let max = config.max_adjustment_factor;
     if factor > max {
@@ -75,6 +103,25 @@ pub fn next_difficulty(
     let next = (current.level as f64 * factor).round() as i64;
     let floored = next.max(config.min_level as i64) as u32;
     Difficulty { level: floored }
+}
+
+/// Compute next difficulty from window timestamps (ms) ordered oldest → newest.
+///
+/// Uniform work per sample — prefer [`next_difficulty_weighted`] with blue-work samples.
+pub fn next_difficulty(
+    config: &DaaConfig,
+    current: Difficulty,
+    window_timestamps_ms: &[u64],
+) -> Difficulty {
+    let samples: Vec<DaaSample> = window_timestamps_ms
+        .iter()
+        .enumerate()
+        .map(|(i, &timestamp_ms)| DaaSample {
+            timestamp_ms,
+            blue_work: (i as u128) + 1,
+        })
+        .collect();
+    next_difficulty_weighted(config, current, &samples)
 }
 
 #[cfg(test)]
@@ -116,5 +163,35 @@ mod tests {
         let ts = vec![0, 1];
         let next = next_difficulty(&config, current, &ts);
         assert_eq!(next.level, 0);
+    }
+
+    #[test]
+    fn higher_work_tips_weight_spacing_more() {
+        let config = DaaConfig {
+            target_block_time_ms: 1_000,
+            window_size: 2,
+            max_adjustment_factor: 4.0,
+            min_level: 1,
+        };
+        let current = Difficulty { level: 10 };
+        // Two slow soft blocks then one fast hard block: without work weighting the
+        // mean is dominated by the long early gap; with high work on the last tip
+        // the short interval pulls difficulty up.
+        let soft = vec![
+            DaaSample {
+                timestamp_ms: 0,
+                blue_work: 1,
+            },
+            DaaSample {
+                timestamp_ms: 10_000,
+                blue_work: 2,
+            },
+            DaaSample {
+                timestamp_ms: 10_500,
+                blue_work: 2 + work_from_bits(20),
+            },
+        ];
+        let next = next_difficulty_weighted(&config, current, &soft);
+        assert!(next.level > current.level, "got {}", next.level);
     }
 }

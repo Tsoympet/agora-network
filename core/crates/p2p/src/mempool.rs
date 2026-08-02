@@ -8,10 +8,15 @@ use crate::P2pError;
 /// Default cap on how many transfer txs a mining template pulls from the pool.
 pub const DEFAULT_TEMPLATE_TX_LIMIT: usize = 128;
 
+/// Default minimum implicit fee (base units) for relay / template admission.
+pub const DEFAULT_MIN_RELAY_FEE: u64 = 1;
+
 /// Local mempool with signature-gated admission and outpoint reservation.
 #[derive(Debug, Default)]
 pub struct Mempool {
     txs: HashMap<Hash, Transaction>,
+    /// Implicit fee (`in − out`) recorded at admit for fee-ordered selection.
+    fees: HashMap<Hash, u64>,
     /// Outpoints spent by txs currently in the pool (conflict detection).
     reserved: HashSet<OutPoint>,
     max_size: usize,
@@ -21,6 +26,7 @@ impl Mempool {
     pub fn new(max_size: usize) -> Self {
         Self {
             txs: HashMap::new(),
+            fees: HashMap::new(),
             reserved: HashSet::new(),
             max_size,
         }
@@ -45,10 +51,18 @@ impl Mempool {
 
     /// Admit a transaction after secp256k1 verification and mempool conflict checks.
     ///
+    /// Prefer [`Self::admit_priced`] when the caller already computed the implicit fee
+    /// via [`agora_state_machine::validate_mempool_tx`].
+    ///
     /// Callers that have a live UTXO set should run
     /// [`agora_state_machine::validate_mempool_tx`] under the same mempool lock
     /// before this method so chain UTXO rules and reserved conflicts stay atomic.
     pub fn admit(&mut self, tx: Transaction) -> Result<Hash, P2pError> {
+        self.admit_priced(tx, 0)
+    }
+
+    /// Admit with an explicit fee used for mining-template ordering.
+    pub fn admit_priced(&mut self, tx: Transaction, fee: u64) -> Result<Hash, P2pError> {
         if tx.inputs.is_empty() {
             return Err(P2pError::MempoolRejected(
                 "coinbase not allowed in mempool".into(),
@@ -77,12 +91,17 @@ impl Mempool {
         for op in &claimed {
             self.reserved.insert(*op);
         }
+        self.fees.insert(id, fee);
         self.txs.insert(id, tx);
         Ok(id)
     }
 
     pub fn get(&self, tx_id: &Hash) -> Option<&Transaction> {
         self.txs.get(tx_id)
+    }
+
+    pub fn fee_of(&self, tx_id: &Hash) -> Option<u64> {
+        self.fees.get(tx_id).copied()
     }
 
     /// Lookup by first 8 bytes of `tx_id` for compact-block inflation.
@@ -95,16 +114,22 @@ impl Mempool {
 
     pub fn remove(&mut self, tx_id: &Hash) -> Option<Transaction> {
         let tx = self.txs.remove(tx_id)?;
+        self.fees.remove(tx_id);
         for input in &tx.inputs {
             self.reserved.remove(&input.previous_outpoint);
         }
         Some(tx)
     }
 
-    /// Deterministic transfer selection for mining templates (sorted by `tx_id`).
+    /// Fee-ordered transfer selection for mining templates (fee desc, then `tx_id`).
     pub fn select_transfers(&self, max: usize) -> Vec<Transaction> {
         let mut txs: Vec<Transaction> = self.txs.values().cloned().collect();
-        txs.sort_by(|a, b| a.tx_id().as_bytes().cmp(b.tx_id().as_bytes()));
+        txs.sort_by(|a, b| {
+            let fa = self.fees.get(&a.tx_id()).copied().unwrap_or(0);
+            let fb = self.fees.get(&b.tx_id()).copied().unwrap_or(0);
+            fb.cmp(&fa)
+                .then_with(|| a.tx_id().as_bytes().cmp(b.tx_id().as_bytes()))
+        });
         if txs.len() > max {
             txs.truncate(max);
         }
@@ -229,17 +254,22 @@ mod tests {
     }
 
     #[test]
-    fn select_transfers_is_sorted_and_capped() {
+    fn select_transfers_orders_by_fee_then_txid() {
         let mut pool = Mempool::new(16);
-        let a = signed_spend(0, 1);
-        let b = signed_spend(1, 2);
-        let c = signed_spend(2, 3);
-        pool.admit(a.clone()).unwrap();
-        pool.admit(b.clone()).unwrap();
-        pool.admit(c.clone()).unwrap();
-        let selected = pool.select_transfers(2);
-        assert_eq!(selected.len(), 2);
-        assert!(selected[0].tx_id().as_bytes() <= selected[1].tx_id().as_bytes());
+        let low = signed_spend(0, 1);
+        let high = signed_spend(1, 2);
+        let mid = signed_spend(2, 3);
+        pool.admit_priced(low.clone(), 1).unwrap();
+        pool.admit_priced(high.clone(), 10).unwrap();
+        pool.admit_priced(mid.clone(), 5).unwrap();
+        let selected = pool.select_transfers(3);
+        assert_eq!(selected.len(), 3);
+        assert_eq!(selected[0].tx_id(), high.tx_id());
+        assert_eq!(selected[1].tx_id(), mid.tx_id());
+        assert_eq!(selected[2].tx_id(), low.tx_id());
+        let capped = pool.select_transfers(2);
+        assert_eq!(capped.len(), 2);
+        assert_eq!(capped[0].tx_id(), high.tx_id());
     }
 
     #[test]

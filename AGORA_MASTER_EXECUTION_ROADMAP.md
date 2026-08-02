@@ -110,6 +110,15 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **`agora_getUtxos`:** list live outpoints for coin selection
 - [x] **Light-client wallet helpers:** `getBalance` / `getUtxos` / `submitTransaction` + desktop/mobile lookup UI
 
+## Phase 12: Testnet close-out — in progress
+
+- [x] **Premine address:** `AGORA_PREMINE_ADDRESS` on fresh genesis (`load_or_ignite`)
+- [x] **Signed send:** BIP-39/44 JS wallet (`apps/shared/light-client/wallet.ts`) + desktop/mobile send UI
+- [x] **Explorer txs:** `agora_getBlock` includes hex `transactions`; LiveDag block detail
+- [x] **Stratum notify fan-out:** broadcast `mining.notify` to all sessions on template upsert
+- [x] **Fee + DAA:** min relay fee, fee-ordered `select_transfers`, blue-work-weighted DAA window
+- [x] **Local testnet runbook:** `scripts/local_testnet.sh`
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

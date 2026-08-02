@@ -3,13 +3,22 @@
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agora_p2p::{Mempool, NetworkHandle, NetworkMessage, DEFAULT_TEMPLATE_TX_LIMIT};
+use agora_p2p::{
+    Mempool, NetworkHandle, NetworkMessage, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT,
+};
 use agora_rpc::{RpcBackend, RpcError, UtxoEntry};
 use agora_state_machine::{outpoint_key, validate_mempool_tx, ColumnFamily, StateStore};
 use agora_types::{Address, Amount, Block, Hash, OutPoint, Transaction, TxOut};
 use borsh::BorshDeserialize;
 
 use crate::admit::ChainState;
+
+fn min_relay_fee() -> u64 {
+    std::env::var("AGORA_MIN_RELAY_FEE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_MIN_RELAY_FEE)
+}
 
 /// UTXO + signature + mempool reservation checks, then admit under one lock.
 pub(crate) fn admit_transaction(
@@ -20,9 +29,15 @@ pub(crate) fn admit_transaction(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-    validate_mempool_tx(store, &tx, pool.reserved())
+    let fee = validate_mempool_tx(store, &tx, pool.reserved())
         .map_err(|e| RpcError::Rejected(format!("utxo: {e}")))?;
-    pool.admit(tx)
+    let min_fee = min_relay_fee();
+    if fee < min_fee {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {fee} < min relay {min_fee}"
+        )));
+    }
+    pool.admit_priced(tx, fee)
         .map_err(|e| RpcError::Rejected(e.to_string()))
 }
 
@@ -326,6 +341,8 @@ mod tests {
         assert!(backend.submit_transaction(bad).is_err());
 
         let premine = Amount::from_whole(10_000_000).unwrap();
+        let pay = Amount::from_whole(1).unwrap().as_base_units();
+        let fee = 1u64;
         let mut good = Transaction::unsigned(
             1,
             vec![TxIn {
@@ -336,13 +353,11 @@ mod tests {
             }],
             vec![
                 TxOut {
-                    value: Amount::from_whole(1).unwrap(),
+                    value: Amount::from_base_units(pay),
                     address: to,
                 },
                 TxOut {
-                    value: Amount::from_base_units(
-                        premine.as_base_units() - Amount::from_whole(1).unwrap().as_base_units(),
-                    ),
+                    value: Amount::from_base_units(premine.as_base_units() - pay - fee),
                     address: from.address(),
                 },
             ],
@@ -386,6 +401,8 @@ mod tests {
         let mut backend = NodeBackend::new(chain, store, None, false, mempool.clone(), miner);
 
         let premine = Amount::from_whole(10_000_000).unwrap();
+        let pay = Amount::from_whole(1).unwrap().as_base_units();
+        let fee = 1u64;
         let mut transfer = Transaction::unsigned(
             1,
             vec![TxIn {
@@ -396,13 +413,11 @@ mod tests {
             }],
             vec![
                 TxOut {
-                    value: Amount::from_whole(1).unwrap(),
+                    value: Amount::from_base_units(pay),
                     address: to,
                 },
                 TxOut {
-                    value: Amount::from_base_units(
-                        premine.as_base_units() - Amount::from_whole(1).unwrap().as_base_units(),
-                    ),
+                    value: Amount::from_base_units(premine.as_base_units() - pay - fee),
                     address: from.address(),
                 },
             ],
@@ -486,13 +501,14 @@ mod tests {
         };
         assert_eq!(out.value, drip);
 
+        let fee = 1u64;
         let mut spend = Transaction::unsigned(
             1,
             vec![TxIn {
                 previous_outpoint: op,
             }],
             vec![TxOut {
-                value: drip,
+                value: Amount::from_base_units(drip.as_base_units() - fee),
                 address: payee,
             }],
             1,
@@ -504,6 +520,9 @@ mod tests {
         block.header.nonce = 1;
         backend.submit_block(block).unwrap();
         assert_eq!(backend.get_balance(&funded.address()), Amount::ZERO);
-        assert_eq!(backend.get_balance(&payee), drip);
+        assert_eq!(
+            backend.get_balance(&payee).as_base_units(),
+            drip.as_base_units() - fee
+        );
     }
 }

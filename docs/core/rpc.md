@@ -32,6 +32,8 @@ Wired in `core/node-bin`:
 | `AGORA_POW_ALGO` | `randomx` | `randomx` or `kheavyhash` for admission / templates |
 | `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty (`header.bits`); retargets after admits |
 | `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout address (40-char hex) for templates |
+| `AGORA_PREMINE_ADDRESS` | `00…00` | Genesis premine payout (40-char hex); only applied on a fresh `AGORA_DATA` |
+| `AGORA_MIN_RELAY_FEE` | `1` | Minimum implicit fee (`in − out`) for mempool admission |
 
 Endpoints:
 
@@ -39,8 +41,8 @@ Endpoints:
 - `POST /` or `POST /rpc` → JSON body is an `RpcRequest`
 - CORS enabled (`Access-Control-Allow-Origin: *`) for browser explorers; `OPTIONS` preflight supported
 
-`agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`).  
-`agora_getBlockTemplate` returns a full `Block` (native serde hashes as byte arrays) with a coinbase paying `AGORA_MINER_ADDRESS` for the emission reward at the estimated next blue score, followed by up to 128 mempool transfers (`tx_id` order); `header.tx_root` commits to that body. `agora_submitBlock` rejects `tx_root` mismatches and evicts included/conflicting mempool txs.
+`agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`, and hex `transactions` with inputs/outputs).  
+`agora_getBlockTemplate` returns a full `Block` (native serde hashes as byte arrays) with a coinbase paying `AGORA_MINER_ADDRESS` for the emission reward at the estimated next blue score, followed by up to 128 mempool transfers (fee-desc, then `tx_id`); `header.tx_root` commits to that body. `agora_submitBlock` rejects `tx_root` mismatches and evicts included/conflicting mempool txs. Mempool admission requires `fee ≥ AGORA_MIN_RELAY_FEE` (implicit burn).
 
 Example:
 
@@ -54,10 +56,10 @@ The live backend (`NodeBackend`) reads tips/blocks/UTXOs from `StateStore`, admi
 
 ## Light clients
 
-`apps/shared/light-client` provides `createLightClient` + `startTipSync` plus wallet helpers (`getBalance`, `getUtxos`, `submitTransaction`) used by:
+`apps/shared/light-client` provides `createLightClient` + `startTipSync` plus wallet helpers (`getBalance`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) used by:
 
-- `apps/explorer` (live DAG)
-- `apps/desktop` (tip sync + address UTXO lookup)
-- `apps/mobile` (tip sync + address UTXO lookup)
+- `apps/explorer` (live DAG + block tx detail)
+- `apps/desktop` (tip sync, UTXO lookup, signed send)
+- `apps/mobile` (tip sync, UTXO lookup, signed send)
 
 Default endpoint: `http://127.0.0.1:8545/rpc` (explorer/desktop may proxy `/rpc`).

@@ -27,11 +27,11 @@ Wired in `agora-node` (`ChainState`):
 
 1. Templates advertise `bits = difficulty.level`
 2. Admission rejects blocks whose `bits` ≠ current difficulty
-3. After admit, timestamps along the selected-parent spine feed `next_difficulty`
+3. After admit, selected-parent spine samples (`timestamp_ms` + cumulative `work_from_bits`) feed `next_difficulty_weighted`
 4. Level is persisted at `meta/daa_difficulty` (`u32` LE)
 
 `AGORA_TEMPLATE_BITS` sets the initial level (and `min_level = 0` when started at 0).  
-Production will key windows off blue-work; the scaffold still uses timestamps.
+GHOSTDAG also tracks unit `blue_work` per blue tip; the DAA window overlays header-bits work so harder tips weigh spacing more.
 
 ## PoW
 

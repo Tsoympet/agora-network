@@ -157,9 +157,15 @@ async fn main() {
 
     let data_dir = std::env::var("AGORA_DATA").unwrap_or_else(|_| "data/agora-node".into());
     let store = Arc::new(StateStore::open(&data_dir).expect("open state store"));
+    let premine_address = std::env::var("AGORA_PREMINE_ADDRESS")
+        .ok()
+        .and_then(|s| Address::from_hex(&s))
+        .unwrap_or(Address::ZERO);
     let genesis_hash = GenesisBuilder::default()
+        .with_premine_address(premine_address)
         .load_or_ignite(store.as_ref())
         .expect("genesis load_or_ignite");
+    info!(premine = %premine_address.to_hex(), "genesis premine address");
 
     let chain = Arc::new(Mutex::new(
         ChainState::bootstrap(store.clone(), genesis_hash, pow_algo, template_bits)
