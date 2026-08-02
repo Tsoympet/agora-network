@@ -73,14 +73,14 @@ Bind with `AGORA_SEEDER_BIND` (default `127.0.0.1:18080`). Preload via `AGORA_SE
 `agora-node` reads `AGORA_DNS_SEEDER` (host or full URL) into `NetworkConfig::dns_seeder_url`:
 
 1. On boot, `fetch_seeder_peers` merges seeder results with `AGORA_BOOTSTRAP` (capped by `max_peers`) and dials
-2. On first `Listening` event, `register_with_seeder` POSTs the dialable multiaddr (`0.0.0.0` → `127.0.0.1`)
+2. On first `Listening` event, register the dialable multiaddr (`0.0.0.0` → `127.0.0.1`)
+3. Every `AGORA_SEEDER_REFRESH_SECS` (default `60`, `0` disables), `SeederBook` re-fetches peers, dials new multiaddrs, and re-registers
 
 ```bash
 cargo run -p agora-dns-seeder
-AGORA_DNS_SEEDER=http://127.0.0.1:18080 cargo run -p agora-node
+AGORA_DNS_SEEDER=http://127.0.0.1:18080 AGORA_SEEDER_REFRESH_SECS=60 cargo run -p agora-node
 ```
 
 ## Follow-ons
 
-- Periodic seeder refresh / re-register
 - Connection-limits behaviour tied to `max_peers`

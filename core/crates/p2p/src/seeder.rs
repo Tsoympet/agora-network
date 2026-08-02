@@ -162,6 +162,115 @@ pub async fn fetch_seeder_peers_best_effort(url: &str) -> Vec<String> {
     }
 }
 
+/// Tracks seeder registration + periodic peer refresh / re-dial.
+#[derive(Debug, Clone)]
+pub struct SeederBook {
+    url: String,
+    max_peers: u32,
+    bootstrap: Vec<String>,
+    /// Multiaddrs we have already attempted to dial.
+    dialed: std::collections::HashSet<String>,
+    /// Last known dialable listen multiaddr (with `/p2p/<id>`).
+    dialable: Option<String>,
+    refresh_interval: std::time::Duration,
+}
+
+impl SeederBook {
+    pub fn new(
+        url: impl Into<String>,
+        bootstrap: Vec<String>,
+        max_peers: u32,
+        refresh_interval: std::time::Duration,
+    ) -> Self {
+        let mut dialed = std::collections::HashSet::new();
+        for peer in &bootstrap {
+            dialed.insert(peer.clone());
+        }
+        Self {
+            url: normalize_seeder_url(&url.into()),
+            max_peers: max_peers.max(1),
+            bootstrap,
+            dialed,
+            dialable: None,
+            refresh_interval,
+        }
+    }
+
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    pub fn refresh_interval(&self) -> std::time::Duration {
+        self.refresh_interval
+    }
+
+    pub fn dialable(&self) -> Option<&str> {
+        self.dialable.as_deref()
+    }
+
+    pub fn note_dialed(&mut self, peers: &[String]) {
+        for peer in peers {
+            self.dialed.insert(peer.clone());
+        }
+    }
+
+    pub fn has_dialed(&self, peer: &str) -> bool {
+        self.dialed.contains(peer)
+    }
+
+    pub fn dialed_count(&self) -> usize {
+        self.dialed.len()
+    }
+
+    /// Update the dialable listen address used for seeder registration.
+    pub fn set_dialable(&mut self, multiaddr: impl Into<String>) {
+        self.dialable = Some(multiaddr.into());
+    }
+
+    /// Register (or re-register) the current dialable address with the seeder.
+    pub async fn register(&self) -> Result<(), P2pError> {
+        let Some(addr) = &self.dialable else {
+            return Err(P2pError::Seeder("no dialable address yet".into()));
+        };
+        register_with_seeder(&self.url, addr).await
+    }
+
+    /// Fetch seeder peers, dial any not yet attempted (up to `max_peers`), re-register.
+    ///
+    /// Returns newly dialed multiaddrs.
+    pub async fn refresh_and_dial(
+        &mut self,
+        dial: impl Fn(&str) -> Result<(), P2pError>,
+    ) -> Vec<String> {
+        let seeder = fetch_seeder_peers_best_effort(&self.url).await;
+        let merged = merge_bootstrap_peers(&self.bootstrap, &seeder, self.max_peers);
+        let mut newly = Vec::new();
+        for peer in merged {
+            if self.dialed.contains(&peer) {
+                continue;
+            }
+            match dial(&peer) {
+                Ok(()) => {
+                    info!(peer, "seeder refresh dialed peer");
+                    self.dialed.insert(peer.clone());
+                    newly.push(peer);
+                }
+                Err(err) => {
+                    warn!(peer, error = %err, "seeder refresh dial failed");
+                    // Still mark dialed so we do not spam the same bad multiaddr every tick.
+                    self.dialed.insert(peer);
+                }
+            }
+        }
+        if let Err(err) = self.register().await {
+            warn!(error = %err, "seeder refresh re-register failed");
+        } else if self.dialable.is_some() {
+            debug!(url = %self.url, "seeder refresh re-registered dialable addr");
+        }
+        newly
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,6 +310,82 @@ mod tests {
                 "/ip4/2.2.2.2/tcp/2".to_string()
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn seeder_book_tracks_dialable_and_skips_known() {
+        let mut book = SeederBook::new(
+            "http://127.0.0.1:9/peers",
+            vec!["/ip4/1.1.1.1/tcp/1".into()],
+            8,
+            std::time::Duration::from_secs(60),
+        );
+        book.note_dialed(&["/ip4/2.2.2.2/tcp/2".into()]);
+        book.set_dialable("/ip4/127.0.0.1/tcp/16111/p2p/12D3KooWLocal");
+        assert_eq!(
+            book.dialable(),
+            Some("/ip4/127.0.0.1/tcp/16111/p2p/12D3KooWLocal")
+        );
+        assert!(book.has_dialed("/ip4/1.1.1.1/tcp/1"));
+        assert!(book.has_dialed("/ip4/2.2.2.2/tcp/2"));
+        assert_eq!(book.dialed_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn seeder_book_refresh_dials_and_registers() {
+        use std::sync::{Arc, Mutex};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            // GET peers, then POST register (may repeat).
+            for _ in 0..4 {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = vec![0u8; 4096];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                if n == 0 {
+                    continue;
+                }
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let body = if req.starts_with("GET") {
+                    r#"["/ip4/8.8.8.8/tcp/16111/p2p/12D3KooWFreshPeer"]"#
+                } else {
+                    "registered"
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+
+        let url = format!("http://{addr}/peers");
+        let mut book = SeederBook::new(
+            &url,
+            Vec::new(),
+            8,
+            std::time::Duration::from_secs(30),
+        );
+        book.set_dialable("/ip4/127.0.0.1/tcp/16111/p2p/12D3KooWLocal");
+        let dialed = Arc::new(Mutex::new(Vec::new()));
+        let dialed_c = dialed.clone();
+        let newly = book
+            .refresh_and_dial(|peer| {
+                dialed_c.lock().unwrap().push(peer.to_string());
+                Ok(())
+            })
+            .await;
+        assert_eq!(newly.len(), 1);
+        assert!(newly[0].contains("8.8.8.8"));
+        // Second refresh should not re-dial the same peer.
+        let newly2 = book
+            .refresh_and_dial(|peer| {
+                dialed.lock().unwrap().push(peer.to_string());
+                Ok(())
+            })
+            .await;
+        assert!(newly2.is_empty());
     }
 
     #[tokio::test]

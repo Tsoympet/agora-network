@@ -30,6 +30,6 @@ pub use scoring::{
 };
 pub use seeder::{
     fetch_seeder_peers, fetch_seeder_peers_best_effort, merge_bootstrap_peers, normalize_seeder_url,
-    register_with_seeder,
+    register_with_seeder, SeederBook,
 };
 pub use topics::{blocks_topic, transactions_topic, TOPIC_BLOCKS, TOPIC_TRANSACTIONS};

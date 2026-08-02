@@ -12,8 +12,8 @@ use std::time::Duration;
 use agora_consensus::{EmissionSchedule, PowAlgorithm};
 use agora_p2p::{
     dial_addr, fetch_seeder_peers_best_effort, merge_bootstrap_peers, reconstruct_compact_block,
-    register_with_seeder, Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage,
-    NetworkNode, PeerId, PendingFetches, ReconstructError,
+    Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage, NetworkNode, PeerId,
+    PendingFetches, ReconstructError, SeederBook,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{GenesisBuilder, StateStore};
@@ -129,10 +129,15 @@ async fn main() {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let seeder_refresh_secs = std::env::var("AGORA_SEEDER_REFRESH_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(60);
 
     let mut net_cfg = NetworkConfig::default()
         .with_listen(listen)
-        .with_bootstrap(bootstrap.clone());
+        .with_bootstrap(bootstrap.clone())
+        .with_seeder_refresh_interval(Duration::from_secs(seeder_refresh_secs));
     if let Some(url) = &dns_seeder {
         net_cfg = net_cfg.with_dns_seeder(url.clone());
     }
@@ -149,6 +154,14 @@ async fn main() {
     ));
     let mempool = Arc::new(Mutex::new(Mempool::new(10_000)));
 
+    let mut seeder_book = net_cfg.dns_seeder_url.as_ref().map(|url| {
+        SeederBook::new(
+            url.clone(),
+            bootstrap.clone(),
+            net_cfg.max_peers,
+            net_cfg.seeder_refresh_interval,
+        )
+    });
     let seeder_peers = if let Some(url) = net_cfg.dns_seeder_url.clone() {
         fetch_seeder_peers_best_effort(&url).await
     } else {
@@ -161,6 +174,9 @@ async fn main() {
         if let Err(err) = handle.dial(peer) {
             warn!(error = %err, peer, "bootstrap dial failed");
         }
+    }
+    if let Some(book) = seeder_book.as_mut() {
+        book.note_dialed(&dial_peers);
     }
 
     let rpc_bind =
@@ -189,6 +205,7 @@ async fn main() {
         template_bits,
         daa_bits = chain.lock().map(|c| c.difficulty().as_bits()).unwrap_or(template_bits),
         dns_seeder = net_cfg.dns_seeder_url.as_deref().unwrap_or(""),
+        seeder_refresh_secs,
         dial_peers = dial_peers.len(),
         "agora-node foundation boot ok"
     );
@@ -202,26 +219,58 @@ async fn main() {
     );
 
     let net = handle.clone();
-    let seeder_url = net_cfg.dns_seeder_url.clone();
     let local_peer = handle.peer_id();
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));
-        let mut registered = false;
-        while let Some(event) = events.recv().await {
+        let refresh_every = seeder_book
+            .as_ref()
+            .map(|b| b.refresh_interval())
+            .unwrap_or(Duration::ZERO);
+        let mut refresh = if refresh_every.is_zero() {
+            None
+        } else {
+            let mut interval = tokio::time::interval(refresh_every);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // Skip the immediate first tick; boot already fetched/dialed.
+            interval.tick().await;
+            Some(interval)
+        };
+
+        loop {
+            let event = tokio::select! {
+                maybe = events.recv() => match maybe {
+                    Some(ev) => ev,
+                    None => break,
+                },
+                _ = async {
+                    if let Some(interval) = refresh.as_mut() {
+                        interval.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    if let Some(book) = seeder_book.as_mut() {
+                        let newly = book.refresh_and_dial(|peer| net.dial(peer)).await;
+                        if !newly.is_empty() {
+                            info!(count = newly.len(), "seeder refresh dialed new peers");
+                        }
+                    }
+                    continue;
+                }
+            };
+
             match event {
                 NetworkEvent::Listening(addr) => {
                     info!(%addr, "p2p listening");
-                    if !registered {
-                        if let Some(url) = &seeder_url {
-                            let dialable = dial_addr(&addr, local_peer);
-                            match register_with_seeder(url, &dialable.to_string()).await {
-                                Ok(()) => {
-                                    registered = true;
-                                    info!(%dialable, "registered dialable addr with dns seeder");
-                                }
-                                Err(err) => {
-                                    warn!(error = %err, "dns seeder register failed")
-                                }
+                    if let Some(book) = seeder_book.as_mut() {
+                        let dialable = dial_addr(&addr, local_peer);
+                        book.set_dialable(dialable.to_string());
+                        match book.register().await {
+                            Ok(()) => {
+                                info!(%dialable, "registered dialable addr with dns seeder");
+                            }
+                            Err(err) => {
+                                warn!(error = %err, "dns seeder register failed")
                             }
                         }
                     }
