@@ -1,28 +1,44 @@
 //! Agora full node process.
 //!
-//! Wires consensus, state, p2p, and HTTP JSON-RPC.
+//! Wires consensus, state, p2p, HTTP JSON-RPC, and PoW-gated block admission.
 
+mod admit;
 mod backend;
 mod http;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use agora_consensus::{EmissionSchedule, Ghostdag, GhostdagConfig};
-use agora_p2p::{NetworkConfig, NetworkEvent, NetworkNode};
+use agora_consensus::{EmissionSchedule, PowAlgorithm};
+use agora_p2p::{NetworkConfig, NetworkEvent, NetworkMessage, NetworkNode};
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{GenesisBuilder, StateStore};
-use tokio::sync::Mutex;
 use tracing::{info, warn};
 
+use crate::admit::ChainState;
 use crate::backend::NodeBackend;
 use crate::http::serve_rpc;
+
+fn parse_pow_algo() -> PowAlgorithm {
+    match std::env::var("AGORA_POW_ALGO")
+        .unwrap_or_else(|_| "randomx".into())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "kheavyhash" | "kheavy" | "asic" => PowAlgorithm::KHeavyHash,
+        _ => PowAlgorithm::RandomX,
+    }
+}
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let ghostdag = Ghostdag::new(GhostdagConfig::default());
     let emission = EmissionSchedule::default();
+    let pow_algo = parse_pow_algo();
+    let template_bits = std::env::var("AGORA_TEMPLATE_BITS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
 
     let listen = std::env::var("AGORA_LISTEN")
         .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/16111".into());
@@ -47,6 +63,11 @@ async fn main() {
         .ignite(store.as_ref())
         .expect("genesis ignition");
 
+    let chain = Arc::new(Mutex::new(
+        ChainState::bootstrap(store.clone(), genesis_hash, pow_algo, template_bits)
+            .expect("chain bootstrap"),
+    ));
+
     let (handle, mut events, node) = NetworkNode::build(&net_cfg).expect("p2p build");
     for peer in &bootstrap {
         if let Err(err) = handle.dial(peer) {
@@ -60,24 +81,31 @@ async fn main() {
         std::env::var("AGORA_RPC_ALLOW_FUND").as_deref(),
         Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
     );
-    let backend = NodeBackend::new(store, Some(handle.clone()), allow_fund);
-    let dispatcher = Arc::new(Mutex::new(RpcDispatcher::new(backend)));
+    let backend = NodeBackend::new(
+        chain.clone(),
+        store,
+        Some(handle.clone()),
+        allow_fund,
+    );
+    let dispatcher = Arc::new(tokio::sync::Mutex::new(RpcDispatcher::new(backend)));
     tokio::spawn(serve_rpc(rpc_bind.clone(), dispatcher.clone()));
 
     info!(
-        k = ghostdag.config().k,
         initial_reward = emission.initial_reward,
         peer_id = %handle.peer_id(),
         genesis = %genesis_hash.to_hex(),
         %rpc_bind,
         allow_fund,
+        ?pow_algo,
+        template_bits,
         "agora-node foundation boot ok"
     );
     println!(
-        "Agora Network node — peer {} genesis {} rpc http://{}",
+        "Agora Network node — peer {} genesis {} rpc http://{} pow={:?}",
         handle.peer_id(),
         genesis_hash.to_hex(),
-        rpc_bind
+        rpc_bind,
+        pow_algo
     );
 
     tokio::spawn(async move {
@@ -86,9 +114,34 @@ async fn main() {
                 NetworkEvent::Listening(addr) => info!(%addr, "p2p listening"),
                 NetworkEvent::PeerConnected(peer) => info!(%peer, "peer connected"),
                 NetworkEvent::PeerDisconnected(peer) => info!(%peer, "peer disconnected"),
-                NetworkEvent::Message { peer, topic, .. } => {
-                    info!(%peer, %topic, "gossip message")
-                }
+                NetworkEvent::Message {
+                    peer,
+                    topic,
+                    message,
+                } => match message {
+                    NetworkMessage::Block(block) => {
+                        let result = chain
+                            .lock()
+                            .map_err(|_| "chain lock poisoned".to_string())
+                            .and_then(|mut guard| {
+                                guard.admit_block(block).map_err(|e| e.to_string())
+                            });
+                        match result {
+                            Ok(id) => {
+                                info!(%peer, %topic, block = %id.to_hex(), "admitted gossip block")
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "rejected gossip block")
+                            }
+                        }
+                    }
+                    NetworkMessage::BlockAnnounce { hash } => {
+                        info!(%peer, %topic, announce = %hash.to_hex(), "block announce")
+                    }
+                    NetworkMessage::Transaction(_) => {
+                        info!(%peer, %topic, "tx gossip")
+                    }
+                },
             }
         }
     });

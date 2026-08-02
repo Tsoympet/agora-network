@@ -51,7 +51,7 @@ agora-network/
 | `core/crates/state-machine` | `types`, `consensus` | libp2p, UI |
 | `core/crates/p2p` | `types`, `consensus` | RocksDB, UI |
 | `core/crates/rpc` | `types`, node services | Mining loops, UI frameworks |
-| `core/crates/miner-sidecar` | `types`, `crypto` | Full state machine |
+| `core/crates/miner-sidecar` | `types`, `crypto`, `consensus` (RandomX hasher), `rpc` | Full state machine / RocksDB |
 | `core/node-bin` | all core crates | Client UI |
 | `apps/*` | RPC / generated TS types | Consensus or RocksDB logic |
 | `infrastructure/*` | public RPC / P2P APIs | Core crate internals |

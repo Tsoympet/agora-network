@@ -1,4 +1,4 @@
-use agora_types::{Address, Amount, Hash, Transaction};
+use agora_types::{Address, Amount, Block, Hash, Transaction};
 use serde_json::{json, Value};
 
 use crate::backend::RpcBackend;
@@ -78,6 +78,18 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     "balance": bal.as_base_units(),
                 }))
             }
+            RpcMethod::GetBlockTemplate => {
+                let header = self.backend.get_block_template()?;
+                Ok(serde_json::to_value(header)
+                    .map_err(|e| RpcError::Internal(e.to_string()))?)
+            }
+            RpcMethod::SubmitBlock => {
+                let raw = block_param(&req.params)?;
+                let block: Block = serde_json::from_value(raw)
+                    .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+                let id = self.backend.submit_block(block)?;
+                Ok(json!({ "block_id": id.to_hex() }))
+            }
         }
     }
 }
@@ -114,6 +126,20 @@ fn tx_param(params: &Value) -> Result<Value, RpcError> {
         return Err(RpcError::InvalidParams("missing `tx`".into()));
     }
     single_or_named(params, "tx")
+}
+
+/// Accept `{ "block": {...} }`, `[block]`, or a bare block object.
+fn block_param(params: &Value) -> Result<Value, RpcError> {
+    if let Some(obj) = params.as_object() {
+        if let Some(block) = obj.get("block") {
+            return Ok(block.clone());
+        }
+        if obj.contains_key("header") {
+            return Ok(params.clone());
+        }
+        return Err(RpcError::InvalidParams("missing `block`".into()));
+    }
+    single_or_named(params, "block")
 }
 
 fn param_hash(params: &Value, key: &str) -> Result<Hash, RpcError> {

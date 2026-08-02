@@ -29,13 +29,20 @@ Production will key windows off blue-work; the scaffold uses timestamps to lock 
 
 | Algorithm | Target hardware | Hasher |
 | --- | --- | --- |
-| RandomX | CPU (`miner-sidecar`) | `Sha256PowHasher` stand-in until RandomX FFI |
+| RandomX | CPU (`miner-sidecar`) | `RandomXPowHasher` (`rust-randomx`, feature `randomx`) |
 | kHeavyHash | ASIC (`stratum-pool`) | `KHeavyHashPowHasher` → `agora-kheavyhash` |
 
 Traits:
 
 - `PowHasher` — compute digest for a `BlockHeader`
 - `PowVerifier` — check digest + difficulty (`LeadingZeroPow` uses `header.bits` as leading-zero requirement)
+
+### RandomX
+
+- Key = `SHA-256(borsh(header))` with `nonce = 0`
+- Input = full `borsh(header)` including candidate nonce
+- Feature `randomx` (default) binds official RandomX via `rust-randomx` (needs cmake + g++; see `.cargo/config.toml`)
+- Without the feature, `RandomXPowHasher` falls back to SHA-256 so the workspace still compiles
 
 ### kHeavyHash (`agora-kheavyhash`)
 
@@ -44,6 +51,13 @@ Vendored from rusty-kaspa (`kaspa-hashes` / `kaspa-pow`, ISC). Pipeline:
 1. Pre-PoW commitment = `SHA-256(borsh(header))` with `nonce = 0` and `timestamp_ms = 0`
 2. Kaspa `PowHash::new(pre, timestamp).finalize_with_nonce(nonce)`
 3. `Matrix::generate(pre).heavy_hash(...)` (includes final `KHeavyHash` cSHAKE domain)
+
+### Block admission (`agora-node`)
+
+`ChainState::admit_block` runs `LeadingZeroPow::verify`, persists the block, updates tips, then `Dag::insert` + `Ghostdag::add_block`. Called from:
+
+- RPC `agora_submitBlock`
+- Gossip `NetworkMessage::Block`
 
 ## Emission
 
@@ -54,11 +68,3 @@ Vendored from rusty-kaspa (`kaspa-hashes` / `kaspa-pow`, ISC). Pipeline:
 ```bash
 cargo run -p agora-consensus --bin ghostdag_fuzzer -- 128 42
 ```
-
-Simulates two isolated mining partitions that later merge through bridge tips, then asserts:
-
-- ordered set == tip past (no dupes / omissions)
-- selected-parent spine has non-increasing blue score toward genesis
-- coloring is deterministic across fresh engines
-
-CI also runs `tests/ghostdag_partition_fuzz.rs`.

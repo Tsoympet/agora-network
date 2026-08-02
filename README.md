@@ -65,14 +65,15 @@ TypeScript bindings for shared types are generated under `core/crates/types/bind
 ### Binaries
 
 ```bash
-# Full node (libp2p gossip + HTTP JSON-RPC).
-# Optional: AGORA_LISTEN, AGORA_BOOTSTRAP, AGORA_DATA, AGORA_RPC_BIND, AGORA_RPC_ALLOW_FUND
+# Full node (libp2p gossip + HTTP JSON-RPC + PoW admission).
+# Optional: AGORA_LISTEN, AGORA_BOOTSTRAP, AGORA_DATA, AGORA_RPC_BIND,
+#           AGORA_RPC_ALLOW_FUND, AGORA_POW_ALGO, AGORA_TEMPLATE_BITS
 cargo run -p agora-node
 # Example: curl -s http://127.0.0.1:8545/rpc -H 'content-type: application/json' \
 #   -d '{"id":1,"method":"agora_getDagTips","params":[]}'
 
-# CPU miner sidecar
-cargo run -p agora-miner-sidecar
+# CPU RandomX miner sidecar (polls agora_getBlockTemplate / agora_submitBlock)
+AGORA_RPC_URL=http://127.0.0.1:8545/rpc cargo run -p agora-miner-sidecar
 
 # Bootstrap peer phonebook (optional: AGORA_SEEDER_BIND, AGORA_SEEDER_PEERS)
 cargo run -p agora-dns-seeder

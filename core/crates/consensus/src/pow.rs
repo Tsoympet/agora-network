@@ -23,7 +23,7 @@ pub trait PowVerifier: Send + Sync {
     fn verify(&self, header: &BlockHeader, hash: &Hash) -> Result<(), ConsensusError>;
 }
 
-/// SHA-256(borsh(header)) stand-in used for RandomX until that FFI lands.
+/// SHA-256(borsh(header)) stand-in used when the `randomx` feature is disabled.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Sha256PowHasher;
 
@@ -34,6 +34,58 @@ impl PowHasher for Sha256PowHasher {
 
     fn pow_hash(&self, header: &BlockHeader) -> Hash {
         Hash::hash_borsh(header)
+    }
+}
+
+/// Official RandomX digest over an Agora header (feature `randomx`).
+///
+/// - Key = `SHA-256(borsh(header))` with `nonce = 0`
+/// - Input = full `borsh(header)` including the candidate nonce
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RandomXPowHasher;
+
+impl RandomXPowHasher {
+    pub fn key_hash(header: &BlockHeader) -> Hash {
+        let keyed = BlockHeader {
+            nonce: 0,
+            ..header.clone()
+        };
+        Hash::hash_borsh(&keyed)
+    }
+}
+
+#[cfg(feature = "randomx")]
+impl PowHasher for RandomXPowHasher {
+    fn algorithm(&self) -> PowAlgorithm {
+        PowAlgorithm::RandomX
+    }
+
+    fn pow_hash(&self, header: &BlockHeader) -> Hash {
+        use std::sync::Arc;
+
+        use rust_randomx::{Context, Hasher};
+
+        let key = Self::key_hash(header);
+        let input = borsh::to_vec(header).expect("borsh header is infallible");
+        // Light mode (fast=false): lower memory, suitable for verify + sidecar smoke.
+        let ctx = Arc::new(Context::new(key.as_bytes(), false));
+        let hasher = Hasher::new(ctx);
+        let out = hasher.hash(&input);
+        let mut digest = [0u8; 32];
+        digest.copy_from_slice(out.as_ref());
+        Hash(digest)
+    }
+}
+
+#[cfg(not(feature = "randomx"))]
+impl PowHasher for RandomXPowHasher {
+    fn algorithm(&self) -> PowAlgorithm {
+        PowAlgorithm::RandomX
+    }
+
+    fn pow_hash(&self, header: &BlockHeader) -> Hash {
+        // Fall back so workspace builds without a C++ toolchain still compile.
+        Sha256PowHasher.pow_hash(header)
     }
 }
 
@@ -75,7 +127,7 @@ impl PowHasher for KHeavyHashPowHasher {
 /// Select the default hasher for an algorithm.
 pub fn hasher_for(algo: PowAlgorithm) -> Box<dyn PowHasher> {
     match algo {
-        PowAlgorithm::RandomX => Box::new(Sha256PowHasher),
+        PowAlgorithm::RandomX => Box::new(RandomXPowHasher),
         PowAlgorithm::KHeavyHash => Box::new(KHeavyHashPowHasher),
     }
 }
@@ -102,6 +154,10 @@ impl LeadingZeroPow {
 
     pub fn with_hasher(hasher: Box<dyn PowHasher>) -> Self {
         Self { hasher }
+    }
+
+    pub fn hasher(&self) -> &dyn PowHasher {
+        self.hasher.as_ref()
     }
 
     pub fn leading_zero_bits(hash: &Hash) -> u32 {
@@ -182,7 +238,7 @@ mod tests {
         };
         let hasher = Sha256PowHasher;
         let hash = hasher.pow_hash(&header);
-        let verifier = LeadingZeroPow::new(PowAlgorithm::RandomX);
+        let verifier = LeadingZeroPow::with_hasher(Box::new(Sha256PowHasher));
         let bits = if LeadingZeroPow::leading_zero_bits(&hash) >= 16 {
             40
         } else {
@@ -205,10 +261,27 @@ mod tests {
         };
         let hasher = KHeavyHashPowHasher;
         let hash = hasher.pow_hash(&header);
-        // Must differ from plain SHA-256(borsh(header)).
         assert_ne!(hash, header.hash());
         let verifier = LeadingZeroPow::new(PowAlgorithm::KHeavyHash);
         assert!(verifier.verify(&header, &hash).is_ok());
         assert!(verifier.verify(&header, &Hash::ZERO).is_err());
+    }
+
+    #[cfg(feature = "randomx")]
+    #[test]
+    fn randomx_hasher_roundtrip_verify() {
+        let header = BlockHeader {
+            version: 1,
+            parents: vec![Hash::ZERO],
+            timestamp_ms: 1,
+            bits: 0,
+            nonce: 7,
+            tx_root: Hash::ZERO,
+        };
+        let hasher = RandomXPowHasher;
+        let hash = hasher.pow_hash(&header);
+        assert_ne!(hash, Sha256PowHasher.pow_hash(&header));
+        let verifier = LeadingZeroPow::new(PowAlgorithm::RandomX);
+        assert!(verifier.verify(&header, &hash).is_ok());
     }
 }
