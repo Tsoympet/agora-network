@@ -44,13 +44,13 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Whale protection:** 5% hard cap on countable balance vs total supply
 - [x] **Testing:** `ghostdag_fuzzer` + partition fuzz tests for GHOSTDAG merge scenarios
 
-## Phase 4: Scaling (Day 2 Growth) — in progress
+## Phase 4: Scaling (Day 2 Growth)
 
 - [x] **4.1 (L2):** Ovolos optimistic rollup scaffold (`agora-ovolos-rollup`) — batches, challenge window, fraud-proof hooks, pluggable `EvmExecutor`
 - [x] **4.2 (L3):** Bridge-in-a-Box SDK (`agora-bridge-sdk`) — District configs + lock/mint & burn/unlock
 - [x] **4.3 (L4):** Intent-Engine scaffold (`agora-intent-engine`) — intents, solver trait, bridge settlement
-- [ ] Bind production EVM (`revm`) behind `EvmExecutor`
-- [ ] District light-client proofs / production messaging transport
+- [x] Bind production EVM (`revm`) behind `EvmExecutor` (`RevmExecutor`, feature `revm` default-on)
+- [x] District light-client merkle proofs + `MessageTransport` / `InMemoryTransport`
 
 ## Directory Structure Reference
 

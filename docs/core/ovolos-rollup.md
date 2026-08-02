@@ -12,4 +12,9 @@ Optimistic L2 for EVM smart-contract scaling on Agora.
 
 ## EVM execution
 
-`EvmExecutor` is intentionally pluggable. `StubEvmExecutor` provides a deterministic pseudo-root for sequencing tests. Production binds an audited EVM (e.g. `revm`) behind the same trait — no custom VM logic in-repo.
+| Executor | Feature | Role |
+| --- | --- | --- |
+| `StubEvmExecutor` | always | Deterministic pseudo-root for sequencing unit tests |
+| `RevmExecutor` | `revm` (default) | Audited [`revm`](https://crates.io/crates/revm) binding |
+
+`RevmExecutor` decodes compact transfers `to(20) || value(32) || calldata?`, runs them through mainnet `revm`, and hashes the resulting account cache into a post-state root. Use `encode_transfer` helpers in tests.
