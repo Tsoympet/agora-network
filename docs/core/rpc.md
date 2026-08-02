@@ -1,14 +1,21 @@
 # RPC (`agora-rpc`)
 
-Access layer for wallets, explorer, and CEX gateways.
+Access layer for wallets, explorer, faucet, and CEX gateways.
 
-## Methods (planned)
+## Methods
 
 | Method | Purpose |
 | --- | --- |
-| `agora_getDagTips` | Current DAG tips |
+| `agora_getDagTips` | Current DAG tips (hex hashes) |
 | `agora_getBlock` | Block by hash |
-| `agora_submitTransaction` | Broadcast a signed tx |
-| `agora_getBalance` | Address balance |
+| `agora_submitTransaction` | Admit a signed/unsigned tx into the mempool |
+| `agora_getBalance` | Address balance (base units) |
+| `agora_fundAddress` | Testnet credit path (faucet / local backend) |
 
-Transport (HTTP JSON-RPC / REST) is wired in Phase 5 inside `node-bin`.
+## Dispatch
+
+- `RpcBackend` — trait implemented by node services
+- `InMemoryBackend` — ledger + tips/blocks/mempool for tests and the faucet scaffold
+- `RpcDispatcher` — parses `RpcRequest`, returns `RpcResponse` with `result` or `error`
+
+HTTP / REST transport remains wired from `node-bin` (Phase 5). The faucet and other infra tools can call the dispatcher in-process today.

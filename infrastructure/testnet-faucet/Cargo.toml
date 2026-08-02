@@ -1,15 +1,21 @@
 [package]
-name = "agora-rpc"
-description = "JSON-RPC / REST access layer for Agora Network"
+name = "agora-testnet-faucet"
+description = "Rate-limited Agora testnet faucet service"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "agora-testnet-faucet"
+path = "src/main.rs"
+
 [dependencies]
 agora-types = { workspace = true }
+agora-rpc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = "0.3"

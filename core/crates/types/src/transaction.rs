@@ -18,6 +18,17 @@ impl Address {
     pub fn to_hex(&self) -> String {
         hex::encode(self.0)
     }
+
+    pub fn from_hex(s: &str) -> Option<Self> {
+        let s = s.strip_prefix("0x").unwrap_or(s);
+        let bytes = hex::decode(s).ok()?;
+        if bytes.len() != 20 {
+            return None;
+        }
+        let mut out = [0u8; 20];
+        out.copy_from_slice(&bytes);
+        Some(Self(out))
+    }
 }
 
 /// Reference to a previous transaction output spent by an input.
