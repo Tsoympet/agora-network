@@ -1,12 +1,17 @@
-//! TCP stratum listener (JSON lines).
+//! TCP stratum listener (JSON lines) backed by live `agora-node` templates.
 //!
 //! Env:
 //! - `AGORA_STRATUM_BIND` (default `0.0.0.0:3333`)
+//! - `AGORA_RPC_URL` (default `http://127.0.0.1:8545/rpc`)
+//! - `AGORA_STRATUM_POLL_MS` (default `2000`)
+//!
+//! Node must run with `AGORA_POW_ALGO=kheavyhash` so submitted shares verify.
 
 use std::sync::Arc;
 
-use agora_stratum_pool::{StratumPool, StratumRequest, StratumResponse};
-use agora_types::{BlockHeader, Hash};
+use agora_stratum_pool::node_rpc::{fetch_block_template, submit_block};
+use agora_stratum_pool::{MiningJob, StratumPool, StratumRequest, StratumResponse};
+use serde_json::json;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -16,26 +21,41 @@ use tracing::{info, warn};
 async fn main() {
     tracing_subscriber::fmt::init();
     let bind = std::env::var("AGORA_STRATUM_BIND").unwrap_or_else(|_| "0.0.0.0:3333".into());
+    let rpc_url =
+        std::env::var("AGORA_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8545/rpc".into());
+    let poll_ms = std::env::var("AGORA_STRATUM_POLL_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2_000u64);
+
     let pool = Arc::new(Mutex::new(StratumPool::new()));
 
-    // Seed a genesis-difficulty job so miners can connect immediately.
     {
-        let mut guard = pool.lock().await;
-        guard.create_job(
-            BlockHeader {
-                version: 1,
-                parents: vec![Hash::ZERO],
-                timestamp_ms: 0,
-                bits: 0,
-                nonce: 0,
-                tx_root: Hash::ZERO,
-            },
-            0,
-        );
+        let pool = pool.clone();
+        let rpc_url = rpc_url.clone();
+        tokio::spawn(async move {
+            loop {
+                match fetch_block_template(&rpc_url).await {
+                    Ok(block) => {
+                        let mut guard = pool.lock().await;
+                        if let Some(job) = guard.upsert_template(block) {
+                            info!(
+                                job = %job.job_id,
+                                bits = job.difficulty_bits,
+                                txs = job.block.transactions.len(),
+                                "installed live mining template"
+                            );
+                        }
+                    }
+                    Err(err) => warn!(error = %err, "template poll failed"),
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(poll_ms)).await;
+            }
+        });
     }
 
     let listener = TcpListener::bind(&bind).await.expect("bind stratum");
-    info!(%bind, "agora-stratum-pool listening (kHeavyHash path)");
+    info!(%bind, %rpc_url, poll_ms, "agora-stratum-pool listening (kHeavyHash → node)");
 
     loop {
         let (socket, addr) = match listener.accept().await {
@@ -46,8 +66,9 @@ async fn main() {
             }
         };
         let pool = pool.clone();
+        let rpc_url = rpc_url.clone();
         tokio::spawn(async move {
-            if let Err(err) = handle_miner(socket, pool).await {
+            if let Err(err) = handle_miner(socket, pool, rpc_url).await {
                 warn!(%addr, error = %err, "miner session ended");
             }
         });
@@ -57,6 +78,7 @@ async fn main() {
 async fn handle_miner(
     socket: tokio::net::TcpStream,
     pool: Arc<Mutex<StratumPool>>,
+    rpc_url: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (reader, mut writer) = socket.into_split();
     let mut lines = BufReader::new(reader).lines();
@@ -77,13 +99,19 @@ async fn handle_miner(
             }
         };
 
+        let mut notify_job: Option<MiningJob> = None;
+        let mut solved: Option<agora_types::Block> = None;
+
         let resp = {
             let mut pool = pool.lock().await;
             match req.method.as_str() {
-                "mining.subscribe" => StratumResponse::ok(
-                    req.id.clone(),
-                    serde_json::json!([["mining.notify", "agora"], "00"]),
-                ),
+                "mining.subscribe" => {
+                    notify_job = pool.current_job().cloned();
+                    StratumResponse::ok(
+                        req.id.clone(),
+                        json!([["mining.notify", "agora"], "00"]),
+                    )
+                }
                 "mining.authorize" => {
                     let name = req
                         .params
@@ -93,7 +121,8 @@ async fn handle_miner(
                         .unwrap_or("worker");
                     worker = name.to_string();
                     pool.authorize(&worker);
-                    StratumResponse::ok(req.id.clone(), serde_json::json!(true))
+                    notify_job = pool.current_job().cloned();
+                    StratumResponse::ok(req.id.clone(), json!(true))
                 }
                 "mining.submit" => {
                     let params = req.params.as_array().cloned().unwrap_or_default();
@@ -108,7 +137,10 @@ async fn handle_miner(
                         .or_else(|| params.get(2).and_then(|v| v.as_u64()))
                         .unwrap_or(0);
                     match pool.submit_share(&worker, job_id, nonce) {
-                        Ok(_) => StratumResponse::ok(req.id.clone(), serde_json::json!(true)),
+                        Ok(share) => {
+                            solved = Some(share.block);
+                            StratumResponse::ok(req.id.clone(), json!(true))
+                        }
                         Err(err) => StratumResponse::err(req.id.clone(), 21, err.to_string()),
                     }
                 }
@@ -123,6 +155,33 @@ async fn handle_miner(
         writer
             .write_all(format!("{}\n", serde_json::to_string(&resp)?).as_bytes())
             .await?;
+
+        if let Some(job) = notify_job {
+            let notify = json!({
+                "id": null,
+                "method": "mining.notify",
+                "params": [
+                    job.job_id,
+                    job.block.header,
+                    job.difficulty_bits,
+                    job.block.transactions.len(),
+                ],
+            });
+            writer
+                .write_all(format!("{}\n", serde_json::to_string(&notify)?).as_bytes())
+                .await?;
+        }
+
+        if let Some(block) = solved {
+            match submit_block(&rpc_url, &block).await {
+                Ok(id) => info!(
+                    %worker,
+                    block = %id.to_hex(),
+                    "submitted network share to agora-node"
+                ),
+                Err(err) => warn!(%worker, error = %err, "agora_submitBlock failed"),
+            }
+        }
     }
     Ok(())
 }
