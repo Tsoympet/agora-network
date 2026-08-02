@@ -88,6 +88,24 @@ impl StateStore {
         }
     }
 
+    pub fn delete_cf(&self, cf: ColumnFamily, key: &[u8]) -> Result<(), StateError> {
+        match &self.inner {
+            Inner::Memory(map) => {
+                let mut guard = map
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                guard.remove(&(cf as u8, key.to_vec()));
+                Ok(())
+            }
+            #[cfg(feature = "rocksdb")]
+            Inner::Rocks(db) => {
+                let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                db.delete_cf(handle, key)
+                    .map_err(|e| StateError::Storage(e.to_string()))
+            }
+        }
+    }
+
     pub fn put(&self, zone: StateZone, key: &[u8], value: &[u8]) -> Result<(), StateError> {
         self.put_cf(zone.column_family(), key, value)
     }

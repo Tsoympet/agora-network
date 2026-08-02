@@ -137,6 +137,9 @@ impl RpcBackend for NodeBackend {
                 crate::admit::AdmitError::MissingParent(h) => {
                     RpcError::Rejected(format!("missing parent {h}"))
                 }
+                crate::admit::AdmitError::Utxo(msg) => {
+                    RpcError::Rejected(format!("utxo: {msg}"))
+                }
                 other => RpcError::Internal(other.to_string()),
             })?;
         if let Some(net) = &self.net {

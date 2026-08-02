@@ -62,6 +62,12 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **RandomX FFI:** `RandomXPowHasher` via `rust-randomx` (feature `randomx`) + miner-sidecar template loop
 - [x] **Block admission:** `ChainState::admit_block` runs `PowVerifier`, wired to gossip + `agora_submitBlock`
 
+## Phase 5b: L1 state close-out — in progress
+
+- [x] **UTXO apply/revert:** `apply_block` / `revert_journal` + `delete_cf`; wired into `admit_block` with coinbase budget
+- [ ] DAA wiring into templates + admission (`next_difficulty` → `header.bits`)
+- [ ] Compact blocks / IBD fetch on `BlockAnnounce`
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

@@ -48,7 +48,7 @@ agora-network/
 | `core/crates/bridge-sdk` | `types` | Consensus internals, UI |
 | `core/crates/intent-engine` | `types`, `bridge-sdk` | Consensus internals, UI |
 | `core/crates/consensus` | `types`, `crypto`, `kheavyhash` | Disk I/O, UI, RPC transport |
-| `core/crates/state-machine` | `types`, `consensus` | libp2p, UI |
+| `core/crates/state-machine` | `types`, `crypto`, `consensus` | libp2p, UI |
 | `core/crates/p2p` | `types`, `consensus` | RocksDB, UI |
 | `core/crates/rpc` | `types`, node services | Mining loops, UI frameworks |
 | `core/crates/miner-sidecar` | `types`, `crypto`, `consensus` (RandomX hasher), `rpc` | Full state machine / RocksDB |
