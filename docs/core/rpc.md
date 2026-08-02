@@ -9,7 +9,8 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_getDagTips` | Current DAG tips (hex hashes) |
 | `agora_getBlock` | Block by hash |
 | `agora_submitTransaction` | UTXO-check + admit a signed tx into the mempool and gossip it |
-| `agora_getBalance` | Address balance (UTXO scan + optional testnet overlay) |
+| `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
+| `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Testnet mint: write a spendable `cf_utxo` (disabled unless `AGORA_RPC_ALLOW_FUND`) |
 | `agora_getBlockTemplate` | Mining template block (tips as parents + coinbase) |
 | `agora_submitBlock` | Admit a mined block (PoW verify + store + gossip) |
@@ -53,10 +54,10 @@ The live backend (`NodeBackend`) reads tips/blocks/UTXOs from `StateStore`, admi
 
 ## Light clients
 
-`apps/shared/light-client` provides `createLightClient` + `startTipSync` used by:
+`apps/shared/light-client` provides `createLightClient` + `startTipSync` plus wallet helpers (`getBalance`, `getUtxos`, `submitTransaction`) used by:
 
 - `apps/explorer` (live DAG)
-- `apps/desktop` (Tauri shell tip list)
-- `apps/mobile` (Expo shell tip list)
+- `apps/desktop` (tip sync + address UTXO lookup)
+- `apps/mobile` (tip sync + address UTXO lookup)
 
 Default endpoint: `http://127.0.0.1:8545/rpc` (explorer/desktop may proxy `/rpc`).

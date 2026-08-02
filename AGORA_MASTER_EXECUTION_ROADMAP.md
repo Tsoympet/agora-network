@@ -105,6 +105,11 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **RocksDB default on `agora-node`:** feature `rocksdb` on by default; `AGORA_DATA` opens durable CFs
 - [x] **Genesis resume + DAG reload:** `load_or_ignite` + rebuild GHOSTDAG from durable tips on boot
 
+## Phase 11: Wallet RPC surface — done
+
+- [x] **`agora_getUtxos`:** list live outpoints for coin selection
+- [x] **Light-client wallet helpers:** `getBalance` / `getUtxos` / `submitTransaction` + desktop/mobile lookup UI
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.
