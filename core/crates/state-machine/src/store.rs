@@ -95,6 +95,39 @@ impl StateStore {
     pub fn get(&self, zone: StateZone, key: &[u8]) -> Result<Option<Vec<u8>>, StateError> {
         self.get_cf(zone.column_family(), key)
     }
+
+    /// Iterate all key/value pairs in a column family.
+    ///
+    /// Used by RPC balance scans and other index walks. Callback errors abort iteration.
+    pub fn for_each_cf<F>(&self, cf: ColumnFamily, mut f: F) -> Result<(), StateError>
+    where
+        F: FnMut(&[u8], &[u8]) -> Result<(), StateError>,
+    {
+        match &self.inner {
+            Inner::Memory(map) => {
+                let guard = map
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                for ((stored_cf, key), value) in guard.iter() {
+                    if *stored_cf == cf as u8 {
+                        f(key.as_slice(), value.as_slice())?;
+                    }
+                }
+                Ok(())
+            }
+            #[cfg(feature = "rocksdb")]
+            Inner::Rocks(db) => {
+                let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                let iter = db.iterator_cf(handle, rocksdb::IteratorMode::Start);
+                for item in iter {
+                    let (key, value) =
+                        item.map_err(|e| StateError::Storage(e.to_string()))?;
+                    f(key.as_ref(), value.as_ref())?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 #[cfg(test)]
