@@ -11,5 +11,15 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    proxy: {
+      "/rpc": {
+        target: process.env.AGORA_RPC_PROXY || "http://127.0.0.1:8545",
+        changeOrigin: true,
+      },
+      "/health": {
+        target: process.env.AGORA_RPC_PROXY || "http://127.0.0.1:8545",
+        changeOrigin: true,
+      },
+    },
   },
 });

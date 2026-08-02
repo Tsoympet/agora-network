@@ -51,8 +51,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .backend
                     .get_block(&hash)
                     .ok_or_else(|| RpcError::NotFound(hash.to_hex()))?;
-                Ok(serde_json::to_value(block)
-                    .map_err(|e| RpcError::Internal(e.to_string()))?)
+                Ok(block_to_explorer_json(&block))
             }
             RpcMethod::SubmitTransaction => {
                 let raw = tx_param(&req.params)?;
@@ -80,6 +79,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
             }
             RpcMethod::GetBlockTemplate => {
                 let header = self.backend.get_block_template()?;
+                // Keep native serde shape (`Hash` as byte arrays) for miner-sidecar.
                 Ok(serde_json::to_value(header)
                     .map_err(|e| RpcError::Internal(e.to_string()))?)
             }
@@ -92,6 +92,33 @@ impl<B: RpcBackend> RpcDispatcher<B> {
             }
         }
     }
+}
+
+/// Hex-friendly block JSON for wallets / explorer (hashes as hex strings).
+fn block_to_explorer_json(block: &Block) -> Value {
+    let id = block.id().to_hex();
+    json!({
+        "id": id,
+        "header": header_to_explorer_json(&block.header, Some(id)),
+        "tx_count": block.transactions.len(),
+    })
+}
+
+fn header_to_explorer_json(header: &agora_types::BlockHeader, id: Option<String>) -> Value {
+    let mut obj = json!({
+        "version": header.version,
+        "parents": header.parents.iter().map(|p| p.to_hex()).collect::<Vec<_>>(),
+        "timestamp_ms": header.timestamp_ms,
+        "bits": header.bits,
+        "nonce": header.nonce,
+        "tx_root": header.tx_root.to_hex(),
+    });
+    if let Some(id) = id {
+        obj.as_object_mut()
+            .expect("object")
+            .insert("id".into(), json!(id));
+    }
+    obj
 }
 
 fn single_or_named(params: &Value, key: &str) -> Result<Value, RpcError> {
@@ -246,5 +273,15 @@ mod tests {
             params: json!(tx),
         });
         assert!(submitted.result.unwrap()["tx_id"].as_str().is_some());
+
+        let block = rpc.handle(RpcRequest {
+            id: Some(json!(4)),
+            method: "agora_getBlock".into(),
+            params: json!([genesis_id.to_hex()]),
+        });
+        let result = block.result.unwrap();
+        assert_eq!(result["id"], json!(genesis_id.to_hex()));
+        assert!(result["header"]["parents"].as_array().unwrap().is_empty());
+        assert_eq!(result["tx_count"], json!(0));
     }
 }

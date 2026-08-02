@@ -35,6 +35,10 @@ Endpoints:
 
 - `GET /health` → `{"ok":true}`
 - `POST /` or `POST /rpc` → JSON body is an `RpcRequest`
+- CORS enabled (`Access-Control-Allow-Origin: *`) for browser explorers; `OPTIONS` preflight supported
+
+`agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`).  
+`agora_getBlockTemplate` keeps native serde hashes (byte arrays) for the miner sidecar.
 
 Example:
 

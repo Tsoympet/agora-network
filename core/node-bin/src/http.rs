@@ -55,6 +55,7 @@ async fn handle_request(
     let path = parts.next().unwrap_or("/");
 
     match (method, path) {
+        ("OPTIONS", _) => cors_preflight(),
         ("GET", "/health") => http_response(200, r#"{"ok":true}"#),
         ("POST", "/") | ("POST", "/rpc") => {
             let body = req.split("\r\n\r\n").nth(1).unwrap_or("").trim();
@@ -82,6 +83,20 @@ async fn handle_request(
     }
 }
 
+fn cors_headers() -> &'static str {
+    "Access-Control-Allow-Origin: *\r\n\
+     Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+     Access-Control-Allow-Headers: content-type\r\n\
+     Access-Control-Max-Age: 86400\r\n"
+}
+
+fn cors_preflight() -> String {
+    format!(
+        "HTTP/1.1 204 No Content\r\n{cors}Connection: close\r\n\r\n",
+        cors = cors_headers()
+    )
+}
+
 fn http_response(status: u16, body: &str) -> String {
     let reason = match status {
         200 => "OK",
@@ -91,7 +106,8 @@ fn http_response(status: u16, body: &str) -> String {
         _ => "Error",
     };
     format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\n{cors}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len(),
+        cors = cors_headers()
     )
 }
