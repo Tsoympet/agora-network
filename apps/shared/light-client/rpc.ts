@@ -1,5 +1,25 @@
 /** Shared HTTP JSON-RPC helpers for Agora light clients (desktop / mobile / explorer). */
 
+export type LightTxOut = {
+  value: number;
+  address: string;
+};
+
+export type LightTxIn = {
+  tx_id: string;
+  index: number;
+};
+
+export type LightTx = {
+  tx_id: string;
+  version: number;
+  inputs: LightTxIn[];
+  outputs: LightTxOut[];
+  nonce: number;
+  /** True when the transaction has no inputs (coinbase / mint). */
+  is_coinbase: boolean;
+};
+
 export type LightBlock = {
   id: string;
   header: {
@@ -11,6 +31,7 @@ export type LightBlock = {
     tx_root: string;
   };
   tx_count: number;
+  transactions?: LightTx[];
 };
 
 export type LightUtxo = {

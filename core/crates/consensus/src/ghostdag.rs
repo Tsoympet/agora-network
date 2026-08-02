@@ -23,6 +23,9 @@ impl Default for GhostdagConfig {
 pub struct GhostdagData {
     pub selected_parent: Option<Hash>,
     pub blue_score: u64,
+    /// Cumulative blue work along the selected-parent chain (unit work per blue block).
+    /// Production DAA may replace unit work with `work_from_bits(header.bits)`.
+    pub blue_work: u128,
     pub is_blue_in_tip_view: bool,
 }
 
@@ -40,6 +43,7 @@ struct BlockColoring {
     /// Blue blocks in the past of this block (including itself when it is blue in its own view).
     blues: HashSet<Hash>,
     blue_score: u64,
+    blue_work: u128,
 }
 
 /// GHOSTDAG engine: greedy blue-set inheritance over an in-memory DAG.
@@ -65,6 +69,10 @@ impl Ghostdag {
         self.coloring.get(hash).map(|c| c.blue_score)
     }
 
+    pub fn blue_work(&self, hash: &Hash) -> Option<u128> {
+        self.coloring.get(hash).map(|c| c.blue_work)
+    }
+
     pub fn selected_parent(&self, hash: &Hash) -> Option<Hash> {
         self.coloring.get(hash).and_then(|c| c.selected_parent)
     }
@@ -75,6 +83,7 @@ impl Ghostdag {
             return Ok(GhostdagData {
                 selected_parent: existing.selected_parent,
                 blue_score: existing.blue_score,
+                blue_work: existing.blue_work,
                 is_blue_in_tip_view: existing.blues.contains(&block),
             });
         }
@@ -86,11 +95,13 @@ impl Ghostdag {
             let coloring = BlockColoring {
                 selected_parent: None,
                 blue_score: 1,
+                blue_work: 1,
                 blues,
             };
             let out = GhostdagData {
                 selected_parent: None,
                 blue_score: 1,
+                blue_work: 1,
                 is_blue_in_tip_view: true,
             };
             self.coloring.insert(block, coloring);
@@ -145,16 +156,21 @@ impl Ghostdag {
         // The new tip is blue in its own view by construction of the selected chain.
         blues.insert(block);
         let blue_score = blues.len() as u64;
+        let parent_work = self.coloring[&selected_parent].blue_work;
+        // Unit work per blue tip for now; DAA window may overlay `work_from_bits`.
+        let blue_work = parent_work.saturating_add(1);
         let coloring = BlockColoring {
             selected_parent: Some(selected_parent),
             blues: blues.clone(),
             blue_score,
+            blue_work,
         };
         self.coloring.insert(block, coloring);
 
         Ok(GhostdagData {
             selected_parent: Some(selected_parent),
             blue_score,
+            blue_work,
             is_blue_in_tip_view: true,
         })
     }

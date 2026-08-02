@@ -13,7 +13,8 @@ External services that sit beside the Agora node.
 - Bind: `AGORA_STRATUM_BIND` (default `0.0.0.0:3333`)
 - RPC: `AGORA_RPC_URL` (default `http://127.0.0.1:8545/rpc`) — polls `agora_getBlockTemplate`, submits network shares via `agora_submitBlock`
 - Poll: `AGORA_STRATUM_POLL_MS` (default `2000`)
-- Methods: `mining.subscribe`, `mining.authorize`, `mining.submit` (+ `mining.notify` after subscribe/authorize)
+- Methods: `mining.subscribe`, `mining.authorize`, `mining.submit`
+- `mining.notify` after subscribe/authorize **and** broadcast to all sessions when a new template is installed
 - PoW hash uses audited Kaspa kHeavyHash via `agora_consensus::KHeavyHashPowHasher`
 - Run the node with `AGORA_POW_ALGO=kheavyhash` so submitted blocks verify
 

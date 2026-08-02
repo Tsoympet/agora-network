@@ -69,8 +69,11 @@ TypeScript bindings for shared types are generated under `core/crates/types/bind
 # RocksDB under AGORA_DATA (default data/agora-node). Memory-only:
 #   cargo run -p agora-node --no-default-features
 # Optional: AGORA_LISTEN, AGORA_BOOTSTRAP, AGORA_DATA, AGORA_RPC_BIND,
-#           AGORA_RPC_ALLOW_FUND, AGORA_POW_ALGO, AGORA_TEMPLATE_BITS
+#           AGORA_RPC_ALLOW_FUND, AGORA_POW_ALGO, AGORA_TEMPLATE_BITS,
+#           AGORA_MINER_ADDRESS, AGORA_PREMINE_ADDRESS, AGORA_MIN_RELAY_FEE
 cargo run -p agora-node
+# Local testnet one-shot (node + faucet + stratum + miner helpers):
+#   ./scripts/local_testnet.sh
 # Example: curl -s http://127.0.0.1:8545/rpc -H 'content-type: application/json' \
 #   -d '{"id":1,"method":"agora_getDagTips","params":[]}'
 

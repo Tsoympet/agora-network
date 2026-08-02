@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  addressFromMnemonic,
   createLightClient,
+  sendTransfer,
   shortHash,
   startTipSync,
   type LightUtxo,
@@ -33,6 +35,15 @@ export function App() {
   const [utxos, setUtxos] = useState<LightUtxo[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletBusy, setWalletBusy] = useState(false);
+
+  const [mnemonic, setMnemonic] = useState("");
+  const [toAddress, setToAddress] = useState("");
+  const [amount, setAmount] = useState("1");
+  const [fee, setFee] = useState("1");
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [lastTxId, setLastTxId] = useState<string | null>(null);
+  const [derivedAddress, setDerivedAddress] = useState<string | null>(null);
 
   useEffect(() => startTipSync({ client, pollMs, onUpdate: setSnap }), [client]);
 
@@ -70,6 +81,76 @@ export function App() {
     }
   }
 
+  function onDerive() {
+    try {
+      const hex = addressFromMnemonic(mnemonic);
+      setDerivedAddress(hex);
+      setAddress(hex);
+      setSendError(null);
+    } catch (err) {
+      setDerivedAddress(null);
+      setSendError(err instanceof Error ? err.message : "invalid mnemonic");
+    }
+  }
+
+  async function onSend(e: FormEvent) {
+    e.preventDefault();
+    const amt = Number(amount);
+    const feeN = Number(fee);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setSendError("Amount must be a positive number");
+      return;
+    }
+    if (!Number.isFinite(feeN) || feeN < 1) {
+      setSendError("Fee must be ≥ 1 (min relay)");
+      return;
+    }
+    setSendBusy(true);
+    setSendError(null);
+    setLastTxId(null);
+    try {
+      const { tx_id, built } = await sendTransfer(client, {
+        mnemonic,
+        toAddressHex: toAddress.trim(),
+        amount: Math.floor(amt),
+        fee: Math.floor(feeN),
+      });
+      setLastTxId(tx_id);
+      setDerivedAddress(built.from);
+      setAddress(built.from);
+      const [bal, set] = await Promise.all([
+        client.getBalance(built.from),
+        client.getUtxos(built.from),
+      ]);
+      setBalance(bal.balance);
+      setUtxos(set.utxos);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "send failed");
+    } finally {
+      setSendBusy(false);
+    }
+  }
+
+  const fieldStyle = {
+    width: "100%" as const,
+    padding: "0.65rem 0.75rem",
+    border: "1px solid color-mix(in srgb, var(--agora-gold) 35%, transparent)",
+    background: "color-mix(in srgb, var(--agora-obsidian) 55%, transparent)",
+    color: "var(--agora-ink)",
+    fontFamily: "ui-monospace, monospace",
+    fontSize: "0.85rem",
+  };
+
+  const btnStyle = {
+    padding: "0.65rem 1rem",
+    border: "1px solid var(--agora-gold)",
+    background: "transparent",
+    color: "var(--agora-gold)",
+    cursor: "pointer" as const,
+    fontFamily: "var(--agora-display)",
+    letterSpacing: "0.04em",
+  };
+
   return (
     <main className="agora-shell">
       <img src="/nexus-icon.svg" alt="" className="agora-icon-lg agora-rise" />
@@ -83,8 +164,8 @@ export function App() {
         className="agora-lede agora-rise agora-rise-delay-2"
         style={{ marginTop: "0.85rem" }}
       >
-        Desktop wallet shell with RandomX sidecar hooks. Tip sync and UTXO
-        lookup follow the live DAG over HTTP JSON-RPC.
+        Desktop wallet shell with RandomX sidecar hooks. Tip sync, UTXO lookup,
+        and signed BIP-44 sends follow the live DAG over HTTP JSON-RPC.
       </p>
 
       <section
@@ -184,29 +265,9 @@ export function App() {
             placeholder="40-hex address"
             aria-label="Address"
             spellCheck={false}
-            style={{
-              width: "100%",
-              padding: "0.65rem 0.75rem",
-              border: "1px solid color-mix(in srgb, var(--agora-gold) 35%, transparent)",
-              background: "color-mix(in srgb, var(--agora-obsidian) 55%, transparent)",
-              color: "var(--agora-ink)",
-              fontFamily: "ui-monospace, monospace",
-              fontSize: "0.85rem",
-            }}
+            style={fieldStyle}
           />
-          <button
-            type="submit"
-            disabled={walletBusy}
-            style={{
-              padding: "0.65rem 1rem",
-              border: "1px solid var(--agora-gold)",
-              background: "transparent",
-              color: "var(--agora-gold)",
-              cursor: walletBusy ? "wait" : "pointer",
-              fontFamily: "var(--agora-display)",
-              letterSpacing: "0.04em",
-            }}
-          >
+          <button type="submit" disabled={walletBusy} style={btnStyle}>
             {walletBusy ? "…" : "Lookup"}
           </button>
         </form>
@@ -247,6 +308,94 @@ export function App() {
               </li>
             ))}
           </ul>
+        ) : null}
+      </section>
+
+      <section
+        className="agora-rise agora-rise-delay-3"
+        style={{ marginTop: "2.75rem", maxWidth: 520 }}
+      >
+        <p className="agora-eyebrow">Send</p>
+        <p style={{ marginTop: "0.55rem", fontSize: "0.85rem", color: "var(--agora-ink-muted)" }}>
+          BIP-39 mnemonic → m/44&apos;/8888&apos;/0&apos;/0/0. Fee is burned (min relay 1).
+        </p>
+        <form
+          onSubmit={onSend}
+          style={{ marginTop: "0.85rem", display: "grid", gap: "0.75rem" }}
+        >
+          <textarea
+            value={mnemonic}
+            onChange={(e) => setMnemonic(e.target.value)}
+            placeholder="twelve or twenty-four word mnemonic"
+            aria-label="Mnemonic"
+            rows={3}
+            style={{ ...fieldStyle, resize: "vertical" as const }}
+          />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.75rem" }}>
+            <button type="button" onClick={onDerive} style={btnStyle}>
+              Derive address
+            </button>
+            {derivedAddress ? (
+              <span
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: "0.75rem",
+                  color: "var(--agora-cyan)",
+                  alignSelf: "center",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {derivedAddress}
+              </span>
+            ) : null}
+          </div>
+          <input
+            value={toAddress}
+            onChange={(e) => setToAddress(e.target.value)}
+            placeholder="to address (40-hex)"
+            aria-label="To address"
+            spellCheck={false}
+            style={fieldStyle}
+          />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <input
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="amount"
+              aria-label="Amount"
+              inputMode="numeric"
+              style={fieldStyle}
+            />
+            <input
+              value={fee}
+              onChange={(e) => setFee(e.target.value)}
+              placeholder="fee"
+              aria-label="Fee"
+              inputMode="numeric"
+              style={fieldStyle}
+            />
+          </div>
+          <button type="submit" disabled={sendBusy} style={{ ...btnStyle, cursor: sendBusy ? "wait" : "pointer" }}>
+            {sendBusy ? "Signing…" : "Sign & send"}
+          </button>
+        </form>
+        {sendError ? (
+          <p style={{ marginTop: "0.65rem", color: "var(--agora-danger)", fontSize: "0.9rem" }}>
+            {sendError}
+          </p>
+        ) : null}
+        {lastTxId ? (
+          <p
+            style={{
+              marginTop: "0.65rem",
+              fontFamily: "ui-monospace, monospace",
+              fontSize: "0.8rem",
+              color: "var(--agora-cyan)",
+            }}
+          >
+            submitted {shortHash(lastTxId)}
+          </p>
         ) : null}
       </section>
     </main>

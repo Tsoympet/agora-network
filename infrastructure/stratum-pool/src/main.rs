@@ -6,6 +6,8 @@
 //! - `AGORA_STRATUM_POLL_MS` (default `2000`)
 //!
 //! Node must run with `AGORA_POW_ALGO=kheavyhash` so submitted shares verify.
+//!
+//! New templates are broadcast to all connected miners via `mining.notify`.
 
 use std::sync::Arc;
 
@@ -14,8 +16,21 @@ use agora_stratum_pool::{MiningJob, StratumPool, StratumRequest, StratumResponse
 use serde_json::json;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 use tracing::{info, warn};
+
+fn notify_payload(job: &MiningJob) -> serde_json::Value {
+    json!({
+        "id": null,
+        "method": "mining.notify",
+        "params": [
+            job.job_id,
+            job.block.header,
+            job.difficulty_bits,
+            job.block.transactions.len(),
+        ],
+    })
+}
 
 #[tokio::main]
 async fn main() {
@@ -29,10 +44,12 @@ async fn main() {
         .unwrap_or(2_000u64);
 
     let pool = Arc::new(Mutex::new(StratumPool::new()));
+    let (job_tx, _) = broadcast::channel::<MiningJob>(64);
 
     {
         let pool = pool.clone();
         let rpc_url = rpc_url.clone();
+        let job_tx = job_tx.clone();
         tokio::spawn(async move {
             loop {
                 match fetch_block_template(&rpc_url).await {
@@ -45,6 +62,7 @@ async fn main() {
                                 txs = job.block.transactions.len(),
                                 "installed live mining template"
                             );
+                            let _ = job_tx.send(job);
                         }
                     }
                     Err(err) => warn!(error = %err, "template poll failed"),
@@ -67,8 +85,9 @@ async fn main() {
         };
         let pool = pool.clone();
         let rpc_url = rpc_url.clone();
+        let job_rx = job_tx.subscribe();
         tokio::spawn(async move {
-            if let Err(err) = handle_miner(socket, pool, rpc_url).await {
+            if let Err(err) = handle_miner(socket, pool, rpc_url, job_rx).await {
                 warn!(%addr, error = %err, "miner session ended");
             }
         });
@@ -79,10 +98,35 @@ async fn handle_miner(
     socket: tokio::net::TcpStream,
     pool: Arc<Mutex<StratumPool>>,
     rpc_url: String,
+    mut job_rx: broadcast::Receiver<MiningJob>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (reader, mut writer) = socket.into_split();
+    let (reader, writer) = socket.into_split();
+    let writer = Arc::new(Mutex::new(writer));
     let mut lines = BufReader::new(reader).lines();
     let mut worker = String::from("anonymous");
+
+    // Fan-out task: push mining.notify whenever the pool installs a new template.
+    {
+        let writer = writer.clone();
+        tokio::spawn(async move {
+            loop {
+                match job_rx.recv().await {
+                    Ok(job) => {
+                        let line = match serde_json::to_string(&notify_payload(&job)) {
+                            Ok(s) => format!("{s}\n"),
+                            Err(_) => continue,
+                        };
+                        let mut w = writer.lock().await;
+                        if w.write_all(line.as_bytes()).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
 
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
@@ -92,8 +136,8 @@ async fn handle_miner(
             Ok(v) => v,
             Err(err) => {
                 let resp = StratumResponse::err(None, -32700, format!("parse error: {err}"));
-                writer
-                    .write_all(format!("{}\n", serde_json::to_string(&resp)?).as_bytes())
+                let mut w = writer.lock().await;
+                w.write_all(format!("{}\n", serde_json::to_string(&resp)?).as_bytes())
                     .await?;
                 continue;
             }
@@ -152,24 +196,15 @@ async fn handle_miner(
             }
         };
 
-        writer
-            .write_all(format!("{}\n", serde_json::to_string(&resp)?).as_bytes())
-            .await?;
-
-        if let Some(job) = notify_job {
-            let notify = json!({
-                "id": null,
-                "method": "mining.notify",
-                "params": [
-                    job.job_id,
-                    job.block.header,
-                    job.difficulty_bits,
-                    job.block.transactions.len(),
-                ],
-            });
-            writer
-                .write_all(format!("{}\n", serde_json::to_string(&notify)?).as_bytes())
+        {
+            let mut w = writer.lock().await;
+            w.write_all(format!("{}\n", serde_json::to_string(&resp)?).as_bytes())
                 .await?;
+
+            if let Some(job) = notify_job {
+                w.write_all(format!("{}\n", serde_json::to_string(&notify_payload(&job))?).as_bytes())
+                    .await?;
+            }
         }
 
         if let Some(block) = solved {

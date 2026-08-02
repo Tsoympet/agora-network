@@ -206,11 +206,14 @@ pub fn revert_journal(store: &StateStore, journal: &UtxoJournal) -> Result<(), S
 ///
 /// Rejects coinbase-shaped txs (`inputs` empty), missing / foreign / already-reserved
 /// outpoints, and transfers whose outputs exceed input value.
+/// Validate a mempool candidate against the live UTXO set.
+///
+/// Returns the implicit fee (`input − output`) on success.
 pub fn validate_mempool_tx(
     store: &StateStore,
     tx: &Transaction,
     reserved: &HashSet<OutPoint>,
-) -> Result<(), StateError> {
+) -> Result<u64, StateError> {
     if tx.inputs.is_empty() {
         return Err(StateError::InvalidTx(
             "coinbase not allowed in mempool".into(),
@@ -254,7 +257,7 @@ pub fn validate_mempool_tx(
             "insufficient funds: in={input_value} out={output_value}"
         )));
     }
-    Ok(())
+    Ok(input_value - output_value)
 }
 
 /// Sum of all UTXO values for `address` (same scan used by RPC balances).

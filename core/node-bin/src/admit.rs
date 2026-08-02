@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agora_consensus::{
-    next_difficulty, DaaConfig, Dag, Difficulty, EmissionSchedule, Ghostdag, GhostdagConfig,
-    LeadingZeroPow, PowAlgorithm, PowVerifier,
+    next_difficulty_weighted, work_from_bits, DaaConfig, DaaSample, Dag, Difficulty,
+    EmissionSchedule, Ghostdag, GhostdagConfig, LeadingZeroPow, PowAlgorithm, PowVerifier,
 };
 use agora_state_machine::{apply_block, meta_keys, revert_journal, ColumnFamily, StateStore};
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
@@ -173,22 +173,33 @@ impl ChainState {
             .saturating_add(1)
     }
 
-    /// Walk the selected-parent spine collecting timestamps oldest → newest.
-    fn timestamp_window(&self, tip: Hash) -> Result<Vec<u64>, AdmitError> {
+    /// Walk the selected-parent spine collecting work-weighted DAA samples (oldest → newest).
+    fn daa_window(&self, tip: Hash) -> Result<Vec<DaaSample>, AdmitError> {
         let want = (self.daa.window_size as usize).saturating_add(1);
         let mut newest_first = Vec::with_capacity(want.min(64));
         let mut cursor = Some(tip);
+        let mut cumulative = 0u128;
         while let Some(hash) = cursor {
             if newest_first.len() >= want {
                 break;
             }
             if let Some(block) = self.load_block(&hash)? {
-                newest_first.push(block.header.timestamp_ms);
+                let work = work_from_bits(block.header.bits);
+                // Accumulate from tip backward, then reverse and rebuild cumulative oldest→newest.
+                newest_first.push((block.header.timestamp_ms, work));
             }
             cursor = self.ghostdag.selected_parent(&hash);
         }
         newest_first.reverse();
-        Ok(newest_first)
+        let mut samples = Vec::with_capacity(newest_first.len());
+        for (timestamp_ms, work) in newest_first {
+            cumulative = cumulative.saturating_add(work);
+            samples.push(DaaSample {
+                timestamp_ms,
+                blue_work: cumulative,
+            });
+        }
+        Ok(samples)
     }
 
     fn persist_difficulty(&self) -> Result<(), AdmitError> {
@@ -248,8 +259,8 @@ impl ChainState {
             .add_block(&self.dag, id)
             .map_err(|e| AdmitError::Consensus(e.to_string()))?;
 
-        let window = self.timestamp_window(id)?;
-        self.difficulty = next_difficulty(&self.daa, self.difficulty, &window);
+        let window = self.daa_window(id)?;
+        self.difficulty = next_difficulty_weighted(&self.daa, self.difficulty, &window);
         self.persist_difficulty()?;
 
         Ok(id)
@@ -431,9 +442,9 @@ mod tests {
         chain.daa.window_size = 2;
         chain.daa.target_block_time_ms = 10_000;
         chain.difficulty = Difficulty::new(4);
-        let window = chain.timestamp_window(id).unwrap();
+        let window = chain.daa_window(id).unwrap();
         assert!(window.len() >= 2);
-        let next = next_difficulty(&chain.daa, chain.difficulty, &window);
+        let next = next_difficulty_weighted(&chain.daa, chain.difficulty, &window);
         assert!(next.level > 4);
         chain.difficulty = next;
         chain.persist_difficulty().unwrap();

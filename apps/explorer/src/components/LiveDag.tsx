@@ -5,6 +5,7 @@ import {
   type ExplorerBlock,
   type RpcStatus,
 } from "../lib/rpc";
+import type { LightTx } from "../../../shared/light-client";
 
 type LaidOut = {
   id: string;
@@ -92,6 +93,7 @@ export function LiveDag() {
   const [status, setStatus] = useState<RpcStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +108,10 @@ export function LiveDag() {
         setStatus("ok");
         setError(null);
         setUpdatedAt(Date.now());
+        setSelectedId((prev) => {
+          if (prev && snap.blocks.some((b) => b.id === prev)) return prev;
+          return snap.tips[0] ?? snap.blocks[0]?.id ?? null;
+        });
       } catch (err) {
         if (cancelled) return;
         setStatus("error");
@@ -133,6 +139,11 @@ export function LiveDag() {
     () => new Map(nodes.map((n) => [n.id, n])),
     [nodes],
   );
+  const selected = useMemo(
+    () => blocks.find((b) => b.id === selectedId) ?? null,
+    [blocks, selectedId],
+  );
+  const selectedTxs: LightTx[] = selected?.transactions ?? [];
 
   const edges = useMemo(() => {
     const lines: { key: string; x1: number; y1: number; x2: number; y2: number }[] =
@@ -165,7 +176,7 @@ export function LiveDag() {
           </h2>
           <p className="agora-lede mt-4">
             Polled from the node RPC—tip hashes and one parent layer, redrawn as
-            the dag breathes.
+            the dag breathes. Click a node to inspect its transactions.
           </p>
         </div>
         <p className="text-sm text-mist">
@@ -210,45 +221,56 @@ export function LiveDag() {
               />
             ))}
           </g>
-          {nodes.map((n, i) => (
-            <g key={n.id} className="agora-rise" style={{ animationDelay: `${i * 40}ms` }}>
-              <circle
-                cx={n.x}
-                cy={n.y}
-                r={n.isTip ? 12 : 8}
-                fill={n.isTip ? "#06BBDF" : "#C59835"}
-                fillOpacity={n.isTip ? 0.95 : 0.8}
-              />
-              <circle
-                cx={n.x}
-                cy={n.y}
-                r={n.isTip ? 26 : 18}
-                stroke={n.isTip ? "#06BBDF" : "#C59835"}
-                strokeOpacity="0.28"
-                fill="none"
+          {nodes.map((n, i) => {
+            const active = n.id === selectedId;
+            return (
+              <g
+                key={n.id}
+                className="agora-rise"
+                style={{
+                  animationDelay: `${i * 40}ms`,
+                  cursor: "pointer",
+                }}
+                onClick={() => setSelectedId(n.id)}
               >
-                {n.isTip ? (
-                  <animate
-                    attributeName="r"
-                    values="22;28;22"
-                    dur="2.4s"
-                    repeatCount="indefinite"
-                  />
-                ) : null}
-              </circle>
-              <text
-                x={n.x}
-                y={n.y + 36}
-                textAnchor="middle"
-                fill="#e8e6e1"
-                fontSize="12"
-                fontFamily="ui-monospace, monospace"
-                opacity="0.85"
-              >
-                {n.short}
-              </text>
-            </g>
-          ))}
+                <circle
+                  cx={n.x}
+                  cy={n.y}
+                  r={n.isTip ? 12 : 8}
+                  fill={active ? "#e8e6e1" : n.isTip ? "#06BBDF" : "#C59835"}
+                  fillOpacity={n.isTip || active ? 0.95 : 0.8}
+                />
+                <circle
+                  cx={n.x}
+                  cy={n.y}
+                  r={n.isTip ? 26 : 18}
+                  stroke={active ? "#e8e6e1" : n.isTip ? "#06BBDF" : "#C59835"}
+                  strokeOpacity="0.28"
+                  fill="none"
+                >
+                  {n.isTip ? (
+                    <animate
+                      attributeName="r"
+                      values="22;28;22"
+                      dur="2.4s"
+                      repeatCount="indefinite"
+                    />
+                  ) : null}
+                </circle>
+                <text
+                  x={n.x}
+                  y={n.y + 36}
+                  textAnchor="middle"
+                  fill="#e8e6e1"
+                  fontSize="12"
+                  fontFamily="ui-monospace, monospace"
+                  opacity="0.85"
+                >
+                  {n.short}
+                </text>
+              </g>
+            );
+          })}
           {nodes.length === 0 ? (
             <text
               x="500"
@@ -266,12 +288,58 @@ export function LiveDag() {
         </svg>
       </div>
 
+      {selected ? (
+        <div className="mt-12">
+          <p className="agora-eyebrow">Block detail</p>
+          <h3 className="agora-display mt-3 text-2xl">
+            {shortHash(selected.id)}
+          </h3>
+          <p className="mt-3 font-mono text-xs text-mist md:text-sm">
+            {selected.id}
+            {" · "}
+            {selected.tx_count} tx{selected.tx_count === 1 ? "" : "s"}
+            {" · bits "}
+            {selected.header.bits}
+          </p>
+          <ul className="mt-6 space-y-4">
+            {selectedTxs.length === 0 ? (
+              <li className="text-sm text-mist">No transactions in this block.</li>
+            ) : (
+              selectedTxs.map((tx) => (
+                <li key={tx.tx_id} className="font-mono text-xs md:text-sm">
+                  <div className="text-[var(--agora-cyan)]">
+                    {tx.is_coinbase ? "coinbase" : "transfer"}{" "}
+                    <span className="text-[var(--agora-ink)]">
+                      {shortHash(tx.tx_id)}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-mist">
+                    {tx.inputs.length} in · {tx.outputs.length} out
+                    {tx.outputs.map((o, i) => (
+                      <div key={`${tx.tx_id}-o${i}`}>
+                        → {shortHash(o.address)} · {o.value}
+                      </div>
+                    ))}
+                  </div>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      ) : null}
+
       {tips.length > 0 ? (
         <ul className="mt-8 space-y-2 font-mono text-xs text-mist md:text-sm">
           {tips.slice(0, 8).map((tip) => (
             <li key={tip} className="truncate">
-              <span className="text-[var(--agora-cyan)]">tip</span>{" "}
-              <span className="text-[var(--agora-ink)]">{tip}</span>
+              <button
+                type="button"
+                className="text-left hover:text-[var(--agora-ink)]"
+                onClick={() => setSelectedId(tip)}
+              >
+                <span className="text-[var(--agora-cyan)]">tip</span>{" "}
+                <span className="text-[var(--agora-ink)]">{tip}</span>
+              </button>
             </li>
           ))}
         </ul>
