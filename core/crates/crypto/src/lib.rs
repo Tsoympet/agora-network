@@ -15,4 +15,6 @@ pub use bip44::{derive_bip44, Bip44Path, AGORA_COIN_TYPE};
 pub use error::CryptoError;
 pub use keys::{KeyPair, PublicKeyBytes, SignatureBytes};
 pub use mnemonic::{generate_mnemonic, seed_fingerprint, seed_from_mnemonic};
-pub use transaction::{sign_transaction, signer_address, verify_transaction};
+pub use transaction::{
+    sign_transaction, signature_from_slice, signer_address, verify_transaction,
+};
