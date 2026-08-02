@@ -7,6 +7,7 @@ members = [
     "core/crates/p2p",
     "core/crates/rpc",
     "core/crates/miner-sidecar",
+    "core/crates/governance",
     "core/node-bin",
     "infrastructure/dns-seeder",
 ]
@@ -25,6 +26,7 @@ agora-consensus = { path = "core/crates/consensus" }
 agora-state-machine = { path = "core/crates/state-machine" }
 agora-p2p = { path = "core/crates/p2p" }
 agora-rpc = { path = "core/crates/rpc" }
+agora-governance = { path = "core/crates/governance" }
 
 borsh = { version = "1.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }

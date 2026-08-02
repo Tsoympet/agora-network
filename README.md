@@ -51,6 +51,9 @@ cargo test --workspace
 
 # Optional: durable RocksDB backend (needs g++ / libstdc++)
 cargo check -p agora-state-machine --features rocksdb
+
+# GHOSTDAG partition fuzzer
+cargo run -p agora-consensus --bin ghostdag_fuzzer -- 64
 ```
 
 TypeScript bindings for shared types are generated under `core/crates/types/bindings/` when `agora-types` tests run.

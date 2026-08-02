@@ -72,6 +72,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agora-governance"
+version = "0.1.0"
+dependencies = [
+ "agora-types",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "agora-miner-sidecar"
 version = "0.1.0"
 dependencies = [

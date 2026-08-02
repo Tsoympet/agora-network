@@ -1,0 +1,11 @@
+[package]
+name = "agora-governance"
+description = "Quadratic voting and anti-whale caps for Agora Network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+agora-types = { workspace = true }
+thiserror = { workspace = true }
