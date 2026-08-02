@@ -165,6 +165,7 @@ async fn main() {
         ChainState::bootstrap(store.clone(), genesis_hash, pow_algo, template_bits)
             .expect("chain bootstrap"),
     ));
+    info!(%data_dir, "state store opened");
     let mempool = Arc::new(Mutex::new(Mempool::new(10_000)));
 
     let mut seeder_book = net_cfg.dns_seeder_url.as_ref().map(|url| {
