@@ -65,7 +65,7 @@ This document is the definitive command center. It bridges architectural theory 
 ## Phase 5b: L1 state close-out — in progress
 
 - [x] **UTXO apply/revert:** `apply_block` / `revert_journal` + `delete_cf`; wired into `admit_block` with coinbase budget
-- [ ] DAA wiring into templates + admission (`next_difficulty` → `header.bits`)
+- [x] **DAA wiring:** templates + admission use `Difficulty.level` as `bits`; retarget + `meta/daa_difficulty`
 - [ ] Compact blocks / IBD fetch on `BlockAnnounce`
 
 ## Directory Structure Reference

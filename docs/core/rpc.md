@@ -29,7 +29,7 @@ Wired in `core/node-bin`:
 | `AGORA_RPC_BIND` | `127.0.0.1:8545` | HTTP JSON-RPC listen address |
 | `AGORA_RPC_ALLOW_FUND` | unset | When `1`/`true`, enable `agora_fundAddress` |
 | `AGORA_POW_ALGO` | `randomx` | `randomx` or `kheavyhash` for admission / templates |
-| `AGORA_TEMPLATE_BITS` | `1` | Leading-zero bits required on template digests |
+| `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty (`header.bits`); retargets after admits |
 
 Endpoints:
 

@@ -42,4 +42,6 @@ pub mod meta_keys {
     pub const MAX_SUPPLY: &[u8] = b"meta/max_supply";
     pub const PREMINE: &[u8] = b"meta/premine";
     pub const TIPS: &[u8] = b"meta/tips";
+    /// Current DAA difficulty level (`u32` LE) — maps to `BlockHeader.bits`.
+    pub const DAA_DIFFICULTY: &[u8] = b"meta/daa_difficulty";
 }

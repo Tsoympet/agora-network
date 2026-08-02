@@ -3,10 +3,12 @@
 pub struct DaaConfig {
     /// Target spacing between blocks in milliseconds.
     pub target_block_time_ms: u64,
-    /// Sliding window length in blue-score units.
+    /// Sliding window length in samples (timestamps), not including the newest alone.
     pub window_size: u64,
     /// Clamp ratio when adjusting difficulty (e.g. 2.0 => at most 2x / 0.5x per window).
     pub max_adjustment_factor: f64,
+    /// Floor for `Difficulty.level` / `header.bits` (use `0` for unrestricted testnets).
+    pub min_level: u32,
 }
 
 impl Default for DaaConfig {
@@ -15,11 +17,12 @@ impl Default for DaaConfig {
             target_block_time_ms: 1_000,
             window_size: 90,
             max_adjustment_factor: 2.0,
+            min_level: 1,
         }
     }
 }
 
-/// Compact `bits`-style difficulty (higher = harder). Phase 2 stores a simple integer target level.
+/// Compact difficulty: `level` maps 1:1 onto `BlockHeader.bits` (leading-zero requirement).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Difficulty {
     pub level: u32,
@@ -31,10 +34,24 @@ impl Default for Difficulty {
     }
 }
 
+impl Difficulty {
+    pub const fn new(level: u32) -> Self {
+        Self { level }
+    }
+
+    pub const fn as_bits(self) -> u32 {
+        self.level
+    }
+}
+
 /// Compute next difficulty from window timestamps (ms) ordered oldest → newest.
 ///
 /// Uses blue-work windows in production; this scaffold keys off observed timestamps only.
-pub fn next_difficulty(config: &DaaConfig, current: Difficulty, window_timestamps_ms: &[u64]) -> Difficulty {
+pub fn next_difficulty(
+    config: &DaaConfig,
+    current: Difficulty,
+    window_timestamps_ms: &[u64],
+) -> Difficulty {
     if window_timestamps_ms.len() < 2 {
         return current;
     }
@@ -45,7 +62,8 @@ pub fn next_difficulty(config: &DaaConfig, current: Difficulty, window_timestamp
     }
 
     let observed = (last - first) as f64;
-    let expected = config.target_block_time_ms as f64 * (window_timestamps_ms.len() as f64 - 1.0);
+    let expected =
+        config.target_block_time_ms as f64 * (window_timestamps_ms.len() as f64 - 1.0);
     let mut factor = expected / observed;
     let max = config.max_adjustment_factor;
     if factor > max {
@@ -54,10 +72,9 @@ pub fn next_difficulty(config: &DaaConfig, current: Difficulty, window_timestamp
         factor = 1.0 / max;
     }
 
-    let next = (current.level as f64 * factor).round() as u32;
-    Difficulty {
-        level: next.max(1),
-    }
+    let next = (current.level as f64 * factor).round() as i64;
+    let floored = next.max(config.min_level as i64) as u32;
+    Difficulty { level: floored }
 }
 
 #[cfg(test)]
@@ -87,5 +104,17 @@ mod tests {
         }
         let next = next_difficulty(&config, current, &ts);
         assert!(next.level < current.level);
+    }
+
+    #[test]
+    fn respects_min_level_zero() {
+        let config = DaaConfig {
+            min_level: 0,
+            ..DaaConfig::default()
+        };
+        let current = Difficulty { level: 0 };
+        let ts = vec![0, 1];
+        let next = next_difficulty(&config, current, &ts);
+        assert_eq!(next.level, 0);
     }
 }

@@ -21,9 +21,17 @@ Synthetic DAG unit tests cover chains, parallel merges (`k` large ⇒ all blue),
 ## DAA
 
 `DaaConfig` targets sub-second block times (`target_block_time_ms`, default 1000).  
-`next_difficulty` adjusts a simple integer difficulty level from a timestamp window, clamped by `max_adjustment_factor`.
+`Difficulty.level` maps 1:1 onto `BlockHeader.bits` (leading-zero requirement).
 
-Production will key windows off blue-work; the scaffold uses timestamps to lock the API.
+Wired in `agora-node` (`ChainState`):
+
+1. Templates advertise `bits = difficulty.level`
+2. Admission rejects blocks whose `bits` ≠ current difficulty
+3. After admit, timestamps along the selected-parent spine feed `next_difficulty`
+4. Level is persisted at `meta/daa_difficulty` (`u32` LE)
+
+`AGORA_TEMPLATE_BITS` sets the initial level (and `min_level = 0` when started at 0).  
+Production will key windows off blue-work; the scaffold still uses timestamps.
 
 ## PoW
 
