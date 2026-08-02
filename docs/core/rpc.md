@@ -10,7 +10,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_getBlock` | Block by hash |
 | `agora_submitTransaction` | UTXO-check + admit a signed tx into the mempool and gossip it |
 | `agora_getBalance` | Address balance (UTXO scan + optional testnet overlay) |
-| `agora_fundAddress` | Testnet credit path (disabled on node unless allowed) |
+| `agora_fundAddress` | Testnet mint: write a spendable `cf_utxo` (disabled unless `AGORA_RPC_ALLOW_FUND`) |
 | `agora_getBlockTemplate` | Mining template block (tips as parents + coinbase) |
 | `agora_submitBlock` | Admit a mined block (PoW verify + store + gossip) |
 
@@ -27,7 +27,7 @@ Wired in `core/node-bin`:
 | Env | Default | Meaning |
 | --- | --- | --- |
 | `AGORA_RPC_BIND` | `127.0.0.1:8545` | HTTP JSON-RPC listen address |
-| `AGORA_RPC_ALLOW_FUND` | unset | When `1`/`true`, enable `agora_fundAddress` |
+| `AGORA_RPC_ALLOW_FUND` | unset | When `1`/`true`, enable `agora_fundAddress` (mints spendable UTXOs) |
 | `AGORA_POW_ALGO` | `randomx` | `randomx` or `kheavyhash` for admission / templates |
 | `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty (`header.bits`); retargets after admits |
 | `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout address (40-char hex) for templates |

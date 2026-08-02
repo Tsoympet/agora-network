@@ -4,6 +4,8 @@
 //! - `AGORA_FAUCET_BIND` (default `127.0.0.1:18081`)
 //! - `AGORA_FAUCET_DRIP` base units per drip (default `1000000000` = 10 AGORA)
 //! - `AGORA_FAUCET_COOLDOWN_SECS` (default `60`)
+//! - `AGORA_RPC_URL` (default `http://127.0.0.1:8545/rpc`) — live node with
+//!   `AGORA_RPC_ALLOW_FUND=1` so drips mint spendable `cf_utxo` outputs
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,6 +28,8 @@ async fn main() {
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(60);
+    let rpc_url =
+        std::env::var("AGORA_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8545/rpc".into());
 
     let config = FaucetConfig {
         drip_amount: Amount::from_base_units(drip),
@@ -35,9 +39,10 @@ async fn main() {
     info!(
         drip_base_units = drip,
         cooldown_secs = cooldown,
-        "faucet policy"
+        %rpc_url,
+        "faucet policy → live node UTXO mints"
     );
 
-    let faucet = Arc::new(Mutex::new(FaucetService::new(config)));
+    let faucet = Arc::new(Mutex::new(FaucetService::node(config, rpc_url)));
     serve(&bind, faucet).await;
 }

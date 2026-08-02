@@ -27,10 +27,12 @@ AGORA_RPC_URL=http://127.0.0.1:8545/rpc cargo run -p agora-stratum-pool
 - Bind: `AGORA_FAUCET_BIND` (default `127.0.0.1:18081`)
 - Drip size: `AGORA_FAUCET_DRIP` (base units; default `1000000000` = 10 AGORA)
 - Cooldown: `AGORA_FAUCET_COOLDOWN_SECS` (default `60`)
-- Credits balances through `agora-rpc`'s `InMemoryBackend` / `fund_address`
+- RPC: `AGORA_RPC_URL` (default `http://127.0.0.1:8545/rpc`) — calls `agora_fundAddress` / `agora_getBalance`
+- Node must enable `AGORA_RPC_ALLOW_FUND=1` so drips mint spendable `cf_utxo` outputs (not overlay balances)
 
 ```bash
-cargo run -p agora-testnet-faucet
+AGORA_RPC_ALLOW_FUND=1 cargo run -p agora-node
+AGORA_RPC_URL=http://127.0.0.1:8545/rpc cargo run -p agora-testnet-faucet
 curl -X POST http://127.0.0.1:18081/drip \
   -H 'content-type: application/json' \
   -d '{"address":"0102030405060708090a0b0c0d0e0f1011121314"}'
