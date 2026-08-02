@@ -1,60 +1,36 @@
-/** Thin JSON-RPC client for agora-node (browser / vite proxy). */
+/** Explorer RPC façade over the shared light-client module. */
 
-export type ExplorerBlock = {
-  id: string;
-  header: {
-    version: number;
-    parents: string[];
-    timestamp_ms: number;
-    bits: number;
-    nonce: number;
-    tx_root: string;
-  };
-  tx_count: number;
-};
+import {
+  createLightClient,
+  type LightBlock,
+  type RpcStatus,
+} from "../../../shared/light-client";
 
-export type RpcStatus = "idle" | "ok" | "error";
+export type ExplorerBlock = LightBlock;
+export type { RpcStatus };
 
 const DEFAULT_RPC =
   (import.meta.env.VITE_AGORA_RPC_URL as string | undefined) || "/rpc";
 
-let nextId = 1;
+const client = createLightClient({ rpcUrl: DEFAULT_RPC });
 
 export function rpcUrl(): string {
-  return DEFAULT_RPC;
+  return client.rpcUrl;
 }
 
 export async function rpcCall<T>(
   method: string,
   params: unknown = [],
 ): Promise<T> {
-  const res = await fetch(rpcUrl(), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id: nextId++, method, params }),
-  });
-  if (!res.ok) {
-    throw new Error(`RPC HTTP ${res.status}`);
-  }
-  const body = (await res.json()) as {
-    result?: T;
-    error?: { message?: string };
-  };
-  if (body.error) {
-    throw new Error(body.error.message || "RPC error");
-  }
-  if (body.result === undefined) {
-    throw new Error("RPC missing result");
-  }
-  return body.result;
+  return client.call<T>(method, params);
 }
 
 export async function getDagTips(): Promise<string[]> {
-  return rpcCall<string[]>("agora_getDagTips", []);
+  return client.getDagTips();
 }
 
 export async function getBlock(hash: string): Promise<ExplorerBlock> {
-  return rpcCall<ExplorerBlock>("agora_getBlock", { hash });
+  return client.getBlock(hash);
 }
 
 /** Fetch tip blocks plus one parent layer for a compact live DAG view. */

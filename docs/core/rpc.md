@@ -49,3 +49,13 @@ curl -s http://127.0.0.1:8545/rpc \
 ```
 
 The live backend (`NodeBackend`) reads tips/blocks/UTXOs from `StateStore`, admits signed transactions via `Mempool`, and publishes them on libp2p gossip.
+
+## Light clients
+
+`apps/shared/light-client` provides `createLightClient` + `startTipSync` used by:
+
+- `apps/explorer` (live DAG)
+- `apps/desktop` (Tauri shell tip list)
+- `apps/mobile` (Expo shell tip list)
+
+Default endpoint: `http://127.0.0.1:8545/rpc` (explorer/desktop may proxy `/rpc`).

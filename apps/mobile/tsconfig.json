@@ -9,5 +9,10 @@
     "noEmit": true,
     "types": ["react"]
   },
-  "include": ["App.tsx"]
+  "include": [
+    "App.tsx",
+    "global.d.ts",
+    "../shared/light-client/**/*.ts",
+    "../shared/brand/tokens.ts"
+  ]
 }
