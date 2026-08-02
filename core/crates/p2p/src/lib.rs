@@ -5,6 +5,7 @@
 
 mod config;
 mod error;
+mod getblock;
 mod ibd;
 mod mempool;
 mod messages;
@@ -14,11 +15,13 @@ mod topics;
 
 pub use config::NetworkConfig;
 pub use error::P2pError;
+pub use getblock::{GetBlockRequest, GetBlockResponse, GETBLOCK_PROTOCOL};
 pub use ibd::{
     reconstruct_compact_block, short_ids_for_block, tx_short_id, PendingFetches, ReconstructError,
 };
 pub use mempool::Mempool;
 pub use messages::NetworkMessage;
+pub use libp2p::PeerId;
 pub use network::{dial_addr, NetworkEvent, NetworkHandle, NetworkNode};
 pub use seeder::{
     fetch_seeder_peers, fetch_seeder_peers_best_effort, merge_bootstrap_peers, normalize_seeder_url,

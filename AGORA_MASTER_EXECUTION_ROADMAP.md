@@ -71,7 +71,7 @@ This document is the definitive command center. It bridges architectural theory 
 ## Phase 5c: P2P hardening — in progress
 
 - [x] **DNS seeder pull:** `AGORA_DNS_SEEDER` → `fetch_seeder_peers` + dial merge; register dialable addr on listen
-- [ ] Request-response transport for `GetBlock`
+- [x] **GetBlock request-response:** `/agora/getblock/1` CBOR RR to announcing peer; gossip fallback on failure
 - [ ] Peer scoring & mesh tuning for sub-second DAGs
 
 ## Directory Structure Reference
