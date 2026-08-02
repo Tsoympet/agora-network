@@ -38,11 +38,11 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] Explorer branded landing (Cinzel / Inter, Obsidian & Gold)
 - Brand tokens: Obsidian `#101218`, Burnished Gold `#C59835`, Aegean Cyan `#06BBDF`
 
-## Phase 3: Launch Security (Anti-Whale & Governance)
+## Phase 3: Launch Security (Anti-Whale & Governance) — in progress
 
-- **Governance:** Quadratic voting — `EffectiveVotes = sqrt(RawBalance)`
-- **Whale protection:** Enforce the 5% hard cap on voting power
-- **Testing:** `ghostdag_fuzzer` stress-tests against partitioned network simulations
+- [x] **Governance:** Quadratic voting — `EffectiveVotes = floor(sqrt(RawBalance))` (`agora-governance`)
+- [x] **Whale protection:** 5% hard cap on countable balance vs total supply
+- [x] **Testing:** `ghostdag_fuzzer` + partition fuzz tests for GHOSTDAG merge scenarios
 
 ## Phase 4: Scaling (Day 2 Growth)
 

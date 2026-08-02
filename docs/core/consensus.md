@@ -37,3 +37,17 @@ Verification is trait-based (`PowVerifier`). Until RandomX/kHeavyHash FFI lands,
 ## Emission
 
 `EmissionSchedule` owns reward math (initial subsidy + halving interval). Callers must not hardcode rewards elsewhere.
+
+## Partition fuzzer
+
+```bash
+cargo run -p agora-consensus --bin ghostdag_fuzzer -- 128 42
+```
+
+Simulates two isolated mining partitions that later merge through bridge tips, then asserts:
+
+- ordered set == tip past (no dupes / omissions)
+- selected-parent spine has non-increasing blue score toward genesis
+- coloring is deterministic across fresh engines
+
+CI also runs `tests/ghostdag_partition_fuzz.rs`.

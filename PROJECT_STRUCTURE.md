@@ -17,6 +17,7 @@ agora-network/
 │   │   ├── p2p/            # Gossipsub, Mempool, Compact Blocks
 │   │   ├── rpc/            # CEX Gateway, JSON-RPC, REST API
 │   │   ├── crypto/         # BIP-39/44 Wallet, secp256k1 Signatures
+│   │   ├── governance/     # Quadratic voting + anti-whale caps
 │   │   └── miner-sidecar/  # Standalone Binary for CPU Mining
 │   └── node-bin/           # Main entry point for the node
 ├── docs/                   # Architectural & Scaling Blueprints
@@ -36,6 +37,7 @@ agora-network/
 | --- | --- | --- |
 | `core/crates/types` | `borsh`, `serde`, `ts-rs` | Networking, storage, UI |
 | `core/crates/crypto` | `types`, audited crypto crates | Consensus policy, P2P |
+| `core/crates/governance` | `types` | Networking, UI, storage |
 | `core/crates/consensus` | `types`, `crypto` | Disk I/O, UI, RPC transport |
 | `core/crates/state-machine` | `types`, `consensus` | libp2p, UI |
 | `core/crates/p2p` | `types`, `consensus` | RocksDB, UI |
