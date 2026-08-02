@@ -4,7 +4,7 @@ External services that sit beside the Agora node.
 
 | Service | Crate / binary | Role |
 | --- | --- | --- |
-| DNS seeder | `agora-dns-seeder` | HTTP peer phonebook (`/peers`, `/health`) |
+| DNS seeder | `agora-dns-seeder` | HTTP peer phonebook (`/peers`, `/health`); two-node local via `scripts/local_testnet.sh seeder` |
 | Stratum pool | `agora-stratum-pool` | kHeavyHash ASIC share aggregation (JSON-lines TCP) |
 | Testnet faucet | `agora-testnet-faucet` | Rate-limited address funding (`/drip`, `/balance`) |
 

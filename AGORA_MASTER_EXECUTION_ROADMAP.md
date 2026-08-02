@@ -123,9 +123,13 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **Fee → miner coinbase:** templates and `apply_block` pay `emission + Σ(in−out)` to `AGORA_MINER_ADDRESS`
 
-## Phase 14: Tx confirmation — in progress
+## Phase 14: Tx confirmation — done
 
 - [x] **`agora_getTransaction`:** mempool / `cf_warm` index / unknown + light-client `watchTransaction` + desktop/mobile status
+
+## Phase 15: Multi-node local testnet — in progress
+
+- [x] **Two-node gossip/IBD smoke:** `local_testnet.sh` `seeder` / `node-a` / `node-b` / `tips` + p2p runbook
 
 ## Directory Structure Reference
 
