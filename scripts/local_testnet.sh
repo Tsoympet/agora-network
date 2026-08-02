@@ -14,8 +14,8 @@
 #   ./scripts/local_testnet.sh seeder       # terminal 0
 #   ./scripts/local_testnet.sh node-a       # terminal 1 (RPC :8545, fund enabled)
 #   ./scripts/local_testnet.sh node-b       # terminal 2 (RPC :8546)
-#   AGORA_RPC_URL=http://127.0.0.1:8545/rpc ./scripts/local_testnet.sh miner
-#   ./scripts/local_testnet.sh tips         # compare A vs B tips
+#   ./scripts/local_testnet.sh tips
+#   ./scripts/local_testnet.sh smoke-ibd    # mine 1 block on A, wait for B tip converge
 #
 # Premine mnemonic (abandon…about) external(0):
 #   ff9ec96f09eb154d038a552ecae59c50204ea9a9
@@ -40,6 +40,7 @@ TEMPLATE_BITS="${AGORA_TEMPLATE_BITS:-1}"
 MIN_RELAY="${AGORA_MIN_RELAY_FEE:-1}"
 LISTEN_A="${AGORA_LISTEN_A:-/ip4/127.0.0.1/tcp/16111}"
 LISTEN_B="${AGORA_LISTEN_B:-/ip4/127.0.0.1/tcp/16112}"
+SMOKE_TIMEOUT_SECS="${AGORA_SMOKE_TIMEOUT_SECS:-180}"
 
 export_common() {
   export AGORA_PREMINE_ADDRESS="$PREMINE"
@@ -61,12 +62,55 @@ run_bin() {
   exec cargo run -p "$pkg"
 }
 
+# Run a binary in the foreground without replacing this shell (for smoke helpers).
+run_bin_fg() {
+  local pkg="$1"
+  local bin="$ROOT/target/debug/$pkg"
+  if [[ -x "$bin" ]]; then
+    echo "run $bin"
+    "$bin"
+    return $?
+  fi
+  echo "run cargo run -p $pkg"
+  cargo run -q -p "$pkg"
+}
+
 rpc_call() {
   local url="$1"
   local method="$2"
   curl -sS --connect-timeout 2 "$url" \
     -H 'content-type: application/json' \
     -d "{\"id\":1,\"method\":\"${method}\",\"params\":[]}" 2>/dev/null
+}
+
+# Print sorted tip hashes (one per line) from an agora_getDagTips JSON response.
+tips_list() {
+  local url="$1"
+  local body
+  body="$(rpc_call "$url" "agora_getDagTips")" || return 1
+  python3 - "$body" <<'PY'
+import json, sys
+raw = sys.argv[1]
+data = json.loads(raw)
+tips = data.get("result") or []
+for t in sorted(tips):
+    print(t)
+PY
+}
+
+tips_fingerprint() {
+  tips_list "$1" | paste -sd, -
+}
+
+require_health() {
+  local url="$1"
+  local name="$2"
+  local health
+  health="$(curl -sS --connect-timeout 2 "${url%/rpc}/health" 2>/dev/null || true)"
+  if [[ "$health" != *ok* ]]; then
+    echo "error: $name not healthy at ${url%/rpc}/health" >&2
+    return 1
+  fi
 }
 
 print_env() {
@@ -96,17 +140,16 @@ Suggested single-node flow:
   4. ./scripts/local_testnet.sh miner
   5. Clients: VITE_AGORA_RPC_URL=$RPC_URL npm run dev (explorer/desktop)
 
-Suggested two-node flow:
-  0. ./scripts/local_testnet.sh wipe-two
-  1. ./scripts/local_testnet.sh seeder
-  2. ./scripts/local_testnet.sh node-a    # wait for "registered dialable addr"
-  3. curl -s $SEEDER_URL/peers
-  4. ./scripts/local_testnet.sh node-b    # expect "peer connected" on both
-  5. AGORA_RPC_URL=$RPC_A ./scripts/local_testnet.sh miner
-  6. ./scripts/local_testnet.sh tips      # A and B tip sets should match after gossip/IBD
+Suggested two-node IBD smoke:
+  0. cargo build -p agora-dns-seeder -p agora-node -p agora-miner-sidecar
+  1. ./scripts/local_testnet.sh wipe-two
+  2. ./scripts/local_testnet.sh seeder
+  3. ./scripts/local_testnet.sh node-a
+  4. ./scripts/local_testnet.sh node-b
+  5. ./scripts/local_testnet.sh smoke-ibd   # mines 1 block on A, waits for B
 
 Premine mnemonic (abandon…about) external(0) → $PREMINE
-Note: agora_fundAddress is local mint only — use mined blocks to prove gossip.
+Note: agora_fundAddress is local mint only — use mined blocks to prove gossip/IBD.
 EOF
 }
 
@@ -177,6 +220,88 @@ case "$cmd" in
     curl -sS --connect-timeout 2 "$SEEDER_URL/peers" 2>/dev/null || echo "(unreachable)"
     echo
     ;;
+  wait-peers)
+    echo "Waiting for node-a + node-b healthy and seeder listing ≥2 peers (timeout ${SMOKE_TIMEOUT_SECS}s)"
+    deadline=$((SECONDS + SMOKE_TIMEOUT_SECS))
+    while (( SECONDS < deadline )); do
+      ha=$(curl -sS --connect-timeout 1 "${RPC_A%/rpc}/health" 2>/dev/null || true)
+      hb=$(curl -sS --connect-timeout 1 "${RPC_B%/rpc}/health" 2>/dev/null || true)
+      peers=$(curl -sS --connect-timeout 1 "$SEEDER_URL/peers" 2>/dev/null || true)
+      count=$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$peers" 2>/dev/null || echo 0)
+      echo "health_a=${ha:-?} health_b=${hb:-?} peer_count=$count"
+      if [[ "$ha" == *ok* && "$hb" == *ok* && "$count" -ge 2 ]]; then
+        echo "peers ready"
+        exit 0
+      fi
+      sleep 2
+    done
+    echo "error: timed out waiting for peers" >&2
+    exit 1
+    ;;
+  smoke-ibd)
+    require_health "$RPC_A" "node-a"
+    require_health "$RPC_B" "node-b"
+    before_a="$(tips_fingerprint "$RPC_A")"
+    before_b="$(tips_fingerprint "$RPC_B")"
+    echo "before A tips: $before_a"
+    echo "before B tips: $before_b"
+    if [[ -z "$before_a" || -z "$before_b" ]]; then
+      echo "error: could not read tips from both nodes" >&2
+      exit 1
+    fi
+    if [[ "$before_a" != "$before_b" ]]; then
+      echo "warn: A/B tips already diverge; continuing IBD smoke anyway" >&2
+    fi
+
+    echo "Mining 1 block on node-a (AGORA_MINE_MAX_BLOCKS=1, bits≈$TEMPLATE_BITS)…"
+    export AGORA_RPC_URL="$RPC_A"
+    export AGORA_MINE_MAX_BLOCKS=1
+    export AGORA_MINE_POLL_MS="${AGORA_MINE_POLL_MS:-500}"
+    run_bin_fg agora-miner-sidecar
+
+    echo "Waiting for node-a tip to advance…"
+    deadline=$((SECONDS + SMOKE_TIMEOUT_SECS))
+    after_a=""
+    while (( SECONDS < deadline )); do
+      after_a="$(tips_fingerprint "$RPC_A" || true)"
+      if [[ -n "$after_a" && "$after_a" != "$before_a" ]]; then
+        break
+      fi
+      sleep 1
+    done
+    if [[ -z "$after_a" || "$after_a" == "$before_a" ]]; then
+      echo "error: node-a tips did not advance after mine" >&2
+      exit 1
+    fi
+    echo "after  A tips: $after_a"
+
+    echo "Waiting for node-b tips to converge with node-a…"
+    after_b=""
+    while (( SECONDS < deadline )); do
+      after_b="$(tips_fingerprint "$RPC_B" || true)"
+      echo "  B tips: ${after_b:-?}"
+      if [[ -n "$after_b" && "$after_b" == "$after_a" ]]; then
+        echo "IBD smoke OK — A and B tip sets match after mined block"
+        exit 0
+      fi
+      # Also accept B containing every tip from A (subset equality for multi-tip cases).
+      if [[ -n "$after_b" ]] && python3 - "$after_a" "$after_b" <<'PY'
+import sys
+a=set(sys.argv[1].split(',')) if sys.argv[1] else set()
+b=set(sys.argv[2].split(',')) if sys.argv[2] else set()
+sys.exit(0 if a and a <= b else 1)
+PY
+      then
+        echo "IBD smoke OK — B contains all of A's tips"
+        exit 0
+      fi
+      sleep 2
+    done
+    echo "error: timed out waiting for tip convergence" >&2
+    echo "A=$after_a" >&2
+    echo "B=${after_b:-}" >&2
+    exit 1
+    ;;
   faucet)
     export AGORA_RPC_URL="${AGORA_RPC_URL:-$RPC_A}"
     run_bin agora-testnet-faucet
@@ -188,7 +313,7 @@ case "$cmd" in
     ;;
   miner)
     export AGORA_RPC_URL="${AGORA_RPC_URL:-$RPC_URL}"
-    echo "miner → $AGORA_RPC_URL"
+    echo "miner → $AGORA_RPC_URL (AGORA_MINE_MAX_BLOCKS=${AGORA_MINE_MAX_BLOCKS:-0})"
     run_bin agora-miner-sidecar
     ;;
   *)

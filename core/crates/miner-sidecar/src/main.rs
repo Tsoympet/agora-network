@@ -6,6 +6,7 @@
 //! Env:
 //! - `AGORA_RPC_URL` (default `http://127.0.0.1:8545/rpc`)
 //! - `AGORA_MINE_POLL_MS` (default `2000`)
+//! - `AGORA_MINE_MAX_BLOCKS` (default `0` = unlimited; set `1` for IBD smoke)
 
 use agora_consensus::{LeadingZeroPow, PowHasher, RandomXPowHasher};
 use agora_rpc::{RpcRequest, RpcResponse};
@@ -23,16 +24,28 @@ async fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(2_000u64);
+    let max_blocks = std::env::var("AGORA_MINE_MAX_BLOCKS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0u64);
 
-    info!(%rpc_url, poll_ms, "agora-miner RandomX sidecar starting");
-    println!("agora-miner: RandomX loop → {rpc_url}");
+    info!(%rpc_url, poll_ms, max_blocks, "agora-miner RandomX sidecar starting");
+    println!("agora-miner: RandomX loop → {rpc_url} (max_blocks={max_blocks})");
 
     let hasher = RandomXPowHasher;
     let mut nonce_cursor = 0u64;
+    let mut submitted = 0u64;
 
     loop {
         match mine_one_round(&rpc_url, &hasher, &mut nonce_cursor).await {
-            Ok(Some(id)) => info!(block = %id, "submitted solution"),
+            Ok(Some(id)) => {
+                submitted = submitted.saturating_add(1);
+                info!(block = %id, submitted, "submitted solution");
+                if max_blocks > 0 && submitted >= max_blocks {
+                    info!(submitted, max_blocks, "reached AGORA_MINE_MAX_BLOCKS; exiting");
+                    return;
+                }
+            }
             Ok(None) => {}
             Err(err) => warn!(error = %err, "mine round failed"),
         }

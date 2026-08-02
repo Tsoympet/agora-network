@@ -20,7 +20,14 @@ AGORA_TEMPLATE_BITS=1 AGORA_MINER_ADDRESS=<40-hex> cargo run -p agora-node
 AGORA_RPC_URL=http://127.0.0.1:8545/rpc cargo run -p agora-miner-sidecar
 ```
 
-Env: `AGORA_RPC_URL` (default `http://127.0.0.1:8545/rpc`), `AGORA_MINE_POLL_MS` (default `2000`).
+Env:
+
+| Var | Default | Meaning |
+| --- | --- | --- |
+| `AGORA_RPC_URL` | `http://127.0.0.1:8545/rpc` | Node JSON-RPC |
+| `AGORA_MINE_POLL_MS` | `2000` | Pause between nonce windows |
+| `AGORA_MINE_MAX_BLOCKS` | `0` | Exit after N successful submits (`0` = unlimited; use `1` for IBD smoke) |
+
 Node payout: `AGORA_MINER_ADDRESS` (20-byte hex; default `00…00`).
 
 ## ASIC path

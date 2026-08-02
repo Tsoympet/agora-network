@@ -72,10 +72,10 @@ TypeScript bindings for shared types are generated under `core/crates/types/bind
 #           AGORA_RPC_ALLOW_FUND, AGORA_POW_ALGO, AGORA_TEMPLATE_BITS,
 #           AGORA_MINER_ADDRESS, AGORA_PREMINE_ADDRESS, AGORA_MIN_RELAY_FEE
 cargo run -p agora-node
-# Local testnet helpers (single-node + two-node gossip/IBD):
+# Local testnet helpers (single-node + two-node IBD smoke):
 #   ./scripts/local_testnet.sh              # print runbook
 #   ./scripts/local_testnet.sh up           # single node
-#   ./scripts/local_testnet.sh seeder && ./scripts/local_testnet.sh node-a / node-b
+#   ./scripts/local_testnet.sh seeder / node-a / node-b / smoke-ibd
 # Example: curl -s http://127.0.0.1:8545/rpc -H 'content-type: application/json' \
 #   -d '{"id":1,"method":"agora_getDagTips","params":[]}'
 

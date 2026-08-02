@@ -108,16 +108,20 @@ AGORA_DNS_SEEDER=http://127.0.0.1:18080 AGORA_SEEDER_REFRESH_SECS=60 cargo run -
 | node-b | `data/agora-node-b` | `/ip4/127.0.0.1/tcp/16112` | `:8546` | `AGORA_SEEDER_REFRESH_SECS=5` |
 
 ```bash
+# Prebuild once so terminals don't race rocksdb compiles:
+cargo build -p agora-dns-seeder -p agora-node -p agora-miner-sidecar
+
 ./scripts/local_testnet.sh wipe-two
 ./scripts/local_testnet.sh seeder          # terminal 0
 ./scripts/local_testnet.sh node-a          # terminal 1 — wait for "registered dialable addr"
-curl -s http://127.0.0.1:18080/peers
 ./scripts/local_testnet.sh node-b          # terminal 2 — both should log "peer connected"
-AGORA_RPC_URL=http://127.0.0.1:8545/rpc ./scripts/local_testnet.sh miner
-./scripts/local_testnet.sh tips            # A and B tip sets should match after gossip/IBD
+./scripts/local_testnet.sh wait-peers      # optional readiness gate
+./scripts/local_testnet.sh smoke-ibd       # mine 1 block on A, wait for B tip converge
 ```
 
-**Smoke proof:** mine a block on A; B’s `agora_getDagTips` must include A’s new tip (CompactBlock / `GetBlock` IBD). Do **not** use `agora_fundAddress` as the gossip check — it only mints locally on the node that handles the RPC.
+The script prefers `target/debug/<bin>` when present.
+
+**Smoke proof (`smoke-ibd`):** mines one RandomX block against node-a (`AGORA_MINE_MAX_BLOCKS=1`), then polls until node-b’s tip set matches (CompactBlock / `GetBlock` IBD). Do **not** use `agora_fundAddress` as the gossip check — it only mints locally on the node that handles the RPC.
 
 Optional tx gossip: `agora_submitTransaction` on A → `agora_getTransaction` on B returns `status: "pending"`.
 
@@ -127,3 +131,4 @@ Optional tx gossip: `agora_submitTransaction` on A → `agora_getTransaction` on
 - [x] Coinbase outputs in mining templates
 - [x] Mempool transfers in mining templates + eviction on admit
 - [x] Two-node local seeder + gossip/IBD runbook
+- [x] Automated mined-block IBD smoke (`smoke-ibd`)

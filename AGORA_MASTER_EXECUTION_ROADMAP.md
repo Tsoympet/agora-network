@@ -127,9 +127,13 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **`agora_getTransaction`:** mempool / `cf_warm` index / unknown + light-client `watchTransaction` + desktop/mobile status
 
-## Phase 15: Multi-node local testnet — in progress
+## Phase 15: Multi-node local testnet — done
 
 - [x] **Two-node gossip/IBD smoke:** `local_testnet.sh` `seeder` / `node-a` / `node-b` / `tips` + p2p runbook
+
+## Phase 16: Mined-block IBD proof — in progress
+
+- [x] **`smoke-ibd`:** `AGORA_MINE_MAX_BLOCKS=1` miner exit + script waits for A/B tip convergence after mine
 
 ## Directory Structure Reference
 
