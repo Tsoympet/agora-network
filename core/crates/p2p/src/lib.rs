@@ -10,6 +10,7 @@ mod ibd;
 mod mempool;
 mod messages;
 mod network;
+mod scoring;
 mod seeder;
 mod topics;
 
@@ -23,6 +24,10 @@ pub use mempool::Mempool;
 pub use messages::NetworkMessage;
 pub use libp2p::PeerId;
 pub use network::{dial_addr, NetworkEvent, NetworkHandle, NetworkNode};
+pub use scoring::{
+    agora_peer_score_params, agora_topic_score_params, GossipTuning, APP_SCORE_BAD_PEER,
+    APP_SCORE_GOOD_PEER,
+};
 pub use seeder::{
     fetch_seeder_peers, fetch_seeder_peers_best_effort, merge_bootstrap_peers, normalize_seeder_url,
     register_with_seeder,

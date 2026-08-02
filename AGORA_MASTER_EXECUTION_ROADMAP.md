@@ -68,11 +68,11 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **DAA wiring:** templates + admission use `Difficulty.level` as `bits`; retarget + `meta/daa_difficulty`
 - [x] **Compact blocks / IBD fetch:** `CompactBlock` + `GetBlock` on `BlockAnnounce`; mempool inflate + pending-fetch dedupe
 
-## Phase 5c: P2P hardening — in progress
+## Phase 5c: P2P hardening — done
 
 - [x] **DNS seeder pull:** `AGORA_DNS_SEEDER` → `fetch_seeder_peers` + dial merge; register dialable addr on listen
 - [x] **GetBlock request-response:** `/agora/getblock/1` CBOR RR to announcing peer; gossip fallback on failure
-- [ ] Peer scoring & mesh tuning for sub-second DAGs
+- [x] **Peer scoring & mesh tuning:** 200ms heartbeat, mesh 4–12, flood publish, gossipsub scores + app-score hooks
 
 ## Directory Structure Reference
 
