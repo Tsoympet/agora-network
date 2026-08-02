@@ -175,7 +175,10 @@ impl NetworkNode {
             NetworkMessage::Transaction(_) => {
                 self.publish(transactions_topic(), message.encode())
             }
-            NetworkMessage::Block(_) | NetworkMessage::BlockAnnounce { .. } => {
+            NetworkMessage::Block(_)
+            | NetworkMessage::BlockAnnounce { .. }
+            | NetworkMessage::CompactBlock { .. }
+            | NetworkMessage::GetBlock { .. } => {
                 self.publish(blocks_topic(), message.encode())
             }
         }

@@ -15,7 +15,7 @@ use crate::admit::ChainState;
 pub struct NodeBackend {
     chain: Arc<Mutex<ChainState>>,
     store: Arc<StateStore>,
-    mempool: Mempool,
+    mempool: Arc<Mutex<Mempool>>,
     net: Option<NetworkHandle>,
     /// When true, `agora_fundAddress` credits an overlay balance (testnet only).
     allow_fund: bool,
@@ -28,11 +28,12 @@ impl NodeBackend {
         store: Arc<StateStore>,
         net: Option<NetworkHandle>,
         allow_fund: bool,
+        mempool: Arc<Mutex<Mempool>>,
     ) -> Self {
         Self {
             chain,
             store,
-            mempool: Mempool::new(10_000),
+            mempool,
             net,
             allow_fund,
             fund_overlay: HashMap::new(),
@@ -77,6 +78,8 @@ impl RpcBackend for NodeBackend {
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError> {
         let id = self
             .mempool
+            .lock()
+            .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?
             .admit(tx.clone())
             .map_err(|e| RpcError::Rejected(e.to_string()))?;
         if let Some(net) = &self.net {
@@ -148,7 +151,8 @@ impl RpcBackend for NodeBackend {
                 other => RpcError::Internal(other.to_string()),
             })?;
         if let Some(net) = &self.net {
-            let _ = net.publish_message(NetworkMessage::Block(block));
+            // Prefer compact + announce; peers inflate from mempool or issue GetBlock.
+            let _ = net.publish_message(NetworkMessage::compact_from_block(&block));
             let _ = net.publish_message(NetworkMessage::BlockAnnounce { hash: id });
         }
         Ok(id)
@@ -166,6 +170,7 @@ mod tests {
     #[test]
     fn genesis_tips_and_admit_easy_block() {
         let store = Arc::new(StateStore::open("/tmp/agora-node-backend-admit").unwrap());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
         let premine = Address([9u8; 20]);
         let genesis = GenesisBuilder::default()
             .with_premine_address(premine)
@@ -175,7 +180,7 @@ mod tests {
         let chain = Arc::new(Mutex::new(
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap(),
         ));
-        let mut backend = NodeBackend::new(chain.clone(), store, None, false);
+        let mut backend = NodeBackend::new(chain.clone(), store, None, false, mempool);
         assert_eq!(backend.dag_tips(), vec![genesis]);
         assert_eq!(
             backend.get_balance(&premine).as_base_units(),

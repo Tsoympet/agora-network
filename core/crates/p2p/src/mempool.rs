@@ -47,6 +47,14 @@ impl Mempool {
         self.txs.get(tx_id)
     }
 
+    /// Lookup by first 8 bytes of `tx_id` for compact-block inflation.
+    pub fn get_by_short_id(&self, short_id: &[u8; 8]) -> Option<&Transaction> {
+        self.txs
+            .iter()
+            .find(|(id, _)| &id.as_bytes()[..8] == short_id.as_slice())
+            .map(|(_, tx)| tx)
+    }
+
     pub fn remove(&mut self, tx_id: &Hash) -> Option<Transaction> {
         self.txs.remove(tx_id)
     }
