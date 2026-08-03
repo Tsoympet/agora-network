@@ -143,9 +143,13 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **Explorer `agora_getTransaction` UI:** `#tx` lookup + pending watch; Live DAG txs deep-link
 
-## Phase 19: Mempool RPC — in progress
+## Phase 19: Mempool RPC — done
 
 - [x] **`agora_getMempool`:** fee-ordered pending snapshot + light-client helper + explorer `#mempool` panel
+
+## Phase 20: Tx gossip smoke — in progress
+
+- [x] **`smoke-tx`:** signed premine spend on node-a → `pending` / mempool on node-b (`scripts/smoke_tx.mjs`)
 
 ## Directory Structure Reference
 

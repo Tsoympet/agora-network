@@ -120,14 +120,15 @@ cargo build -p agora-dns-seeder -p agora-node -p agora-miner-sidecar
 ./scripts/local_testnet.sh node-a          # terminal 1 — wait for "registered dialable addr"
 ./scripts/local_testnet.sh node-b          # terminal 2 — both should log "peer connected"
 ./scripts/local_testnet.sh wait-peers      # optional readiness gate
+./scripts/local_testnet.sh smoke-tx        # signed premine spend on A → pending on B
 ./scripts/local_testnet.sh smoke-ibd       # mine 1 block on A, wait for B tip converge
 ```
 
-The script prefers `target/debug/<bin>` when present.
+The script prefers `target/debug/<bin>` when present. `smoke-tx` needs `apps/shared` npm deps (auto-installs once).
 
-**Smoke proof (`smoke-ibd`):** mines one RandomX block against node-a (`AGORA_MINE_MAX_BLOCKS=1`), then polls until node-b’s tip set matches (CompactBlock / `GetBlock` IBD). Do **not** use `agora_fundAddress` as the gossip check — it only mints locally on the node that handles the RPC.
+**Smoke proof (`smoke-tx`):** BIP-39 premine wallet (`abandon…about` external(0)) signs a small transfer via the shared light-client, submits on node-a, then polls node-b until `agora_getTransaction` is `pending` (or the tx appears in `agora_getMempool`). Both nodes must share the same fresh genesis premine UTXO (`wipe-two` first). Do **not** use `agora_fundAddress` — it only mints locally.
 
-Optional tx gossip: `agora_submitTransaction` on A → `agora_getTransaction` on B returns `status: "pending"`.
+**Smoke proof (`smoke-ibd`):** mines one RandomX block against node-a (`AGORA_MINE_MAX_BLOCKS=1`), then polls until node-b’s tip set matches (CompactBlock / `GetBlock` IBD).
 
 ## Follow-ons
 
@@ -138,3 +139,4 @@ Optional tx gossip: `agora_submitTransaction` on A → `agora_getTransaction` on
 - [x] Automated mined-block IBD smoke (`smoke-ibd`)
 - [x] Persistent libp2p identity (`$AGORA_DATA/p2p/identity.key`)
 - [x] `agora_getMempool` pending snapshot RPC
+- [x] Automated tx gossip smoke (`smoke-tx`)
