@@ -93,6 +93,10 @@ impl ChainState {
         self.difficulty
     }
 
+    pub fn storage_policy(&self) -> StoragePolicy {
+        self.storage
+    }
+
     pub fn tips(&self) -> Result<Vec<Hash>, AdmitError> {
         let bytes = self
             .store

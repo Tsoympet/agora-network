@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import {
+  shortAddress,
   watchTransaction,
   type LightTxLookup,
 } from "../../../shared/light-client";
@@ -225,7 +226,7 @@ export function TxLookup() {
                       key={`${o.address}-${i}`}
                       className="text-[var(--agora-ink)]"
                     >
-                      <span title={o.address}>{shortHash(o.address, 8)}</span>
+                      <span title={o.address}>{shortAddress(o.address)}</span>
                       <span className="text-mist"> → </span>
                       {o.value}
                       <span className="text-mist"> gold</span>

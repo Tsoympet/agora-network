@@ -66,6 +66,10 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     "transactions": entries.iter().map(mempool_entry_to_json).collect::<Vec<_>>(),
                 }))
             }
+            RpcMethod::GetNodeInfo => {
+                let info = self.backend.get_node_info()?;
+                Ok(node_info_to_json(&info))
+            }
             RpcMethod::SubmitTransaction => {
                 let raw = tx_param(&req.params)?;
                 let tx: Transaction = serde_json::from_value(raw)
@@ -168,6 +172,23 @@ fn mempool_entry_to_json(entry: &crate::backend::MempoolEntry) -> Value {
         "tx_id": entry.tx_id.to_hex(),
         "fee": entry.fee,
         "transaction": tx_to_explorer_json(&entry.transaction),
+    })
+}
+
+fn node_info_to_json(info: &crate::backend::NodeInfo) -> Value {
+    json!({
+        "network": info.network,
+        "version": info.version,
+        "peer_id": info.peer_id,
+        "connected_peers": info.connected_peers,
+        "tip_count": info.tip_count,
+        "mempool_count": info.mempool_count,
+        "pow_algorithm": info.pow_algorithm,
+        "bits": info.bits,
+        "archival": info.archival,
+        "hot_window": info.hot_window,
+        "allow_fund": info.allow_fund,
+        "miner_address": info.miner_address,
     })
 }
 
@@ -406,6 +427,17 @@ mod tests {
         let pool_res = pool.result.unwrap();
         assert_eq!(pool_res["count"], json!(1));
         assert_eq!(pool_res["transactions"][0]["tx_id"], json!(tx_id));
+
+        let info = rpc.handle(RpcRequest {
+            id: Some(json!(312)),
+            method: "agora_getNodeInfo".into(),
+            params: json!([]),
+        });
+        let info_res = info.result.unwrap();
+        assert_eq!(info_res["network"], json!("agora"));
+        assert_eq!(info_res["tip_count"], json!(1));
+        assert_eq!(info_res["mempool_count"], json!(1));
+        assert_eq!(info_res["archival"], json!(true));
 
         let unknown = rpc.handle(RpcRequest {
             id: Some(json!(32)),

@@ -8,6 +8,7 @@ export {
   type LightTxIn,
   type LightMempool,
   type LightMempoolEntry,
+  type LightNodeInfo,
   type LightTxLookup,
   type LightTxOut,
   type LightTxStatus,
@@ -28,6 +29,7 @@ export {
   encodeAddress,
   isAddress,
   parseAddress,
+  shortAddress,
 } from "./address";
 export {
   addressFromMnemonic,

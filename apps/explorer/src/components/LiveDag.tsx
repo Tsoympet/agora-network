@@ -5,7 +5,7 @@ import {
   type ExplorerBlock,
   type RpcStatus,
 } from "../lib/rpc";
-import type { LightTx } from "../../../shared/light-client";
+import { shortAddress, type LightTx } from "../../../shared/light-client";
 
 type LaidOut = {
   id: string;
@@ -328,7 +328,7 @@ export function LiveDag() {
                     {tx.inputs.length} in · {tx.outputs.length} out
                     {tx.outputs.map((o, i) => (
                       <div key={`${tx.tx_id}-o${i}`}>
-                        → {shortHash(o.address)} · {o.value}
+                        → {shortAddress(o.address)} · {o.value}
                       </div>
                     ))}
                   </div>

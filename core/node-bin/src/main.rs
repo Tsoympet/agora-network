@@ -7,6 +7,7 @@ mod backend;
 mod http;
 mod storage_policy;
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -233,6 +234,7 @@ async fn main() {
         .ok()
         .and_then(|s| Address::parse(&s))
         .unwrap_or(Address::ZERO);
+    let connected_peers = Arc::new(AtomicU32::new(0));
     let backend = NodeBackend::new(
         chain.clone(),
         store.clone(),
@@ -240,6 +242,7 @@ async fn main() {
         allow_fund,
         mempool.clone(),
         miner_address,
+        connected_peers.clone(),
     );
     let dispatcher = Arc::new(tokio::sync::Mutex::new(RpcDispatcher::new(backend)));
     tokio::spawn(serve_rpc(rpc_bind.clone(), dispatcher.clone()));
@@ -326,8 +329,16 @@ async fn main() {
                         }
                     }
                 }
-                NetworkEvent::PeerConnected(peer) => info!(%peer, "peer connected"),
-                NetworkEvent::PeerDisconnected(peer) => info!(%peer, "peer disconnected"),
+                NetworkEvent::PeerConnected(peer) => {
+                    let n = connected_peers.fetch_add(1, Ordering::Relaxed) + 1;
+                    info!(%peer, connected = n, "peer connected");
+                }
+                NetworkEvent::PeerDisconnected(peer) => {
+                    let prev = connected_peers.load(Ordering::Relaxed);
+                    let n = prev.saturating_sub(1);
+                    connected_peers.store(n, Ordering::Relaxed);
+                    info!(%peer, connected = n, "peer disconnected");
+                }
                 NetworkEvent::GetBlockRequest {
                     peer,
                     hash,

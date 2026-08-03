@@ -1,12 +1,14 @@
 //! Live [`RpcBackend`] backed by chain admission + mempool.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agora_consensus::PowAlgorithm;
 use agora_p2p::{
     Mempool, NetworkHandle, NetworkMessage, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT,
 };
-use agora_rpc::{MempoolEntry, RpcBackend, RpcError, TxLookup, UtxoEntry};
+use agora_rpc::{MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
     lookup_tx_location, outpoint_key, validate_mempool_tx, ColumnFamily, StateStore,
 };
@@ -55,6 +57,8 @@ pub struct NodeBackend {
     fund_nonce: u64,
     /// Coinbase payout address for `agora_getBlockTemplate`.
     miner_address: Address,
+    /// Live connected-peer count (updated from the p2p event loop).
+    connected_peers: Arc<AtomicU32>,
 }
 
 impl NodeBackend {
@@ -65,6 +69,7 @@ impl NodeBackend {
         allow_fund: bool,
         mempool: Arc<Mutex<Mempool>>,
         miner_address: Address,
+        connected_peers: Arc<AtomicU32>,
     ) -> Self {
         Self {
             chain,
@@ -74,6 +79,7 @@ impl NodeBackend {
             allow_fund,
             fund_nonce: 0,
             miner_address,
+            connected_peers,
         }
     }
 
@@ -172,6 +178,39 @@ impl RpcBackend for NodeBackend {
                 transaction: tx,
             })
             .collect())
+    }
+
+    fn get_node_info(&self) -> Result<NodeInfo, RpcError> {
+        let chain = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?;
+        let tips = chain.tips().unwrap_or_default();
+        let storage = chain.storage_policy();
+        let bits = chain.difficulty().as_bits();
+        let pow = match chain.pow_algorithm() {
+            PowAlgorithm::RandomX => "randomx",
+            PowAlgorithm::KHeavyHash => "kheavyhash",
+        };
+        let mempool_count = self
+            .mempool
+            .lock()
+            .map(|p| p.len())
+            .unwrap_or(0);
+        Ok(NodeInfo {
+            network: "agora".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            peer_id: self.net.as_ref().map(|n| n.peer_id().to_string()),
+            connected_peers: Some(self.connected_peers.load(Ordering::Relaxed)),
+            tip_count: tips.len(),
+            mempool_count,
+            pow_algorithm: pow.into(),
+            bits,
+            archival: storage.archival,
+            hot_window: storage.hot_window,
+            allow_fund: self.allow_fund,
+            miner_address: Some(self.miner_address.to_bech32()),
+        })
     }
 
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError> {
@@ -311,7 +350,7 @@ mod tests {
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
         let miner = Address([1u8; 20]);
-        let mut backend = NodeBackend::new(chain.clone(), store, None, false, mempool, miner);
+        let mut backend = NodeBackend::new(chain.clone(), store, None, false, mempool, miner, Arc::new(AtomicU32::new(0)));
         assert_eq!(backend.dag_tips(), vec![genesis]);
         assert_eq!(
             backend.get_balance(&premine).as_base_units(),
@@ -364,7 +403,7 @@ mod tests {
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
         let mut backend =
-            NodeBackend::new(chain, store, None, false, mempool, Address::ZERO);
+            NodeBackend::new(chain, store, None, false, mempool, Address::ZERO, Arc::new(AtomicU32::new(0)));
 
         let mut bad = Transaction::unsigned(
             1,
@@ -441,7 +480,7 @@ mod tests {
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
         let miner = Address([2u8; 20]);
-        let mut backend = NodeBackend::new(chain, store, None, false, mempool.clone(), miner);
+        let mut backend = NodeBackend::new(chain, store, None, false, mempool.clone(), miner, Arc::new(AtomicU32::new(0)));
 
         let premine = Amount::from_whole(10_000_000).unwrap();
         let pay = Amount::from_whole(1).unwrap().as_base_units();
@@ -525,7 +564,7 @@ mod tests {
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
         let mut backend =
-            NodeBackend::new(chain, store.clone(), None, true, mempool, Address::ZERO);
+            NodeBackend::new(chain, store.clone(), None, true, mempool, Address::ZERO, Arc::new(AtomicU32::new(0)));
 
         let drip = Amount::from_base_units(5_000);
         assert_eq!(

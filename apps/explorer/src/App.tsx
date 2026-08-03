@@ -2,6 +2,7 @@ import { DagField } from "./components/DagField";
 import { LiveDag } from "./components/LiveDag";
 import { MarkRow } from "./components/MarkRow";
 import { MempoolPanel } from "./components/MempoolPanel";
+import { NodeStatus } from "./components/NodeStatus";
 import { TxLookup } from "./components/TxLookup";
 
 export default function App() {
@@ -27,6 +28,9 @@ export default function App() {
           </a>
           <a href="#mempool" className="agora-btn agora-btn-ghost text-sm">
             Mempool
+          </a>
+          <a href="#node" className="agora-btn agora-btn-ghost text-sm">
+            Node
           </a>
           <a href="#marks" className="agora-btn agora-btn-ghost text-sm">
             Marks
@@ -81,6 +85,13 @@ export default function App() {
           className="relative border-t border-[var(--agora-line)] px-6 py-20 md:px-10"
         >
           <MempoolPanel />
+        </section>
+
+        <section
+          id="node"
+          className="relative border-t border-[var(--agora-line)] px-6 py-20 md:px-10"
+        >
+          <NodeStatus />
         </section>
 
         <section
