@@ -190,6 +190,7 @@ fn node_info_to_json(info: &crate::backend::NodeInfo) -> Value {
         "hot_window": info.hot_window,
         "allow_fund": info.allow_fund,
         "miner_address": info.miner_address,
+        "genesis_hash": info.genesis_hash,
     })
 }
 
@@ -435,10 +436,11 @@ mod tests {
             params: json!([]),
         });
         let info_res = info.result.unwrap();
-        assert_eq!(info_res["network"], json!("agora"));
+        assert_eq!(info_res["network"], json!("dev"));
         assert_eq!(info_res["tip_count"], json!(1));
         assert_eq!(info_res["mempool_count"], json!(1));
         assert_eq!(info_res["archival"], json!(true));
+        assert_eq!(info_res["genesis_hash"], json!(genesis_id.to_hex()));
 
         let unknown = rpc.handle(RpcRequest {
             id: Some(json!(32)),

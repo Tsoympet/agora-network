@@ -83,6 +83,17 @@ export function NodeStatus() {
             </dd>
           </div>
           <div>
+            <dt className="text-mist">genesis</dt>
+            <dd
+              className="truncate text-[var(--agora-ink)]"
+              title={info.genesis_hash ?? undefined}
+            >
+              {info.genesis_hash
+                ? `${info.genesis_hash.slice(0, 12)}…${info.genesis_hash.slice(-8)}`
+                : "—"}
+            </dd>
+          </div>
+          <div>
             <dt className="text-mist">pow</dt>
             <dd className="text-[var(--agora-ink)]">
               {info.pow_algorithm} · bits {info.bits}

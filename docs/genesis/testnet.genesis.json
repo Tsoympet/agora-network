@@ -1,0 +1,13 @@
+{
+  "network": "testnet",
+  "version": 1,
+  "timestamp_ms": 1785715200000,
+  "bits": 0,
+  "max_supply": 10000000000000000,
+  "premine": 1000000000000000,
+  "premine_address": "agora1l70vjmcfav256qu225hv4evu2qsya2dfajrcqc",
+  "premine_address_hex": "ff9ec96f09eb154d038a552ecae59c50204ea9a9",
+  "genesis_hash": "afe59232cd20a16bd56948044149d2b8013e63f3694c113074fef75ab0cb9b98",
+  "emission_initial_reward": 5000000000,
+  "emission_halving_interval": 210000
+}

@@ -145,6 +145,25 @@ impl GenesisBuilder {
         }
         self.ignite(store)
     }
+
+    /// Like [`load_or_ignite`], then reject datadirs whose genesis ≠ `expected`.
+    pub fn load_or_ignite_checked(
+        &self,
+        store: &StateStore,
+        expected: Option<Hash>,
+    ) -> Result<Hash, StateError> {
+        let hash = self.load_or_ignite(store)?;
+        if let Some(want) = expected {
+            if hash != want {
+                return Err(StateError::Storage(format!(
+                    "genesis hash mismatch: datadir {} expected {} (wipe AGORA_DATA or change AGORA_NETWORK)",
+                    hash.to_hex(),
+                    want.to_hex()
+                )));
+            }
+        }
+        Ok(hash)
+    }
 }
 
 #[cfg(test)]

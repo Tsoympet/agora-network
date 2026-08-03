@@ -16,6 +16,9 @@ agora-types = { workspace = true }
 agora-crypto = { workspace = true }
 agora-consensus = { workspace = true }
 borsh = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 rocksdb = { version = "0.22", optional = true }

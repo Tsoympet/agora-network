@@ -242,6 +242,7 @@ export default function App() {
                 : "connecting"}
           </Text>
           {` · ${snap.tips.length} tip${snap.tips.length === 1 ? "" : "s"}`}
+          {nodeInfo ? ` · ${nodeInfo.network}` : ""}
           {nodeInfo
             ? ` · mempool ${nodeInfo.mempool_count} · ${nodeInfo.pow_algorithm}`
             : ""}
@@ -252,6 +253,9 @@ export default function App() {
             : ""}
           {nodeInfo?.connected_peers != null
             ? ` · peers ${nodeInfo.connected_peers}`
+            : ""}
+          {nodeInfo?.genesis_hash
+            ? ` · genesis ${nodeInfo.genesis_hash.slice(0, 10)}…`
             : ""}
         </Text>
         <Text style={styles.rpc}>

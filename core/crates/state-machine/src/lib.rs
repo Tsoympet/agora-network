@@ -7,6 +7,7 @@ mod apply;
 mod columns;
 mod error;
 mod genesis;
+mod network;
 mod store;
 mod tx_index;
 mod utxo;
@@ -19,6 +20,10 @@ pub use apply::{
 pub use columns::{meta_keys, ColumnFamily};
 pub use error::StateError;
 pub use genesis::{GenesisBuilder, SupplyCaps};
+pub use network::{
+    ChainParams, GenesisArtifact, NetworkId, TESTNET_GENESIS_BITS, TESTNET_GENESIS_HASH_HEX,
+    TESTNET_GENESIS_TIMESTAMP_MS, TESTNET_PREMINE_ADDRESS_HEX,
+};
 pub use store::StateStore;
 pub use tx_index::{
     decode_tx_location, encode_tx_location, index_block_transactions, lookup_tx_location,
