@@ -33,8 +33,8 @@ Wired in `core/node-bin`:
 | `AGORA_RPC_ALLOW_FUND` | unset | When `1`/`true`, enable `agora_fundAddress` (mints spendable UTXOs) |
 | `AGORA_POW_ALGO` | `randomx` | `randomx` or `kheavyhash` for admission / templates |
 | `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty (`header.bits`); retargets after admits |
-| `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout address (40-char hex) for templates |
-| `AGORA_PREMINE_ADDRESS` | `00…00` | Genesis premine payout (40-char hex); only applied on a fresh `AGORA_DATA` |
+| `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout (`agora1…` Bech32m or 40-char hex) for templates |
+| `AGORA_PREMINE_ADDRESS` | `00…00` | Genesis premine payout (Bech32m or hex); only applied on a fresh `AGORA_DATA` |
 | `AGORA_MIN_RELAY_FEE` | `1` | Minimum implicit fee (`in − out`) for mempool admission |
 | `AGORA_ARCHIVAL` | `1` | Persist full block history in `cf_archival` (`0` = pruned node) |
 | `AGORA_HOT_WINDOW` | `64` | Tip-distance of block bodies kept in `cf_hot` (`0` = unlimited) |
@@ -45,7 +45,7 @@ Endpoints:
 - `POST /` or `POST /rpc` → JSON body is an `RpcRequest`
 - CORS enabled (`Access-Control-Allow-Origin: *`) for browser explorers; `OPTIONS` preflight supported
 
-`agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`, and hex `transactions` with inputs/outputs).  
+`agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`, and hex `transactions` with inputs/outputs). Address fields in tx outputs / balance / UTXO responses are **Bech32m** (`agora1…`); request params still accept hex or Bech32m.  
 `agora_getTransaction` returns `{ tx_id, status, block_id, index, fee, transaction }` — wallets should poll until `confirmed` (missing txs return `status: "unknown"`, not an RPC error). Confirmed locations are indexed in `cf_warm` (`tx/` ‖ tx_id → block_id ‖ index) on admit / genesis.  
 `agora_getMempool` returns `{ count, transactions: [{ tx_id, fee, transaction }] }` ordered by fee desc then `tx_id` (default `limit` 128, max 10000).  
 

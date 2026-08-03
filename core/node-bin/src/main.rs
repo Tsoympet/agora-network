@@ -171,14 +171,14 @@ async fn main() {
     let storage = StoragePolicy::from_env();
     let premine_address = std::env::var("AGORA_PREMINE_ADDRESS")
         .ok()
-        .and_then(|s| Address::from_hex(&s))
+        .and_then(|s| Address::parse(&s))
         .unwrap_or(Address::ZERO);
     let genesis_hash = GenesisBuilder::default()
         .with_premine_address(premine_address)
         .with_archival(storage.archival)
         .load_or_ignite(store.as_ref())
         .expect("genesis load_or_ignite");
-    info!(premine = %premine_address.to_hex(), "genesis premine address");
+    info!(premine = %premine_address, "genesis premine address");
 
     let chain = Arc::new(Mutex::new(
         ChainState::bootstrap(
@@ -231,7 +231,7 @@ async fn main() {
     );
     let miner_address = std::env::var("AGORA_MINER_ADDRESS")
         .ok()
-        .and_then(|s| Address::from_hex(&s))
+        .and_then(|s| Address::parse(&s))
         .unwrap_or(Address::ZERO);
     let backend = NodeBackend::new(
         chain.clone(),
@@ -250,7 +250,7 @@ async fn main() {
         genesis = %genesis_hash.to_hex(),
         %rpc_bind,
         allow_fund,
-        miner = %miner_address.to_hex(),
+        miner = %miner_address,
         ?pow_algo,
         template_bits,
         daa_bits = chain.lock().map(|c| c.difficulty().as_bits()).unwrap_or(template_bits),

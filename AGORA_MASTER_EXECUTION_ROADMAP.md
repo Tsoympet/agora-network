@@ -151,13 +151,9 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **`smoke-tx`:** signed premine spend on node-a → `pending` / mempool on node-b (`scripts/smoke_tx.mjs`)
 
-## Phase 21: Bech32m addresses — in progress (see PR)
+## Phase 21: Bech32m addresses — in progress
 
-- [ ] **`agora1…` Bech32m:** dual-accept at RPC/env; emit Bech32m in responses (branch `cursor/agora-bech32-addresses-c253`)
-
-## Phase 22: Prune / archival policy — in progress
-
-- [x] **`AGORA_ARCHIVAL` / `AGORA_HOT_WINDOW`:** optional archival writes + Hot tip-distance prune (Meta/UTXO/Warm index retained)
+- [x] **`agora1…` Bech32m:** `Address::{to_bech32,from_bech32,parse}` + RPC/faucet emit; hex still accepted
 
 ## Directory Structure Reference
 

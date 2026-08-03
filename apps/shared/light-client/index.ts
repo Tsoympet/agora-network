@@ -24,6 +24,12 @@ export {
 } from "./tipSync";
 export { watchTransaction, type TxWatchOptions } from "./txWatch";
 export {
+  ADDRESS_HRP,
+  encodeAddress,
+  isAddress,
+  parseAddress,
+} from "./address";
+export {
   addressFromMnemonic,
   buildSignedTransfer,
   deriveAccount,

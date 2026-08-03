@@ -1,8 +1,12 @@
+use bech32::{Bech32m, Hrp};
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::{Amount, Hash};
+
+/// Human-readable part for Bech32m address strings (`agora1…`).
+pub const ADDRESS_HRP: &str = "agora";
 
 /// Bech32-ready raw payload for a secp256k1-derived address (20-byte hash of pubkey).
 #[derive(
@@ -28,6 +32,46 @@ impl Address {
         let mut out = [0u8; 20];
         out.copy_from_slice(&bytes);
         Some(Self(out))
+    }
+
+    /// Bech32m encoding with HRP [`ADDRESS_HRP`] (`agora1…`).
+    pub fn to_bech32(&self) -> String {
+        let hrp = Hrp::parse(ADDRESS_HRP).expect("static ADDRESS_HRP");
+        bech32::encode::<Bech32m>(hrp, &self.0).expect("20-byte bech32m encode")
+    }
+
+    /// Decode a Bech32m `agora1…` address (case-insensitive).
+    pub fn from_bech32(s: &str) -> Option<Self> {
+        let (hrp, data) = bech32::decode(s).ok()?;
+        if !hrp.as_str().eq_ignore_ascii_case(ADDRESS_HRP) {
+            return None;
+        }
+        if data.len() != 20 {
+            return None;
+        }
+        let mut out = [0u8; 20];
+        out.copy_from_slice(&data);
+        Some(Self(out))
+    }
+
+    /// Accept Bech32m (`agora1…`) or 40-char hex (optional `0x`).
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+        if s.contains('1') {
+            if let Some(addr) = Self::from_bech32(s) {
+                return Some(addr);
+            }
+        }
+        Self::from_hex(s)
+    }
+}
+
+impl std::fmt::Display for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_bech32())
     }
 }
 
