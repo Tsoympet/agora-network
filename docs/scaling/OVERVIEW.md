@@ -34,10 +34,14 @@ Intent-Engine (L4) ──solvers──► Bridge-in-a-Box (L3) ──► Distric
 ## Run locally
 
 ```bash
-cargo run -p agora-layers
-# AGORA_LAYERS_BIND=127.0.0.1:8555
+AGORA_OVL_GENESIS_FILE=docs/genesis/ovolos.testnet.genesis.json \
+AGORA_DRC_GENESIS_FILE=docs/genesis/drachma.testnet.genesis.json \
+  cargo run -p agora-layers
 # POST /rpc  {"method":"agora_layers_getInfo","params":{}}
+# → ovl_genesis_hash / drc_genesis_hash / chain ids
 ```
+
+Each mark has its own genesis: OVL on L2, DRC on L3 (TLT remains L1-only).
 
 See also:
 

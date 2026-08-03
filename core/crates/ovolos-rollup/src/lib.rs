@@ -8,6 +8,7 @@
 mod da;
 mod error;
 mod executor;
+mod genesis;
 mod ovl;
 mod rollup;
 mod types;
@@ -18,6 +19,7 @@ mod revm_exec;
 pub use da::{tx_merkle_root, BatchCommitment};
 pub use error::RollupError;
 pub use executor::{reexecute_batch, EvmExecutor, StubEvmExecutor};
+pub use genesis::{OvlPremine, OvolosGenesis};
 pub use ovl::{OvlLedger, DEFAULT_GAS_PER_TX, OVL_MAX_SUPPLY_BASE};
 pub use rollup::{OvolosRollup, RollupConfig};
 pub use types::{Batch, BatchStatus, EvmTx, FraudProof};

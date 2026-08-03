@@ -1,9 +1,9 @@
 //! Agora mark / token registry for genesis artifacts.
 //!
 //! L1 consensus settles a single native asset ([`TokenMark::native_tlt`]).
-//! Drachma (DRC) and Ovolos (OVL) are frozen in the genesis document for
-//! wallets, explorers, and future L2 / bridge issuance — they are **not**
-//! separate L1 UTXO asset ids today.
+//! Drachma (DRC) and Ovolos (OVL) appear in the L1 registry for wallets/explorers
+//! and each also has a **layer genesis** (`docs/genesis/drachma.*.json`,
+//! `docs/genesis/ovolos.*.json`). They are **not** separate L1 UTXO asset ids.
 
 use serde::{Deserialize, Serialize};
 

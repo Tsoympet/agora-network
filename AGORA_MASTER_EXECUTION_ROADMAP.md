@@ -53,6 +53,7 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] District light-client merkle proofs + `MessageTransport` / `InMemoryTransport`
 - [x] **4.4 (L2):** `BatchCommitment` DA blob + OVL gas ledger (layered mark, not L1 UTXO)
 - [x] **4.5 (Runtime):** `agora-layers-runtime` + `agora-layers` JSON-RPC operator binary
+- [x] **4.5b:** Dedicated Ovolos L2 + Drachma L3 genesis artifacts (testnet frozen, mainnet draft)
 - [ ] **4.6 (Ops):** Post DA commitments from `agora-layers` into live L1 txs / public district endpoints
 
 ## Phase 5: Infrastructure & RPC surface — in progress

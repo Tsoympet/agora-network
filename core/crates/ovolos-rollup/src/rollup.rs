@@ -4,6 +4,7 @@ use agora_types::{Address, Hash};
 
 use crate::da::BatchCommitment;
 use crate::executor::{reexecute_batch, EvmExecutor};
+use crate::genesis::OvolosGenesis;
 use crate::ovl::OvlLedger;
 use crate::types::{Batch, BatchStatus, FraudProof};
 use crate::RollupError;
@@ -62,8 +63,31 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         }
     }
 
+    /// Boot rollup from a frozen Ovolos L2 genesis (caps, gas, premine, state root).
+    pub fn from_genesis(
+        genesis: &OvolosGenesis,
+        executor: E,
+        gas_payer: Option<Address>,
+    ) -> Result<Self, RollupError> {
+        genesis.validate()?;
+        Ok(Self {
+            config: genesis.rollup_config(gas_payer),
+            executor,
+            next_sequence: 0,
+            head_state_root: genesis.genesis_state_root_hash()?,
+            batches: HashMap::new(),
+            by_sequence: HashMap::new(),
+            ovl: genesis.ignite_ledger()?,
+            da_posted: HashMap::new(),
+        })
+    }
+
     pub fn config(&self) -> &RollupConfig {
         &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut RollupConfig {
+        &mut self.config
     }
 
     pub fn head_state_root(&self) -> Hash {
