@@ -77,7 +77,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let address = param_address(&req.params, "address")?;
                 let bal = self.backend.get_balance(&address);
                 Ok(json!({
-                    "address": address.to_hex(),
+                    "address": address.to_bech32(),
                     "balance": bal.as_base_units(),
                 }))
             }
@@ -85,7 +85,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let address = param_address(&req.params, "address")?;
                 let utxos = self.backend.get_utxos(&address)?;
                 Ok(json!({
-                    "address": address.to_hex(),
+                    "address": address.to_bech32(),
                     "utxos": utxos.iter().map(|u| json!({
                         "tx_id": u.outpoint.tx_id.to_hex(),
                         "index": u.outpoint.index,
@@ -98,7 +98,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let amount = param_amount(&req.params, "amount")?;
                 let bal = self.backend.fund_address(address, amount)?;
                 Ok(json!({
-                    "address": address.to_hex(),
+                    "address": address.to_bech32(),
                     "balance": bal.as_base_units(),
                 }))
             }
@@ -145,7 +145,7 @@ fn tx_to_explorer_json(tx: &Transaction) -> Value {
         })).collect::<Vec<_>>(),
         "outputs": tx.outputs.iter().map(|o| json!({
             "value": o.value.as_base_units(),
-            "address": o.address.to_hex(),
+            "address": o.address.to_bech32(),
         })).collect::<Vec<_>>(),
         "nonce": tx.nonce,
         "is_coinbase": tx.inputs.is_empty(),
@@ -285,8 +285,8 @@ fn param_address(params: &Value, key: &str) -> Result<Address, RpcError> {
     let v = single_or_named(params, key)?;
     let s = v
         .as_str()
-        .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be hex string")))?;
-    Address::from_hex(s).ok_or_else(|| RpcError::InvalidParams(format!("invalid address `{s}`")))
+        .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be bech32 or hex string")))?;
+    Address::parse(s).ok_or_else(|| RpcError::InvalidParams(format!("invalid address `{s}`")))
 }
 
 fn param_amount(params: &Value, key: &str) -> Result<Amount, RpcError> {
@@ -348,24 +348,25 @@ mod tests {
         let funded = rpc.handle(RpcRequest {
             id: Some(json!(2)),
             method: "agora_fundAddress".into(),
-            params: json!({"address": addr.to_hex(), "amount": 500u64}),
+            params: json!({"address": addr.to_bech32(), "amount": 500u64}),
         });
-        assert_eq!(
-            funded.result.unwrap()["balance"],
-            json!(500)
-        );
+        let funded_res = funded.result.unwrap();
+        assert_eq!(funded_res["balance"], json!(500));
+        assert_eq!(funded_res["address"], json!(addr.to_bech32()));
 
         let bal = rpc.handle(RpcRequest {
             id: None,
             method: "agora_getBalance".into(),
-            params: json!([addr.to_hex()]),
+            params: json!([addr.to_hex()]), // hex still accepted
         });
-        assert_eq!(bal.result.unwrap()["balance"], json!(500));
+        let bal_res = bal.result.unwrap();
+        assert_eq!(bal_res["balance"], json!(500));
+        assert_eq!(bal_res["address"], json!(addr.to_bech32()));
 
         let utxos = rpc.handle(RpcRequest {
             id: Some(json!(21)),
             method: "agora_getUtxos".into(),
-            params: json!({"address": addr.to_hex()}),
+            params: json!({"address": addr.to_bech32()}),
         });
         let utxo_list = utxos.result.unwrap()["utxos"].as_array().unwrap().clone();
         assert_eq!(utxo_list.len(), 1);

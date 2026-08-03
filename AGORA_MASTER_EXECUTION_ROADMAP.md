@@ -147,9 +147,13 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **`agora_getMempool`:** fee-ordered pending snapshot + light-client helper + explorer `#mempool` panel
 
-## Phase 20: Tx gossip smoke — in progress
+## Phase 20: Tx gossip smoke — done
 
 - [x] **`smoke-tx`:** signed premine spend on node-a → `pending` / mempool on node-b (`scripts/smoke_tx.mjs`)
+
+## Phase 21: Bech32m addresses — in progress
+
+- [x] **`agora1…` Bech32m:** `Address::{to_bech32,from_bech32,parse}` + RPC/faucet emit; hex still accepted
 
 ## Directory Structure Reference
 

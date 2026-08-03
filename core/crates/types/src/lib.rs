@@ -10,7 +10,9 @@ mod transaction;
 pub use amount::Amount;
 pub use block::{Block, BlockHeader};
 pub use hash::Hash;
-pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
+pub use transaction::{
+    Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut, ADDRESS_HRP,
+};
 
 #[cfg(test)]
 mod tests {
@@ -22,6 +24,21 @@ mod tests {
         let one = Amount::from_whole(1).expect("1 AGORA");
         assert_eq!(one.as_base_units(), 100_000_000);
         assert_eq!(one.checked_add(one).unwrap().as_base_units(), 200_000_000);
+    }
+
+    #[test]
+    fn address_bech32m_roundtrip_and_parse() {
+        let addr = Address::from_hex("ff9ec96f09eb154d038a552ecae59c50204ea9a9").unwrap();
+        let encoded = addr.to_bech32();
+        // Locked against apps/shared/light-client `encodeAddress` (@scure/base bech32m).
+        assert_eq!(encoded, "agora1l70vjmcfav256qu225hv4evu2qsya2dfajrcqc");
+        assert_eq!(Address::from_bech32(&encoded), Some(addr));
+        assert_eq!(Address::from_bech32(&encoded.to_uppercase()), Some(addr));
+        assert_eq!(Address::parse(&encoded), Some(addr));
+        assert_eq!(Address::parse(&addr.to_hex()), Some(addr));
+        assert_eq!(Address::parse(&format!("0x{}", addr.to_hex())), Some(addr));
+        assert_eq!(format!("{addr}"), encoded);
+        assert!(Address::from_bech32("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4").is_none());
     }
 
     #[test]
