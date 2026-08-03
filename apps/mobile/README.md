@@ -20,6 +20,7 @@ AGORA_TEMPLATE_BITS=0 cargo run -p agora-node
 cd apps/mobile
 npm install
 npm start
+npm run web               # requires react-dom / react-native-web / @expo/metro-runtime
 # device builds: npm run android | npm run ios
 # store/EAS: npm run build:android | npm run build:ios
 ```

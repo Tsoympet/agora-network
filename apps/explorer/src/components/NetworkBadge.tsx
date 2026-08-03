@@ -21,7 +21,7 @@ export function NetworkBadge() {
         const next = await getNodeInfo();
         if (!cancelled) setInfo(next);
       } catch {
-        if (!cancelled) setInfo(null);
+        // Keep last successful network across transient RPC failures.
       } finally {
         if (!cancelled) {
           timer = window.setTimeout(tick, POLL_MS);
@@ -36,9 +36,8 @@ export function NetworkBadge() {
     };
   }, []);
 
-  const accent = networkAccent(info?.network ?? "devnet");
+  const accent = networkAccent(info?.network);
   const label = info ? networkLabel(info.network) : "Connecting…";
-  const hrp = networkHrpHint(info?.network ?? "devnet");
 
   return (
     <span
@@ -57,9 +56,11 @@ export function NetworkBadge() {
         aria-hidden
       />
       {label}
-      <span className="font-mono text-[0.7rem] normal-case tracking-normal opacity-75">
-        {hrp}
-      </span>
+      {info ? (
+        <span className="font-mono text-[0.7rem] normal-case tracking-normal opacity-75">
+          {networkHrpHint(info.network)}
+        </span>
+      ) : null}
     </span>
   );
 }

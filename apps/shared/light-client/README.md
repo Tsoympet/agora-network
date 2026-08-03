@@ -31,5 +31,7 @@ RPC methods: `agora_getDagTips`, `agora_getBlock`, `agora_getTransaction`,
 `agora_getMempool`, `agora_getNodeInfo`, `agora_getBalance`, `agora_getUtxos`,
 `agora_submitTransaction`.
 
-Addresses: Bech32m (`agora1…`) preferred; 40-char hex still accepted via
-`parseAddress`.
+Addresses: Bech32m HRPs `agora` / `agoratest` / `agoradev` preferred; 40-char
+hex stays network-neutral. Pass the node network to `parseAddress(input, network)`
+(and to `sendTransfer` / `buildSignedTransfer`) so cross-network Bech32 recipients
+are rejected instead of silently re-encoded.
