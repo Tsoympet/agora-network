@@ -11,7 +11,9 @@ mod mnemonic;
 mod transaction;
 
 pub use address::address_from_pubkey;
-pub use bip44::{derive_bip44, Bip44Path, AGORA_COIN_TYPE};
+pub use bip44::{
+    derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,
+};
 pub use error::CryptoError;
 pub use keys::{KeyPair, PublicKeyBytes, SignatureBytes};
 pub use mnemonic::{generate_mnemonic, seed_fingerprint, seed_from_mnemonic};

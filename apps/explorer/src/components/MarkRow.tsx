@@ -2,19 +2,19 @@ const marks = [
   {
     code: "TLT",
     name: "Talanton",
-    meaning: "Scales of value",
+    meaning: "L1 native · 100M max",
     src: "/brand/talanton.png",
   },
   {
     code: "DRC",
     name: "Drachma",
-    meaning: "Corinthian helm",
+    meaning: "L2+ medium · 6B max",
     src: "/brand/drachma.png",
   },
   {
     code: "OVL",
     name: "Ovolos",
-    meaning: "Winged helm / spears",
+    meaning: "L2 rollup · 21B max",
     src: "/brand/ovolos.png",
   },
 ] as const;

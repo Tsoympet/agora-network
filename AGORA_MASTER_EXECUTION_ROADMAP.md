@@ -196,6 +196,12 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **`OrphanPool` + drain:** park `MissingParent` bodies, fetch ancestors via GetBlock, re-admit children; no peer penalty for parent-miss alone
 - [x] **`agora_fundAddress` hard-off on mainnet:** env cannot enable fund RPC when `network=mainnet`
 
+## Phase 32: Genesis v2 + HRPs / SLIP-0044 prep — done
+
+- [x] **Genesis artifact v2:** chain id, consensus + wallet policy, three-mark registry (TLT 100M / DRC 6B / OVL 21B)
+- [x] **Network HRPs:** `agora` / `agoratest` / `agoradev` (decode accepts all; encode per network)
+- [x] **Provisional SLIP-0044:** coin type `8888` documented pending registration; mainnet draft artifact
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

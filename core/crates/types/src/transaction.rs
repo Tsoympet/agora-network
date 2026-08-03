@@ -3,10 +3,8 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::hrp::{is_known_address_hrp, ADDRESS_HRP};
 use crate::{Amount, Hash};
-
-/// Human-readable part for Bech32m address strings (`agora1…`).
-pub const ADDRESS_HRP: &str = "agora";
 
 /// Bech32-ready raw payload for a secp256k1-derived address (20-byte hash of pubkey).
 #[derive(
@@ -34,16 +32,23 @@ impl Address {
         Some(Self(out))
     }
 
-    /// Bech32m encoding with HRP [`ADDRESS_HRP`] (`agora1…`).
+    /// Bech32m encoding with the default mainnet HRP (`agora1…`).
     pub fn to_bech32(&self) -> String {
-        let hrp = Hrp::parse(ADDRESS_HRP).expect("static ADDRESS_HRP");
+        self.to_bech32_hrp(ADDRESS_HRP)
+    }
+
+    /// Bech32m encoding with an explicit HRP (`agora` / `agoratest` / `agoradev`).
+    pub fn to_bech32_hrp(&self, hrp: &str) -> String {
+        let hrp = Hrp::parse(hrp).unwrap_or_else(|_| {
+            Hrp::parse(ADDRESS_HRP).expect("static ADDRESS_HRP")
+        });
         bech32::encode::<Bech32m>(hrp, &self.0).expect("20-byte bech32m encode")
     }
 
-    /// Decode a Bech32m `agora1…` address (case-insensitive).
+    /// Decode a Bech32m Agora address (any known network HRP, case-insensitive).
     pub fn from_bech32(s: &str) -> Option<Self> {
         let (hrp, data) = bech32::decode(s).ok()?;
-        if !hrp.as_str().eq_ignore_ascii_case(ADDRESS_HRP) {
+        if !is_known_address_hrp(hrp.as_str()) {
             return None;
         }
         if data.len() != 20 {
@@ -54,7 +59,7 @@ impl Address {
         Some(Self(out))
     }
 
-    /// Accept Bech32m (`agora1…`) or 40-char hex (optional `0x`).
+    /// Accept Bech32m (`agora1…` / `agoratest1…` / `agoradev1…`) or 40-char hex.
     pub fn parse(s: &str) -> Option<Self> {
         let s = s.trim();
         if s.is_empty() {

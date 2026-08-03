@@ -1,15 +1,16 @@
 {
-  "network": "testnet",
+  "network": "mainnet",
   "version": 2,
   "chain_name": "Agora Network",
-  "chain_id": "agora-testnet-1",
-  "timestamp_ms": 1785715200000,
-  "bits": 0,
+  "chain_id": "agora-mainnet-1",
+  "status": "DRAFT — not frozen; AGORA_NETWORK=mainnet still refuses boot",
+  "timestamp_ms": 0,
+  "bits": 16,
   "max_supply": 10000000000000000,
   "premine": 1000000000000000,
-  "premine_address": "agoratest1l70vjmcfav256qu225hv4evu2qsya2df646nyg",
-  "premine_address_hex": "ff9ec96f09eb154d038a552ecae59c50204ea9a9",
-  "genesis_hash": "afe59232cd20a16bd56948044149d2b8013e63f3694c113074fef75ab0cb9b98",
+  "premine_address": "TBD",
+  "premine_address_hex": "TBD",
+  "genesis_hash": "TBD",
   "emission_initial_reward": 5000000000,
   "emission_halving_interval": 210000,
   "decimals": 8,
@@ -49,12 +50,17 @@
     "target_block_time_ms": 1000,
     "daa_window_size": 90,
     "daa_max_adjustment_factor": 2.0,
-    "daa_min_level": 0
+    "daa_min_level": 8
   },
   "wallet": {
-    "address_hrp": "agoratest",
+    "address_hrp": "agora",
     "coin_type": 8888,
     "coin_type_status": "provisional-slip44-pending",
     "bip44_path_account0": "m/44'/8888'/0'/0/0"
-  }
+  },
+  "notes": [
+    "L1 settles only TLT (Amount). DRC/OVL supplies are economic freezes for L2/bridge issuance.",
+    "Register a real SLIP-0044 coin type before publishing mainnet genesis_hash.",
+    "Premine address + timestamp + bits must be chosen before hash freeze."
+  ]
 }

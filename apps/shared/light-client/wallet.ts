@@ -22,10 +22,17 @@ export function generateMnemonic(strength: 128 | 256 = 128): string {
   return bip39Generate(wordlist, strength);
 }
 
-import { encodeAddress, parseAddress } from "./address";
+import {
+  ADDRESS_HRP,
+  addressHrpForNetwork,
+  encodeAddress,
+  parseAddress,
+} from "./address";
 import type { LightClient, LightUtxo } from "./rpc";
 
+/** Provisional SLIP-0044 coin type — replace before mainnet freeze. */
 export const AGORA_COIN_TYPE = 8888;
+export const AGORA_COIN_TYPE_PROVISIONAL = AGORA_COIN_TYPE;
 
 export type WalletAccount = {
   index: number;
@@ -125,16 +132,22 @@ export function addressFromMnemonic(
   return deriveAccount(mnemonic, index, passphrase).addressHex;
 }
 
-/** Bech32m (`agora1…`) form of the derived external address. */
+/** Bech32m form of the derived external address (HRP from `network`). */
 export function addressBech32FromMnemonic(
   mnemonic: string,
   index = 0,
   passphrase = "",
+  network = "mainnet",
 ): string {
-  return deriveAccount(mnemonic, index, passphrase).addressBech32;
+  return deriveAccount(mnemonic, index, passphrase, network).addressBech32;
 }
 
-export function deriveAccount(mnemonic: string, index = 0, passphrase = ""): WalletAccount {
+export function deriveAccount(
+  mnemonic: string,
+  index = 0,
+  passphrase = "",
+  network = "mainnet",
+): WalletAccount {
   const phrase = mnemonic.trim().toLowerCase().replace(/\s+/g, " ");
   if (!validateMnemonic(phrase)) {
     throw new Error("invalid BIP-39 mnemonic");
@@ -148,10 +161,11 @@ export function deriveAccount(mnemonic: string, index = 0, passphrase = ""): Wal
   // @scure/bip32 publicKey is compressed 33 bytes.
   const publicKey = hd.publicKey;
   const addressHex = addressFromPubkey(publicKey);
+  const hrp = addressHrpForNetwork(network) || ADDRESS_HRP;
   return {
     index,
     addressHex,
-    addressBech32: encodeAddress(addressHex),
+    addressBech32: encodeAddress(addressHex, hrp),
     publicKey,
     secretKey: hd.privateKey,
   };
