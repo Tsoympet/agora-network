@@ -191,6 +191,11 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **Network-locked consensus policy:** `ChainParams.{daa,ghostdag_k,pow_algorithm,bits}` → `ChainBootConfig`; `AGORA_TEMPLATE_BITS` / `AGORA_POW_ALGO` override only on `dev`
 
+## Phase 31: Orphan pool + parent-fetch IBD — done
+
+- [x] **`OrphanPool` + drain:** park `MissingParent` bodies, fetch ancestors via GetBlock, re-admit children; no peer penalty for parent-miss alone
+- [x] **`agora_fundAddress` hard-off on mainnet:** env cannot enable fund RPC when `network=mainnet`
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

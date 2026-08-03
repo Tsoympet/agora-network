@@ -30,8 +30,8 @@ pub enum AdmitError {
     InvalidPow,
     #[error("wrong difficulty: expected bits={expected}, got={got}")]
     WrongDifficulty { expected: u32, got: u32 },
-    #[error("missing parent: {0}")]
-    MissingParent(String),
+    #[error("missing parent: {}", .0.to_hex())]
+    MissingParent(Hash),
     #[error("duplicate block: {0}")]
     Duplicate(String),
     #[error("storage: {0}")]
@@ -242,6 +242,17 @@ impl ChainState {
         Ok(self.load_block(hash)?.is_some() || self.dag.contains(hash))
     }
 
+    /// Parents of `block` that are not yet in the local DAG / store.
+    pub fn missing_parents_of(&self, block: &Block) -> Vec<Hash> {
+        block
+            .header
+            .parents
+            .iter()
+            .copied()
+            .filter(|p| !self.dag.contains(p))
+            .collect()
+    }
+
     /// Build a mining template parented to current tips with coinbase + transfers.
     ///
     /// Coinbase value is emission ([`EmissionSchedule::reward_at_blue_score`]) plus
@@ -433,7 +444,7 @@ impl ChainState {
                 return Err(AdmitError::DuplicateParent(parent.to_hex()));
             }
             if !self.dag.contains(parent) {
-                return Err(AdmitError::MissingParent(parent.to_hex()));
+                return Err(AdmitError::MissingParent(*parent));
             }
         }
         Ok(())
@@ -1444,5 +1455,83 @@ mod tests {
         .unwrap();
         assert_eq!(reloaded.virtual_tip().unwrap(), tip);
         assert_eq!(reloaded.genesis(), genesis);
+    }
+
+    fn mine_block_pow(chain: &ChainState, parents: &[Hash], nonce: u64) -> Block {
+        let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
+        block.header.parents = parents.to_vec();
+        block.header.nonce = nonce;
+        block.header.timestamp_ms = nonce;
+        let emission = chain
+            .emission
+            .reward_at_blue_score(chain.estimate_blue_score(parents));
+        block.transactions = vec![Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(emission),
+                address: Address::ZERO,
+            }],
+            nonce,
+        )];
+        block.header.tx_root = Block::compute_tx_root(&block.transactions);
+        let digest = RandomXPowHasher.pow_hash(&block.header);
+        LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&block.header, &digest)
+            .unwrap();
+        block
+    }
+
+    #[test]
+    fn orphan_pool_recovers_out_of_order_child() {
+        use agora_p2p::{drain_orphans_after, OrphanPool};
+        use std::time::Duration;
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+
+        let mid = mine_block_pow(&chain, &[genesis], 70);
+        let mid_id = mid.id();
+        let tip = mine_block_pow(&chain, &[mid_id], 71);
+        let tip_id = tip.id();
+
+        assert!(matches!(
+            chain.admit_block(tip.clone()),
+            Err(AdmitError::MissingParent(h)) if h == mid_id
+        ));
+        assert_eq!(chain.missing_parents_of(&tip), vec![mid_id]);
+
+        let mut orphans = OrphanPool::new(Duration::from_secs(60), 16);
+        assert!(orphans.park(tip, &[mid_id], None));
+
+        let mid_admitted = chain.admit_block(mid).unwrap();
+        assert_eq!(mid_admitted, mid_id);
+
+        let drained = drain_orphans_after(&mut orphans, mid_id, |child| {
+            match chain.admit_block(child.clone()) {
+                Ok(id) => Ok(id),
+                Err(AdmitError::MissingParent(_)) => {
+                    let missing = chain.missing_parents_of(&child);
+                    if missing.is_empty() {
+                        Err(None)
+                    } else {
+                        Err(Some(missing))
+                    }
+                }
+                Err(_) => Err(None),
+            }
+        });
+        assert!(drained.contains(&tip_id));
+        assert!(orphans.is_empty());
+        assert!(chain.has_block(&tip_id).unwrap());
+        assert_eq!(chain.virtual_tip().unwrap(), tip_id);
     }
 }

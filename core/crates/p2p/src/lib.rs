@@ -21,7 +21,8 @@ pub use error::P2pError;
 pub use identity::{load_or_generate_identity, save_identity};
 pub use getblock::{getblock_protocol, GetBlockRequest, GetBlockResponse, GETBLOCK_PROTOCOL};
 pub use ibd::{
-    reconstruct_compact_block, short_ids_for_block, tx_short_id, PendingFetches, ReconstructError,
+    drain_orphans_after, reconstruct_compact_block, short_ids_for_block, tx_short_id, OrphanEntry,
+    OrphanPool, PendingFetches, ReconstructError,
 };
 pub use limits::{connection_limits_behaviour, connection_limits_for_max_peers};
 pub use mempool::{Mempool, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT};

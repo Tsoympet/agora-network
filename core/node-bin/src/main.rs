@@ -14,16 +14,17 @@ use std::time::Duration;
 
 use agora_consensus::PowAlgorithm;
 use agora_p2p::{
-    dial_addr, fetch_seeder_peers_best_effort, load_or_generate_identity, merge_bootstrap_peers,
-    reconstruct_compact_block, Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage,
-    NetworkNode, PeerId, PendingFetches, ReconstructError, SeederBook,
+    dial_addr, drain_orphans_after, fetch_seeder_peers_best_effort, load_or_generate_identity,
+    merge_bootstrap_peers, reconstruct_compact_block, Mempool, NetworkConfig, NetworkEvent,
+    NetworkHandle, NetworkMessage, NetworkNode, OrphanPool, PeerId, PendingFetches,
+    ReconstructError, SeederBook,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{ChainParams, NetworkId, StateStore};
 use agora_types::{Address, Block, Hash};
 use tracing::{info, warn};
 
-use crate::admit::{ChainBootConfig, ChainState};
+use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{admit_transaction, NodeBackend};
 use crate::http::serve_rpc;
 use crate::storage_policy::StoragePolicy;
@@ -141,15 +142,106 @@ fn admit_gossip_block(
     chain: &Arc<Mutex<ChainState>>,
     mempool: &Arc<Mutex<Mempool>>,
     block: Block,
-) -> Result<Hash, String> {
-    let id = chain
-        .lock()
-        .map_err(|_| "chain lock poisoned".to_string())
-        .and_then(|mut guard| guard.admit_block(block.clone()).map_err(|e| e.to_string()))?;
+) -> Result<Hash, AdmitError> {
+    let id = {
+        let mut guard = chain
+            .lock()
+            .map_err(|_| AdmitError::Storage("chain lock poisoned".into()))?;
+        guard.admit_block(block.clone())?
+    };
     if let Ok(mut pool) = mempool.lock() {
         pool.evict_for_block(&block);
     }
     Ok(id)
+}
+
+fn missing_parents(
+    chain: &Arc<Mutex<ChainState>>,
+    block: &Block,
+) -> Result<Vec<Hash>, AdmitError> {
+    let guard = chain
+        .lock()
+        .map_err(|_| AdmitError::Storage("chain lock poisoned".into()))?;
+    Ok(guard.missing_parents_of(block))
+}
+
+/// Admit a block; on missing parents park it and fetch ancestors. On success, drain orphans.
+fn handle_incoming_block(
+    chain: &Arc<Mutex<ChainState>>,
+    mempool: &Arc<Mutex<Mempool>>,
+    orphans: &mut OrphanPool,
+    pending: &mut PendingFetches,
+    net: &NetworkHandle,
+    peer: PeerId,
+    block: Block,
+) {
+    let block_id = block.id();
+    match admit_gossip_block(chain, mempool, block.clone()) {
+        Ok(id) => {
+            score_peer(net, peer, true);
+            info!(%peer, block = %id.to_hex(), "admitted block");
+            let chain_ref = chain.clone();
+            let mempool_ref = mempool.clone();
+            let drained = drain_orphans_after(orphans, id, |child| {
+                match admit_gossip_block(&chain_ref, &mempool_ref, child.clone()) {
+                    Ok(cid) => {
+                        info!(block = %cid.to_hex(), "admitted orphan");
+                        Ok(cid)
+                    }
+                    Err(AdmitError::MissingParent(_)) => {
+                        match missing_parents(&chain_ref, &child) {
+                            Ok(missing) if !missing.is_empty() => Err(Some(missing)),
+                            Ok(_) => Err(None),
+                            Err(_) => Err(None),
+                        }
+                    }
+                    Err(err) => {
+                        warn!(error = %err, "rejected orphan");
+                        Err(None)
+                    }
+                }
+            });
+            if drained.len() > 1 {
+                info!(count = drained.len() - 1, "drained orphans after admit");
+            }
+        }
+        Err(AdmitError::MissingParent(_)) => {
+            let missing = missing_parents(chain, &block).unwrap_or_else(|_| {
+                block.header.parents.clone()
+            });
+            if missing.is_empty() {
+                score_peer(net, peer, false);
+                warn!(%peer, block = %block_id.to_hex(), "missing parent race — rejecting");
+                return;
+            }
+            if orphans.park(block, &missing, Some(peer)) {
+                info!(
+                    %peer,
+                    block = %block_id.to_hex(),
+                    missing = missing.len(),
+                    orphans = orphans.len(),
+                    "parked orphan — fetching parents"
+                );
+            } else {
+                warn!(
+                    %peer,
+                    block = %block_id.to_hex(),
+                    "orphan pool full — dropping block"
+                );
+            }
+            for parent in missing {
+                request_block_if_missing(chain, pending, net, peer, parent);
+            }
+        }
+        Err(AdmitError::Duplicate(_)) => {
+            // Benign — already have it.
+            pending.complete(&block_id);
+        }
+        Err(err) => {
+            score_peer(net, peer, false);
+            warn!(%peer, error = %err, "rejected block");
+        }
+    }
 }
 
 fn request_block_if_missing(
@@ -330,10 +422,16 @@ async fn main() {
 
     let rpc_bind =
         std::env::var("AGORA_RPC_BIND").unwrap_or_else(|_| "127.0.0.1:8545".into());
-    let allow_fund = matches!(
-        std::env::var("AGORA_RPC_ALLOW_FUND").as_deref(),
-        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
-    );
+    let allow_fund = chain_params.network != NetworkId::Mainnet
+        && matches!(
+            std::env::var("AGORA_RPC_ALLOW_FUND").as_deref(),
+            Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
+        );
+    if chain_params.network == NetworkId::Mainnet
+        && std::env::var("AGORA_RPC_ALLOW_FUND").is_ok()
+    {
+        warn!("AGORA_RPC_ALLOW_FUND ignored on mainnet — fund RPC permanently disabled");
+    }
     let miner_address = std::env::var("AGORA_MINER_ADDRESS")
         .ok()
         .and_then(|s| Address::parse(&s))
@@ -384,6 +482,7 @@ async fn main() {
     let local_peer = handle.peer_id();
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));
+        let mut orphans = OrphanPool::new(Duration::from_secs(120), 1_024);
         let refresh_every = seeder_book
             .as_ref()
             .map(|b| b.refresh_interval())
@@ -474,16 +573,15 @@ async fn main() {
                 NetworkEvent::GetBlockResponse { peer, hash, block } => match block {
                     Some(block) => {
                         pending.complete(&hash);
-                        match admit_gossip_block(&chain, &mempool, block) {
-                            Ok(id) => {
-                                score_peer(&net, peer, true);
-                                info!(%peer, block = %id.to_hex(), "admitted rr getblock")
-                            }
-                            Err(err) => {
-                                score_peer(&net, peer, false);
-                                warn!(%peer, error = %err, "rejected rr getblock")
-                            }
-                        }
+                        handle_incoming_block(
+                            &chain,
+                            &mempool,
+                            &mut orphans,
+                            &mut pending,
+                            &net,
+                            peer,
+                            block,
+                        );
                     }
                     None => {
                         warn!(
@@ -512,16 +610,16 @@ async fn main() {
                     NetworkMessage::Block(block) => {
                         let id = block.id();
                         pending.complete(&id);
-                        match admit_gossip_block(&chain, &mempool, block) {
-                            Ok(id) => {
-                                score_peer(&net, peer, true);
-                                info!(%peer, %topic, block = %id.to_hex(), "admitted gossip block")
-                            }
-                            Err(err) => {
-                                score_peer(&net, peer, false);
-                                warn!(%peer, %topic, error = %err, "rejected gossip block")
-                            }
-                        }
+                        handle_incoming_block(
+                            &chain,
+                            &mempool,
+                            &mut orphans,
+                            &mut pending,
+                            &net,
+                            peer,
+                            block,
+                        );
+                        let _ = topic;
                     }
                     NetworkMessage::CompactBlock { header, short_ids } => {
                         let hash = header.hash();
@@ -543,26 +641,16 @@ async fn main() {
                         match reconstruct_compact_block(header, &short_ids, lookup) {
                             Ok(block) => {
                                 pending.complete(&hash);
-                                match admit_gossip_block(&chain, &mempool, block) {
-                                    Ok(id) => {
-                                        score_peer(&net, peer, true);
-                                        info!(
-                                            %peer,
-                                            %topic,
-                                            block = %id.to_hex(),
-                                            "admitted compact block"
-                                        );
-                                    }
-                                    Err(err) => {
-                                        score_peer(&net, peer, false);
-                                        warn!(
-                                            %peer,
-                                            %topic,
-                                            error = %err,
-                                            "rejected compact block"
-                                        );
-                                    }
-                                }
+                                handle_incoming_block(
+                                    &chain,
+                                    &mempool,
+                                    &mut orphans,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    block,
+                                );
+                                let _ = topic;
                             }
                             Err(ReconstructError::MissingShortIds(n)) => {
                                 info!(
