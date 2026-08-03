@@ -13,6 +13,7 @@ Wallet and signature primitives for Agora Network.
 - BIP-39 24-word mnemonic generation and seed derivation
 - BIP-44 paths via `bip32` CKD (`m/44'/8888'/account'/change/index`)
 - Address = first 20 bytes of SHA-256(compressed pubkey)
+- String form = **Bech32m** with HRP `agora` (`Address::to_bech32` / light-client `encodeAddress`); hex still accepted at RPC/env boundaries
 - ECDSA sign / verify over SHA-256 digests
 - Transaction auth: sign `TransactionBody` borsh bytes; attach pubkey + compact signature
 
@@ -24,4 +25,3 @@ Wallet and signature primitives for Agora Network.
 ## Non-goals
 
 - Proof-of-work hashing (lives under consensus / miner)
-- Bech32 address string encoding (client / RPC formatting layer)

@@ -13,13 +13,17 @@ export { wordlist };
 export const validateMnemonic = (mnemonic: string): boolean =>
   bip39Validate(mnemonic.trim().toLowerCase().replace(/\s+/g, " "), wordlist);
 
+import { encodeAddress, parseAddress } from "./address";
 import type { LightClient, LightUtxo } from "./rpc";
 
 export const AGORA_COIN_TYPE = 8888;
 
 export type WalletAccount = {
   index: number;
+  /** Canonical 40-char lowercase hex (consensus payload). */
   addressHex: string;
+  /** Bech32m display form (`agora1…`). */
+  addressBech32: string;
   publicKey: Uint8Array;
   secretKey: Uint8Array;
 };
@@ -119,9 +123,11 @@ export function deriveAccount(mnemonic: string, index = 0, passphrase = ""): Wal
   }
   // @scure/bip32 publicKey is compressed 33 bytes.
   const publicKey = hd.publicKey;
+  const addressHex = addressFromPubkey(publicKey);
   return {
     index,
-    addressHex: addressFromPubkey(publicKey),
+    addressHex,
+    addressBech32: encodeAddress(addressHex),
     publicKey,
     secretKey: hd.privateKey,
   };
@@ -159,8 +165,9 @@ export async function buildSignedTransfer(options: {
   const fee = options.fee ?? 1;
   const need = options.amount + fee;
   if (need <= 0) throw new Error("amount must be > 0");
-  const to = hexToBytes(options.toAddressHex);
-  if (to.length !== 20) throw new Error("to address must be 20 bytes hex");
+  const toHex = parseAddress(options.toAddressHex);
+  const to = hexToBytes(toHex);
+  if (to.length !== 20) throw new Error("to address must be 20 bytes");
 
   const sorted = [...options.utxos].sort((a, b) => b.value - a.value);
   const selected: LightUtxo[] = [];
@@ -218,7 +225,7 @@ export async function buildSignedTransfer(options: {
   return {
     tx,
     from: account.addressHex,
-    to: bytesToHex(to),
+    to: toHex,
     amount: options.amount,
     change,
     fee,

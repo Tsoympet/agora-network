@@ -13,6 +13,7 @@ import { agoraBrand } from "../shared/brand/tokens";
 import {
   addressFromMnemonic,
   createLightClient,
+  parseAddress,
   sendTransfer,
   shortHash,
   startTipSync,
@@ -85,9 +86,11 @@ export default function App() {
         : agoraBrand.colors.inkMuted;
 
   async function onLookup() {
-    const hex = address.trim().toLowerCase();
-    if (!/^(0x)?[0-9a-f]{40}$/.test(hex)) {
-      setWalletError("Enter a 40-character hex address");
+    let resolved: string;
+    try {
+      resolved = parseAddress(address);
+    } catch {
+      setWalletError("Enter an agora1… or 40-character hex address");
       setBalance(null);
       setUtxos([]);
       return;
@@ -96,8 +99,8 @@ export default function App() {
     setWalletError(null);
     try {
       const [bal, set] = await Promise.all([
-        client.getBalance(hex),
-        client.getUtxos(hex),
+        client.getBalance(resolved),
+        client.getUtxos(resolved),
       ]);
       setBalance(bal.balance);
       setUtxos(set.utxos);

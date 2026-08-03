@@ -17,8 +17,8 @@ struct DripBody {
 /// Serve faucet over a tiny HTTP surface (same style as dns-seeder).
 ///
 /// - `GET /health`
-/// - `POST /drip` JSON `{ "address": "<40-hex>" }`
-/// - `GET /balance/<40-hex>`
+/// - `POST /drip` JSON `{ "address": "<agora1…|40-hex>" }`
+/// - `GET /balance/<agora1…|40-hex>`
 pub async fn serve(bind: &str, faucet: Arc<Mutex<FaucetService>>) {
     let listener = TcpListener::bind(bind).await.expect("bind faucet");
     info!(%bind, "agora-testnet-faucet listening");
@@ -63,7 +63,7 @@ async fn handle_request(req: &str, faucet: &Arc<Mutex<FaucetService>>) -> String
                     return http_response(400, &format!(r#"{{"error":"bad json: {err}"}}"#));
                 }
             };
-            let address = match Address::from_hex(&parsed.address) {
+            let address = match Address::parse(&parsed.address) {
                 Some(a) => a,
                 None => {
                     return http_response(400, r#"{"error":"invalid address"}"#);
@@ -74,7 +74,7 @@ async fn handle_request(req: &str, faucet: &Arc<Mutex<FaucetService>>) -> String
                 Ok(bal) => http_response(
                     200,
                     &serde_json::json!({
-                        "address": address.to_hex(),
+                        "address": address.to_bech32(),
                         "balance": bal.as_base_units(),
                     })
                     .to_string(),
@@ -90,8 +90,8 @@ async fn handle_request(req: &str, faucet: &Arc<Mutex<FaucetService>>) -> String
             }
         }
         (m, p) if m == "GET" && p.starts_with("/balance/") => {
-            let hex = p.trim_start_matches("/balance/");
-            let address = match Address::from_hex(hex) {
+            let raw = p.trim_start_matches("/balance/");
+            let address = match Address::parse(raw) {
                 Some(a) => a,
                 None => return http_response(400, r#"{"error":"invalid address"}"#),
             };
@@ -100,7 +100,7 @@ async fn handle_request(req: &str, faucet: &Arc<Mutex<FaucetService>>) -> String
                 Ok(bal) => http_response(
                     200,
                     &serde_json::json!({
-                        "address": address.to_hex(),
+                        "address": address.to_bech32(),
                         "balance": bal.as_base_units(),
                     })
                     .to_string(),
