@@ -1,13 +1,16 @@
 //! `agora-layers` — operator JSON-RPC for the L2/L3/L4 stack.
 //!
 //! Bind with `AGORA_LAYERS_BIND` (default `127.0.0.1:8555`).
-//! Methods are namespaced `agora_layers_*` and stay off the L1 node process.
+//! Layer genesis:
+//! - `AGORA_OVL_GENESIS_FILE` — Ovolos L2 (default: embedded testnet)
+//! - `AGORA_DRC_GENESIS_FILE` — Drachma L3 (default: embedded testnet)
 
 use std::sync::Arc;
 
+use agora_bridge_sdk::DrachmaGenesis;
 use agora_intent_engine::Intent;
 use agora_layers_runtime::{LayersRuntime, LayersRuntimeConfig};
-use agora_ovolos_rollup::{Batch, BatchCommitment, EvmTx, FraudProof};
+use agora_ovolos_rollup::{Batch, BatchCommitment, EvmTx, FraudProof, OvolosGenesis};
 use agora_types::{Address, Amount, Hash};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -23,13 +26,37 @@ async fn main() {
     let bind = std::env::var("AGORA_LAYERS_BIND").unwrap_or_else(|_| "127.0.0.1:8555".into());
     let challenge_window_ms = std::env::var("AGORA_LAYERS_CHALLENGE_MS")
         .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(60_000);
+        .and_then(|s| s.parse().ok());
+
+    let ovolos_genesis = match std::env::var("AGORA_OVL_GENESIS_FILE") {
+        Ok(path) => OvolosGenesis::from_path(&path).unwrap_or_else(|e| {
+            panic!("failed to load AGORA_OVL_GENESIS_FILE ({path}): {e}");
+        }),
+        Err(_) => OvolosGenesis::testnet(),
+    };
+    let drachma_genesis = match std::env::var("AGORA_DRC_GENESIS_FILE") {
+        Ok(path) => DrachmaGenesis::from_path(&path).unwrap_or_else(|e| {
+            panic!("failed to load AGORA_DRC_GENESIS_FILE ({path}): {e}");
+        }),
+        Err(_) => DrachmaGenesis::testnet(),
+    };
+
+    info!(
+        ovl_chain = %ovolos_genesis.chain_id,
+        ovl_genesis = %ovolos_genesis.genesis_hash,
+        drc_chain = %drachma_genesis.chain_id,
+        drc_genesis = %drachma_genesis.genesis_hash,
+        "loading layer genesis"
+    );
+
     let runtime = LayersRuntime::new(LayersRuntimeConfig {
         challenge_window_ms,
         gas_payer: None,
-        hub_id: "agora-hub".into(),
-    });
+        hub_id: None,
+        ovolos_genesis,
+        drachma_genesis,
+    })
+    .expect("layers runtime boot");
     let state = Arc::new(Mutex::new(runtime));
     serve(&bind, state).await;
 }

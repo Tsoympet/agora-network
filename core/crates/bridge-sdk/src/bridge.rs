@@ -5,6 +5,7 @@ use agora_types::{Address, Amount, Hash};
 
 use crate::district::DistrictConfig;
 use crate::drc::{DrcLedger, DRC_MAX_SUPPLY_BASE};
+use crate::genesis::DrachmaGenesis;
 use crate::messages::{BridgeDirection, BridgeMessage, MessageStatus};
 use crate::proof::{verify_inclusion, LightClientProof};
 use crate::transport::MessageTransport;
@@ -35,6 +36,36 @@ impl Default for BridgeBox {
 impl BridgeBox {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Boot bridge from a frozen Drachma L3 genesis (caps, districts, premine).
+    pub fn from_genesis(genesis: &DrachmaGenesis) -> Result<Self, BridgeError> {
+        genesis.validate()?;
+        let ledger = genesis.ignite_ledger()?;
+        let mut bridge = Self {
+            districts: HashMap::new(),
+            locks: HashMap::new(),
+            messages: HashMap::new(),
+            drc: ledger,
+            transport: None,
+        };
+        for cfg in genesis.district_configs()? {
+            bridge.register_district(cfg);
+        }
+        // Hub premine also counts as locked hub liquidity.
+        for p in &genesis.premine {
+            if p.district_id == genesis.hub_id {
+                let addr = Address::from_hex(&p.address_hex)
+                    .ok_or_else(|| BridgeError::Constraint("bad premine address".into()))?;
+                let key = (genesis.hub_id.clone(), addr);
+                let locked = bridge.locks.get(&key).copied().unwrap_or(Amount::ZERO);
+                let next = locked
+                    .checked_add(Amount::from_base_units(p.amount))
+                    .ok_or(BridgeError::InsufficientLock)?;
+                bridge.locks.insert(key, next);
+            }
+        }
+        Ok(bridge)
     }
 
     pub fn with_transport(mut self, transport: Arc<dyn MessageTransport>) -> Self {

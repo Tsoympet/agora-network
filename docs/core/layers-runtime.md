@@ -7,8 +7,12 @@ In-process composition of L2 + L3 + L4 for operators and integration tests.
 ```bash
 cargo run -p agora-layers
 # AGORA_LAYERS_BIND=127.0.0.1:8555
-# AGORA_LAYERS_CHALLENGE_MS=60000
+# AGORA_LAYERS_CHALLENGE_MS=60000          # optional local override
+# AGORA_OVL_GENESIS_FILE=docs/genesis/ovolos.testnet.genesis.json
+# AGORA_DRC_GENESIS_FILE=docs/genesis/drachma.testnet.genesis.json
 ```
+
+Boots from Ovolos (L2) + Drachma (L3) genesis documents — see [`docs/genesis/README.md`](../genesis/README.md).
 
 - `GET /health`
 - `POST /rpc` — JSON-RPC body

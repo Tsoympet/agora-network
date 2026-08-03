@@ -1,0 +1,23 @@
+{
+  "layer": "L2",
+  "mark": "OVL",
+  "network": "testnet",
+  "version": 1,
+  "chain_name": "Ovolos Rollup",
+  "chain_id": "agora-ovolos-testnet-1",
+  "parent_l1_network": "testnet",
+  "parent_l1_genesis_hash": "afe59232cd20a16bd56948044149d2b8013e63f3694c113074fef75ab0cb9b98",
+  "timestamp_ms": 1785715200000,
+  "max_supply": 2100000000000000000,
+  "decimals": 8,
+  "gas_per_tx": 21000,
+  "challenge_window_ms": 604800000,
+  "genesis_state_root": "0000000000000000000000000000000000000000000000000000000000000000",
+  "premine": [
+    {
+      "address_hex": "ff9ec96f09eb154d038a552ecae59c50204ea9a9",
+      "amount": 210000000000000000
+    }
+  ],
+  "genesis_hash": "440bb8ebbfbbb6e5ede84566a4fe906022f903ce9b6338b2191a817b94669e01"
+}

@@ -1,0 +1,25 @@
+{
+  "layer": "L3",
+  "mark": "DRC",
+  "network": "mainnet",
+  "version": 1,
+  "chain_name": "Drachma Bridge Hub",
+  "chain_id": "agora-drachma-mainnet-1",
+  "status": "DRAFT — not frozen; awaits L1 mainnet genesis freeze",
+  "parent_l1_network": "mainnet",
+  "parent_l1_genesis_hash": "TBD",
+  "hub_id": "agora-hub",
+  "timestamp_ms": 0,
+  "max_supply": 600000000000000000,
+  "decimals": 8,
+  "premine": [],
+  "districts": [
+    {
+      "district_id": "agora-hub",
+      "kind": "general",
+      "chain_id": 1,
+      "rpc_hint": ""
+    }
+  ],
+  "genesis_hash": "TBD"
+}
