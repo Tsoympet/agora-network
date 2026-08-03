@@ -175,6 +175,10 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **Frozen testnet Block 0:** `ChainParams` / `NetworkId`, `docs/genesis/testnet.genesis.json`, `agora-node genesis dump|verify`, boot hash check, `genesis_hash` on `agora_getNodeInfo`
 
+## Phase 27: Network-scoped P2P topics — done
+
+- [x] **Gossip / getblock scoped by network:** `agora/<network>/blocks|txs/1` + `/agora/<network>/getblock/1`; `NetworkConfig::with_network` from `AGORA_NETWORK`
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

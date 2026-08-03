@@ -3,6 +3,7 @@ use std::time::Duration;
 use libp2p::identity::Keypair;
 
 use crate::scoring::GossipTuning;
+use crate::topics::NetworkTopics;
 
 /// libp2p node configuration.
 #[derive(Clone)]
@@ -21,6 +22,8 @@ pub struct NetworkConfig {
     pub gossip: GossipTuning,
     /// Persistent node identity. When `None`, [`crate::NetworkNode::build`] generates ephemeral keys.
     pub identity: Option<Keypair>,
+    /// Network label (`dev` / `testnet` / …) — scopes gossip topics + getblock protocol.
+    pub network: String,
 }
 
 impl std::fmt::Debug for NetworkConfig {
@@ -33,6 +36,7 @@ impl std::fmt::Debug for NetworkConfig {
             .field("seeder_refresh_interval", &self.seeder_refresh_interval)
             .field("gossip", &self.gossip)
             .field("identity", &self.identity.as_ref().map(|_| "<keypair>"))
+            .field("network", &self.network)
             .finish()
     }
 }
@@ -47,6 +51,7 @@ impl Default for NetworkConfig {
             seeder_refresh_interval: Duration::from_secs(60),
             gossip: GossipTuning::default(),
             identity: None,
+            network: "dev".into(),
         }
     }
 }
@@ -90,5 +95,15 @@ impl NetworkConfig {
     pub fn with_identity(mut self, identity: Keypair) -> Self {
         self.identity = Some(identity);
         self
+    }
+
+    /// Scope gossip topics / getblock to this network (`dev`, `testnet`, …).
+    pub fn with_network(mut self, network: impl Into<String>) -> Self {
+        self.network = NetworkTopics::new(network).network;
+        self
+    }
+
+    pub fn topics(&self) -> NetworkTopics {
+        NetworkTopics::new(&self.network)
     }
 }

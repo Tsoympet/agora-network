@@ -7,11 +7,12 @@ use agora_types::{Block, Hash};
 use libp2p::StreamProtocol;
 use serde::{Deserialize, Serialize};
 
-/// `/agora/getblock/1` — CBOR request/response for IBD body fetch.
-pub const GETBLOCK_PROTOCOL: &str = "/agora/getblock/1";
+/// Legacy unscoped protocol (pre–Phase 27). Prefer [`crate::NetworkTopics::getblock_protocol`].
+pub const GETBLOCK_PROTOCOL: &str = "/agora/dev/getblock/1";
 
+/// Default (`dev`) getblock protocol. Prefer network-scoped topics from [`NetworkConfig`].
 pub fn getblock_protocol() -> StreamProtocol {
-    StreamProtocol::new(GETBLOCK_PROTOCOL)
+    crate::topics::NetworkTopics::new("dev").getblock_protocol()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
