@@ -77,6 +77,7 @@ pub fn apply_block(
     let mut journal = UtxoJournal::default();
     let mut spent_in_block: HashSet<OutPoint> = HashSet::new();
     let mut created_in_block: HashMap<OutPoint, TxOut> = HashMap::new();
+    let mut coinbase_created: HashSet<OutPoint> = HashSet::new();
     let mut coinbases = 0u32;
 
     for tx in &block.transactions {
@@ -85,7 +86,14 @@ pub fn apply_block(
             if coinbases > 1 {
                 return Err(StateError::Coinbase("multiple coinbase txs".into()));
             }
-            apply_coinbase(store, tx, coinbase_budget, &mut journal, &mut created_in_block)?;
+            apply_coinbase(
+                store,
+                tx,
+                coinbase_budget,
+                &mut journal,
+                &mut created_in_block,
+                &mut coinbase_created,
+            )?;
         } else {
             apply_transfer(
                 store,
@@ -93,6 +101,7 @@ pub fn apply_block(
                 &mut journal,
                 &mut spent_in_block,
                 &mut created_in_block,
+                &coinbase_created,
             )?;
         }
     }
@@ -106,6 +115,7 @@ fn apply_coinbase(
     coinbase_reward: u64,
     journal: &mut UtxoJournal,
     created_in_block: &mut HashMap<OutPoint, TxOut>,
+    coinbase_created: &mut HashSet<OutPoint>,
 ) -> Result<(), StateError> {
     if tx.outputs.is_empty() {
         return Err(StateError::Coinbase("coinbase has no outputs".into()));
@@ -121,7 +131,7 @@ fn apply_coinbase(
             "coinbase {total} exceeds reward {coinbase_reward}"
         )));
     }
-    create_outputs(store, tx, journal, created_in_block)
+    create_outputs(store, tx, journal, created_in_block, Some(coinbase_created))
 }
 
 fn apply_transfer(
@@ -130,6 +140,7 @@ fn apply_transfer(
     journal: &mut UtxoJournal,
     spent_in_block: &mut HashSet<OutPoint>,
     created_in_block: &mut HashMap<OutPoint, TxOut>,
+    coinbase_created: &HashSet<OutPoint>,
 ) -> Result<(), StateError> {
     verify_transaction(tx).map_err(|e| StateError::InvalidTx(e.to_string()))?;
     let signer = signer_address(tx).map_err(|e| StateError::InvalidTx(e.to_string()))?;
@@ -142,6 +153,13 @@ fn apply_transfer(
         if spent_in_block.contains(&op) {
             return Err(StateError::DoubleSpend(format!(
                 "{}:{}",
+                op.tx_id.to_hex(),
+                op.index
+            )));
+        }
+        if coinbase_created.contains(&op) {
+            return Err(StateError::ImmatureCoinbase(format!(
+                "{}:{} (same-block)",
                 op.tx_id.to_hex(),
                 op.index
             )));
@@ -179,7 +197,7 @@ fn apply_transfer(
     for (op, out) in pending_spends {
         spend_utxo(store, &op, &out, journal, spent_in_block, created_in_block)?;
     }
-    create_outputs(store, tx, journal, created_in_block)
+    create_outputs(store, tx, journal, created_in_block, None)
 }
 
 fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
@@ -217,6 +235,7 @@ fn create_outputs(
     tx: &Transaction,
     journal: &mut UtxoJournal,
     created_in_block: &mut HashMap<OutPoint, TxOut>,
+    mut coinbase_created: Option<&mut HashSet<OutPoint>>,
 ) -> Result<(), StateError> {
     let tx_id = tx.tx_id();
     for (index, out) in tx.outputs.iter().enumerate() {
@@ -229,6 +248,9 @@ fn create_outputs(
         store.put_cf(ColumnFamily::Utxo, &key, &bytes)?;
         journal.created.push(op);
         created_in_block.insert(op, out.clone());
+        if let Some(set) = coinbase_created.as_deref_mut() {
+            set.insert(op);
+        }
     }
     Ok(())
 }
@@ -261,6 +283,29 @@ pub fn validate_mempool_tx(
         return Err(StateError::InvalidTx(
             "coinbase not allowed in mempool".into(),
         ));
+    }
+    if tx.inputs.len() > agora_consensus::MAX_TX_INPUTS {
+        return Err(StateError::BlockLimit(format!(
+            "too many inputs: {} > {}",
+            tx.inputs.len(),
+            agora_consensus::MAX_TX_INPUTS
+        )));
+    }
+    if tx.outputs.len() > agora_consensus::MAX_TX_OUTPUTS {
+        return Err(StateError::BlockLimit(format!(
+            "too many outputs: {} > {}",
+            tx.outputs.len(),
+            agora_consensus::MAX_TX_OUTPUTS
+        )));
+    }
+    let tx_bytes =
+        borsh::to_vec(tx).map_err(|e| StateError::Storage(e.to_string()))?;
+    if tx_bytes.len() > agora_consensus::MAX_TX_BYTES {
+        return Err(StateError::BlockLimit(format!(
+            "tx too large: {} > {}",
+            tx_bytes.len(),
+            agora_consensus::MAX_TX_BYTES
+        )));
     }
     verify_transaction(tx).map_err(|e| StateError::InvalidTx(e.to_string()))?;
     let signer = signer_address(tx).map_err(|e| StateError::InvalidTx(e.to_string()))?;
