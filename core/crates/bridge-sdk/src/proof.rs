@@ -20,7 +20,7 @@ pub fn merkle_root(leaves: &[Hash]) -> Hash {
     }
     let mut level = leaves.to_vec();
     while level.len() > 1 {
-        if level.len() % 2 == 1 {
+        if !level.len().is_multiple_of(2) {
             level.push(*level.last().expect("non-empty"));
         }
         level = level
@@ -53,10 +53,14 @@ pub fn prove_inclusion(
     let mut level = leaves.to_vec();
     let mut siblings = Vec::new();
     while level.len() > 1 {
-        if level.len() % 2 == 1 {
+        if !level.len().is_multiple_of(2) {
             level.push(*level.last().expect("non-empty"));
         }
-        let sibling_index = if index % 2 == 0 { index + 1 } else { index - 1 };
+        let sibling_index = if index.is_multiple_of(2) {
+            index + 1
+        } else {
+            index - 1
+        };
         siblings.push(level[sibling_index]);
         index /= 2;
         level = level
@@ -80,7 +84,7 @@ pub fn verify_inclusion(proof: &LightClientProof, expected_root: &Hash) -> bool 
     let mut hash = proof.message_id;
     let mut index = proof.leaf_index;
     for sibling in &proof.siblings {
-        hash = if index % 2 == 0 {
+        hash = if index.is_multiple_of(2) {
             hash_pair(&hash, sibling)
         } else {
             hash_pair(sibling, &hash)

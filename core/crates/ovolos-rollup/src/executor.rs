@@ -23,7 +23,7 @@ impl EvmExecutor for StubEvmExecutor {
         hasher.update(prev_state_root.as_bytes());
         hasher.update((txs.len() as u64).to_le_bytes());
         for tx in txs {
-            hasher.update(&(tx.0.len() as u64).to_le_bytes());
+            hasher.update((tx.0.len() as u64).to_le_bytes());
             hasher.update(&tx.0);
         }
         let digest = hasher.finalize();

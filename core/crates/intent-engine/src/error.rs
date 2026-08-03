@@ -10,4 +10,8 @@ pub enum IntentError {
     Unsolvable,
     #[error("intent already settled")]
     AlreadySettled,
+    #[error("intent cancelled")]
+    Cancelled,
+    #[error("unknown intent")]
+    Unknown,
 }

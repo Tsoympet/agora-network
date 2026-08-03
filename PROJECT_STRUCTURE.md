@@ -19,11 +19,13 @@ agora-network/
 │   │   ├── rpc/            # HTTP JSON-RPC methods + dispatcher
 │   │   ├── crypto/         # BIP-39/44 Wallet, secp256k1 Signatures
 │   │   ├── governance/     # Quadratic voting + anti-whale caps
-│   │   ├── ovolos-rollup/  # L2 optimistic rollup (EVM batches)
-│   │   ├── bridge-sdk/     # L3 Bridge-in-a-Box for District Chains
-│   │   ├── intent-engine/  # L4 intent orchestration
+│   │   ├── ovolos-rollup/  # L2 optimistic rollup (EVM batches + OVL)
+│   │   ├── bridge-sdk/     # L3 Bridge-in-a-Box for District Chains + DRC
+│   │   ├── intent-engine/  # L4 intent orchestration (bridge + AMM)
+│   │   ├── layers-runtime/ # Composes L2/L3/L4 for operators
 │   │   └── miner-sidecar/  # Standalone Binary for CPU Mining
-│   └── node-bin/           # Main entry point for the node
+│   ├── layers-bin/         # agora-layers JSON-RPC operator binary
+│   └── node-bin/           # Main entry point for the L1 node
 ├── docs/                   # Architectural & Scaling Blueprints
 │   ├── core/               # One markdown file per major core module
 │   └── scaling/            # L2/L3/L4 overview
@@ -47,6 +49,8 @@ agora-network/
 | `core/crates/ovolos-rollup` | `types` | P2P, UI |
 | `core/crates/bridge-sdk` | `types` | Consensus internals, UI |
 | `core/crates/intent-engine` | `types`, `bridge-sdk` | Consensus internals, UI |
+| `core/crates/layers-runtime` | `types`, L2/L3/L4 crates | Consensus internals, RocksDB, UI |
+| `core/layers-bin` | `layers-runtime` | L1 consensus / RocksDB |
 | `core/crates/consensus` | `types`, `crypto`, `kheavyhash` | Disk I/O, UI, RPC transport |
 | `core/crates/state-machine` | `types`, `crypto`, `consensus` | libp2p, UI |
 | `core/crates/p2p` | `types`, `consensus` | RocksDB, UI |

@@ -12,6 +12,8 @@ members = [
     "core/crates/ovolos-rollup",
     "core/crates/bridge-sdk",
     "core/crates/intent-engine",
+    "core/crates/layers-runtime",
+    "core/layers-bin",
     "core/node-bin",
     "infrastructure/dns-seeder",
     "infrastructure/stratum-pool",
@@ -38,6 +40,7 @@ agora-governance = { path = "core/crates/governance" }
 agora-ovolos-rollup = { path = "core/crates/ovolos-rollup" }
 agora-bridge-sdk = { path = "core/crates/bridge-sdk" }
 agora-intent-engine = { path = "core/crates/intent-engine" }
+agora-layers-runtime = { path = "core/crates/layers-runtime" }
 
 borsh = { version = "1.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
