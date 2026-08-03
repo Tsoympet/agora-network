@@ -252,6 +252,11 @@ impl RpcBackend for NodeBackend {
     }
 
     fn fund_address(&mut self, address: Address, amount: Amount) -> Result<Amount, RpcError> {
+        if self.network.eq_ignore_ascii_case("mainnet") {
+            return Err(RpcError::Rejected(
+                "agora_fundAddress is permanently disabled on mainnet".into(),
+            ));
+        }
         if !self.allow_fund {
             return Err(RpcError::Rejected(
                 "agora_fundAddress disabled (set AGORA_RPC_ALLOW_FUND=1 for testnet)".into(),
@@ -316,7 +321,7 @@ impl RpcBackend for NodeBackend {
                     RpcError::Rejected(format!("duplicate block {h}"))
                 }
                 crate::admit::AdmitError::MissingParent(h) => {
-                    RpcError::Rejected(format!("missing parent {h}"))
+                    RpcError::Rejected(format!("missing parent {}", h.to_hex()))
                 }
                 crate::admit::AdmitError::Utxo(msg) => {
                     RpcError::Rejected(format!("utxo: {msg}"))
@@ -682,5 +687,41 @@ mod tests {
             backend.get_balance(&payee).as_base_units(),
             drip.as_base_units() - fee
         );
+    }
+
+    #[test]
+    fn fund_address_hard_disabled_on_mainnet_label() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        // Even with allow_fund=true, mainnet label must reject.
+        let mut backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            true,
+            mempool,
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "mainnet",
+            genesis,
+        );
+        let err = backend
+            .fund_address(Address([1u8; 20]), Amount::from_base_units(1))
+            .unwrap_err();
+        match err {
+            RpcError::Rejected(msg) => assert!(msg.contains("mainnet")),
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }
