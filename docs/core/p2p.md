@@ -43,6 +43,10 @@ After a block is admitted locally, `agora-node` gossips:
 
 Receivers try `reconstruct_compact_block` against the local mempool. On miss (or hash-only announce without a body), they request the body from the announcing peer over the network-scoped **`/agora/<network>/getblock/1`** protocol (libp2p request-response, CBOR). `PendingFetches` dedupes in-flight hashes. If request-response fails, the node falls back to gossip `GetBlock` / `Block`.
 
+### Orphan pool (multi-hop IBD)
+
+When a full body arrives but parents are unknown, `agora-node` **parks** it in an in-memory `OrphanPool` (TTL + max size) and issues GetBlock for each missing parent — without penalizing the peer. After a parent admits, `drain_orphans_after` re-tries waiting children (re-parking if other parents are still missing). Orphans are not persisted across restart.
+
 Empty-tx templates reconstruct immediately (no mempool lookup).
 
 | Test | Covers |
@@ -50,6 +54,8 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 | `compact_block_ibd` | gossip announce / compact wire path |
 | `getblock_request_response` | direct getblock roundtrip |
 | `topics` unit tests | `dev` vs `testnet` topic / protocol isolation |
+| `ibd::orphan_pool_*` / `drain_orphans_*` | park / release / capacity / BFS drain |
+| `admit::orphan_pool_recovers_out_of_order_child` | tip-before-parent → fetch path via pool |
 
 ## Mempool
 
