@@ -26,10 +26,10 @@ This document is the definitive command center. It bridges architectural theory 
 
 ### Assets
 
-- [x] **TLT:** Talanton (Scales) — `apps/shared/brand/assets/talanton.svg`
-- [x] **DRC:** Drachma (Helmet) — `apps/shared/brand/assets/drachma.svg`
-- [x] **OBL:** Ovolos (Shield/Spears) — `apps/shared/brand/assets/ovolos.svg`
-- [x] **Nexus Icon:** gold `A` — `apps/shared/brand/assets/nexus-icon.svg` / `.png`
+- [x] **TLT:** Talanton (Scales) — `apps/shared/brand/assets/talanton.png`
+- [x] **DRC:** Drachma (Corinthian helm) — `apps/shared/brand/assets/drachma.png`
+- [x] **OVL:** Ovolos (Winged helm / spears) — `apps/shared/brand/assets/ovolos.png`
+- [x] **Brand / app icon:** column `A` — `agora-network.png` / `agora-app-icon.png`
 
 ### Implementation
 

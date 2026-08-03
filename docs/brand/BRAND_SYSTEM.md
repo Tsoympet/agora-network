@@ -18,19 +18,31 @@ Obsidian & Gold visual identity for all Agora clients.
 | --- | --- |
 | `apps/shared/brand/Agora_Brand_System.css` | CSS variables, type, buttons, motion |
 | `apps/shared/brand/tokens.ts` | TS token mirror for React Native / logic |
-| `apps/shared/brand/assets/nexus-icon.svg` | Primary app icon (gold `A`) |
-| `apps/shared/brand/assets/talanton.svg` | TLT — Scales |
-| `apps/shared/brand/assets/drachma.svg` | DRC — Helmet |
-| `apps/shared/brand/assets/ovolos.svg` | OBL — Shield / Spears |
+| `apps/shared/brand/assets/agora-network.png` | Primary brand mark (column `A` + wordmark) |
+| `apps/shared/brand/assets/agora-app-icon.png` | App / favicon square crop |
+| `apps/shared/brand/assets/nexus-icon.png` | Alias of brand mark for legacy paths |
+| `apps/shared/brand/assets/talanton.png` | TLT — gold scales coin |
+| `apps/shared/brand/assets/drachma.png` | DRC — silver Corinthian helm coin |
+| `apps/shared/brand/assets/ovolos.png` | OVL — bronze winged-helm coin |
+| `apps/shared/brand/assets/masters/` | Full-resolution source masters |
 
 ## Client wiring
 
-- **Explorer:** imports `Agora_Brand_System.css`; public assets copied/linked from shared brand
-- **Desktop (Tauri):** `src-tauri/icons/icon.png` (and SVG source) = Nexus; frontend imports brand CSS
-- **Mobile (Expo):** `app.json` `icon` / `splash` point at Nexus asset
+- **Explorer:** `Agora_Brand_System.css`; favicon `agora-app-icon.png`; marks under `public/brand/*.png`
+- **Desktop (Tauri):** `src-tauri/icons/*` from app icon; frontend uses `agora-network.png`
+- **Mobile (Expo):** `app.json` `icon` / `splash` / adaptive icon → `assets/icon.png`
+
+## Marks
+
+| Ticker | Name | Motif |
+| --- | --- | --- |
+| TLT | Talanton | Balanced scales |
+| DRC | Drachma | Crested Corinthian helm |
+| OVL | Ovolos | Winged helm, crossed spears |
 
 ## Rules
 
 1. Brand name must read as the hero-level signal on promotional surfaces.
 2. Do not invent alternate purple / cream palettes.
 3. Prefer full-bleed atmospheric backgrounds over flat gray panels.
+4. Prefer photoreal coin PNGs over simplified SVG placeholders for token UI.
