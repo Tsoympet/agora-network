@@ -49,7 +49,14 @@ Wired in `agora-node` (`ChainState`):
 3. After admit, selected-parent spine samples (`timestamp_ms` + cumulative `work_from_bits`) feed `next_difficulty_weighted`
 4. Level is persisted at `meta/daa_difficulty` (`u32` LE)
 
-`AGORA_TEMPLATE_BITS` sets the initial level (and `min_level = 0` when started at 0).  
+Canonical DAA / PoW / GHOSTDAG `k` live on `ChainParams` (`daa`, `pow_algorithm`, `ghostdag_k`, `bits`):
+
+| Network | Initial `bits` | DAA `min_level` | PoW |
+| --- | --- | --- | --- |
+| `dev` | `AGORA_TEMPLATE_BITS` (default `1`) | from that value | env override OK |
+| `testnet` | frozen `0` | `0` | RandomX (env ignored) |
+| `mainnet` | placeholder `16` (not bootable yet) | `8` | RandomX (env ignored) |
+
 GHOSTDAG also tracks unit `blue_work` per blue tip; the DAA window overlays header-bits work so harder tips weigh spacing more.
 
 ## PoW

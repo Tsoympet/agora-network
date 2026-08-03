@@ -32,8 +32,8 @@ Wired in `core/node-bin`:
 | --- | --- | --- |
 | `AGORA_RPC_BIND` | `127.0.0.1:8545` | HTTP JSON-RPC listen address |
 | `AGORA_RPC_ALLOW_FUND` | unset | When `1`/`true`, enable `agora_fundAddress` (mints spendable UTXOs) |
-| `AGORA_POW_ALGO` | `randomx` | `randomx` or `kheavyhash` for admission / templates |
-| `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty (`header.bits`); retargets after admits |
+| `AGORA_POW_ALGO` | `randomx` | PoW algorithm (**dev override only**; testnet/mainnet use `ChainParams.pow_algorithm`) |
+| `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty on **dev** only; frozen networks use `ChainParams.bits` |
 | `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout (`agora1…` Bech32m or 40-char hex) for templates |
 | `AGORA_NETWORK` | `dev` | `dev` (free genesis) / `testnet` (frozen) / `mainnet` (not frozen); also scopes P2P gossip topics |
 | `AGORA_PREMINE_ADDRESS` | `00…00` | Genesis premine (**dev only**; ignored on frozen networks); fresh `AGORA_DATA` |

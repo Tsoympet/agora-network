@@ -187,6 +187,10 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **Parents / size / time / maturity / supply:** `ConsensusLimits`, template tip trim, coinbase maturity (premine exempt), `meta/issued_supply` clamp
 
+## Phase 30: Production DAA / PoW in ChainParams — done
+
+- [x] **Network-locked consensus policy:** `ChainParams.{daa,ghostdag_k,pow_algorithm,bits}` → `ChainBootConfig`; `AGORA_TEMPLATE_BITS` / `AGORA_POW_ALGO` override only on `dev`
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.
