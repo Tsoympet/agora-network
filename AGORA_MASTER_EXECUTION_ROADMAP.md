@@ -208,6 +208,11 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **`ChainState::{block_locator,headers_after_locator}`** + PeerConnected sync kickoff
 - [x] **Mainnet freeze scaffolding:** `docs/governance/{SLIP0044,MAINNET_GENESIS_FREEZE}.md` + `scripts/prepare_mainnet_genesis.sh`
 
+## Phase 34: Prune-safe durable header index — done
+
+- [x] **Warm `header/*`:** persist on genesis + every admit; outlives Hot body prune
+- [x] **GetHeaders / DAG rebuild / prune BFS** use headers when bodies are gone; pruned-node restart + serve tests
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

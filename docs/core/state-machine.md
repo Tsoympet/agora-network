@@ -7,7 +7,7 @@ Applies consensus-ordered blocks to durable storage.
 | CF | Name | Purpose |
 | --- | --- | --- |
 | Hot | `cf_hot` | Recent block bodies for tip validation (pruned by `AGORA_HOT_WINDOW`) |
-| Warm | `cf_warm` | Tx index (`tx/` ‖ tx_id) for RPC lookups — not pruned |
+| Warm | `cf_warm` | Tx index (`tx/`), UTXO journals (`utxo_diff/`), durable headers (`header/`) — not pruned |
 | Archival | `cf_archival` | Long-term block payloads (optional via `AGORA_ARCHIVAL`) |
 | Meta | `cf_meta` | Genesis hash, supply caps, tips set — never pruned |
 | UTXO | `cf_utxo` | Spendable outputs keyed by outpoint — never pruned |
@@ -19,7 +19,7 @@ Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
 | Env | Default | Meaning |
 | --- | --- | --- |
 | `AGORA_ARCHIVAL` | `1` | When `0`/`false`, skip writing block bodies to `cf_archival` (pruned node) |
-| `AGORA_HOT_WINDOW` | `64` | Tip-distance of bodies kept in `cf_hot` (`0` = unlimited). Older Hot bodies are deleted after admit (only if Archival still holds a copy when archival mode is on) |
+| `AGORA_HOT_WINDOW` | `64` | Tip-distance of bodies kept in `cf_hot` (`0` = unlimited). Older Hot bodies are deleted after admit (only if Archival still holds a copy when archival mode is on). **Headers** stay in Warm `header/*` so pruned nodes can still serve GetHeaders and rebuild the DAG. |
 
 ## Genesis
 

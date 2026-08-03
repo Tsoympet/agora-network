@@ -4,9 +4,9 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ColumnFamily {
-    /// Tip hashes, mempool-adjacent caches, recent headers.
+    /// Tip hashes and recent full block bodies (prunable via hot_window).
     Hot = 0,
-    /// Queryable recent history for RPC / explorer.
+    /// Queryable recent history: tx index, utxo journals, durable `header/*`.
     Warm = 1,
     /// Long-term archival payloads.
     Archival = 2,
