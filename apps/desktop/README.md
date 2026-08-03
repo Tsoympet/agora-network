@@ -7,6 +7,7 @@ hooks live under `src-tauri/`; day-to-day development uses `npm run dev`.
 
 - Bech32m receive (`agora1…`) with hex secondary + copy
 - BIP-39 generate / derive (`m/44'/8888'/0'/0/0`) and signed send
+- Password vault (AES-256-GCM) persisted in `localStorage` — Unlock / Save / Lock
 - Compact node strip via `agora_getNodeInfo` (mempool, PoW, peers, archival)
 - Post-send pending → confirmed + confirmation depth
 
