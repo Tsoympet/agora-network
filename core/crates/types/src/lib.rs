@@ -20,7 +20,7 @@ pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxO
 #[cfg(test)]
 mod tests {
     use super::*;
-    use borsh::{BorshDeserialize, BorshSerialize};
+    use borsh::BorshDeserialize;
 
     #[test]
     fn amount_whole_conversion() {
