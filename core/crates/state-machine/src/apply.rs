@@ -4,14 +4,14 @@ use std::collections::{HashMap, HashSet};
 
 use agora_crypto::{signer_address, verify_transaction};
 use agora_types::{Amount, Block, OutPoint, Transaction, TxOut};
-use borsh::BorshDeserialize;
+use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::columns::ColumnFamily;
 use crate::utxo::outpoint_key;
 use crate::{StateError, StateStore};
 
-/// Journal of UTXO mutations so a failed admission can roll back.
-#[derive(Debug, Default, Clone)]
+/// Journal of UTXO mutations so a failed admission / reorg can roll back.
+#[derive(Debug, Default, Clone, BorshSerialize, BorshDeserialize)]
 pub struct UtxoJournal {
     /// Outputs removed while applying (for revert: re-insert).
     pub spent: Vec<(OutPoint, TxOut)>,

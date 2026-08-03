@@ -11,6 +11,7 @@ mod network;
 mod store;
 mod tx_index;
 mod utxo;
+mod utxo_diff;
 mod zones;
 
 pub use apply::{
@@ -30,4 +31,5 @@ pub use tx_index::{
     tx_index_key,
 };
 pub use utxo::{outpoint_key, outpoint_key_parts};
+pub use utxo_diff::{delete_utxo_journal, load_utxo_journal, store_utxo_journal, utxo_diff_key};
 pub use zones::StateZone;

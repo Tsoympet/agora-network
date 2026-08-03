@@ -26,14 +26,29 @@ Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
 `GenesisBuilder` constructs Block 0 (premine coinbase), then `ignite` writes:
 
 - genesis block into hot + archival
-- `meta/genesis_hash`, `meta/max_supply`, `meta/premine`, `meta/tips`
-- premine UTXO into `cf_utxo`
+- `meta/genesis_hash`, `meta/max_supply`, `meta/premine`, `meta/tips`, `meta/virtual_tip`
+- premine UTXO into `cf_utxo` (virtual-chain baseline; no per-block journal)
 
 Default caps: max supply 100,000,000 AGORA; premine 10,000,000 AGORA.
 
 Canonical networks live in `ChainParams` / `NetworkId` (`dev` | `testnet` | `mainnet`).
 Testnet freezes Block 0 — see [`docs/genesis/`](../genesis/README.md). `load_or_ignite_checked`
 rejects a datadir whose `meta/genesis_hash` ≠ the expected network hash.
+
+## Virtual UTXO (Phase 28)
+
+Live `cf_utxo` follows **blues** of `Ghostdag::order_past(virtual_tip)`, not every DAG tip.
+
+| Concept | Storage |
+| --- | --- |
+| Selected tip | `meta/virtual_tip` (max tip `blue_score`, then hash) |
+| Per-block diff | Warm key `utxo_diff/` ‖ block_hash → borsh(`UtxoJournal`) |
+
+Admission order: PoW → persist body/tips → DAG/GHOSTDAG → reorg UTXO from old virtual → new virtual → retarget DAA.
+
+Non-selected parallel tips are stored but do not spend until they become blue in the virtual past. Switching virtual tip unapplies/applies journals along the common-prefix of the two blue orders.
+
+**Migration:** datadirs from before Phase 28 applied every tip eagerly — wipe `AGORA_DATA` and resync.
 
 ## UTXO apply / revert
 

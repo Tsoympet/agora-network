@@ -179,6 +179,10 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **Gossip / getblock scoped by network:** `agora/<network>/blocks|txs/1` + `/agora/<network>/getblock/1`; `NetworkConfig::with_network` from `AGORA_NETWORK`
 
+## Phase 28: Virtual UTXO / reorg — done
+
+- [x] **Selected virtual tip + UTXO journals:** `meta/virtual_tip`, Warm `utxo_diff/*`, admit reorgs blues of `order_past(virtual)`; parallel tips no longer spend until selected
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

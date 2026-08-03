@@ -14,7 +14,11 @@ Agora orders a BlockDAG rather than a single chain. Parallel blocks are retained
    - Inherit the selected parent's blue set and add the selected parent.
    - Walk the **merge set** (`past(B) \ past(selected_parent)`); add a candidate if `|anticone(candidate) ∩ blues| ≤ k`.
    - Insert `B` into its blue set; `blue_score(B) = |blues|`.
-3. `order_past(tip)` returns tip-past blocks with blue/red flags for conflict resolution.
+3. `order_past(tip)` / `order_past_view(tip)` return tip-past blocks with blue/red flags.
+4. `select_virtual_tip(tips)` picks the selected tip (max `blue_score`, hash tie-break).
+5. `blue_order(tip)` = blues from that order — this is the UTXO apply sequence in `agora-node`.
+
+`ChainState::admit_block` colors the DAG first, then reorgs live UTXO to blues of the virtual tip (see [`state-machine.md`](state-machine.md) Phase 28). Reds are stored but do not mutate UTXO yet.
 
 Synthetic DAG unit tests cover chains, parallel merges (`k` large ⇒ all blue), and `k = 0` red merges.
 
