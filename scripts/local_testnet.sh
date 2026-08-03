@@ -16,6 +16,7 @@
 #   ./scripts/local_testnet.sh node-b       # terminal 2 (RPC :8546)
 #   ./scripts/local_testnet.sh tips
 #   ./scripts/local_testnet.sh smoke-ibd    # mine 1 block on A, wait for B tip converge
+#   ./scripts/local_testnet.sh smoke-tx     # signed send on A → pending on B (tx gossip)
 #
 # Premine mnemonic (abandon…about) external(0):
 #   ff9ec96f09eb154d038a552ecae59c50204ea9a9
@@ -140,16 +141,19 @@ Suggested single-node flow:
   4. ./scripts/local_testnet.sh miner
   5. Clients: VITE_AGORA_RPC_URL=$RPC_URL npm run dev (explorer/desktop)
 
-Suggested two-node IBD smoke:
+Suggested two-node IBD + tx gossip smoke:
   0. cargo build -p agora-dns-seeder -p agora-node -p agora-miner-sidecar
+     (cd apps/shared && npm install)   # once, for smoke-tx light-client
   1. ./scripts/local_testnet.sh wipe-two
   2. ./scripts/local_testnet.sh seeder
   3. ./scripts/local_testnet.sh node-a
   4. ./scripts/local_testnet.sh node-b
-  5. ./scripts/local_testnet.sh smoke-ibd   # mines 1 block on A, waits for B
+  5. ./scripts/local_testnet.sh wait-peers
+  6. ./scripts/local_testnet.sh smoke-tx    # signed premine spend on A → pending on B
+  7. ./scripts/local_testnet.sh smoke-ibd   # mines 1 block on A, waits for B
 
 Premine mnemonic (abandon…about) external(0) → $PREMINE
-Note: agora_fundAddress is local mint only — use mined blocks to prove gossip/IBD.
+Note: agora_fundAddress is local mint only — use smoke-tx / mined blocks to prove gossip/IBD.
 EOF
 }
 
@@ -237,6 +241,19 @@ case "$cmd" in
     done
     echo "error: timed out waiting for peers" >&2
     exit 1
+    ;;
+  smoke-tx)
+    require_health "$RPC_A" "node-a"
+    require_health "$RPC_B" "node-b"
+    if [[ ! -d "$ROOT/apps/shared/node_modules/@noble/secp256k1" ]]; then
+      echo "Installing light-client deps in apps/shared…"
+      (cd "$ROOT/apps/shared" && npm install --silent)
+    fi
+    export AGORA_RPC_A="$RPC_A"
+    export AGORA_RPC_B="$RPC_B"
+    export AGORA_SMOKE_TIMEOUT_SECS="$SMOKE_TIMEOUT_SECS"
+    echo "Submitting premine transfer on A and waiting for B mempool…"
+    node --experimental-strip-types "$ROOT/scripts/smoke_tx.mjs"
     ;;
   smoke-ibd)
     require_health "$RPC_A" "node-a"
