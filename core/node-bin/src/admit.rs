@@ -97,6 +97,19 @@ impl ChainState {
         self.storage
     }
 
+    /// Confirmations for a block: `max_tip_blue_score − block_blue_score + 1`.
+    pub fn confirmations(&self, block_id: &Hash) -> Option<u64> {
+        let block_score = self.ghostdag.blue_score(block_id)?;
+        let tip_score = self
+            .tips()
+            .ok()?
+            .iter()
+            .filter_map(|t| self.ghostdag.blue_score(t))
+            .max()
+            .unwrap_or(block_score);
+        Some(tip_score.saturating_sub(block_score).saturating_add(1))
+    }
+
     pub fn tips(&self) -> Result<Vec<Hash>, AdmitError> {
         let bytes = self
             .store
@@ -656,5 +669,27 @@ mod tests {
         assert!(chain.load_block(&genesis).unwrap().is_none());
         // Tips still load.
         assert!(chain.load_block(&_b2).unwrap().is_some());
+    }
+
+    #[test]
+    fn confirmations_grow_with_blue_score() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        assert_eq!(chain.confirmations(&genesis), Some(1));
+        let b1 = mine_one(&mut chain, 21);
+        assert_eq!(chain.confirmations(&b1), Some(1));
+        assert!(chain.confirmations(&genesis).unwrap() >= 2);
+        let b2 = mine_one(&mut chain, 22);
+        assert_eq!(chain.confirmations(&b2), Some(1));
+        assert!(chain.confirmations(&b1).unwrap() >= 2);
+        assert!(chain.confirmations(&genesis).unwrap() >= 3);
     }
 }

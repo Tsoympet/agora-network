@@ -37,6 +37,8 @@ pub struct TxLookup {
     pub block_id: Option<Hash>,
     pub index: Option<u32>,
     pub fee: Option<u64>,
+    /// Blue-score depth vs best tip (`tip − block + 1`) when confirmed; else `None`.
+    pub confirmations: Option<u64>,
     pub transaction: Option<Transaction>,
 }
 
@@ -74,6 +76,7 @@ impl TxLookup {
             block_id: None,
             index: None,
             fee: None,
+            confirmations: None,
             transaction: None,
         }
     }
@@ -85,17 +88,19 @@ impl TxLookup {
             block_id: None,
             index: None,
             fee,
+            confirmations: None,
             transaction: Some(tx),
         }
     }
 
-    pub fn confirmed(tx: Transaction, block_id: Hash, index: u32) -> Self {
+    pub fn confirmed(tx: Transaction, block_id: Hash, index: u32, confirmations: u64) -> Self {
         Self {
             tx_id: tx.tx_id(),
             status: TxStatus::Confirmed,
             block_id: Some(block_id),
             index: Some(index),
             fee: None,
+            confirmations: Some(confirmations.max(1)),
             transaction: Some(tx),
         }
     }
@@ -163,6 +168,31 @@ impl InMemoryBackend {
         }
         self.blocks.insert(id, block);
     }
+
+    /// Shortest tip→block parent distance + 1 (BFS). `None` if unreachable.
+    fn tip_confirmations(&self, block_id: &Hash) -> Option<u64> {
+        use std::collections::{HashSet, VecDeque};
+        let mut best: Option<u64> = None;
+        for tip in &self.tips {
+            let mut q = VecDeque::from([(*tip, 0u64)]);
+            let mut seen = HashSet::from([*tip]);
+            while let Some((hash, dist)) = q.pop_front() {
+                if hash == *block_id {
+                    let conf = dist + 1;
+                    best = Some(best.map_or(conf, |b| b.min(conf)));
+                    break;
+                }
+                if let Some(block) = self.blocks.get(&hash) {
+                    for parent in &block.header.parents {
+                        if seen.insert(*parent) {
+                            q.push_back((*parent, dist + 1));
+                        }
+                    }
+                }
+            }
+        }
+        best
+    }
 }
 
 impl RpcBackend for InMemoryBackend {
@@ -181,7 +211,14 @@ impl RpcBackend for InMemoryBackend {
         if let Some((block_id, index)) = self.tx_index.get(tx_id).copied() {
             if let Some(block) = self.blocks.get(&block_id) {
                 if let Some(tx) = block.transactions.get(index as usize) {
-                    return Ok(TxLookup::confirmed(tx.clone(), block_id, index));
+                    // In-memory backend: tip distance via ancestor walk when possible.
+                    let confirmations = self.tip_confirmations(&block_id).unwrap_or(1);
+                    return Ok(TxLookup::confirmed(
+                        tx.clone(),
+                        block_id,
+                        index,
+                        confirmations,
+                    ));
                 }
             }
         }

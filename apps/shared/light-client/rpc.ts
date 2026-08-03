@@ -62,6 +62,8 @@ export type LightTxLookup = {
   block_id: string | null;
   index: number | null;
   fee: number | null;
+  /** Blue-score / tip-depth confirmations when confirmed. */
+  confirmations: number | null;
   transaction: LightTx | null;
 };
 

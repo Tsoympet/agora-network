@@ -161,7 +161,18 @@ impl RpcBackend for NodeBackend {
         let Some(tx) = block.transactions.get(index as usize) else {
             return Ok(TxLookup::unknown(*tx_id));
         };
-        Ok(TxLookup::confirmed(tx.clone(), block_id, index))
+        let confirmations = self
+            .chain
+            .lock()
+            .ok()
+            .and_then(|g| g.confirmations(&block_id))
+            .unwrap_or(1);
+        Ok(TxLookup::confirmed(
+            tx.clone(),
+            block_id,
+            index,
+            confirmations,
+        ))
     }
 
     fn get_mempool(&self, limit: usize) -> Result<Vec<MempoolEntry>, RpcError> {
