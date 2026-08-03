@@ -39,6 +39,7 @@ Stack: **Expo** + React Native (`apps/mobile`).
 cd apps/mobile
 npm install
 npm start                 # Expo Metro
+npm run web               # Expo web (react-dom / react-native-web / @expo/metro-runtime)
 npm run android           # device / emulator
 npm run ios               # Simulator / device (macOS)
 npm run build:android     # EAS (requires `eas login` + project link)
@@ -47,6 +48,7 @@ npm run build:all
 ```
 
 `eas.json` profiles: `development`, `preview`, `production`.
+Web deps are pinned in `package.json` / `package-lock.json` to Expo SDK 52 versions.
 
 ## Explorer
 

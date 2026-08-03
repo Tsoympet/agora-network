@@ -68,8 +68,11 @@ export function encodeAddress(
 /**
  * Parse Bech32m (`agora1…` / `agoratest1…` / `agoradev1…`) or 40-char hex
  * into canonical lowercase hex. Throws on invalid input.
+ *
+ * When `network` is set, Bech32 HRP must match that network (`agora` /
+ * `agoratest` / `agoradev`). Raw hex stays network-neutral.
  */
-export function parseAddress(input: string): string {
+export function parseAddress(input: string, network?: string): string {
   const s = input.trim();
   if (!s) throw new Error("empty address");
   if (HEX40.test(s)) {
@@ -89,6 +92,14 @@ export function parseAddress(input: string): string {
       `unexpected address HRP '${prefix}' (want agora|agoratest|agoradev)`,
     );
   }
+  if (network !== undefined) {
+    const expected = addressHrpForNetwork(network);
+    if (prefix !== expected) {
+      throw new Error(
+        `address HRP '${prefix}' does not match ${network} (want ${expected}1…)`,
+      );
+    }
+  }
   const bytes = bech32m.fromWords(words);
   if (bytes.length !== 20) {
     throw new Error("invalid address payload length");
@@ -97,9 +108,9 @@ export function parseAddress(input: string): string {
 }
 
 /** True when `input` is a valid Bech32m or hex Agora address. */
-export function isAddress(input: string): boolean {
+export function isAddress(input: string, network?: string): boolean {
   try {
-    parseAddress(input);
+    parseAddress(input, network);
     return true;
   } catch {
     return false;

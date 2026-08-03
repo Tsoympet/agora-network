@@ -103,7 +103,7 @@ export default function App() {
         const info = await client.getNodeInfo();
         if (!cancelled) setNodeInfo(info);
       } catch {
-        if (!cancelled) setNodeInfo(null);
+        // Retain last successful nodeInfo / network across transient failures.
       }
     }
     void pollNode();
@@ -127,12 +127,15 @@ export default function App() {
     });
   }, [client, lastTxId]);
 
-  const walletNetwork = walletNetworkFromNode(nodeInfo?.network ?? "devnet");
+  const walletNetwork = nodeInfo
+    ? walletNetworkFromNode(nodeInfo.network)
+    : null;
+  const networkReady = walletNetwork !== null;
   const netLabel = nodeInfo ? networkLabel(nodeInfo.network) : null;
-  const netAccent = networkAccent(nodeInfo?.network ?? "devnet");
+  const netAccent = networkAccent(nodeInfo?.network);
 
   useEffect(() => {
-    if (!mnemonic.trim()) return;
+    if (!networkReady || !mnemonic.trim()) return;
     try {
       const bech32 = addressBech32FromMnemonic(mnemonic, 0, "", walletNetwork);
       setReceiveBech32(bech32);
@@ -141,7 +144,7 @@ export default function App() {
     } catch {
       /* ignore while typing mnemonic */
     }
-  }, [walletNetwork, mnemonic]);
+  }, [walletNetwork, networkReady, mnemonic]);
 
   const statusColor =
     snap.status === "ok"
@@ -153,9 +156,13 @@ export default function App() {
   async function onLookup() {
     let resolved: string;
     try {
-      resolved = parseAddress(address);
-    } catch {
-      setWalletError("Enter an agora1… or 40-character hex address");
+      resolved = parseAddress(address, walletNetwork ?? undefined);
+    } catch (err) {
+      setWalletError(
+        err instanceof Error
+          ? err.message
+          : "Enter a network-matching Bech32 or 40-character hex address",
+      );
       setBalance(null);
       setUtxos([]);
       return;
@@ -179,6 +186,10 @@ export default function App() {
   }
 
   function onDerive() {
+    if (!walletNetwork) {
+      setSendError("Waiting for node network…");
+      return;
+    }
     try {
       const bech32 = addressBech32FromMnemonic(mnemonic, 0, "", walletNetwork);
       const hex = parseAddress(bech32);
@@ -195,6 +206,10 @@ export default function App() {
   }
 
   function onGenerate() {
+    if (!walletNetwork) {
+      setSendError("Waiting for node network…");
+      return;
+    }
     const phrase = generateMnemonic(128);
     setMnemonic(phrase);
     setVaultUnlocked(true);
@@ -234,6 +249,9 @@ export default function App() {
     setVaultBusy(true);
     setVaultMsg(null);
     try {
+      if (!walletNetwork) {
+        throw new Error("Waiting for node network…");
+      }
       const sealed = await loadSealedVault(vaultStorage);
       if (!sealed) throw new Error("no vault on this device");
       const phrase = await openVault(sealed, vaultPassword);
@@ -273,7 +291,7 @@ export default function App() {
   }
 
   async function onCopyReceive() {
-    if (!receiveBech32) return;
+    if (!receiveBech32 || !networkReady) return;
     try {
       await Clipboard.setStringAsync(receiveBech32);
       setCopyHint("Copied Bech32 address");
@@ -283,6 +301,10 @@ export default function App() {
   }
 
   async function onSend() {
+    if (!walletNetwork) {
+      setSendError("Waiting for node network…");
+      return;
+    }
     const amt = Number(amount);
     const feeN = Number(fee);
     if (!Number.isFinite(amt) || amt <= 0) {
@@ -340,9 +362,11 @@ export default function App() {
           <Text style={[styles.netLabel, { color: netAccent }]}>
             {netLabel ?? "Connecting…"}
           </Text>
-          <Text style={styles.netHrp}>
-            {networkHrpHint(nodeInfo?.network ?? "devnet")}
-          </Text>
+          {nodeInfo ? (
+            <Text style={styles.netHrp}>
+              {networkHrpHint(nodeInfo.network)}
+            </Text>
+          ) : null}
         </View>
         <Text style={styles.lede}>
           Mobile wallet: Bech32 receive, BIP-39 send, and live DAG tip sync over
@@ -407,9 +431,11 @@ export default function App() {
 
         <Text style={styles.eyebrow}>Receive</Text>
         <Text style={styles.meta}>
-          Primary address is Bech32m (agora1…). Hex is secondary.
+          {networkReady
+            ? `Primary address is Bech32m (${networkHrpHint(walletNetwork)}). Hex is secondary.`
+            : "Waiting for node network before deriving a receive address."}
         </Text>
-        {receiveBech32 ? (
+        {receiveBech32 && networkReady ? (
           <>
             <Text style={[styles.tipRow, { color: agoraBrand.colors.cyan }]}>
               {receiveBech32}
@@ -417,14 +443,20 @@ export default function App() {
             {receiveHex ? (
               <Text style={styles.tipRow}>hex {receiveHex}</Text>
             ) : null}
-            <Pressable onPress={() => void onCopyReceive()} style={styles.lookupBtn}>
+            <Pressable
+              onPress={() => void onCopyReceive()}
+              disabled={!networkReady}
+              style={styles.lookupBtn}
+            >
               <Text style={styles.lookupLabel}>Copy address</Text>
             </Pressable>
             {copyHint ? <Text style={styles.meta}>{copyHint}</Text> : null}
           </>
         ) : (
           <Text style={styles.meta}>
-            Generate or derive a mnemonic below to get a receive address.
+            {networkReady
+              ? "Generate or derive a mnemonic below to get a receive address."
+              : "Connect to a node to unlock wallet actions."}
           </Text>
         )}
 
@@ -433,7 +465,11 @@ export default function App() {
           <TextInput
             value={address}
             onChangeText={setAddress}
-            placeholder="agora1… or 40-hex"
+            placeholder={
+              networkReady
+                ? `${networkHrpHint(walletNetwork)} or 40-hex`
+                : "40-hex (or wait for network)"
+            }
             placeholderTextColor={agoraBrand.colors.inkMuted}
             autoCapitalize="none"
             autoCorrect={false}
@@ -479,7 +515,7 @@ export default function App() {
         <View style={styles.actions}>
           <Pressable
             onPress={() => void onUnlockVault()}
-            disabled={vaultBusy || !vaultHasBlob}
+            disabled={vaultBusy || !vaultHasBlob || !networkReady}
             style={styles.lookupBtn}
           >
             <Text style={styles.lookupLabel}>Unlock</Text>
@@ -532,14 +568,22 @@ export default function App() {
           style={[styles.input, styles.mnemonic]}
         />
         <View style={styles.actions}>
-          <Pressable onPress={onGenerate} style={styles.lookupBtn}>
+          <Pressable
+            onPress={onGenerate}
+            disabled={!networkReady}
+            style={styles.lookupBtn}
+          >
             <Text style={styles.lookupLabel}>Generate mnemonic</Text>
           </Pressable>
-          <Pressable onPress={onDerive} style={styles.lookupBtn}>
+          <Pressable
+            onPress={onDerive}
+            disabled={!networkReady}
+            style={styles.lookupBtn}
+          >
             <Text style={styles.lookupLabel}>Derive address</Text>
           </Pressable>
         </View>
-        {receiveBech32 ? (
+        {receiveBech32 && networkReady ? (
           <Text style={styles.tipRow} numberOfLines={1}>
             {shortAddress(receiveBech32)}
           </Text>
@@ -547,10 +591,15 @@ export default function App() {
         <TextInput
           value={toAddress}
           onChangeText={setToAddress}
-          placeholder="to agora1… or 40-hex"
+          placeholder={
+            networkReady
+              ? `to ${networkHrpHint(walletNetwork)} or 40-hex`
+              : "waiting for node network…"
+          }
           placeholderTextColor={agoraBrand.colors.inkMuted}
           autoCapitalize="none"
           autoCorrect={false}
+          editable={networkReady}
           style={styles.input}
         />
         <View style={styles.walletRow}>
@@ -573,7 +622,7 @@ export default function App() {
         </View>
         <Pressable
           onPress={onSend}
-          disabled={sendBusy}
+          disabled={sendBusy || !networkReady}
           style={styles.lookupBtn}
         >
           <Text style={styles.lookupLabel}>

@@ -96,7 +96,7 @@ export function App() {
         const info = await client.getNodeInfo();
         if (!cancelled) setNodeInfo(info);
       } catch {
-        if (!cancelled) setNodeInfo(null);
+        // Retain last successful nodeInfo / network across transient failures.
       }
     }
     void pollNode();
@@ -120,13 +120,16 @@ export function App() {
     });
   }, [client, lastTxId]);
 
-  // Prefer live node network for Bech32 HRP; local default is devnet.
-  const walletNetwork = walletNetworkFromNode(nodeInfo?.network ?? "devnet");
+  // Gate HRP-sensitive wallet work until the first successful node info.
+  const walletNetwork = nodeInfo
+    ? walletNetworkFromNode(nodeInfo.network)
+    : null;
+  const networkReady = walletNetwork !== null;
   const netLabel = nodeInfo ? networkLabel(nodeInfo.network) : null;
-  const netAccent = networkAccent(nodeInfo?.network ?? "devnet");
+  const netAccent = networkAccent(nodeInfo?.network);
 
   useEffect(() => {
-    if (!mnemonic.trim()) return;
+    if (!networkReady || !mnemonic.trim()) return;
     try {
       const bech32 = addressBech32FromMnemonic(mnemonic, 0, "", walletNetwork);
       setReceiveBech32(bech32);
@@ -135,7 +138,7 @@ export function App() {
     } catch {
       /* keep previous receive address on transient mnemonic edits */
     }
-  }, [walletNetwork, mnemonic]);
+  }, [walletNetwork, networkReady, mnemonic]);
 
   const statusColor =
     snap.status === "ok"
@@ -148,9 +151,13 @@ export function App() {
     e.preventDefault();
     let resolved: string;
     try {
-      resolved = parseAddress(address);
-    } catch {
-      setWalletError("Enter an agora1… or 40-character hex address");
+      resolved = parseAddress(address, walletNetwork ?? undefined);
+    } catch (err) {
+      setWalletError(
+        err instanceof Error
+          ? err.message
+          : "Enter a network-matching Bech32 or 40-character hex address",
+      );
       setBalance(null);
       setUtxos([]);
       return;
@@ -174,6 +181,10 @@ export function App() {
   }
 
   function onDerive() {
+    if (!walletNetwork) {
+      setSendError("Waiting for node network…");
+      return;
+    }
     try {
       const bech32 = addressBech32FromMnemonic(mnemonic, 0, "", walletNetwork);
       const hex = parseAddress(bech32);
@@ -190,6 +201,10 @@ export function App() {
   }
 
   function onGenerate() {
+    if (!walletNetwork) {
+      setSendError("Waiting for node network…");
+      return;
+    }
     const phrase = generateMnemonic(128);
     setMnemonic(phrase);
     setVaultUnlocked(true);
@@ -229,6 +244,9 @@ export function App() {
     setVaultBusy(true);
     setVaultMsg(null);
     try {
+      if (!walletNetwork) {
+        throw new Error("Waiting for node network…");
+      }
       const sealed = await loadSealedVault(vaultStorage);
       if (!sealed) {
         throw new Error("no vault on this device");
@@ -270,13 +288,17 @@ export function App() {
   }
 
   async function onCopyReceive() {
-    if (!receiveBech32) return;
+    if (!receiveBech32 || !networkReady) return;
     const ok = await copyText(receiveBech32);
     setCopyHint(ok ? "Copied Bech32 address" : "Clipboard unavailable");
   }
 
   async function onSend(e: FormEvent) {
     e.preventDefault();
+    if (!walletNetwork) {
+      setSendError("Waiting for node network…");
+      return;
+    }
     const amt = Number(amount);
     const feeN = Number(fee);
     if (!Number.isFinite(amt) || amt <= 0) {
@@ -365,9 +387,11 @@ export function App() {
           aria-hidden
         />
         {netLabel ?? "Connecting…"}
-        <span className="agora-net-hrp">
-          {networkHrpHint(nodeInfo?.network ?? "devnet")}
-        </span>
+        {nodeInfo ? (
+          <span className="agora-net-hrp">
+            {networkHrpHint(nodeInfo.network)}
+          </span>
+        ) : null}
       </p>
       <p
         className="agora-lede agora-rise agora-rise-delay-2"
@@ -482,9 +506,11 @@ export function App() {
       >
         <p className="agora-eyebrow">Receive</p>
         <p style={{ marginTop: "0.55rem", fontSize: "0.85rem", color: "var(--agora-ink-muted)" }}>
-          Primary address is Bech32m (`agora1…`). Hex is shown for tooling.
+          {networkReady
+            ? `Primary address is Bech32m (${networkHrpHint(walletNetwork)}). Hex is shown for tooling.`
+            : "Waiting for node network before deriving a receive address."}
         </p>
-        {receiveBech32 ? (
+        {receiveBech32 && networkReady ? (
           <div style={{ marginTop: "0.85rem" }}>
             <p
               style={{
@@ -510,7 +536,12 @@ export function App() {
               </p>
             ) : null}
             <div style={{ marginTop: "0.65rem", display: "flex", gap: "0.75rem", alignItems: "center" }}>
-              <button type="button" onClick={() => void onCopyReceive()} style={btnStyle}>
+              <button
+                type="button"
+                onClick={() => void onCopyReceive()}
+                disabled={!networkReady}
+                style={btnStyle}
+              >
                 Copy address
               </button>
               {copyHint ? (
@@ -545,7 +576,11 @@ export function App() {
           <input
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="agora1… or 40-hex"
+            placeholder={
+              networkReady
+                ? `${networkHrpHint(walletNetwork)} or 40-hex`
+                : "40-hex (or wait for network)"
+            }
             aria-label="Address"
             spellCheck={false}
             style={fieldStyle}
@@ -620,7 +655,7 @@ export function App() {
             <button
               type="button"
               onClick={() => void onUnlockVault()}
-              disabled={vaultBusy || !vaultHasBlob}
+              disabled={vaultBusy || !vaultHasBlob || !networkReady}
               style={btnStyle}
             >
               Unlock
@@ -676,13 +711,23 @@ export function App() {
             style={{ ...fieldStyle, resize: "vertical" as const }}
           />
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
-            <button type="button" onClick={onGenerate} style={btnStyle}>
+            <button
+              type="button"
+              onClick={onGenerate}
+              disabled={!networkReady}
+              style={btnStyle}
+            >
               Generate mnemonic
             </button>
-            <button type="button" onClick={onDerive} style={btnStyle}>
+            <button
+              type="button"
+              onClick={onDerive}
+              disabled={!networkReady}
+              style={btnStyle}
+            >
               Derive address
             </button>
-            {receiveBech32 ? (
+            {receiveBech32 && networkReady ? (
               <span
                 style={{
                   fontFamily: "ui-monospace, monospace",
@@ -699,9 +744,14 @@ export function App() {
           <input
             value={toAddress}
             onChange={(e) => setToAddress(e.target.value)}
-            placeholder="to agora1… or 40-hex"
+            placeholder={
+              networkReady
+                ? `to ${networkHrpHint(walletNetwork)} or 40-hex`
+                : "waiting for node network…"
+            }
             aria-label="To address"
             spellCheck={false}
+            disabled={!networkReady}
             style={fieldStyle}
           />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
@@ -722,7 +772,11 @@ export function App() {
               style={fieldStyle}
             />
           </div>
-          <button type="submit" disabled={sendBusy} style={{ ...btnStyle, cursor: sendBusy ? "wait" : "pointer" }}>
+          <button
+            type="submit"
+            disabled={sendBusy || !networkReady}
+            style={{ ...btnStyle, cursor: sendBusy ? "wait" : "pointer" }}
+          >
             {sendBusy ? "Signing…" : "Sign & send"}
           </button>
         </form>
