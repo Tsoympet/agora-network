@@ -4,10 +4,12 @@
 //! (premine, timestamp, bits, supply) so every peer agrees on the same root.
 
 use agora_consensus::{DaaConfig, EmissionSchedule, GhostdagConfig, PowAlgorithm};
-use agora_types::{Address, Amount, Hash};
+use agora_crypto::AGORA_COIN_TYPE;
+use agora_types::{Address, Amount, Hash, ADDRESS_HRP_DEV, ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET};
 use serde::{Deserialize, Serialize};
 
 use crate::genesis::{GenesisBuilder, SupplyCaps};
+use crate::marks::{default_token_marks, TokenMark};
 
 /// Testnet / local DAA: 1s target, wide window, may start at bits=0.
 pub fn daa_config_testnet() -> DaaConfig {
@@ -59,6 +61,30 @@ impl NetworkId {
             "testnet" | "test" => Some(Self::Testnet),
             "mainnet" | "main" => Some(Self::Mainnet),
             _ => None,
+        }
+    }
+
+    /// Bech32m HRP for this network (`agora` / `agoratest` / `agoradev`).
+    pub fn address_hrp(self) -> &'static str {
+        match self {
+            Self::Mainnet => ADDRESS_HRP_MAINNET,
+            Self::Testnet => ADDRESS_HRP_TESTNET,
+            Self::Dev => ADDRESS_HRP_DEV,
+        }
+    }
+
+    /// BIP-44 coin type (provisional SLIP-0044 `8888` until registered).
+    pub fn coin_type(self) -> u32 {
+        let _ = self;
+        AGORA_COIN_TYPE
+    }
+
+    /// Stable chain id string for wallets / explorers.
+    pub fn chain_id(self) -> &'static str {
+        match self {
+            Self::Mainnet => "agora-mainnet-1",
+            Self::Testnet => "agora-testnet-1",
+            Self::Dev => "agora-dev",
         }
     }
 }
@@ -216,13 +242,41 @@ impl ChainParams {
     }
 }
 
+/// Consensus policy snapshot embedded in genesis JSON (does not affect Block 0 hash).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenesisConsensusPolicy {
+    pub pow_algorithm: String,
+    pub ghostdag_k: u32,
+    pub target_block_time_ms: u64,
+    pub daa_window_size: u64,
+    pub daa_max_adjustment_factor: f64,
+    pub daa_min_level: u32,
+}
+
+/// Wallet identity snapshot (HRP + BIP-44 / provisional SLIP-0044).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenesisWalletPolicy {
+    pub address_hrp: String,
+    pub coin_type: u32,
+    pub coin_type_status: String,
+    pub bip44_path_account0: String,
+}
+
 /// Portable genesis document committed under `docs/genesis/`.
+///
+/// Version 2 adds chain identity, three-mark token registry, consensus + wallet
+/// policy. Hash-affecting monetary fields remain at the top level for v1 compat.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenesisArtifact {
     pub network: NetworkId,
     pub version: u32,
+    #[serde(default = "default_chain_name")]
+    pub chain_name: String,
+    #[serde(default)]
+    pub chain_id: String,
     pub timestamp_ms: u64,
     pub bits: u32,
+    /// L1 native max supply (TLT) in base units — hash-affecting.
     pub max_supply: u64,
     pub premine: u64,
     pub premine_address: String,
@@ -230,23 +284,80 @@ pub struct GenesisArtifact {
     pub genesis_hash: String,
     pub emission_initial_reward: u64,
     pub emission_halving_interval: u64,
+    #[serde(default = "default_decimals")]
+    pub decimals: u8,
+    #[serde(default = "default_native_ticker")]
+    pub native_ticker: String,
+    #[serde(default)]
+    pub tokens: Vec<TokenMark>,
+    #[serde(default)]
+    pub consensus: Option<GenesisConsensusPolicy>,
+    #[serde(default)]
+    pub wallet: Option<GenesisWalletPolicy>,
+}
+
+fn default_chain_name() -> String {
+    "Agora Network".into()
+}
+fn default_decimals() -> u8 {
+    8
+}
+fn default_native_ticker() -> String {
+    "TLT".into()
+}
+
+fn pow_algorithm_name(algo: PowAlgorithm) -> &'static str {
+    match algo {
+        PowAlgorithm::RandomX => "randomx",
+        PowAlgorithm::KHeavyHash => "kheavyhash",
+    }
+}
+
+fn parse_pow_algorithm(s: &str) -> Option<PowAlgorithm> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "randomx" | "rx" => Some(PowAlgorithm::RandomX),
+        "kheavyhash" | "kheavy" | "asic" => Some(PowAlgorithm::KHeavyHash),
+        _ => None,
+    }
 }
 
 impl GenesisArtifact {
     pub fn from_params(params: &ChainParams) -> Self {
         let hash = params.compute_genesis_hash();
+        let hrp = params.network.address_hrp();
+        let coin_type = params.network.coin_type();
+        let max_supply = params.supply.max_supply.as_base_units();
         Self {
             network: params.network,
-            version: 1,
+            version: 2,
+            chain_name: default_chain_name(),
+            chain_id: params.network.chain_id().into(),
             timestamp_ms: params.timestamp_ms,
             bits: params.bits,
-            max_supply: params.supply.max_supply.as_base_units(),
+            max_supply,
             premine: params.supply.premine.as_base_units(),
-            premine_address: params.supply.premine_address.to_bech32(),
+            premine_address: params.supply.premine_address.to_bech32_hrp(hrp),
             premine_address_hex: params.supply.premine_address.to_hex(),
             genesis_hash: hash.to_hex(),
             emission_initial_reward: params.emission.initial_reward,
             emission_halving_interval: params.emission.halving_interval,
+            decimals: 8,
+            native_ticker: "TLT".into(),
+            tokens: default_token_marks(max_supply),
+            consensus: Some(GenesisConsensusPolicy {
+                pow_algorithm: pow_algorithm_name(params.pow_algorithm).into(),
+                ghostdag_k: params.ghostdag_k,
+                target_block_time_ms: params.daa.target_block_time_ms,
+                daa_window_size: params.daa.window_size,
+                daa_max_adjustment_factor: params.daa.max_adjustment_factor,
+                daa_min_level: params.daa.min_level,
+            }),
+            wallet: Some(GenesisWalletPolicy {
+                address_hrp: hrp.into(),
+                coin_type,
+                coin_type_status: "provisional-slip44-pending".into(),
+                bip44_path_account0: format!("m/44'/{coin_type}'/0'/0/0"),
+            }),
         }
     }
 
@@ -272,6 +383,52 @@ impl GenesisArtifact {
             NetworkId::Testnet => ChainParams::testnet(),
             NetworkId::Dev => ChainParams::dev(),
         };
+
+        let (daa, ghostdag_k, pow_algorithm) = if let Some(c) = &self.consensus {
+            let pow = parse_pow_algorithm(&c.pow_algorithm).ok_or_else(|| {
+                format!("unsupported pow_algorithm in genesis: {}", c.pow_algorithm)
+            })?;
+            (
+                DaaConfig {
+                    target_block_time_ms: c.target_block_time_ms,
+                    window_size: c.daa_window_size,
+                    max_adjustment_factor: c.daa_max_adjustment_factor,
+                    min_level: c.daa_min_level,
+                },
+                c.ghostdag_k,
+                pow,
+            )
+        } else {
+            (base.daa, base.ghostdag_k, base.pow_algorithm)
+        };
+
+        if let Some(w) = &self.wallet {
+            let expected_hrp = self.network.address_hrp();
+            if !w.address_hrp.eq_ignore_ascii_case(expected_hrp) {
+                return Err(format!(
+                    "wallet.address_hrp '{}' does not match network {} ({expected_hrp})",
+                    w.address_hrp, self.network
+                ));
+            }
+            if w.coin_type != self.network.coin_type() {
+                return Err(format!(
+                    "wallet.coin_type {} does not match network coin_type {}",
+                    w.coin_type,
+                    self.network.coin_type()
+                ));
+            }
+        }
+
+        // L1 native mark must agree with top-level max_supply when present.
+        if let Some(native) = self.tokens.iter().find(|t| t.native || t.ticker == "TLT") {
+            if native.max_supply != self.max_supply {
+                return Err(format!(
+                    "native token max_supply {} != artifact max_supply {}",
+                    native.max_supply, self.max_supply
+                ));
+            }
+        }
+
         let params = ChainParams {
             network: self.network,
             supply: SupplyCaps {
@@ -286,9 +443,9 @@ impl GenesisArtifact {
             bits: self.bits,
             timestamp_ms: self.timestamp_ms,
             expected_genesis: Some(expected),
-            daa: base.daa,
-            ghostdag_k: base.ghostdag_k,
-            pow_algorithm: base.pow_algorithm,
+            daa,
+            ghostdag_k,
+            pow_algorithm,
         };
         let computed = params.compute_genesis_hash();
         if computed != expected {
@@ -316,8 +473,40 @@ mod tests {
         assert_eq!(params.expected_genesis, Some(hash));
         let artifact = GenesisArtifact::from_params(&params);
         assert_eq!(artifact.network, NetworkId::Testnet);
+        assert_eq!(artifact.version, 2);
+        assert_eq!(artifact.native_ticker, "TLT");
+        assert_eq!(artifact.tokens.len(), 3);
+        assert!(artifact.premine_address.starts_with("agoratest1"));
+        assert_eq!(
+            artifact.wallet.as_ref().unwrap().address_hrp,
+            ADDRESS_HRP_TESTNET
+        );
         let roundtrip = artifact.to_params().unwrap();
         assert_eq!(roundtrip.compute_genesis_hash(), hash);
+        assert_eq!(roundtrip.ghostdag_k, params.ghostdag_k);
+        assert_eq!(roundtrip.daa.min_level, params.daa.min_level);
+    }
+
+    #[test]
+    fn v1_genesis_json_still_loads() {
+        let v1 = r#"{
+          "network": "testnet",
+          "version": 1,
+          "timestamp_ms": 1785715200000,
+          "bits": 0,
+          "max_supply": 10000000000000000,
+          "premine": 1000000000000000,
+          "premine_address": "agora1l70vjmcfav256qu225hv4evu2qsya2dfajrcqc",
+          "premine_address_hex": "ff9ec96f09eb154d038a552ecae59c50204ea9a9",
+          "genesis_hash": "afe59232cd20a16bd56948044149d2b8013e63f3694c113074fef75ab0cb9b98",
+          "emission_initial_reward": 5000000000,
+          "emission_halving_interval": 210000
+        }"#;
+        let artifact = GenesisArtifact::from_json(v1).unwrap();
+        assert_eq!(artifact.version, 1);
+        assert!(artifact.tokens.is_empty());
+        let params = artifact.to_params().unwrap();
+        assert_eq!(params.compute_genesis_hash().to_hex(), TESTNET_GENESIS_HASH_HEX);
     }
 
     #[test]

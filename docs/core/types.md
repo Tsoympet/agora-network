@@ -17,7 +17,7 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | --- | --- |
 | `Amount` | Base units (8 decimals) |
 | `Hash` | 32-byte SHA-256 identifier |
-| `Address` | 20-byte account payload (secp256k1-derived); display as Bech32m `agora1…` |
+| `Address` | 20-byte account payload (secp256k1-derived); display as Bech32m `agora1…` / `agoratest1…` / `agoradev1…` |
 | `OutPoint` / `TxIn` / `TxOut` | UTXO references and outputs |
 | `Transaction` | Signed transfer (`public_key` + `signature`) |
 | `TransactionBody` | Signable subset (no auth material) |
