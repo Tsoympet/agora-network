@@ -44,6 +44,8 @@ LISTEN_B="${AGORA_LISTEN_B:-/ip4/127.0.0.1/tcp/16112}"
 SMOKE_TIMEOUT_SECS="${AGORA_SMOKE_TIMEOUT_SECS:-180}"
 
 export_common() {
+  # Frozen testnet genesis (see docs/genesis/testnet.genesis.json). Wipe data dirs after upgrades.
+  export AGORA_NETWORK="${AGORA_NETWORK:-testnet}"
   export AGORA_PREMINE_ADDRESS="$PREMINE"
   export AGORA_MINER_ADDRESS="$MINER"
   export AGORA_POW_ALGO="$POW_ALGO"
@@ -120,6 +122,7 @@ Agora local testnet
 ───────────────────
 Single node:
   AGORA_DATA            = $DATA_DIR
+  AGORA_NETWORK         = ${AGORA_NETWORK:-testnet}
   AGORA_RPC_BIND        = $RPC_BIND
   AGORA_RPC_URL         = $RPC_URL
   AGORA_PREMINE_ADDRESS = $PREMINE
@@ -128,6 +131,7 @@ Single node:
   AGORA_TEMPLATE_BITS   = $TEMPLATE_BITS
   AGORA_MIN_RELAY_FEE   = $MIN_RELAY
   AGORA_RPC_ALLOW_FUND  = ${AGORA_RPC_ALLOW_FUND:-1}
+  genesis               = docs/genesis/testnet.genesis.json
 
 Two-node gossip/IBD:
   seeder  AGORA_SEEDER_BIND     = $SEEDER_BIND

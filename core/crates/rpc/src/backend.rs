@@ -66,6 +66,8 @@ pub struct NodeInfo {
     pub allow_fund: bool,
     /// Bech32m miner payout address when known.
     pub miner_address: Option<String>,
+    /// Hex id of Block 0 for this datadir / network.
+    pub genesis_hash: Option<String>,
 }
 
 impl TxLookup {
@@ -244,7 +246,7 @@ impl RpcBackend for InMemoryBackend {
 
     fn get_node_info(&self) -> Result<NodeInfo, RpcError> {
         Ok(NodeInfo {
-            network: "agora".into(),
+            network: "dev".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             peer_id: None,
             connected_peers: None,
@@ -256,6 +258,7 @@ impl RpcBackend for InMemoryBackend {
             hot_window: 0,
             allow_fund: true,
             miner_address: None,
+            genesis_hash: self.tips.first().map(|h| h.to_hex()),
         })
     }
 

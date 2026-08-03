@@ -59,6 +59,10 @@ pub struct NodeBackend {
     miner_address: Address,
     /// Live connected-peer count (updated from the p2p event loop).
     connected_peers: Arc<AtomicU32>,
+    /// `AGORA_NETWORK` label (`dev` / `testnet` / …).
+    network: String,
+    /// Block 0 id for this datadir.
+    genesis_hash: Hash,
 }
 
 impl NodeBackend {
@@ -70,6 +74,8 @@ impl NodeBackend {
         mempool: Arc<Mutex<Mempool>>,
         miner_address: Address,
         connected_peers: Arc<AtomicU32>,
+        network: impl Into<String>,
+        genesis_hash: Hash,
     ) -> Self {
         Self {
             chain,
@@ -80,6 +86,8 @@ impl NodeBackend {
             fund_nonce: 0,
             miner_address,
             connected_peers,
+            network: network.into(),
+            genesis_hash,
         }
     }
 
@@ -209,7 +217,7 @@ impl RpcBackend for NodeBackend {
             .map(|p| p.len())
             .unwrap_or(0);
         Ok(NodeInfo {
-            network: "agora".into(),
+            network: self.network.clone(),
             version: env!("CARGO_PKG_VERSION").into(),
             peer_id: self.net.as_ref().map(|n| n.peer_id().to_string()),
             connected_peers: Some(self.connected_peers.load(Ordering::Relaxed)),
@@ -221,6 +229,7 @@ impl RpcBackend for NodeBackend {
             hot_window: storage.hot_window,
             allow_fund: self.allow_fund,
             miner_address: Some(self.miner_address.to_bech32()),
+            genesis_hash: Some(self.genesis_hash.to_hex()),
         })
     }
 
@@ -361,7 +370,17 @@ mod tests {
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
         let miner = Address([1u8; 20]);
-        let mut backend = NodeBackend::new(chain.clone(), store, None, false, mempool, miner, Arc::new(AtomicU32::new(0)));
+        let mut backend = NodeBackend::new(
+            chain.clone(),
+            store,
+            None,
+            false,
+            mempool,
+            miner,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
         assert_eq!(backend.dag_tips(), vec![genesis]);
         assert_eq!(
             backend.get_balance(&premine).as_base_units(),
@@ -413,8 +432,17 @@ mod tests {
         let chain = Arc::new(Mutex::new(
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
-        let mut backend =
-            NodeBackend::new(chain, store, None, false, mempool, Address::ZERO, Arc::new(AtomicU32::new(0)));
+        let mut backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            mempool,
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
 
         let mut bad = Transaction::unsigned(
             1,
@@ -491,7 +519,17 @@ mod tests {
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
         let miner = Address([2u8; 20]);
-        let mut backend = NodeBackend::new(chain, store, None, false, mempool.clone(), miner, Arc::new(AtomicU32::new(0)));
+        let mut backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            mempool.clone(),
+            miner,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
 
         let premine = Amount::from_whole(10_000_000).unwrap();
         let pay = Amount::from_whole(1).unwrap().as_base_units();
@@ -574,8 +612,17 @@ mod tests {
         let chain = Arc::new(Mutex::new(
             ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
-        let mut backend =
-            NodeBackend::new(chain, store.clone(), None, true, mempool, Address::ZERO, Arc::new(AtomicU32::new(0)));
+        let mut backend = NodeBackend::new(
+            chain,
+            store.clone(),
+            None,
+            true,
+            mempool,
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
 
         let drip = Amount::from_base_units(5_000);
         assert_eq!(

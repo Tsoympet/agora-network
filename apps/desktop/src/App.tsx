@@ -269,6 +269,8 @@ export function App() {
           {nodeInfo ? (
             <>
               {" · "}
+              {nodeInfo.network}
+              {" · "}
               mempool {nodeInfo.mempool_count}
               {" · "}
               {nodeInfo.pow_algorithm}
@@ -276,6 +278,9 @@ export function App() {
               {nodeInfo.archival ? "archival" : `hot ${nodeInfo.hot_window}`}
               {nodeInfo.connected_peers != null
                 ? ` · peers ${nodeInfo.connected_peers}`
+                : null}
+              {nodeInfo.genesis_hash
+                ? ` · genesis ${nodeInfo.genesis_hash.slice(0, 10)}…`
                 : null}
             </>
           ) : null}

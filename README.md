@@ -68,12 +68,14 @@ TypeScript bindings for shared types are generated under `core/crates/types/bind
 # Full node (libp2p gossip + HTTP JSON-RPC + PoW admission).
 # RocksDB under AGORA_DATA (default data/agora-node). Memory-only:
 #   cargo run -p agora-node --no-default-features
-# Optional: AGORA_LISTEN, AGORA_BOOTSTRAP, AGORA_DATA, AGORA_RPC_BIND,
-#           AGORA_RPC_ALLOW_FUND, AGORA_POW_ALGO, AGORA_TEMPLATE_BITS,
-#           AGORA_MINER_ADDRESS, AGORA_PREMINE_ADDRESS, AGORA_MIN_RELAY_FEE
+# Optional: AGORA_NETWORK (dev|testnet), AGORA_LISTEN, AGORA_BOOTSTRAP, AGORA_DATA,
+#           AGORA_RPC_BIND, AGORA_RPC_ALLOW_FUND, AGORA_POW_ALGO, AGORA_TEMPLATE_BITS,
+#           AGORA_MINER_ADDRESS, AGORA_PREMINE_ADDRESS (dev only), AGORA_MIN_RELAY_FEE
+# Frozen testnet genesis: docs/genesis/testnet.genesis.json
+#   cargo run -p agora-node -- genesis dump|verify --network testnet
 # PeerId persists at $AGORA_DATA/p2p/identity.key across restarts.
 cargo run -p agora-node
-# Local testnet helpers (single-node + two-node IBD smoke):
+# Local testnet helpers (single-node + two-node IBD smoke; AGORA_NETWORK=testnet):
 #   ./scripts/local_testnet.sh              # print runbook
 #   ./scripts/local_testnet.sh up           # single node
 #   ./scripts/local_testnet.sh seeder / node-a / node-b / smoke-ibd

@@ -195,7 +195,10 @@ dependencies = [
  "agora-crypto",
  "agora-types",
  "borsh",
+ "hex",
  "rocksdb",
+ "serde",
+ "serde_json",
  "thiserror 2.0.19",
  "tracing",
 ]

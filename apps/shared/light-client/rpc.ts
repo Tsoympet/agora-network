@@ -91,6 +91,8 @@ export type LightNodeInfo = {
   hot_window: number;
   allow_fund: boolean;
   miner_address: string | null;
+  /** Hex id of Block 0 when reported by the node. */
+  genesis_hash: string | null;
 };
 
 export type RpcStatus = "idle" | "ok" | "error";

@@ -4,6 +4,7 @@
 
 mod admit;
 mod backend;
+mod genesis_cli;
 mod http;
 mod storage_policy;
 
@@ -11,14 +12,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use agora_consensus::{EmissionSchedule, PowAlgorithm};
+use agora_consensus::PowAlgorithm;
 use agora_p2p::{
     dial_addr, fetch_seeder_peers_best_effort, load_or_generate_identity, merge_bootstrap_peers,
     reconstruct_compact_block, Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage,
     NetworkNode, PeerId, PendingFetches, ReconstructError, SeederBook,
 };
 use agora_rpc::RpcDispatcher;
-use agora_state_machine::{GenesisBuilder, StateStore};
+use agora_state_machine::{ChainParams, NetworkId, StateStore};
 use agora_types::{Address, Block, Hash};
 use tracing::{info, warn};
 
@@ -26,6 +27,68 @@ use crate::admit::ChainState;
 use crate::backend::{admit_transaction, NodeBackend};
 use crate::http::serve_rpc;
 use crate::storage_policy::StoragePolicy;
+
+fn resolve_chain_params() -> ChainParams {
+    let network = std::env::var("AGORA_NETWORK")
+        .ok()
+        .and_then(|s| NetworkId::parse(&s))
+        .unwrap_or(NetworkId::Dev);
+    let mut params = ChainParams::for_network(network).unwrap_or_else(|err| {
+        eprintln!("agora-node: {err}");
+        std::process::exit(1);
+    });
+
+    // Dev may override premine / timestamp / bits. Testnet ignores overrides (frozen).
+    if network == NetworkId::Dev {
+        if let Some(addr) = std::env::var("AGORA_PREMINE_ADDRESS")
+            .ok()
+            .and_then(|s| Address::parse(&s))
+        {
+            params = params.with_premine_address(addr);
+        }
+        if let Some(ts) = std::env::var("AGORA_GENESIS_TIMESTAMP_MS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            params = params.with_timestamp_ms(ts);
+        }
+        if let Some(bits) = std::env::var("AGORA_GENESIS_BITS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            params = params.with_bits(bits);
+        }
+    } else if std::env::var("AGORA_PREMINE_ADDRESS").is_ok() {
+        warn!("AGORA_PREMINE_ADDRESS ignored on frozen network {}", network);
+    }
+
+    if let Some(path) = std::env::var_os("AGORA_GENESIS_FILE") {
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            eprintln!(
+                "agora-node: failed to read AGORA_GENESIS_FILE {}: {e}",
+                path.to_string_lossy()
+            );
+            std::process::exit(1);
+        });
+        let artifact = agora_state_machine::GenesisArtifact::from_json(&raw).unwrap_or_else(|e| {
+            eprintln!("agora-node: invalid genesis artifact: {e}");
+            std::process::exit(1);
+        });
+        params = artifact.to_params().unwrap_or_else(|e| {
+            eprintln!("agora-node: genesis artifact rejected: {e}");
+            std::process::exit(1);
+        });
+    }
+
+    if let Some(want) = std::env::var("AGORA_EXPECTED_GENESIS")
+        .ok()
+        .and_then(|s| Hash::from_hex(s.trim()))
+    {
+        params = params.with_expected_genesis(want);
+    }
+
+    params
+}
 
 fn parse_pow_algo() -> PowAlgorithm {
     match std::env::var("AGORA_POW_ALGO")
@@ -115,9 +178,15 @@ fn gossip_getblock_fallback(pending: &mut PendingFetches, net: &NetworkHandle, h
 
 #[tokio::main]
 async fn main() {
+    let mut argv = std::env::args().skip(1);
+    if argv.next().as_deref() == Some("genesis") {
+        genesis_cli::run(argv);
+    }
+
     tracing_subscriber::fmt::init();
 
-    let emission = EmissionSchedule::default();
+    let chain_params = resolve_chain_params();
+    let emission = chain_params.emission.clone();
     let pow_algo = parse_pow_algo();
     let template_bits = std::env::var("AGORA_TEMPLATE_BITS")
         .ok()
@@ -170,16 +239,22 @@ async fn main() {
 
     let store = Arc::new(StateStore::open(&data_dir).expect("open state store"));
     let storage = StoragePolicy::from_env();
-    let premine_address = std::env::var("AGORA_PREMINE_ADDRESS")
-        .ok()
-        .and_then(|s| Address::parse(&s))
-        .unwrap_or(Address::ZERO);
-    let genesis_hash = GenesisBuilder::default()
-        .with_premine_address(premine_address)
+    let premine_address = chain_params.supply.premine_address;
+    let expected_genesis = chain_params.expected_genesis;
+    let genesis_hash = chain_params
+        .builder()
         .with_archival(storage.archival)
-        .load_or_ignite(store.as_ref())
-        .expect("genesis load_or_ignite");
-    info!(premine = %premine_address, "genesis premine address");
+        .load_or_ignite_checked(store.as_ref(), expected_genesis)
+        .unwrap_or_else(|e| {
+            eprintln!("agora-node: genesis error: {e}");
+            std::process::exit(1);
+        });
+    info!(
+        network = %chain_params.network,
+        premine = %premine_address,
+        genesis = %genesis_hash.to_hex(),
+        "genesis ready"
+    );
 
     let chain = Arc::new(Mutex::new(
         ChainState::bootstrap(
@@ -243,11 +318,14 @@ async fn main() {
         mempool.clone(),
         miner_address,
         connected_peers.clone(),
+        chain_params.network.as_str(),
+        genesis_hash,
     );
     let dispatcher = Arc::new(tokio::sync::Mutex::new(RpcDispatcher::new(backend)));
     tokio::spawn(serve_rpc(rpc_bind.clone(), dispatcher.clone()));
 
     info!(
+        network = %chain_params.network,
         initial_reward = emission.initial_reward,
         peer_id = %handle.peer_id(),
         genesis = %genesis_hash.to_hex(),
@@ -264,7 +342,8 @@ async fn main() {
         "agora-node foundation boot ok"
     );
     println!(
-        "Agora Network node — peer {} genesis {} rpc http://{} pow={:?} bits={}",
+        "Agora Network node — network {} peer {} genesis {} rpc http://{} pow={:?} bits={}",
+        chain_params.network,
         handle.peer_id(),
         genesis_hash.to_hex(),
         rpc_bind,

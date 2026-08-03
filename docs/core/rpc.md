@@ -35,7 +35,10 @@ Wired in `core/node-bin`:
 | `AGORA_POW_ALGO` | `randomx` | `randomx` or `kheavyhash` for admission / templates |
 | `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty (`header.bits`); retargets after admits |
 | `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout (`agora1…` Bech32m or 40-char hex) for templates |
-| `AGORA_PREMINE_ADDRESS` | `00…00` | Genesis premine payout (Bech32m or hex); only applied on a fresh `AGORA_DATA` |
+| `AGORA_NETWORK` | `dev` | `dev` (free genesis) / `testnet` (frozen) / `mainnet` (not frozen) |
+| `AGORA_PREMINE_ADDRESS` | `00…00` | Genesis premine (**dev only**; ignored on frozen networks); fresh `AGORA_DATA` |
+| `AGORA_GENESIS_FILE` | unset | Optional path to a genesis JSON artifact (`docs/genesis/*.genesis.json`) |
+| `AGORA_EXPECTED_GENESIS` | unset | Extra hex Block 0 check after load/ignite |
 | `AGORA_MIN_RELAY_FEE` | `1` | Minimum implicit fee (`in − out`) for mempool admission |
 | `AGORA_ARCHIVAL` | `1` | Persist full block history in `cf_archival` (`0` = pruned node) |
 | `AGORA_HOT_WINDOW` | `64` | Tip-distance of block bodies kept in `cf_hot` (`0` = unlimited) |
@@ -49,7 +52,7 @@ Endpoints:
 `agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`, and hex `transactions` with inputs/outputs). Address fields in tx outputs / balance / UTXO responses are **Bech32m** (`agora1…`); request params still accept hex or Bech32m.  
 `agora_getTransaction` returns `{ tx_id, status, block_id, index, fee, confirmations, transaction }` — wallets should poll until `confirmed` (missing txs return `status: "unknown"`, not an RPC error). Confirmed locations are indexed in `cf_warm` (`tx/` ‖ tx_id → block_id ‖ index) on admit / genesis. `confirmations` is blue-score depth vs the best tip (`max_tip_blue − block_blue + 1`) on live nodes (tip parent-distance on the in-memory test backend).  
 `agora_getMempool` returns `{ count, transactions: [{ tx_id, fee, transaction }] }` ordered by fee desc then `tx_id` (default `limit` 128, max 10000).  
-`agora_getNodeInfo` returns `{ network, version, peer_id, connected_peers, tip_count, mempool_count, pow_algorithm, bits, archival, hot_window, allow_fund, miner_address }` (miner as Bech32m).  
+`agora_getNodeInfo` returns `{ network, version, peer_id, connected_peers, tip_count, mempool_count, pow_algorithm, bits, archival, hot_window, allow_fund, miner_address, genesis_hash }` (`network` is `dev`/`testnet`/…; miner as Bech32m; `genesis_hash` hex Block 0).  
 
 `agora_getBlockTemplate` returns a full `Block` (native serde hashes as byte arrays) with a coinbase paying `AGORA_MINER_ADDRESS` for **emission + Σ transfer fees** at the estimated next blue score, followed by up to 128 mempool transfers (fee-desc, then `tx_id`); `header.tx_root` commits to that body. `agora_submitBlock` rejects `tx_root` mismatches and evicts included/conflicting mempool txs. Mempool admission requires `fee ≥ AGORA_MIN_RELAY_FEE`; fees are paid to the miner via the coinbase (not burned).
 

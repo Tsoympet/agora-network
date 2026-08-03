@@ -171,6 +171,10 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **Desktop / mobile receive+send UX:** Bech32 primary, copy, generate mnemonic, node strip (`getNodeInfo`), post-send confirmations; mobile Metro `watchFolders` + clipboard
 
+## Phase 26: Canonical genesis — done
+
+- [x] **Frozen testnet Block 0:** `ChainParams` / `NetworkId`, `docs/genesis/testnet.genesis.json`, `agora-node genesis dump|verify`, boot hash check, `genesis_hash` on `agora_getNodeInfo`
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

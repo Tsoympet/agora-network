@@ -31,6 +31,10 @@ Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
 
 Default caps: max supply 100,000,000 AGORA; premine 10,000,000 AGORA.
 
+Canonical networks live in `ChainParams` / `NetworkId` (`dev` | `testnet` | `mainnet`).
+Testnet freezes Block 0 — see [`docs/genesis/`](../genesis/README.md). `load_or_ignite_checked`
+rejects a datadir whose `meta/genesis_hash` ≠ the expected network hash.
+
 ## UTXO apply / revert
 
 `apply_block(store, block, emission_reward)` mutates `cf_utxo` and returns a `UtxoJournal`. Transfer fees (`in − out`) are summed first; the coinbase budget is `emission_reward + fees`:
