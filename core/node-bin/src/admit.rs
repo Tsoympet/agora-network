@@ -9,12 +9,14 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agora_consensus::{
-    next_difficulty_weighted, work_from_bits, DaaConfig, DaaSample, Dag, Difficulty,
-    EmissionSchedule, Ghostdag, GhostdagConfig, LeadingZeroPow, PowAlgorithm, PowVerifier,
+    next_difficulty_weighted, work_from_bits, ConsensusLimits, DaaConfig, DaaSample, Dag,
+    Difficulty, EmissionSchedule, Ghostdag, GhostdagConfig, LeadingZeroPow, PowAlgorithm,
+    PowVerifier,
 };
 use agora_state_machine::{
-    apply_block, delete_utxo_journal, index_block_transactions, load_utxo_journal, meta_keys,
-    revert_journal, store_utxo_journal, sum_transfer_fees, ColumnFamily, StateStore,
+    apply_block, delete_utxo_journal, index_block_transactions, load_utxo_journal,
+    lookup_tx_location, meta_keys, revert_journal, store_utxo_journal, sum_transfer_fees,
+    ColumnFamily, StateStore,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -40,6 +42,42 @@ pub enum AdmitError {
     Utxo(String),
     #[error("tx_root mismatch")]
     BadTxRoot,
+    #[error("too many parents: {got} > {max}")]
+    TooManyParents { got: usize, max: usize },
+    #[error("too few parents")]
+    TooFewParents,
+    #[error("duplicate parent: {0}")]
+    DuplicateParent(String),
+    #[error("block too large: {got} > {max}")]
+    BlockTooLarge { got: usize, max: usize },
+    #[error("too many transactions: {got} > {max}")]
+    TooManyTransactions { got: usize, max: usize },
+    #[error("tx {tx_index} too large: {got} > {max}")]
+    TxTooLarge {
+        tx_index: usize,
+        got: usize,
+        max: usize,
+    },
+    #[error("tx {tx_index} too many inputs: {got} > {max}")]
+    TooManyTxInputs {
+        tx_index: usize,
+        got: usize,
+        max: usize,
+    },
+    #[error("tx {tx_index} too many outputs: {got} > {max}")]
+    TooManyTxOutputs {
+        tx_index: usize,
+        got: usize,
+        max: usize,
+    },
+    #[error("timestamp too far ahead: {ts} > {max}")]
+    TimestampTooFarAhead { ts: u64, max: u64 },
+    #[error("timestamp before parent: {ts} < {parent_ts}")]
+    TimestampBeforeParent { ts: u64, parent_ts: u64 },
+    #[error("immature coinbase: {0}")]
+    ImmatureCoinbase(String),
+    #[error("supply cap exceeded")]
+    SupplyCapExceeded,
 }
 
 /// Shared chain state mutated by RPC submit and gossip admission.
@@ -53,6 +91,7 @@ pub struct ChainState {
     daa: DaaConfig,
     difficulty: Difficulty,
     storage: StoragePolicy,
+    limits: ConsensusLimits,
 }
 
 impl ChainState {
@@ -82,6 +121,7 @@ impl ChainState {
             daa,
             difficulty,
             storage,
+            limits: ConsensusLimits::default(),
         };
         // Fresh / upgraded datadirs: ensure virtual tip meta exists.
         if chain.load_virtual_tip()?.is_none() {
@@ -166,14 +206,15 @@ impl ChainState {
         payout: Address,
         transfers: &[Transaction],
     ) -> Result<Block, AdmitError> {
-        let parents = self.tips()?;
+        let parents = self.select_template_parents()?;
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        let emission = self
+        let scheduled = self
             .emission
             .reward_at_blue_score(self.estimate_blue_score(&parents));
+        let emission = self.clamp_emission(scheduled)?;
         let fees = sum_transfer_fees(self.store.as_ref(), transfers)
             .map_err(|e| AdmitError::Utxo(e.to_string()))?;
         let reward = emission
@@ -189,9 +230,10 @@ impl ChainState {
             }],
             timestamp_ms,
         );
-        let mut transactions = Vec::with_capacity(1 + transfers.len());
+        let max_transfers = self.limits.max_block_transactions.saturating_sub(1);
+        let mut transactions = Vec::with_capacity(1 + transfers.len().min(max_transfers));
         transactions.push(coinbase);
-        transactions.extend(transfers.iter().cloned());
+        transactions.extend(transfers.iter().take(max_transfers).cloned());
         let tx_root = Block::compute_tx_root(&transactions);
         Ok(Block {
             header: BlockHeader {
@@ -204,6 +246,18 @@ impl ChainState {
             },
             transactions,
         })
+    }
+
+    /// Tips for mining: highest blue_score first, capped at `max_block_parents`.
+    fn select_template_parents(&self) -> Result<Vec<Hash>, AdmitError> {
+        let mut tips = self.tips()?;
+        tips.sort_by(|a, b| {
+            let sa = self.ghostdag.blue_score(a).unwrap_or(0);
+            let sb = self.ghostdag.blue_score(b).unwrap_or(0);
+            sb.cmp(&sa).then_with(|| b.as_bytes().cmp(a.as_bytes()))
+        });
+        tips.truncate(self.limits.max_block_parents);
+        Ok(tips)
     }
 
     /// Estimate blue score for coinbase budgeting before GHOSTDAG colors the block.
@@ -264,11 +318,11 @@ impl ChainState {
         if self.dag.contains(&id) {
             return Err(AdmitError::Duplicate(id.to_hex()));
         }
-        for parent in &block.header.parents {
-            if !self.dag.contains(parent) {
-                return Err(AdmitError::MissingParent(parent.to_hex()));
-            }
-        }
+
+        self.check_parents(&block)?;
+        self.check_size_limits(&block)?;
+        self.check_timestamps(&block)?;
+        self.check_coinbase_maturity(&block)?;
 
         let expected = self.difficulty.as_bits();
         if block.header.bits != expected {
@@ -314,6 +368,190 @@ impl ChainState {
         }
 
         Ok(id)
+    }
+
+    fn check_parents(&self, block: &Block) -> Result<(), AdmitError> {
+        let parents = &block.header.parents;
+        if parents.is_empty() {
+            return Err(AdmitError::TooFewParents);
+        }
+        if parents.len() > self.limits.max_block_parents {
+            return Err(AdmitError::TooManyParents {
+                got: parents.len(),
+                max: self.limits.max_block_parents,
+            });
+        }
+        let mut seen = HashSet::new();
+        for parent in parents {
+            if !seen.insert(*parent) {
+                return Err(AdmitError::DuplicateParent(parent.to_hex()));
+            }
+            if !self.dag.contains(parent) {
+                return Err(AdmitError::MissingParent(parent.to_hex()));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_size_limits(&self, block: &Block) -> Result<(), AdmitError> {
+        if block.transactions.len() > self.limits.max_block_transactions {
+            return Err(AdmitError::TooManyTransactions {
+                got: block.transactions.len(),
+                max: self.limits.max_block_transactions,
+            });
+        }
+        let block_bytes =
+            borsh::to_vec(block).map_err(|e| AdmitError::Storage(e.to_string()))?;
+        if block_bytes.len() > self.limits.max_block_bytes {
+            return Err(AdmitError::BlockTooLarge {
+                got: block_bytes.len(),
+                max: self.limits.max_block_bytes,
+            });
+        }
+        for (tx_index, tx) in block.transactions.iter().enumerate() {
+            if tx.inputs.len() > self.limits.max_tx_inputs {
+                return Err(AdmitError::TooManyTxInputs {
+                    tx_index,
+                    got: tx.inputs.len(),
+                    max: self.limits.max_tx_inputs,
+                });
+            }
+            if tx.outputs.len() > self.limits.max_tx_outputs {
+                return Err(AdmitError::TooManyTxOutputs {
+                    tx_index,
+                    got: tx.outputs.len(),
+                    max: self.limits.max_tx_outputs,
+                });
+            }
+            let tx_bytes =
+                borsh::to_vec(tx).map_err(|e| AdmitError::Storage(e.to_string()))?;
+            if tx_bytes.len() > self.limits.max_tx_bytes {
+                return Err(AdmitError::TxTooLarge {
+                    tx_index,
+                    got: tx_bytes.len(),
+                    max: self.limits.max_tx_bytes,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn check_timestamps(&self, block: &Block) -> Result<(), AdmitError> {
+        let mut parent_max = 0u64;
+        for parent in &block.header.parents {
+            if let Some(p) = self.load_block(parent)? {
+                parent_max = parent_max.max(p.header.timestamp_ms);
+            }
+        }
+        if block.header.timestamp_ms < parent_max {
+            return Err(AdmitError::TimestampBeforeParent {
+                ts: block.header.timestamp_ms,
+                parent_ts: parent_max,
+            });
+        }
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let max_ts = now_ms.saturating_add(self.limits.max_timestamp_ahead_ms);
+        if block.header.timestamp_ms > max_ts {
+            return Err(AdmitError::TimestampTooFarAhead {
+                ts: block.header.timestamp_ms,
+                max: max_ts,
+            });
+        }
+        Ok(())
+    }
+
+    /// Non-genesis coinbase outs need `coinbase_maturity` blue-score depth.
+    fn check_coinbase_maturity(&self, block: &Block) -> Result<(), AdmitError> {
+        let next_score = self.estimate_blue_score(&block.header.parents);
+        for tx in &block.transactions {
+            if tx.inputs.is_empty() {
+                continue;
+            }
+            for input in &tx.inputs {
+                let op = input.previous_outpoint;
+                let Some((block_id, idx)) = lookup_tx_location(self.store.as_ref(), &op.tx_id)
+                    .map_err(|e| AdmitError::Storage(e.to_string()))?
+                else {
+                    continue;
+                };
+                if block_id == self.genesis {
+                    continue; // Premine spendable immediately.
+                }
+                let Some(created) = self.load_block(&block_id)? else {
+                    continue;
+                };
+                let Some(created_tx) = created.transactions.get(idx as usize) else {
+                    continue;
+                };
+                if !created_tx.inputs.is_empty() {
+                    continue;
+                }
+                let created_score = self.ghostdag.blue_score(&block_id).unwrap_or(0);
+                let required = created_score.saturating_add(self.limits.coinbase_maturity);
+                if next_score < required {
+                    return Err(AdmitError::ImmatureCoinbase(format!(
+                        "{}:{} created_blue={created_score} need={required} next={next_score}",
+                        op.tx_id.to_hex(),
+                        op.index
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn load_max_supply(&self) -> Result<u64, AdmitError> {
+        let bytes = self
+            .store
+            .get_cf(ColumnFamily::Meta, meta_keys::MAX_SUPPLY)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?
+            .ok_or_else(|| AdmitError::Storage("missing max_supply".into()))?;
+        if bytes.len() != 8 {
+            return Err(AdmitError::Storage("bad max_supply".into()));
+        }
+        Ok(u64::from_le_bytes(bytes.try_into().unwrap()))
+    }
+
+    fn load_issued_supply(&self) -> Result<u64, AdmitError> {
+        let Some(bytes) = self
+            .store
+            .get_cf(ColumnFamily::Meta, meta_keys::ISSUED_SUPPLY)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?
+        else {
+            // Pre–Phase 29 datadir: treat premine meta as issued baseline.
+            let premine = self
+                .store
+                .get_cf(ColumnFamily::Meta, meta_keys::PREMINE)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?
+                .unwrap_or_else(|| 0u64.to_le_bytes().to_vec());
+            if premine.len() == 8 {
+                return Ok(u64::from_le_bytes(premine.try_into().unwrap()));
+            }
+            return Ok(0);
+        };
+        if bytes.len() != 8 {
+            return Err(AdmitError::Storage("bad issued_supply".into()));
+        }
+        Ok(u64::from_le_bytes(bytes.try_into().unwrap()))
+    }
+
+    fn persist_issued_supply(&self, issued: u64) -> Result<(), AdmitError> {
+        self.store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::ISSUED_SUPPLY,
+                &issued.to_le_bytes(),
+            )
+            .map_err(|e| AdmitError::Storage(e.to_string()))
+    }
+
+    fn clamp_emission(&self, scheduled: u64) -> Result<u64, AdmitError> {
+        let max = self.load_max_supply()?;
+        let issued = self.load_issued_supply()?;
+        Ok(scheduled.min(max.saturating_sub(issued)))
     }
 
     fn load_virtual_tip(&self) -> Result<Option<Hash>, AdmitError> {
@@ -397,11 +635,27 @@ impl ChainState {
             .ghostdag
             .blue_score(&hash)
             .ok_or_else(|| AdmitError::Consensus(format!("uncolored {}", hash.to_hex())))?;
-        let emission = self.emission.reward_at_blue_score(blue_score);
+        let scheduled = self.emission.reward_at_blue_score(blue_score);
+        let emission = self.clamp_emission(scheduled)?;
+        let fees = sum_transfer_fees(self.store.as_ref(), &block.transactions)
+            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        let coinbase_total = Self::coinbase_output_sum(&block)?;
+        let subsidy = coinbase_total.saturating_sub(fees);
+        if subsidy > emission {
+            return Err(AdmitError::Utxo(format!(
+                "coinbase subsidy {subsidy} exceeds clamped emission {emission}"
+            )));
+        }
+        let max = self.load_max_supply()?;
+        let issued = self.load_issued_supply()?;
+        if issued.saturating_add(subsidy) > max {
+            return Err(AdmitError::SupplyCapExceeded);
+        }
         let journal = apply_block(self.store.as_ref(), &block, emission)
             .map_err(|e| AdmitError::Utxo(e.to_string()))?;
         store_utxo_journal(self.store.as_ref(), &hash, &journal)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        self.persist_issued_supply(issued.saturating_add(subsidy))?;
         Ok(())
     }
 
@@ -417,11 +671,59 @@ impl ChainState {
                 hash.to_hex()
             )));
         };
+        let block = self
+            .load_block(&hash)?
+            .ok_or_else(|| AdmitError::Storage(format!("missing block {}", hash.to_hex())))?;
+        // Fees = coinbase − subsidy; recover subsidy from journal created coinbase outs vs spent.
+        // Prefer: coinbase_total − Σ(spent values − created non-coinbase) is messy.
+        // Recompute fees from journal spent/created is hard; use coinbase_total − (sum spent - sum
+        // non-coinbase created)... Simpler: fees were `coinbase_total - subsidy` and subsidy was
+        // tracked only in issued_supply. Recover via coinbase_total and fee from spent inputs:
+        let coinbase_total = Self::coinbase_output_sum(&block)?;
+        let mut input_sum = 0u64;
+        let mut transfer_out = 0u64;
+        for tx in &block.transactions {
+            if tx.inputs.is_empty() {
+                continue;
+            }
+            for input in &tx.inputs {
+                if let Some((_, out)) = journal
+                    .spent
+                    .iter()
+                    .find(|(op, _)| op == &input.previous_outpoint)
+                {
+                    input_sum = input_sum.saturating_add(out.value.as_base_units());
+                }
+            }
+            for out in &tx.outputs {
+                transfer_out = transfer_out.saturating_add(out.value.as_base_units());
+            }
+        }
+        let fees = input_sum.saturating_sub(transfer_out);
+        let subsidy = coinbase_total.saturating_sub(fees);
+
         revert_journal(self.store.as_ref(), &journal)
             .map_err(|e| AdmitError::Utxo(e.to_string()))?;
         delete_utxo_journal(self.store.as_ref(), &hash)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        let issued = self.load_issued_supply()?;
+        self.persist_issued_supply(issued.saturating_sub(subsidy))?;
         Ok(())
+    }
+
+    fn coinbase_output_sum(block: &Block) -> Result<u64, AdmitError> {
+        let coinbase = block
+            .transactions
+            .iter()
+            .find(|tx| tx.inputs.is_empty())
+            .ok_or_else(|| AdmitError::Utxo("missing coinbase".into()))?;
+        let mut total = 0u64;
+        for out in &coinbase.outputs {
+            total = total
+                .checked_add(out.value.as_base_units())
+                .ok_or_else(|| AdmitError::Utxo("coinbase overflow".into()))?;
+        }
+        Ok(total)
     }
 
     fn persist_block(&self, block: &Block, id: Hash) -> Result<(), AdmitError> {
@@ -924,6 +1226,148 @@ mod tests {
                 .as_base_units(),
             reward_c
         );
+    }
+
+    #[test]
+    fn rejects_too_many_parents_and_bad_timestamp() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        let a = mine_child(&mut chain, &[genesis], Address([0xAAu8; 20]), 40);
+        let b = mine_child(&mut chain, &[genesis], Address([0xBBu8; 20]), 41);
+        chain.limits.max_block_parents = 1;
+        let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
+        block.header.parents = vec![a, b];
+        block.header.nonce = 42;
+        block.header.timestamp_ms = 42;
+        // Rebuild coinbase for emission estimate with these parents.
+        let emission = chain
+            .emission
+            .reward_at_blue_score(chain.estimate_blue_score(&[a, b]));
+        block.transactions = vec![Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(emission),
+                address: Address::ZERO,
+            }],
+            42,
+        )];
+        block.header.tx_root = Block::compute_tx_root(&block.transactions);
+        let digest = RandomXPowHasher.pow_hash(&block.header);
+        LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&block.header, &digest)
+            .unwrap();
+        assert!(matches!(
+            chain.admit_block(block),
+            Err(AdmitError::TooManyParents { .. })
+        ));
+
+        chain.limits.max_block_parents = 16;
+        let mut early = chain.block_template(Address::ZERO, &[]).unwrap();
+        early.header.timestamp_ms = 0;
+        early.header.nonce = 43;
+        early.header.tx_root = Block::compute_tx_root(&early.transactions);
+        let digest = RandomXPowHasher.pow_hash(&early.header);
+        LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&early.header, &digest)
+            .unwrap();
+        assert!(matches!(
+            chain.admit_block(early),
+            Err(AdmitError::TimestampBeforeParent { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_immature_coinbase_with_known_key() {
+        use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
+        use agora_types::{OutPoint, TxIn};
+
+        const PHRASE: &str =
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+        let store = Arc::new(StateStore::open_in_memory());
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let miner = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(Address([9u8; 20]))
+            .ignite(&store)
+            .unwrap();
+        let mut chain = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        chain.limits.coinbase_maturity = 3;
+        let mined = mine_child(&mut chain, &[genesis], miner.address(), 60);
+        let mined_block = chain.load_block(&mined).unwrap().unwrap();
+        let coinbase_txid = mined_block.transactions[0].tx_id();
+        let value = mined_block.transactions[0].outputs[0].value;
+
+        let mut spend = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: coinbase_txid,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value,
+                address: miner.address(),
+            }],
+            1,
+        );
+        sign_transaction(&mut spend, &miner).unwrap();
+        let mut block = chain.block_template(Address::ZERO, &[spend]).unwrap();
+        block.header.nonce = 61;
+        block.header.timestamp_ms = 61;
+        block.header.tx_root = Block::compute_tx_root(&block.transactions);
+        let digest = RandomXPowHasher.pow_hash(&block.header);
+        LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&block.header, &digest)
+            .unwrap();
+        assert!(matches!(
+            chain.admit_block(block),
+            Err(AdmitError::ImmatureCoinbase(_))
+        ));
+
+        // Mature after enough blue-score depth.
+        let _ = mine_one(&mut chain, 62);
+        let _ = mine_one(&mut chain, 63);
+        let mut spend2 = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: coinbase_txid,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value,
+                address: miner.address(),
+            }],
+            2,
+        );
+        sign_transaction(&mut spend2, &miner).unwrap();
+        let mut ok = chain.block_template(Address::ZERO, &[spend2]).unwrap();
+        ok.header.nonce = 64;
+        ok.header.timestamp_ms = 64;
+        ok.header.tx_root = Block::compute_tx_root(&ok.transactions);
+        let digest = RandomXPowHasher.pow_hash(&ok.header);
+        LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&ok.header, &digest)
+            .unwrap();
+        chain.admit_block(ok).unwrap();
     }
 
     #[test]

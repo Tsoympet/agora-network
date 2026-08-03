@@ -50,6 +50,10 @@ Non-selected parallel tips are stored but do not spend until they become blue in
 
 **Migration:** datadirs from before Phase 28 applied every tip eagerly — wipe `AGORA_DATA` and resync.
 
+### Issued supply (Phase 29)
+
+`meta/issued_supply` starts at premine and increases by each applied blue’s coinbase **subsidy** (`coinbase_total − fees`). Reorgs subtract on unapply. Coinbase emission is clamped so issued never exceeds `meta/max_supply`.
+
 ## UTXO apply / revert
 
 `apply_block(store, block, emission_reward)` mutates `cf_utxo` and returns a `UtxoJournal`. Transfer fees (`in − out`) are summed first; the coinbase budget is `emission_reward + fees`:

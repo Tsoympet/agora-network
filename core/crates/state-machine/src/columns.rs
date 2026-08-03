@@ -44,6 +44,8 @@ pub mod meta_keys {
     pub const TIPS: &[u8] = b"meta/tips";
     /// Selected virtual tip (32-byte hash) — UTXO set follows blues of this tip.
     pub const VIRTUAL_TIP: &[u8] = b"meta/virtual_tip";
+    /// Cumulative issued base units (premine + applied coinbase subsidies), `u64` LE.
+    pub const ISSUED_SUPPLY: &[u8] = b"meta/issued_supply";
     /// Current DAA difficulty level (`u32` LE) — maps to `BlockHeader.bits`.
     pub const DAA_DIFFICULTY: &[u8] = b"meta/daa_difficulty";
 }
