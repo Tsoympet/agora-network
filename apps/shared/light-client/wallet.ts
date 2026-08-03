@@ -226,7 +226,8 @@ export async function buildSignedTransfer(options: {
   const fee = options.fee ?? 1;
   const need = options.amount + fee;
   if (need <= 0) throw new Error("amount must be > 0");
-  const toHex = parseAddress(options.toAddressHex);
+  // Bech32 recipients must match `network` HRP; hex remains network-neutral.
+  const toHex = parseAddress(options.toAddressHex, network);
   const to = hexToBytes(toHex);
   if (to.length !== 20) throw new Error("to address must be 20 bytes");
 
