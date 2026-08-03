@@ -20,6 +20,21 @@ Agora orders a BlockDAG rather than a single chain. Parallel blocks are retained
 
 `ChainState::admit_block` colors the DAG first, then reorgs live UTXO to blues of the virtual tip (see [`state-machine.md`](state-machine.md) Phase 28). Reds are stored but do not mutate UTXO yet.
 
+### Admission limits (Phase 29)
+
+`ConsensusLimits` (defaults):
+
+| Limit | Default |
+| --- | --- |
+| max parents | 16 |
+| max txs / block | 129 (1 coinbase + 128) |
+| max tx inputs / outputs | 64 |
+| max tx / block bytes | 100 KiB / 1 MiB |
+| timestamp ahead | 60s; also ≥ max parent timestamp |
+| coinbase maturity | 100 blue-score (genesis premine exempt) |
+
+Templates trim tips to `max_block_parents` (blue_score desc) and clamp coinbase subsidy to remaining `max_supply − issued_supply`.
+
 Synthetic DAG unit tests cover chains, parallel merges (`k` large ⇒ all blue), and `k = 0` red merges.
 
 ## DAA
