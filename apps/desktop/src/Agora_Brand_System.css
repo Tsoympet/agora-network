@@ -200,8 +200,10 @@ body {
 }
 
 .agora-icon-lg {
-  width: 4.5rem;
-  height: 4.5rem;
+  width: 5.5rem;
+  height: 5.5rem;
+  object-fit: contain;
+  border-radius: 50%;
 }
 
 @media (prefers-reduced-motion: reduce) {

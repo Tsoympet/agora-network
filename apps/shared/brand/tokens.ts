@@ -14,15 +14,17 @@ export const agoraBrand = {
     ui: "Inter, Segoe UI, sans-serif",
   },
   assets: {
-    nexus: "nexus-icon.svg",
-    talanton: "talanton.svg",
-    drachma: "drachma.svg",
-    ovolos: "ovolos.svg",
+    nexus: "nexus-icon.png",
+    agoraNetwork: "agora-network.png",
+    appIcon: "agora-app-icon.png",
+    talanton: "talanton.png",
+    drachma: "drachma.png",
+    ovolos: "ovolos.png",
   },
   marks: {
-    TLT: { name: "Talanton", meaning: "Scales" },
-    DRC: { name: "Drachma", meaning: "Helmet" },
-    OBL: { name: "Ovolos", meaning: "Shield / Spears" },
+    TLT: { name: "Talanton", meaning: "Scales of value" },
+    DRC: { name: "Drachma", meaning: "Corinthian helm" },
+    OVL: { name: "Ovolos", meaning: "Winged helm / spears" },
   },
 } as const;
 
