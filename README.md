@@ -10,6 +10,7 @@ A sovereign, multi-layer BlockDAG blockchain built in Rust.
 | --- | --- |
 | [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) | Workspace boundaries |
 | [`AGORA_MASTER_EXECUTION_ROADMAP.md`](AGORA_MASTER_EXECUTION_ROADMAP.md) | Phased architecture plan |
+| [`docs/governance/PATH_TO_COMPLETE_CHAIN.md`](docs/governance/PATH_TO_COMPLETE_CHAIN.md) | What’s left for public testnet / mainnet |
 | [`AGENTS.md`](AGENTS.md) | AI / contributor system rules |
 | [`docs/core/`](docs/core/) | Per-module protocol notes |
 
