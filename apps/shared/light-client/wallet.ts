@@ -142,18 +142,23 @@ export function addressBech32FromMnemonic(
   return deriveAccount(mnemonic, index, passphrase, network).addressBech32;
 }
 
+/**
+ * BIP-44 account derivation.
+ * @param change `0` = external (receive), `1` = internal (change)
+ */
 export function deriveAccount(
   mnemonic: string,
   index = 0,
   passphrase = "",
   network = "mainnet",
+  change: 0 | 1 = 0,
 ): WalletAccount {
   const phrase = mnemonic.trim().toLowerCase().replace(/\s+/g, " ");
   if (!validateMnemonic(phrase)) {
     throw new Error("invalid BIP-39 mnemonic");
   }
   const seed = mnemonicToSeedSync(phrase, passphrase);
-  const path = `m/44'/${AGORA_COIN_TYPE}'/0'/0/${index}`;
+  const path = `m/44'/${AGORA_COIN_TYPE}'/0'/${change}/${index}`;
   const hd = HDKey.fromMasterSeed(seed).derive(path);
   if (!hd.privateKey || !hd.publicKey) {
     throw new Error("derivation failed");
@@ -186,19 +191,37 @@ export async function signTransactionBody(
   return { publicKey, signature: compact };
 }
 
-/** Greedy coin selection + change; fee (`in − out`) is paid to the block miner. */
+/** Greedy coin selection + BIP-44 change; fee (`in − out`) is paid to the miner. */
 export async function buildSignedTransfer(options: {
   mnemonic: string;
   accountIndex?: number;
+  /** UTXOs must all be owned by the signing chain (`spendChange`). */
   utxos: LightUtxo[];
   toAddressHex: string;
   amount: number;
   fee?: number;
   nonce?: number;
+  network?: string;
+  /** When true, inputs are from the internal chain and signed with change keys. */
+  spendChange?: boolean;
 }): Promise<BuiltTransfer> {
+  const accountIndex = options.accountIndex ?? 0;
+  const network = options.network ?? "mainnet";
+  const spendChange = options.spendChange === true;
   const account = deriveAccount(
     options.mnemonic,
-    options.accountIndex ?? 0,
+    accountIndex,
+    "",
+    network,
+    spendChange ? 1 : 0,
+  );
+  // Change outputs always go to the internal chain (BIP-44 change=1).
+  const changeAccount = deriveAccount(
+    options.mnemonic,
+    accountIndex,
+    "",
+    network,
+    1,
   );
   const fee = options.fee ?? 1;
   const need = options.amount + fee;
@@ -223,7 +246,10 @@ export async function buildSignedTransfer(options: {
     { value: options.amount, address: to },
   ];
   if (change > 0) {
-    outputs.push({ value: change, address: hexToBytes(account.addressHex) });
+    outputs.push({
+      value: change,
+      address: hexToBytes(changeAccount.addressHex),
+    });
   }
 
   const inputs = selected.map((u) => ({
@@ -280,13 +306,52 @@ export async function sendTransfer(
     toAddressHex: string;
     amount: number;
     fee?: number;
+    network?: string;
   },
 ): Promise<{ tx_id: string; built: BuiltTransfer }> {
-  const account = deriveAccount(options.mnemonic, options.accountIndex ?? 0);
-  const { utxos } = await client.getUtxos(account.addressHex);
+  const accountIndex = options.accountIndex ?? 0;
+  const network = options.network ?? "mainnet";
+  let fee = options.fee;
+  if (fee === undefined) {
+    try {
+      const est = await client.estimateFee();
+      fee = est.suggested_fee;
+    } catch {
+      fee = 1;
+    }
+  }
+  const receive = deriveAccount(options.mnemonic, accountIndex, "", network, 0);
+  const changeAcc = deriveAccount(
+    options.mnemonic,
+    accountIndex,
+    "",
+    network,
+    1,
+  );
+  const [ext, ch] = await Promise.all([
+    client.getUtxos(receive.addressHex),
+    client.getUtxos(changeAcc.addressHex),
+  ]);
+  const need = options.amount + fee;
+  const sum = (u: { value: number }[]) => u.reduce((a, b) => a + b.value, 0);
+  let utxos = ext.utxos;
+  let spendChange = false;
+  if (sum(ext.utxos) < need) {
+    if (sum(ch.utxos) >= need) {
+      utxos = ch.utxos;
+      spendChange = true;
+    } else if (sum(ext.utxos) + sum(ch.utxos) >= need) {
+      throw new Error(
+        "funds split across receive/change chains — send smaller amount or consolidate first",
+      );
+    }
+  }
   const built = await buildSignedTransfer({
     ...options,
+    fee,
+    network,
     utxos,
+    spendChange,
   });
   const result = await client.submitTransaction(built.tx);
   return { tx_id: result.tx_id, built };

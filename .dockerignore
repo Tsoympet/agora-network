@@ -1,0 +1,7 @@
+target
+data
+.git
+apps/*/node_modules
+**/node_modules
+*.md
+.cursor

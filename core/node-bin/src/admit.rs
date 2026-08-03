@@ -159,7 +159,7 @@ impl ChainState {
         let (dag, ghostdag) =
             rebuild_dag_from_store(store.as_ref(), genesis, boot.ghostdag.clone())?;
 
-        let difficulty = load_or_init_difficulty(&store, boot.initial_bits)?;
+        let difficulty = load_or_init_difficulty(&store, boot.initial_bits, boot.daa.min_level)?;
 
         let chain = Self {
             store,
@@ -1097,17 +1097,29 @@ fn common_prefix_len(a: &[Hash], b: &[Hash]) -> usize {
 fn load_or_init_difficulty(
     store: &StateStore,
     initial_bits: u32,
+    min_level: u32,
 ) -> Result<Difficulty, AdmitError> {
+    let floor = initial_bits.max(min_level);
     if let Some(bytes) = store
         .get_cf(ColumnFamily::Meta, meta_keys::DAA_DIFFICULTY)
         .map_err(|e| AdmitError::Storage(e.to_string()))?
     {
         if bytes.len() == 4 {
             let level = u32::from_le_bytes(bytes.try_into().unwrap());
-            return Ok(Difficulty::new(level));
+            let clamped = level.max(min_level);
+            if clamped != level {
+                store
+                    .put_cf(
+                        ColumnFamily::Meta,
+                        meta_keys::DAA_DIFFICULTY,
+                        &clamped.to_le_bytes(),
+                    )
+                    .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            }
+            return Ok(Difficulty::new(clamped));
         }
     }
-    let difficulty = Difficulty::new(initial_bits);
+    let difficulty = Difficulty::new(floor);
     store
         .put_cf(
             ColumnFamily::Meta,

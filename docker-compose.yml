@@ -1,0 +1,82 @@
+# Multi-host-friendly local stack (loopback by default).
+# Usage:
+#   docker compose up --build seeder node-a
+#   docker compose run --rm miner
+#
+# For a second peer on the same compose network:
+#   docker compose up node-b
+
+services:
+  seeder:
+    build: .
+    entrypoint: ["agora-dns-seeder"]
+    environment:
+      AGORA_SEEDER_BIND: "0.0.0.0:18080"
+    ports:
+      - "18080:18080"
+
+  node-a:
+    build: .
+    environment:
+      AGORA_NETWORK: testnet
+      AGORA_DATA: /data
+      AGORA_RPC_BIND: 0.0.0.0:8545
+      AGORA_RPC_ALLOW_PUBLIC_BIND: "1"
+      AGORA_RPC_ALLOW_FUND: "1"
+      AGORA_LISTEN: /ip4/0.0.0.0/tcp/16111
+      AGORA_DNS_SEEDER: http://seeder:18080
+      AGORA_GENESIS_FILE: /agora/genesis/testnet.genesis.json
+      AGORA_ARCHIVAL: "1"
+    volumes:
+      - node-a-data:/data
+    ports:
+      - "8545:8545"
+      - "16111:16111"
+    depends_on:
+      - seeder
+
+  node-b:
+    build: .
+    environment:
+      AGORA_NETWORK: testnet
+      AGORA_DATA: /data
+      AGORA_RPC_BIND: 0.0.0.0:8546
+      AGORA_RPC_ALLOW_PUBLIC_BIND: "1"
+      AGORA_LISTEN: /ip4/0.0.0.0/tcp/16112
+      AGORA_DNS_SEEDER: http://seeder:18080
+      AGORA_GENESIS_FILE: /agora/genesis/testnet.genesis.json
+    volumes:
+      - node-b-data:/data
+    ports:
+      - "8546:8546"
+      - "16112:16112"
+    depends_on:
+      - seeder
+
+  faucet:
+    build: .
+    entrypoint: ["agora-testnet-faucet"]
+    environment:
+      AGORA_FAUCET_BIND: 0.0.0.0:18081
+      AGORA_RPC_URL: http://node-a:8545/rpc
+      AGORA_FAUCET_COOLDOWN_SECS: "60"
+      AGORA_FAUCET_MAX_TOTAL: "100000000000"
+    ports:
+      - "18081:18081"
+    depends_on:
+      - node-a
+
+  miner:
+    build: .
+    entrypoint: ["agora-miner"]
+    environment:
+      AGORA_RPC_URL: http://node-a:8545/rpc
+      AGORA_MINE_MAX_BLOCKS: "3"
+      AGORA_MINE_POLL_MS: "500"
+    depends_on:
+      - node-a
+    profiles: ["mine"]
+
+volumes:
+  node-a-data:
+  node-b-data:

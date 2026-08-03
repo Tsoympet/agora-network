@@ -10,7 +10,8 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_getBlock` | Block by hash |
 | `agora_getTransaction` | Lookup by `tx_id`: `pending` (mempool) / `confirmed` (indexed) / `unknown` |
 | `agora_getMempool` | Pending pool snapshot (`count` + fee-ordered `transactions`, optional `limit`) |
-| `agora_getNodeInfo` | Operator snapshot: peer id, connected peers, tips, mempool, PoW, archival / hot window |
+| `agora_getNodeInfo` | Operator snapshot: peer id, connected peers, tips, mempool, PoW, archival / hot window, `min_relay_fee` |
+| `agora_estimateFee` | `{ min_relay_fee, suggested_fee }` for wallet coin selection |
 | `agora_submitTransaction` | UTXO-check + admit a signed tx into the mempool and gossip it |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |

@@ -21,7 +21,9 @@ use agora_p2p::{
     PeerId, PendingFetches, ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
 };
 use agora_rpc::RpcDispatcher;
-use agora_state_machine::{ChainParams, NetworkId, StateStore};
+use agora_state_machine::{
+    delete_orphan, list_orphans, store_orphan, ChainParams, NetworkId, StateStore,
+};
 use agora_types::{Address, Block, Hash};
 use tracing::{info, warn};
 
@@ -174,6 +176,7 @@ fn missing_parents(chain: &Arc<Mutex<ChainState>>, block: &Block) -> Result<Vec<
 fn handle_incoming_block(
     chain: &Arc<Mutex<ChainState>>,
     mempool: &Arc<Mutex<Mempool>>,
+    store: &StateStore,
     orphans: &mut OrphanPool,
     pending: &mut PendingFetches,
     net: &NetworkHandle,
@@ -185,22 +188,34 @@ fn handle_incoming_block(
         Ok(id) => {
             score_peer(net, peer, true);
             info!(%peer, block = %id.to_hex(), "admitted block");
+            let _ = delete_orphan(store, &id);
             let chain_ref = chain.clone();
             let mempool_ref = mempool.clone();
             let drained = drain_orphans_after(orphans, id, |child| {
                 match admit_gossip_block(&chain_ref, &mempool_ref, child.clone()) {
                     Ok(cid) => {
+                        let _ = delete_orphan(store, &cid);
                         info!(block = %cid.to_hex(), "admitted orphan");
                         Ok(cid)
                     }
                     Err(AdmitError::MissingParent(_)) => {
                         match missing_parents(&chain_ref, &child) {
-                            Ok(missing) if !missing.is_empty() => Err(Some(missing)),
-                            Ok(_) => Err(None),
-                            Err(_) => Err(None),
+                            Ok(missing) if !missing.is_empty() => {
+                                let _ = store_orphan(store, &child);
+                                Err(Some(missing))
+                            }
+                            Ok(_) => {
+                                let _ = delete_orphan(store, &child.id());
+                                Err(None)
+                            }
+                            Err(_) => {
+                                let _ = delete_orphan(store, &child.id());
+                                Err(None)
+                            }
                         }
                     }
                     Err(err) => {
+                        let _ = delete_orphan(store, &child.id());
                         warn!(error = %err, "rejected orphan");
                         Err(None)
                     }
@@ -218,7 +233,8 @@ fn handle_incoming_block(
                 warn!(%peer, block = %block_id.to_hex(), "missing parent race — rejecting");
                 return;
             }
-            if orphans.park(block, &missing, Some(peer)) {
+            if orphans.park(block.clone(), &missing, Some(peer)) {
+                let _ = store_orphan(store, &block);
                 info!(
                     %peer,
                     block = %block_id.to_hex(),
@@ -576,9 +592,29 @@ async fn main() {
 
     let net = handle.clone();
     let local_peer = handle.peer_id();
+    let orphan_store = store.clone();
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));
         let mut orphans = OrphanPool::new(Duration::from_secs(120), 1_024);
+        match list_orphans(orphan_store.as_ref()) {
+            Ok(persisted) if !persisted.is_empty() => {
+                let n = persisted.len();
+                orphans.restore_from_blocks(persisted, |parent| {
+                    chain
+                        .lock()
+                        .ok()
+                        .and_then(|g| g.has_header(parent).ok())
+                        .unwrap_or(false)
+                });
+                info!(
+                    loaded = n,
+                    parked = orphans.len(),
+                    "restored durable orphan pool"
+                );
+            }
+            Ok(_) => {}
+            Err(err) => warn!(error = %err, "failed to load durable orphans"),
+        }
         let mut header_sync: HashSet<PeerId> = HashSet::new();
         let refresh_every = seeder_book
             .as_ref()
@@ -708,6 +744,7 @@ async fn main() {
                         handle_incoming_block(
                             &chain,
                             &mempool,
+                            orphan_store.as_ref(),
                             &mut orphans,
                             &mut pending,
                             &net,
@@ -745,6 +782,7 @@ async fn main() {
                         handle_incoming_block(
                             &chain,
                             &mempool,
+                            orphan_store.as_ref(),
                             &mut orphans,
                             &mut pending,
                             &net,
@@ -776,6 +814,7 @@ async fn main() {
                                 handle_incoming_block(
                                     &chain,
                                     &mempool,
+                                    orphan_store.as_ref(),
                                     &mut orphans,
                                     &mut pending,
                                     &net,

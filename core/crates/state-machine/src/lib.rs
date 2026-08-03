@@ -10,6 +10,7 @@ mod genesis;
 mod headers;
 mod marks;
 mod network;
+mod orphans;
 mod store;
 mod tx_index;
 mod utxo;
@@ -30,6 +31,7 @@ pub use network::{
     GenesisWalletPolicy, NetworkId, DEFAULT_GHOSTDAG_K, TESTNET_GENESIS_BITS,
     TESTNET_GENESIS_HASH_HEX, TESTNET_GENESIS_TIMESTAMP_MS, TESTNET_PREMINE_ADDRESS_HEX,
 };
+pub use orphans::{delete_orphan, list_orphans, load_orphan, orphan_key, store_orphan};
 pub use store::StateStore;
 pub use tx_index::{
     decode_tx_location, encode_tx_location, index_block_transactions, lookup_tx_location,

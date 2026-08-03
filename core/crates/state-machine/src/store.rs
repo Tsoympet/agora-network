@@ -117,6 +117,44 @@ impl StateStore {
         }
     }
 
+    /// Scan keys in `cf` that start with `prefix` (inclusive).
+    pub fn scan_prefix(
+        &self,
+        cf: ColumnFamily,
+        prefix: &[u8],
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StateError> {
+        match &self.inner {
+            Inner::Memory(map) => {
+                let guard = map
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                let mut out: Vec<(Vec<u8>, Vec<u8>)> = guard
+                    .iter()
+                    .filter(|((c, k), _)| *c == cf as u8 && k.starts_with(prefix))
+                    .map(|((_, k), v)| (k.clone(), v.clone()))
+                    .collect();
+                out.sort_by(|a, b| a.0.cmp(&b.0));
+                Ok(out)
+            }
+            #[cfg(feature = "rocksdb")]
+            Inner::Rocks(db) => {
+                use rocksdb::{Direction, IteratorMode};
+
+                let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                let mut out = Vec::new();
+                let iter = db.iterator_cf(handle, IteratorMode::From(prefix, Direction::Forward));
+                for item in iter {
+                    let (k, v) = item.map_err(|e| StateError::Storage(e.to_string()))?;
+                    if !k.starts_with(prefix) {
+                        break;
+                    }
+                    out.push((k.to_vec(), v.to_vec()));
+                }
+                Ok(out)
+            }
+        }
+    }
+
     pub fn put(&self, zone: StateZone, key: &[u8], value: &[u8]) -> Result<(), StateError> {
         self.put_cf(zone.column_family(), key, value)
     }

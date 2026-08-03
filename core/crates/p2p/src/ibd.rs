@@ -260,6 +260,35 @@ impl OrphanPool {
     pub fn missing_parents(&self) -> Vec<Hash> {
         self.waiting_on.keys().copied().collect()
     }
+
+    /// Snapshot orphan bodies for durable persistence (peer ids dropped).
+    pub fn snapshot_blocks(&self) -> Vec<Block> {
+        self.by_hash.values().map(|e| e.block.clone()).collect()
+    }
+
+    /// Rebuild wait edges from persisted orphan bodies (seen_at = now).
+    ///
+    /// `parent_known` should return true when the local node already has that parent
+    /// (DAG / header / body). Only missing parents are indexed.
+    pub fn restore_from_blocks(
+        &mut self,
+        blocks: impl IntoIterator<Item = Block>,
+        mut parent_known: impl FnMut(&Hash) -> bool,
+    ) {
+        for block in blocks {
+            let missing: Vec<Hash> = block
+                .header
+                .parents
+                .iter()
+                .copied()
+                .filter(|p| !parent_known(p))
+                .collect();
+            if missing.is_empty() {
+                continue;
+            }
+            let _ = self.park(block, &missing, None);
+        }
+    }
 }
 
 /// BFS helper: given a newly admitted hash, drain ready orphans via `try_admit`.
@@ -418,6 +447,23 @@ mod tests {
         assert!(pool.park(b3, &[p3], None));
         assert_eq!(pool.len(), 2);
         assert!(!pool.contains(&id1));
+    }
+
+    #[test]
+    fn orphan_pool_restores_from_persisted_blocks() {
+        let genesis = Hash::hash_bytes(b"g");
+        let child = coinbase_block(genesis, 9);
+        let id = child.id();
+        let mut pool = OrphanPool::new(Duration::from_secs(60), 16);
+        pool.restore_from_blocks(vec![child], |p| *p == genesis && false);
+        // parent unknown → parked
+        assert!(pool.contains(&id));
+        let snap = pool.snapshot_blocks();
+        assert_eq!(snap.len(), 1);
+        let mut pool2 = OrphanPool::new(Duration::from_secs(60), 16);
+        pool2.restore_from_blocks(snap, |_| true);
+        // all parents known → not re-parked
+        assert!(pool2.is_empty());
     }
 
     #[test]

@@ -53,6 +53,8 @@ On `PeerConnected`, the node builds a Bitcoin-style **block locator** along the 
 
 Serving peers walk durable Warm `header/*` records (Phase 34), so **pruned nodes** (`AGORA_ARCHIVAL=0`) can answer GetHeaders even after Hot bodies are dropped.
 
+Orphan bodies persist under Warm `orphan/*` and are reloaded into the in-memory pool on restart (Phase 38).
+
 Empty-tx templates reconstruct immediately (no mempool lookup).
 
 | Test | Covers |

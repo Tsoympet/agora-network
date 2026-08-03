@@ -1,64 +1,59 @@
 # Path to a complete working Agora blockchain
 
-Status after Phase 37: Agora is a **working local BlockDAG** (mine, transfer, gossip, headers-first IBD) — not yet a public testnet or mainnet.
+Status after Phase 38: **public-testnet engineering readiness** is largely in-tree.
+What remains for a live public network is ops deployment + human freeze decisions.
 
 ## What already works (L1)
 
-- GHOSTDAG ordering, virtual tip, UTXO apply/reorg journals
-- RandomX + kHeavyHash PoW verify; DAA wired into templates/admission
-- RocksDB zones, prune/archival, durable header index
-- libp2p gossip, compact blocks, GetBlock, GetHeaders IBD, orphan pool, seeder
-- JSON-RPC (tips/block/tx/mempool/UTXO/balance/submit/template) + optional Bearer token
-- Frozen **testnet** genesis v2; mainnet boot refused until freeze
-- Miner sidecar, stratum scaffold, faucet (dev mint)
-- Desktop/mobile/explorer light clients + **password-sealed mnemonic vault**
+- GHOSTDAG, virtual tip, UTXO reorg journals, admission limits
+- RandomX (testnet/mainnet policy) + kHeavyHash (dev/stratum)
+- Testnet post-genesis PoW floor (`daa_min_level = 8`; genesis hash unchanged)
+- Headers-first IBD, durable headers, **durable orphans**
+- JSON-RPC including `agora_estimateFee` + Bearer auth + public-bind gate
+- Docker / compose + [`docs/ops/PUBLIC_TESTNET.md`](../ops/PUBLIC_TESTNET.md)
+- Wallets: vault, BIP-44 change chain, fee estimate helper
+- OpenAPI sketch: [`docs/core/openapi.yaml`](../core/openapi.yaml)
 
-Local proof: `./scripts/local_testnet.sh` (`smoke-tx`, `smoke-ibd`, `smoke-ibd-catchup`).
+## Remaining checklist
 
-## Finish line checklist
+### A — Public testnet go-live (ops)
 
-### A — Public testnet (external users can join)
-
-| # | Item | Why |
+| # | Item | Status |
 | --- | --- | --- |
-| A1 | Non-trivial PoW floor + DAA (`bits` / `daa_min_level` ≫ 0) | Current testnet `bits: 0` is lab-only |
-| A2 | Reachable seed nodes + dialable multiaddrs (not only loopback HTTP seeder) | Outsiders cannot discover peers |
-| A3 | Persist orphan pool across restarts | IBD survives node bounce |
-| A4 | Release artifacts (Docker / binaries) + multi-host runbook | Ops packaging |
-| A5 | CI runs `smoke-ibd` / `smoke-tx` (or equivalent) | Catch regressions before publish |
-| A6 | Decide RandomX-only vs kHeavyHash for public testnet | ASICs vs CPU miners |
-| A7 | Public faucet with treasury/premine policy (not unbounded mint) | Onboarding without `fundAddress` abuse |
+| A1 | Non-trivial PoW floor | **done** (DAA min_level 8; genesis bits still 0) |
+| A2 | Reachable seeds + dialable multiaddrs | **scaffolded** — deploy seeder on public IP |
+| A3 | Persist orphan pool | **done** |
+| A4 | Docker / binaries + runbook | **done** |
+| A5 | CI live smoke-ibd | partial (unit catch-up + vault); full RandomX compose smoke is operator-run |
+| A6 | RandomX-only public testnet | **done** (documented + locked in ChainParams) |
+| A7 | Faucet cap | **done** (`AGORA_FAUCET_MAX_TOTAL`); treasury spends still follow-up |
 
-### B — Wallet & miner product surface
+### B — Wallet / miner
 
-| # | Item | Why |
+| # | Item | Status |
 | --- | --- | --- |
-| B1 | ~~Encrypted mnemonic vault~~ (**done** Phase 37) | Keys must not live only in React state |
-| B2 | Fee estimate RPC + clearer send UX | External wallets need guidance |
-| B3 | BIP-44 change chain (not always same external index) | Privacy / standard practice |
-| B4 | Desktop Tauri mining sidecar wiring (optional) | End-user CPU mine |
-| B5 | Stable RPC docs / OpenAPI; TLS termination story | Third-party wallets & explorers |
+| B1 | Encrypted vault | **done** |
+| B2 | Fee estimate RPC | **done** |
+| B3 | BIP-44 change chain | **done** |
+| B4 | Desktop Tauri mining sidecar | optional follow-up |
+| B5 | OpenAPI + TLS story | **done** (docs) |
 
-### C — Mainnet freeze (hard gate)
+### C — Mainnet freeze (needs humans)
 
-| # | Item | Why |
+| # | Item | Status |
 | --- | --- | --- |
-| C1 | Register SLIP-0044 (or consciously accept provisional `8888`) | Wallet ecosystem identity |
-| C2 | Freeze `mainnet.genesis.json` (premine, timestamp, bits, DAA, emission) | Code already refuses unfrozen mainnet |
-| C3 | External security review (consensus / UTXO / P2P / RPC) | Real value at risk |
-| C4 | Long soak + adversarial reorg/partition tests | Confidence beyond unit smokes |
-| C5 | Ops: monitoring, incident runbooks, tagged release | Production operation |
+| C1 | SLIP-0044 registration | **human** — see `SLIP0044.md` |
+| C2 | Freeze `mainnet.genesis.json` | **human** — premine, timestamp, bits |
+| C3 | External security review | **human** |
+| C4 | Long soak / adversarial tests | run before freeze |
+| C5 | Ops monitoring / tagged release | after freeze |
 
-### D — Later (not required for “complete L1”)
+Node already refuses `AGORA_NETWORK=mainnet` until genesis is frozen.
 
-- Production Ovolos L2 / bridge / intent settlement
-- Hardware wallets, fee market / RBF, Prometheus metrics
-- Real DNS seeds, QUIC/hole-punch, explorer polish
+## What you must decide / do outside the repo
 
-## Recommended sequence
-
-1. **A1–A5** — public testnet readiness  
-2. **B2–B5** — external wallet/miner polish (vault done)  
-3. **C1–C5** — mainnet freeze gate  
-
-Human decisions required before C: premine/treasury addresses, genesis timestamp, target difficulty, SLIP registration, RandomX vs dual-algo policy.
+1. Premine / treasury addresses and amounts for mainnet  
+2. Genesis timestamp and initial `bits` / DAA floor for mainnet  
+3. File or accept provisional SLIP-0044 coin type `8888`  
+4. Deploy public seeder + 2+ nodes; publish seeder URL + genesis hash  
+5. Commission a security review before real value

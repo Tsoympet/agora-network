@@ -68,6 +68,16 @@ pub struct NodeInfo {
     pub miner_address: Option<String>,
     /// Hex id of Block 0 for this datadir / network.
     pub genesis_hash: Option<String>,
+    /// Minimum mempool relay fee (`in − out`) in base units.
+    pub min_relay_fee: u64,
+}
+
+/// Fee guidance for wallets (`agora_estimateFee`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FeeEstimate {
+    pub min_relay_fee: u64,
+    /// Suggested fee for a typical single-input transfer (currently = min relay).
+    pub suggested_fee: u64,
 }
 
 impl TxLookup {
@@ -118,6 +128,8 @@ pub trait RpcBackend: Send {
     fn get_mempool(&self, limit: usize) -> Result<Vec<MempoolEntry>, RpcError>;
     /// Local node / storage / tip snapshot for explorers and operators.
     fn get_node_info(&self) -> Result<NodeInfo, RpcError>;
+    /// Minimum / suggested fee for wallet coin selection.
+    fn estimate_fee(&self) -> Result<FeeEstimate, RpcError>;
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
     /// Live UTXO set for wallet coin selection.
@@ -259,6 +271,14 @@ impl RpcBackend for InMemoryBackend {
             allow_fund: true,
             miner_address: None,
             genesis_hash: self.tips.first().map(|h| h.to_hex()),
+            min_relay_fee: 1,
+        })
+    }
+
+    fn estimate_fee(&self) -> Result<FeeEstimate, RpcError> {
+        Ok(FeeEstimate {
+            min_relay_fee: 1,
+            suggested_fee: 1,
         })
     }
 
