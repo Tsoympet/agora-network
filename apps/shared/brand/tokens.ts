@@ -2,7 +2,7 @@
 
 /** Max supplies in whole units (8 decimals on-chain). */
 export const agoraTokenSupplies = {
-  /** L1 native — BlockDAG settlement asset. */
+  /** L1 native PoW — BlockDAG UTXO settlement asset (RandomX). */
   TLT: {
     name: "Talanton",
     layer: "L1",
@@ -10,24 +10,27 @@ export const agoraTokenSupplies = {
     decimals: 8,
     role: "native store of value / BlockDAG settlement",
     native: true,
+    powAlgorithm: "randomx",
   },
-  /** District / bridge medium of exchange (not L1 UTXO asset id yet). */
+  /** L3 native PoW — district / bridge money (sha256_leading_zero). */
   DRC: {
     name: "Drachma",
-    layer: "L2+",
+    layer: "L3",
     maxSupplyWhole: 6_000_000_000,
     decimals: 8,
-    role: "medium of exchange / district & bridge settlements",
-    native: false,
+    role: "native L3 PoW money / district & bridge settlements",
+    native: true,
+    powAlgorithm: "sha256_leading_zero",
   },
-  /** Ovolos rollup gas brand (not L1 UTXO asset id yet). */
+  /** L2 native PoW — Ovolos rollup money (sha256_leading_zero). */
   OVL: {
     name: "Ovolos",
     layer: "L2",
     maxSupplyWhole: 21_000_000_000,
     decimals: 8,
-    role: "Ovolos rollup gas / micro-unit brand",
-    native: false,
+    role: "native L2 PoW money / Ovolos rollup gas",
+    native: true,
+    powAlgorithm: "sha256_leading_zero",
   },
 } as const;
 

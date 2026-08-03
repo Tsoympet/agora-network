@@ -1,6 +1,9 @@
 //! Minimal HTTP JSON-RPC transport for `agora-node`.
 
+use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use agora_rpc::{RpcDispatcher, RpcRequest};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -15,6 +18,32 @@ use crate::backend::NodeBackend;
 pub struct RpcHttpConfig {
     /// When set, mutating / wallet RPC methods require `Authorization: Bearer …`.
     pub token: Option<Arc<str>>,
+    /// Max POST /rpc requests per peer IP per rolling minute (`0` disables).
+    pub rate_limit_per_minute: u32,
+}
+
+#[derive(Default)]
+struct RateLimiter {
+    /// peer IP → (window start, count)
+    windows: HashMap<IpAddr, (Instant, u32)>,
+}
+
+impl RateLimiter {
+    fn allow(&mut self, ip: IpAddr, limit: u32) -> bool {
+        if limit == 0 {
+            return true;
+        }
+        let now = Instant::now();
+        let entry = self.windows.entry(ip).or_insert((now, 0));
+        if now.duration_since(entry.0) >= Duration::from_secs(60) {
+            *entry = (now, 0);
+        }
+        if entry.1 >= limit {
+            return false;
+        }
+        entry.1 += 1;
+        true
+    }
 }
 
 /// Serve JSON-RPC over HTTP/1.1 (same style as dns-seeder / faucet).
@@ -27,7 +56,13 @@ pub async fn serve_rpc(
     config: RpcHttpConfig,
 ) {
     let listener = TcpListener::bind(&bind).await.expect("bind rpc");
-    info!(%bind, token_required = config.token.is_some(), "agora-node JSON-RPC listening");
+    let limiter = Arc::new(Mutex::new(RateLimiter::default()));
+    info!(
+        %bind,
+        token_required = config.token.is_some(),
+        rate_limit_per_minute = config.rate_limit_per_minute,
+        "agora-node JSON-RPC listening"
+    );
 
     loop {
         let (mut socket, addr) = match listener.accept().await {
@@ -39,6 +74,7 @@ pub async fn serve_rpc(
         };
         let dispatcher = dispatcher.clone();
         let config = config.clone();
+        let limiter = limiter.clone();
         tokio::spawn(async move {
             let mut buf = vec![0u8; 64 * 1024];
             let n = match socket.read(&mut buf).await {
@@ -46,6 +82,25 @@ pub async fn serve_rpc(
                 Ok(n) => n,
             };
             let req = String::from_utf8_lossy(&buf[..n]);
+            if req.lines().next().unwrap_or("").starts_with("POST") {
+                let mut guard = limiter.lock().await;
+                if !guard.allow(addr.ip(), config.rate_limit_per_minute) {
+                    let response = http_response(
+                        429,
+                        &serde_json::json!({
+                            "result": null,
+                            "error": {
+                                "code": -32029,
+                                "message": "rate limited: too many RPC requests"
+                            }
+                        })
+                        .to_string(),
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                    return;
+                }
+            }
             let response = handle_request(&req, &dispatcher, &config).await;
             let _ = socket.write_all(response.as_bytes()).await;
             let _ = socket.shutdown().await;
@@ -217,6 +272,7 @@ fn http_response(status: u16, body: &str) -> String {
         400 => "Bad Request",
         401 => "Unauthorized",
         404 => "Not Found",
+        429 => "Too Many Requests",
         500 => "Internal Server Error",
         _ => "Error",
     };
@@ -264,5 +320,15 @@ mod tests {
         assert!(token_matches("secret-token", "secret-token"));
         assert!(!token_matches("secret-token", "Secret-token"));
         assert!(!token_matches("ab", "abc"));
+    }
+
+    #[test]
+    fn rate_limiter_caps_per_minute() {
+        let mut lim = RateLimiter::default();
+        let ip: IpAddr = "203.0.113.9".parse().unwrap();
+        assert!(lim.allow(ip, 2));
+        assert!(lim.allow(ip, 2));
+        assert!(!lim.allow(ip, 2));
+        assert!(lim.allow(ip, 0)); // disabled
     }
 }

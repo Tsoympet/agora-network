@@ -1,9 +1,12 @@
 //! Agora mark / token registry for genesis artifacts.
 //!
-//! L1 consensus settles a single native asset ([`TokenMark::native_tlt`]).
-//! Drachma (DRC) and Ovolos (OVL) appear in the L1 registry for wallets/explorers
-//! and each also has a **layer genesis** (`docs/genesis/drachma.*.json`,
-//! `docs/genesis/ovolos.*.json`). They are **not** separate L1 UTXO asset ids.
+//! Each mark is **native PoW money on its own layer**:
+//! - **TLT** — L1 BlockDAG UTXO (RandomX)
+//! - **OVL** — L2 Ovolos ledger (sha256_leading_zero)
+//! - **DRC** — L3 Drachma / districts ledger (sha256_leading_zero)
+//!
+//! Only TLT is an L1 UTXO asset id. OVL and DRC each have a layer genesis
+//! (`docs/genesis/ovolos.*.json`, `docs/genesis/drachma.*.json`).
 
 use serde::{Deserialize, Serialize};
 
@@ -12,15 +15,18 @@ use serde::{Deserialize, Serialize};
 pub struct TokenMark {
     pub ticker: String,
     pub name: String,
-    /// `L1` | `L2` | `L2+`
+    /// `L1` | `L2` | `L3`
     pub layer: String,
     /// Max supply in base units (8 decimals), when hard-capped.
     pub max_supply: u64,
     pub decimals: u8,
     pub role: String,
-    /// When true, this mark is the L1 `Amount` / `SupplyCaps` native asset.
+    /// Native money on the mark's declared layer (PoW + coinbase / emission).
     #[serde(default)]
     pub native: bool,
+    /// PoW algorithm id for this mark's layer.
+    #[serde(default)]
+    pub pow_algorithm: String,
 }
 
 impl TokenMark {
@@ -34,24 +40,26 @@ impl TokenMark {
             decimals: 8,
             role: "native store of value / BlockDAG settlement".into(),
             native: true,
+            pow_algorithm: "randomx".into(),
         }
     }
 
-    /// Drachma — circulating medium (6B whole = 60× TLT unit scale).
+    /// Drachma — native L3 PoW money (6B whole = 60× TLT unit scale).
     pub fn drachma() -> Self {
         Self {
             ticker: "DRC".into(),
             name: "Drachma".into(),
-            layer: "L2+".into(),
+            layer: "L3".into(),
             // 6_000_000_000 * 10^8
             max_supply: 600_000_000_000_000_000,
             decimals: 8,
-            role: "medium of exchange / district & bridge settlements".into(),
-            native: false,
+            role: "native L3 PoW money / district & bridge settlements".into(),
+            native: true,
+            pow_algorithm: "sha256_leading_zero".into(),
         }
     }
 
-    /// Ovolos — rollup / micro unit (21B whole, Bitcoin-shaped L2 gas brand).
+    /// Ovolos — native L2 PoW money (21B whole, Bitcoin-shaped emission).
     pub fn ovolos() -> Self {
         Self {
             ticker: "OVL".into(),
@@ -60,8 +68,9 @@ impl TokenMark {
             // 21_000_000_000 * 10^8
             max_supply: 2_100_000_000_000_000_000,
             decimals: 8,
-            role: "Ovolos rollup gas / micro-unit brand".into(),
-            native: false,
+            role: "native L2 PoW money / Ovolos rollup gas".into(),
+            native: true,
+            pow_algorithm: "sha256_leading_zero".into(),
         }
     }
 }
@@ -80,15 +89,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn three_marks_and_native_matches_l1_cap() {
+    fn three_marks_each_native_pow_on_own_layer() {
         let l1 = 10_000_000_000_000_000u64; // 100M TLT
         let marks = default_token_marks(l1);
         assert_eq!(marks.len(), 3);
         assert_eq!(marks[0].ticker, "TLT");
+        assert_eq!(marks[0].layer, "L1");
         assert!(marks[0].native);
+        assert_eq!(marks[0].pow_algorithm, "randomx");
         assert_eq!(marks[0].max_supply, l1);
         assert_eq!(marks[1].ticker, "DRC");
+        assert_eq!(marks[1].layer, "L3");
+        assert!(marks[1].native);
+        assert_eq!(marks[1].pow_algorithm, "sha256_leading_zero");
         assert_eq!(marks[2].ticker, "OVL");
+        assert_eq!(marks[2].layer, "L2");
+        assert!(marks[2].native);
+        assert_eq!(marks[2].pow_algorithm, "sha256_leading_zero");
         assert!(marks[1].max_supply > l1);
         assert!(marks[2].max_supply > marks[1].max_supply);
     }

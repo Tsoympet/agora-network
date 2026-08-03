@@ -24,13 +24,13 @@
 
 Agora is a proof-of-work **BlockDAG**: blocks can reference multiple parents, ordered by **GHOSTDAG**, with a single-asset L1 UTXO ledger denominated in **TLT**. Peers sync with headers-first IBD over libp2p; wallets talk JSON-RPC.
 
-| Mark | Role |
-| --- | --- |
-| **TLT** (Talanton) | L1 native money — only spendable UTXO asset |
-| **DRC** (Drachma) | L2+ registry mark (not L1 UTXO) |
-| **OVL** (Ovolos) | L2 rollup registry mark (not L1 UTXO) |
+| Mark | Layer | Native PoW | Role |
+| --- | --- | --- | --- |
+| **TLT** (Talanton) | L1 | RandomX | BlockDAG UTXO money |
+| **OVL** (Ovolos) | L2 | sha256_leading_zero | Rollup native money / gas |
+| **DRC** (Drachma) | L3 | sha256_leading_zero | District / bridge native money |
 
-> **Status:** Testnet genesis is **frozen in-repo** and the full node stack runs locally / via Docker. **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot. L2–L4 run in-process via `agora-layers` (OVL/DRC ledgers + intents); they are **not** a publicly deployed multi-chain network until ops wire DA to L1.
+> **Status:** Testnet genesis is **frozen in-repo** and the full node stack runs locally / via Docker. **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot. L2–L4 run in-process via `agora-layers` (native OVL/DRC PoW + intents); they are **not** a publicly deployed multi-chain network until ops wire DA to L1.
 
 ## Features
 

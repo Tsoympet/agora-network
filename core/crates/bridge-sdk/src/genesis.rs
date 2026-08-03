@@ -1,5 +1,6 @@
-//! Drachma (L3 / Bridge-in-a-Box) genesis artifact — freezes DRC monetary + hub params.
+//! Drachma (L3 / Bridge-in-a-Box) genesis — native DRC PoW money on the bridge layer.
 //!
+//! DRC is **native money on L3**, sealed by layer PoW (`sha256_leading_zero`).
 //! Separate from L1 Talanton genesis and L2 Ovolos genesis. Does not mint L1 UTXOs.
 
 use std::path::Path;
@@ -10,7 +11,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::district::{DistrictConfig, DistrictKind};
 use crate::drc::{DrcLedger, DRC_MAX_SUPPLY_BASE};
+use crate::pow::{DrcEmission, DRACHMA_POW_ALGORITHM};
 use crate::BridgeError;
+
+/// Default L3 PoW difficulty (leading-zero bits on SHA-256).
+pub const DEFAULT_DRC_POW_BITS: u32 = 8;
+
+/// Default emission: 50 DRC per block, halvings every 210_000 heights.
+pub const DEFAULT_DRC_INITIAL_REWARD: u64 = 5_000_000_000;
+pub const DEFAULT_DRC_HALVING_INTERVAL: u64 = 210_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct DrcPremine {
@@ -42,6 +51,11 @@ struct DrachmaGenesisBody {
     decimals: u8,
     premine: Vec<(String, String, u64)>,
     districts: Vec<(String, String, u64, String)>,
+    native: bool,
+    pow_algorithm: String,
+    pow_bits: u32,
+    initial_block_reward: u64,
+    halving_interval: u64,
 }
 
 /// Frozen Drachma L3 genesis document.
@@ -61,6 +75,12 @@ pub struct DrachmaGenesis {
     pub decimals: u8,
     pub premine: Vec<DrcPremine>,
     pub districts: Vec<GenesisDistrict>,
+    /// DRC is native money on this layer (not an L1 UTXO asset).
+    pub native: bool,
+    pub pow_algorithm: String,
+    pub pow_bits: u32,
+    pub initial_block_reward: u64,
+    pub halving_interval: u64,
     pub genesis_hash: String,
 }
 
@@ -76,7 +96,7 @@ impl DrachmaGenesis {
             layer: "L3".into(),
             mark: "DRC".into(),
             network: "testnet".into(),
-            version: 1,
+            version: 2,
             chain_name: "Drachma Bridge Hub".into(),
             chain_id: "agora-drachma-testnet-1".into(),
             parent_l1_network: "testnet".into(),
@@ -112,6 +132,11 @@ impl DrachmaGenesis {
                     rpc_hint: String::new(),
                 },
             ],
+            native: true,
+            pow_algorithm: DRACHMA_POW_ALGORITHM.into(),
+            pow_bits: DEFAULT_DRC_POW_BITS,
+            initial_block_reward: DEFAULT_DRC_INITIAL_REWARD,
+            halving_interval: DEFAULT_DRC_HALVING_INTERVAL,
             genesis_hash: String::new(),
         }
         .with_computed_hash()
@@ -122,7 +147,7 @@ impl DrachmaGenesis {
             layer: "L3".into(),
             mark: "DRC".into(),
             network: "mainnet".into(),
-            version: 1,
+            version: 2,
             chain_name: "Drachma Bridge Hub".into(),
             chain_id: "agora-drachma-mainnet-1".into(),
             parent_l1_network: "mainnet".into(),
@@ -138,6 +163,11 @@ impl DrachmaGenesis {
                 chain_id: 1,
                 rpc_hint: String::new(),
             }],
+            native: true,
+            pow_algorithm: DRACHMA_POW_ALGORITHM.into(),
+            pow_bits: DEFAULT_DRC_POW_BITS,
+            initial_block_reward: DEFAULT_DRC_INITIAL_REWARD,
+            halving_interval: DEFAULT_DRC_HALVING_INTERVAL,
             genesis_hash: "TBD".into(),
         }
     }
@@ -170,6 +200,11 @@ impl DrachmaGenesis {
                     )
                 })
                 .collect(),
+            native: self.native,
+            pow_algorithm: self.pow_algorithm.clone(),
+            pow_bits: self.pow_bits,
+            initial_block_reward: self.initial_block_reward,
+            halving_interval: self.halving_interval,
         }
     }
 
@@ -200,6 +235,16 @@ impl DrachmaGenesis {
             return Err(BridgeError::Constraint(
                 "drachma genesis must be layer=L3 mark=DRC".into(),
             ));
+        }
+        if !self.native {
+            return Err(BridgeError::Constraint(
+                "drachma genesis must set native=true (DRC is L3 native money)".into(),
+            ));
+        }
+        if self.pow_algorithm != DRACHMA_POW_ALGORITHM {
+            return Err(BridgeError::Constraint(format!(
+                "drachma pow_algorithm must be {DRACHMA_POW_ALGORITHM}"
+            )));
         }
         if self.max_supply == 0 {
             return Err(BridgeError::Constraint(
@@ -249,6 +294,13 @@ impl DrachmaGenesis {
             .collect()
     }
 
+    pub fn emission(&self) -> DrcEmission {
+        DrcEmission {
+            initial_reward: self.initial_block_reward,
+            halving_interval: self.halving_interval,
+        }
+    }
+
     /// Build DRC ledger and apply genesis premine (hub locks for hub allocations).
     pub fn ignite_ledger(&self) -> Result<DrcLedger, BridgeError> {
         let mut ledger = DrcLedger::new(self.max_supply);
@@ -270,6 +322,9 @@ mod tests {
         let g = DrachmaGenesis::testnet();
         assert_eq!(g.mark, "DRC");
         assert_eq!(g.layer, "L3");
+        assert!(g.native);
+        assert_eq!(g.pow_algorithm, DRACHMA_POW_ALGORITHM);
+        assert_eq!(g.version, 2);
         g.validate().unwrap();
         let ledger = g.ignite_ledger().unwrap();
         assert_eq!(ledger.minted(), 60_000_000_000_000_000);
@@ -288,5 +343,7 @@ mod tests {
         assert_eq!(file.genesis_hash, embedded.genesis_hash);
         assert_eq!(file.max_supply, embedded.max_supply);
         assert_eq!(file.premine, embedded.premine);
+        assert!(file.native);
+        assert_eq!(file.pow_algorithm, DRACHMA_POW_ALGORITHM);
     }
 }

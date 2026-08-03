@@ -23,7 +23,7 @@ Intent-Engine (L4) ──solvers──► Bridge-in-a-Box (L3) ──► Distric
 | --- | --- |
 | L2 sequencer / challenge / finalize / revert | **implemented** (in-process) |
 | L2 `BatchCommitment` DA blob | **implemented** (operator posts to L1 separately) |
-| L2 OVL gas ledger (registry mark, not L1 UTXO) | **implemented** |
+| L2 OVL native PoW money (`sha256_leading_zero`, not L1 UTXO) | **implemented** |
 | L2 `revm` executor | **implemented** (default feature) |
 | L3 lock/mint, burn/unlock, merkle proofs, transport | **implemented** |
 | L3 DRC district ledger | **implemented** |

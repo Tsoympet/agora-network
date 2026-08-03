@@ -93,6 +93,9 @@ pub async fn fetch_seeder_peers(url: &str) -> Result<Vec<String>, P2pError> {
 }
 
 /// `POST` a dialable multiaddr to the seeder phonebook.
+///
+/// When `AGORA_SEEDER_TOKEN` is set, sends `Authorization: Bearer …` (required
+/// by `agora-dns-seeder` for authenticated public registration).
 pub async fn register_with_seeder(url: &str, multiaddr: &str) -> Result<(), P2pError> {
     let parsed = parse_http_url(url)?;
     let path = if parsed.path.ends_with("/peers") {
@@ -101,8 +104,14 @@ pub async fn register_with_seeder(url: &str, multiaddr: &str) -> Result<(), P2pE
         "/peers".into()
     };
     let body = multiaddr.trim();
+    let auth = std::env::var("AGORA_SEEDER_TOKEN")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(|t| format!("Authorization: Bearer {t}\r\n"))
+        .unwrap_or_default();
     let req = format!(
-        "POST {path} HTTP/1.1\r\nHost: {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST {path} HTTP/1.1\r\nHost: {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n{auth}Connection: close\r\n\r\n{body}",
         parsed.host_port,
         body.len(),
     );

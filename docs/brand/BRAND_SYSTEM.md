@@ -36,11 +36,11 @@ Obsidian & Gold visual identity for all Agora clients.
 
 | Ticker | Name | Motif | Max supply | Layer |
 | --- | --- | --- | --- | --- |
-| TLT | Talanton | Balanced scales | 100,000,000 | L1 native |
-| DRC | Drachma | Crested Corinthian helm | 6,000,000,000 | L2+ registry |
-| OVL | Ovolos | Winged helm, crossed spears | 21,000,000,000 | L2 registry |
+| TLT | Talanton | Balanced scales | 100,000,000 | L1 native PoW (RandomX) |
+| DRC | Drachma | Crested Corinthian helm | 6,000,000,000 | L3 native PoW (sha256) |
+| OVL | Ovolos | Winged helm, crossed spears | 21,000,000,000 | L2 native PoW (sha256) |
 
-Supplies are frozen in `docs/genesis/*.genesis.json` (`tokens[]`). Only TLT is the L1 `Amount` today.
+Supplies are frozen in `docs/genesis/*.genesis.json` (`tokens[]`). Each mark is native PoW money on its layer; only TLT is an L1 UTXO `Amount`.
 
 ## Rules
 

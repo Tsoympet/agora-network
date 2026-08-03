@@ -20,7 +20,7 @@ Host RPC: `http://127.0.0.1:8545/rpc`.
 
 ## Multi-host bootstrap
 
-1. Run a seeder on a public IP (`AGORA_SEEDER_BIND=0.0.0.0:18080`).
+1. Run a seeder on a public IP (`AGORA_SEEDER_BIND=0.0.0.0:18080`). Set `AGORA_SEEDER_TOKEN` so `POST /peers` requires Bearer auth.
 2. Start node-a with:
    - `AGORA_LISTEN=/ip4/0.0.0.0/tcp/16111`
    - `AGORA_DNS_SEEDER=http://<seeder-host>:18080`

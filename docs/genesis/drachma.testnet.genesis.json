@@ -2,7 +2,7 @@
   "layer": "L3",
   "mark": "DRC",
   "network": "testnet",
-  "version": 1,
+  "version": 2,
   "chain_name": "Drachma Bridge Hub",
   "chain_id": "agora-drachma-testnet-1",
   "parent_l1_network": "testnet",
@@ -38,5 +38,10 @@
       "rpc_hint": ""
     }
   ],
-  "genesis_hash": "2c4217b5aa81e0626c4a08552f25a06c3f90374e7ae072e8f01eefdf9da2b314"
+  "native": true,
+  "pow_algorithm": "sha256_leading_zero",
+  "pow_bits": 8,
+  "initial_block_reward": 5000000000,
+  "halving_interval": 210000,
+  "genesis_hash": "e9b8ce67404fa5743dfac49cfd8d4ad8c2229ac9a199c9a336bd45f1eaa9d01b"
 }

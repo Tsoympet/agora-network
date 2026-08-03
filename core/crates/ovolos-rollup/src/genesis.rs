@@ -1,5 +1,6 @@
-//! Ovolos (L2) genesis artifact — freezes OVL monetary + rollup boot params.
+//! Ovolos (L2) genesis artifact — freezes native OVL PoW money + rollup boot params.
 //!
+//! OVL is **native money on L2**, sealed by layer PoW (`sha256_leading_zero`).
 //! Separate from L1 Talanton genesis. Does not mint L1 UTXOs.
 
 use std::path::Path;
@@ -9,8 +10,16 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
 use crate::ovl::{OvlLedger, DEFAULT_GAS_PER_TX, OVL_MAX_SUPPLY_BASE};
+use crate::pow::{OvlEmission, OVOLOS_POW_ALGORITHM};
 use crate::rollup::RollupConfig;
 use crate::RollupError;
+
+/// Default L2 PoW difficulty (leading-zero bits on SHA-256).
+pub const DEFAULT_OVL_POW_BITS: u32 = 8;
+
+/// Default emission: 50 OVL per block, halvings every 210_000 heights.
+pub const DEFAULT_OVL_INITIAL_REWARD: u64 = 5_000_000_000;
+pub const DEFAULT_OVL_HALVING_INTERVAL: u64 = 210_000;
 
 /// One premine allocation at L2 ignite.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -34,6 +43,11 @@ struct OvolosGenesisBody {
     challenge_window_ms: u64,
     genesis_state_root: String,
     premine: Vec<(String, u64)>,
+    native: bool,
+    pow_algorithm: String,
+    pow_bits: u32,
+    initial_block_reward: u64,
+    halving_interval: u64,
 }
 
 /// Frozen Ovolos L2 genesis document.
@@ -55,6 +69,12 @@ pub struct OvolosGenesis {
     /// Hex state root at sequence 0 (usually 32 zero bytes).
     pub genesis_state_root: String,
     pub premine: Vec<OvlPremine>,
+    /// OVL is native money on this layer (not an L1 UTXO asset).
+    pub native: bool,
+    pub pow_algorithm: String,
+    pub pow_bits: u32,
+    pub initial_block_reward: u64,
+    pub halving_interval: u64,
     /// Hex of [`Self::compute_hash`]; verified on load when non-empty / not `TBD`.
     pub genesis_hash: String,
 }
@@ -72,7 +92,7 @@ impl OvolosGenesis {
             layer: "L2".into(),
             mark: "OVL".into(),
             network: "testnet".into(),
-            version: 1,
+            version: 2,
             chain_name: "Ovolos Rollup".into(),
             chain_id: "agora-ovolos-testnet-1".into(),
             parent_l1_network: "testnet".into(),
@@ -90,6 +110,11 @@ impl OvolosGenesis {
                 // 10% of 21B OVL @ 8 decimals
                 amount: 210_000_000_000_000_000,
             }],
+            native: true,
+            pow_algorithm: OVOLOS_POW_ALGORITHM.into(),
+            pow_bits: DEFAULT_OVL_POW_BITS,
+            initial_block_reward: DEFAULT_OVL_INITIAL_REWARD,
+            halving_interval: DEFAULT_OVL_HALVING_INTERVAL,
             genesis_hash: String::new(),
         }
         .with_computed_hash()
@@ -100,7 +125,7 @@ impl OvolosGenesis {
             layer: "L2".into(),
             mark: "OVL".into(),
             network: "mainnet".into(),
-            version: 1,
+            version: 2,
             chain_name: "Ovolos Rollup".into(),
             chain_id: "agora-ovolos-mainnet-1".into(),
             parent_l1_network: "mainnet".into(),
@@ -112,6 +137,11 @@ impl OvolosGenesis {
             challenge_window_ms: 7 * 24 * 60 * 60 * 1000,
             genesis_state_root: Hash::ZERO.to_hex(),
             premine: vec![],
+            native: true,
+            pow_algorithm: OVOLOS_POW_ALGORITHM.into(),
+            pow_bits: DEFAULT_OVL_POW_BITS,
+            initial_block_reward: DEFAULT_OVL_INITIAL_REWARD,
+            halving_interval: DEFAULT_OVL_HALVING_INTERVAL,
             genesis_hash: "TBD".into(),
         }
     }
@@ -134,6 +164,11 @@ impl OvolosGenesis {
                 .iter()
                 .map(|p| (p.address_hex.clone(), p.amount))
                 .collect(),
+            native: self.native,
+            pow_algorithm: self.pow_algorithm.clone(),
+            pow_bits: self.pow_bits,
+            initial_block_reward: self.initial_block_reward,
+            halving_interval: self.halving_interval,
         }
     }
 
@@ -164,6 +199,16 @@ impl OvolosGenesis {
             return Err(RollupError::Execution(
                 "ovolos genesis must be layer=L2 mark=OVL".into(),
             ));
+        }
+        if !self.native {
+            return Err(RollupError::Execution(
+                "ovolos genesis must set native=true (OVL is L2 native money)".into(),
+            ));
+        }
+        if self.pow_algorithm != OVOLOS_POW_ALGORITHM {
+            return Err(RollupError::Execution(format!(
+                "ovolos pow_algorithm must be {OVOLOS_POW_ALGORITHM}"
+            )));
         }
         if self.max_supply == 0 {
             return Err(RollupError::Execution(
@@ -201,6 +246,13 @@ impl OvolosGenesis {
         }
     }
 
+    pub fn emission(&self) -> OvlEmission {
+        OvlEmission {
+            initial_reward: self.initial_block_reward,
+            halving_interval: self.halving_interval,
+        }
+    }
+
     /// Build ledger and apply premine allocations.
     pub fn ignite_ledger(&self) -> Result<OvlLedger, RollupError> {
         let mut ledger = OvlLedger::new(self.max_supply, self.gas_per_tx);
@@ -222,11 +274,13 @@ mod tests {
         let g = OvolosGenesis::testnet();
         assert_eq!(g.mark, "OVL");
         assert_eq!(g.layer, "L2");
+        assert!(g.native);
+        assert_eq!(g.pow_algorithm, OVOLOS_POW_ALGORITHM);
+        assert_eq!(g.version, 2);
         assert!(!g.genesis_hash.is_empty());
         g.validate().unwrap();
         let ledger = g.ignite_ledger().unwrap();
         assert_eq!(ledger.minted(), 210_000_000_000_000_000);
-        // Print aids freezing docs/genesis JSON (keep assertion on recompute).
         assert_eq!(g.compute_hash().to_hex(), g.genesis_hash);
     }
 
@@ -242,5 +296,7 @@ mod tests {
         assert_eq!(file.genesis_hash, embedded.genesis_hash);
         assert_eq!(file.max_supply, embedded.max_supply);
         assert_eq!(file.premine, embedded.premine);
+        assert!(file.native);
+        assert_eq!(file.pow_algorithm, OVOLOS_POW_ALGORITHM);
     }
 }

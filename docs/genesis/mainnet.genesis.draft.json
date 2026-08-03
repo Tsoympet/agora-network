@@ -23,16 +23,18 @@
       "max_supply": 10000000000000000,
       "decimals": 8,
       "role": "native store of value / BlockDAG settlement",
-      "native": true
+      "native": true,
+      "pow_algorithm": "randomx"
     },
     {
       "ticker": "DRC",
       "name": "Drachma",
-      "layer": "L2+",
+      "layer": "L3",
       "max_supply": 600000000000000000,
       "decimals": 8,
-      "role": "medium of exchange / district & bridge settlements",
-      "native": false
+      "role": "native L3 PoW money / district & bridge settlements",
+      "native": true,
+      "pow_algorithm": "sha256_leading_zero"
     },
     {
       "ticker": "OVL",
@@ -40,8 +42,9 @@
       "layer": "L2",
       "max_supply": 2100000000000000000,
       "decimals": 8,
-      "role": "Ovolos rollup gas / micro-unit brand",
-      "native": false
+      "role": "native L2 PoW money / Ovolos rollup gas",
+      "native": true,
+      "pow_algorithm": "sha256_leading_zero"
     }
   ],
   "consensus": {
@@ -59,7 +62,7 @@
     "bip44_path_account0": "m/44'/8888'/0'/0/0"
   },
   "notes": [
-    "L1 settles only TLT (Amount). DRC/OVL supplies are economic freezes for L2/bridge issuance.",
+    "L1 UTXO settles only TLT (RandomX). OVL and DRC are native PoW money on L2/L3 (sha256_leading_zero), not L1 UTXO asset ids.",
     "Register a real SLIP-0044 coin type before publishing mainnet genesis_hash.",
     "Premine address + timestamp + bits must be chosen before hash freeze."
   ]

@@ -423,12 +423,13 @@ impl GenesisArtifact {
             }
         }
 
-        // L1 native mark must agree with top-level max_supply when present.
-        if let Some(native) = self.tokens.iter().find(|t| t.native || t.ticker == "TLT") {
-            if native.max_supply != self.max_supply {
+        // L1 UTXO mark (TLT) must agree with top-level max_supply when present.
+        // OVL/DRC are also native on their layers but are not L1 UTXO assets.
+        if let Some(tlt) = self.tokens.iter().find(|t| t.ticker == "TLT") {
+            if tlt.max_supply != self.max_supply {
                 return Err(format!(
-                    "native token max_supply {} != artifact max_supply {}",
-                    native.max_supply, self.max_supply
+                    "TLT max_supply {} != artifact max_supply {}",
+                    tlt.max_supply, self.max_supply
                 ));
             }
         }

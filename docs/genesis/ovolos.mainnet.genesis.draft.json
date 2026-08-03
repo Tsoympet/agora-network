@@ -2,7 +2,7 @@
   "layer": "L2",
   "mark": "OVL",
   "network": "mainnet",
-  "version": 1,
+  "version": 2,
   "chain_name": "Ovolos Rollup",
   "chain_id": "agora-ovolos-mainnet-1",
   "status": "DRAFT — not frozen; awaits L1 mainnet genesis freeze",
@@ -15,5 +15,10 @@
   "challenge_window_ms": 604800000,
   "genesis_state_root": "0000000000000000000000000000000000000000000000000000000000000000",
   "premine": [],
+  "native": true,
+  "pow_algorithm": "sha256_leading_zero",
+  "pow_bits": 8,
+  "initial_block_reward": 5000000000,
+  "halving_interval": 210000,
   "genesis_hash": "TBD"
 }

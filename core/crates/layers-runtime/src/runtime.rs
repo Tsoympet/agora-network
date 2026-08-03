@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use agora_bridge_sdk::{
-    BridgeBox, DistrictConfig, DrachmaGenesis, InMemoryTransport, MessageStatus,
+    DistrictConfig, DrachmaGenesis, DrcBlock, InMemoryTransport, MessageStatus, DRACHMA_POW_ALGORITHM,
 };
 use agora_intent_engine::{
     AmmSolver, CompositeSolver, ConstantProductPool, Intent, IntentEngine, IntentStatus, Solution,
 };
 use agora_ovolos_rollup::{
-    Batch, BatchCommitment, BatchStatus, FraudProof, OvolosGenesis, OvolosRollup, StubEvmExecutor,
+    Batch, BatchCommitment, BatchStatus, FraudProof, OvolosGenesis, OvolosRollup, OvlBlock,
+    StubEvmExecutor, OVOLOS_POW_ALGORITHM,
 };
 use agora_types::{Address, Amount, Hash};
 use serde::Serialize;
@@ -40,8 +41,16 @@ pub struct LayerInfo {
     pub hub_id: String,
     pub ovl_genesis_hash: String,
     pub ovl_chain_id: String,
+    pub ovl_native: bool,
+    pub ovl_pow_algorithm: String,
+    pub ovl_pow_bits: u32,
+    pub ovl_tip_height: u64,
+    pub ovl_tip_hash: String,
     pub drc_genesis_hash: String,
     pub drc_chain_id: String,
+    pub drc_native: bool,
+    pub drc_pow_algorithm: String,
+    pub drc_pow_bits: u32,
     pub rollup_head: String,
     pub next_sequence: u64,
     pub challenge_window_ms: u64,
@@ -125,8 +134,16 @@ impl LayersRuntime {
             hub_id: self.hub_id.clone(),
             ovl_genesis_hash: self.ovl_genesis_hash.clone(),
             ovl_chain_id: self.ovl_chain_id.clone(),
+            ovl_native: true,
+            ovl_pow_algorithm: OVOLOS_POW_ALGORITHM.into(),
+            ovl_pow_bits: self.rollup.pow_bits(),
+            ovl_tip_height: self.rollup.tip_height(),
+            ovl_tip_hash: self.rollup.tip_hash().to_hex(),
             drc_genesis_hash: self.drc_genesis_hash.clone(),
             drc_chain_id: self.drc_chain_id.clone(),
+            drc_native: true,
+            drc_pow_algorithm: DRACHMA_POW_ALGORITHM.into(),
+            drc_pow_bits: self.intents.bridge().pow_bits(),
             rollup_head: self.rollup.head_state_root().to_hex(),
             next_sequence: self.rollup.next_sequence(),
             challenge_window_ms: self.rollup.config().challenge_window_ms,
@@ -182,6 +199,19 @@ impl LayersRuntime {
 
     pub fn ovl_balance(&self, address: Address) -> Amount {
         self.rollup.ovl().balance(address)
+    }
+
+    /// Mine and admit a native OVL PoW block sealing `batch` (coinbase to `miner`).
+    pub fn mine_ovl_block(
+        &mut self,
+        batch: Batch,
+        miner: Address,
+        timestamp_ms: u64,
+        max_nonces: u64,
+    ) -> Result<OvlBlock, LayersError> {
+        self.rollup
+            .mine_and_admit(batch, miner, timestamp_ms, max_nonces)
+            .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
     // --- L3 ---
@@ -241,6 +271,21 @@ impl LayersRuntime {
 
     pub fn drc_balance(&self, district: &str, address: Address) -> Amount {
         self.intents.bridge().drc().balance(district, address)
+    }
+
+    /// Mine and admit a native DRC PoW block on a district/hub (coinbase to `miner`).
+    pub fn mine_drc_block(
+        &mut self,
+        district_id: &str,
+        message_ids: Vec<Hash>,
+        miner: Address,
+        timestamp_ms: u64,
+        max_nonces: u64,
+    ) -> Result<DrcBlock, LayersError> {
+        self.intents
+            .bridge_mut()
+            .mine_and_admit(district_id, message_ids, miner, timestamp_ms, max_nonces)
+            .map_err(|e| LayersError::Bridge(e.to_string()))
     }
 
     // --- L4 ---
@@ -311,6 +356,10 @@ mod tests {
         let info = rt.info();
         assert_eq!(info.ovl_chain_id, "agora-ovolos-testnet-1");
         assert_eq!(info.drc_chain_id, "agora-drachma-testnet-1");
+        assert!(info.ovl_native);
+        assert!(info.drc_native);
+        assert_eq!(info.ovl_pow_algorithm, OVOLOS_POW_ALGORITHM);
+        assert_eq!(info.drc_pow_algorithm, DRACHMA_POW_ALGORITHM);
         assert!(!info.ovl_genesis_hash.is_empty());
         assert!(!info.drc_genesis_hash.is_empty());
     }

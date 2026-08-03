@@ -54,7 +54,7 @@ Canonical DAA / PoW / GHOSTDAG `k` live on `ChainParams` (`daa`, `pow_algorithm`
 | Network | Initial `bits` | DAA `min_level` | PoW |
 | --- | --- | --- | --- |
 | `dev` | `AGORA_TEMPLATE_BITS` (default `1`) | from that value | env override OK |
-| `testnet` | frozen `0` | `0` | RandomX (env ignored) |
+| `testnet` | frozen `0` | `8` (post-genesis floor; genesis hash unchanged) | RandomX (env ignored) |
 | `mainnet` | placeholder `16` (not bootable yet) | `8` | RandomX (env ignored) |
 
 GHOSTDAG also tracks unit `blue_work` per blue tip; the DAA window overlays header-bits work so harder tips weigh spacing more.

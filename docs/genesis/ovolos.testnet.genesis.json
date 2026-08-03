@@ -2,7 +2,7 @@
   "layer": "L2",
   "mark": "OVL",
   "network": "testnet",
-  "version": 1,
+  "version": 2,
   "chain_name": "Ovolos Rollup",
   "chain_id": "agora-ovolos-testnet-1",
   "parent_l1_network": "testnet",
@@ -19,5 +19,10 @@
       "amount": 210000000000000000
     }
   ],
-  "genesis_hash": "440bb8ebbfbbb6e5ede84566a4fe906022f903ce9b6338b2191a817b94669e01"
+  "native": true,
+  "pow_algorithm": "sha256_leading_zero",
+  "pow_bits": 8,
+  "initial_block_reward": 5000000000,
+  "halving_interval": 210000,
+  "genesis_hash": "538a5d0f124e62e102d9d3fc07af51fd46b963f061c9aaec845f37d6f463b86d"
 }

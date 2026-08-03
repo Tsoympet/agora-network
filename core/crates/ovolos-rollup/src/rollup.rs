@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
-use agora_types::{Address, Hash};
+use agora_types::{Address, Amount, Hash};
 
 use crate::da::BatchCommitment;
 use crate::executor::{reexecute_batch, EvmExecutor};
 use crate::genesis::OvolosGenesis;
 use crate::ovl::OvlLedger;
+use crate::pow::{mine_ovl_block, verify_pow, OvlBlock, OvlBlockHeader, OvlEmission};
 use crate::types::{Batch, BatchStatus, FraudProof};
 use crate::RollupError;
 
@@ -47,6 +48,14 @@ pub struct OvolosRollup<E: EvmExecutor> {
     ovl: OvlLedger,
     /// L1 DA commitments accepted by the verifier (operator attestations).
     da_posted: HashMap<Hash, BatchCommitment>,
+    /// Tip of the native OVL PoW chain (prev hash for the next block).
+    tip_hash: Hash,
+    /// Height of the last admitted PoW block (next height = tip_height).
+    tip_height: u64,
+    pow_bits: u32,
+    emission: OvlEmission,
+    /// Admitted PoW block ids by height.
+    pow_blocks: HashMap<u64, Hash>,
 }
 
 impl<E: EvmExecutor> OvolosRollup<E> {
@@ -60,10 +69,15 @@ impl<E: EvmExecutor> OvolosRollup<E> {
             by_sequence: HashMap::new(),
             ovl: OvlLedger::default(),
             da_posted: HashMap::new(),
+            tip_hash: Hash::ZERO,
+            tip_height: 0,
+            pow_bits: crate::genesis::DEFAULT_OVL_POW_BITS,
+            emission: OvlEmission::default(),
+            pow_blocks: HashMap::new(),
         }
     }
 
-    /// Boot rollup from a frozen Ovolos L2 genesis (caps, gas, premine, state root).
+    /// Boot rollup from a frozen Ovolos L2 genesis (caps, gas, premine, state root, PoW).
     pub fn from_genesis(
         genesis: &OvolosGenesis,
         executor: E,
@@ -79,6 +93,11 @@ impl<E: EvmExecutor> OvolosRollup<E> {
             by_sequence: HashMap::new(),
             ovl: genesis.ignite_ledger()?,
             da_posted: HashMap::new(),
+            tip_hash: Hash::ZERO,
+            tip_height: 0,
+            pow_bits: genesis.pow_bits,
+            emission: genesis.emission(),
+            pow_blocks: HashMap::new(),
         })
     }
 
@@ -104,6 +123,26 @@ impl<E: EvmExecutor> OvolosRollup<E> {
 
     pub fn ovl_mut(&mut self) -> &mut OvlLedger {
         &mut self.ovl
+    }
+
+    pub fn tip_hash(&self) -> Hash {
+        self.tip_hash
+    }
+
+    pub fn tip_height(&self) -> u64 {
+        self.tip_height
+    }
+
+    pub fn pow_bits(&self) -> u32 {
+        self.pow_bits
+    }
+
+    pub fn emission(&self) -> &OvlEmission {
+        &self.emission
+    }
+
+    pub fn pow_block_id(&self, height: u64) -> Option<Hash> {
+        self.pow_blocks.get(&height).copied()
     }
 
     pub fn batch_status(&self, batch_id: &Hash) -> Option<BatchStatus> {
@@ -268,6 +307,92 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         }
         Ok(finalized)
     }
+
+    /// Admit a mined OVL PoW block: verify PoW, link tip, mint coinbase under cap.
+    pub fn admit_mined_block(&mut self, block: OvlBlock) -> Result<Hash, RollupError> {
+        verify_pow(&block.header)?;
+        if block.header.bits != self.pow_bits {
+            return Err(RollupError::Execution(format!(
+                "OVL PoW bits {} != configured {}",
+                block.header.bits, self.pow_bits
+            )));
+        }
+        if block.header.height != self.tip_height {
+            return Err(RollupError::Execution(format!(
+                "OVL block height {} != tip {}",
+                block.header.height, self.tip_height
+            )));
+        }
+        if block.header.prev_block_hash != self.tip_hash {
+            return Err(RollupError::Execution(
+                "OVL prev_block_hash does not match tip".into(),
+            ));
+        }
+        if block.header.batch_id != block.batch.id() {
+            return Err(RollupError::Execution(
+                "OVL header batch_id mismatch".into(),
+            ));
+        }
+        let expected_reward = self.emission.reward_at_height(block.header.height);
+        if block.header.reward != expected_reward {
+            return Err(RollupError::Execution(format!(
+                "OVL coinbase reward {} != expected {}",
+                block.header.reward, expected_reward
+            )));
+        }
+
+        // Ensure the sealed batch is already sequenced (or sequence it now).
+        let batch_id = block.batch.id();
+        if !self.batches.contains_key(&batch_id) {
+            self.submit_batch(block.batch.clone())?;
+        } else if self
+            .batches
+            .get(&batch_id)
+            .map(|t| t.batch != block.batch)
+            .unwrap_or(true)
+        {
+            return Err(RollupError::Execution(
+                "OVL block batch does not match sequenced batch".into(),
+            ));
+        }
+
+        if expected_reward > 0 {
+            self.ovl
+                .mint(block.header.miner, Amount::from_base_units(expected_reward))?;
+        }
+
+        let id = block.id();
+        self.pow_blocks.insert(block.header.height, id);
+        self.tip_hash = id;
+        self.tip_height = block.header.height.saturating_add(1);
+        Ok(id)
+    }
+
+    /// Sequence a batch, mine a native OVL PoW block, and admit coinbase issuance.
+    pub fn mine_and_admit(
+        &mut self,
+        batch: Batch,
+        miner: Address,
+        timestamp_ms: u64,
+        max_nonces: u64,
+    ) -> Result<OvlBlock, RollupError> {
+        let batch_id = self.submit_batch(batch.clone())?;
+        let height = self.tip_height;
+        let reward = self.emission.reward_at_height(height);
+        let header = OvlBlockHeader {
+            height,
+            prev_block_hash: self.tip_hash,
+            batch_id,
+            timestamp_ms,
+            bits: self.pow_bits,
+            nonce: 0,
+            miner,
+            reward,
+        };
+        let block = mine_ovl_block(header, batch, max_nonces)?;
+        self.admit_mined_block(block.clone())?;
+        Ok(block)
+    }
 }
 
 #[cfg(test)]
@@ -404,5 +529,20 @@ mod tests {
         rollup.submit_batch(batch).unwrap();
         let after = rollup.ovl().balance(payer).as_base_units();
         assert!(after < before);
+    }
+
+    #[test]
+    fn mine_and_admit_mints_native_coinbase() {
+        let miner = Address([9u8; 20]);
+        let mut rollup = OvolosRollup::new(RollupConfig::default(), StubEvmExecutor, Hash::ZERO);
+        rollup.pow_bits = 0; // deterministic in unit tests
+        let batch = sample_batch(0, Hash::ZERO, &StubEvmExecutor, 0);
+        let before = rollup.ovl().balance(miner).as_base_units();
+        let block = rollup.mine_and_admit(batch, miner, 1, 8).unwrap();
+        verify_pow(&block.header).unwrap();
+        assert_eq!(rollup.tip_height(), 1);
+        assert_eq!(rollup.tip_hash(), block.id());
+        let after = rollup.ovl().balance(miner).as_base_units();
+        assert_eq!(after - before, rollup.emission().reward_at_height(0));
     }
 }
