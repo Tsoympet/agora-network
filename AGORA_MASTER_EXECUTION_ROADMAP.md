@@ -159,9 +159,13 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **`AGORA_ARCHIVAL` / `AGORA_HOT_WINDOW`:** optional archival writes + Hot tip-distance prune (Meta/UTXO/Warm index retained)
 
-## Phase 23: Node info RPC — in progress
+## Phase 23: Node info RPC — done
 
 - [x] **`agora_getNodeInfo`:** peer id / connected peers / tips / mempool / PoW / archival + explorer `#node`
+
+## Phase 24: Tx confirmation depth — in progress
+
+- [x] **`confirmations` on `agora_getTransaction`:** blue-score tip depth + light-client `minConfirmations` watch
 
 ## Directory Structure Reference
 

@@ -307,6 +307,9 @@ export default function App() {
         {lastTxId ? (
           <Text style={[styles.tipRow, { color: agoraBrand.colors.cyan }]}>
             {shortHash(lastTxId)} · {txLookup?.status ?? "pending"}
+            {txLookup?.status === "confirmed" && txLookup.confirmations != null
+              ? ` · ${txLookup.confirmations} conf`
+              : ""}
             {txLookup?.status === "confirmed" && txLookup.block_id
               ? ` @ ${shortHash(txLookup.block_id)}`
               : ""}

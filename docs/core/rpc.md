@@ -47,7 +47,7 @@ Endpoints:
 - CORS enabled (`Access-Control-Allow-Origin: *`) for browser explorers; `OPTIONS` preflight supported
 
 `agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`, and hex `transactions` with inputs/outputs). Address fields in tx outputs / balance / UTXO responses are **Bech32m** (`agora1…`); request params still accept hex or Bech32m.  
-`agora_getTransaction` returns `{ tx_id, status, block_id, index, fee, transaction }` — wallets should poll until `confirmed` (missing txs return `status: "unknown"`, not an RPC error). Confirmed locations are indexed in `cf_warm` (`tx/` ‖ tx_id → block_id ‖ index) on admit / genesis.  
+`agora_getTransaction` returns `{ tx_id, status, block_id, index, fee, confirmations, transaction }` — wallets should poll until `confirmed` (missing txs return `status: "unknown"`, not an RPC error). Confirmed locations are indexed in `cf_warm` (`tx/` ‖ tx_id → block_id ‖ index) on admit / genesis. `confirmations` is blue-score depth vs the best tip (`max_tip_blue − block_blue + 1`) on live nodes (tip parent-distance on the in-memory test backend).  
 `agora_getMempool` returns `{ count, transactions: [{ tx_id, fee, transaction }] }` ordered by fee desc then `tx_id` (default `limit` 128, max 10000).  
 `agora_getNodeInfo` returns `{ network, version, peer_id, connected_peers, tip_count, mempool_count, pow_algorithm, bits, archival, hot_window, allow_fund, miner_address }` (miner as Bech32m).  
 
@@ -65,7 +65,7 @@ The live backend (`NodeBackend`) reads tips/blocks/UTXOs from `StateStore`, admi
 
 ## Light clients
 
-`apps/shared/light-client` provides `createLightClient` + `startTipSync` / `watchTransaction` plus wallet helpers (`getBalance`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) used by:
+`apps/shared/light-client` provides `createLightClient` + `startTipSync` / `watchTransaction` (optional `minConfirmations`) plus wallet helpers (`getBalance`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) used by:
 
 - `apps/explorer` (live DAG + tx lookup + mempool + node status + pending watch)
 - `apps/desktop` (tip sync, UTXO lookup, signed send + confirmation poll)

@@ -163,6 +163,7 @@ fn tx_lookup_to_json(lookup: &crate::backend::TxLookup) -> Value {
         "block_id": lookup.block_id.map(|h| h.to_hex()),
         "index": lookup.index,
         "fee": lookup.fee,
+        "confirmations": lookup.confirmations,
         "transaction": lookup.transaction.as_ref().map(tx_to_explorer_json),
     })
 }
@@ -469,6 +470,27 @@ mod tests {
         assert_eq!(confirmed_res["status"], json!("confirmed"));
         assert_eq!(confirmed_res["block_id"], json!(mined_id.to_hex()));
         assert_eq!(confirmed_res["index"], json!(0));
+        assert_eq!(confirmed_res["confirmations"], json!(1));
+
+        // Child tip → parent tx gains a confirmation.
+        let child = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![mined_id],
+                timestamp_ms: 2,
+                bits: 0,
+                nonce: 2,
+                tx_root: Block::compute_tx_root(&[]),
+            },
+            transactions: vec![],
+        };
+        rpc.backend_mut().insert_block(child);
+        let deeper = rpc.handle(RpcRequest {
+            id: Some(json!(34)),
+            method: "agora_getTransaction".into(),
+            params: json!({"tx_id": tx_id}),
+        });
+        assert_eq!(deeper.result.unwrap()["confirmations"], json!(2));
 
         let block = rpc.handle(RpcRequest {
             id: Some(json!(4)),

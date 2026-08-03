@@ -417,6 +417,9 @@ export function App() {
             {shortHash(lastTxId)}
             {" · "}
             {txLookup?.status ?? "pending"}
+            {txLookup?.status === "confirmed" && txLookup.confirmations != null
+              ? ` · ${txLookup.confirmations} conf`
+              : null}
             {txLookup?.status === "confirmed" && txLookup.block_id
               ? ` @ ${shortHash(txLookup.block_id)}`
               : null}

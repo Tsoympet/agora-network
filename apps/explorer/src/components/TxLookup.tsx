@@ -200,6 +200,12 @@ export function TxLookup() {
                 <dd className="text-[var(--agora-ink)]">{result.fee} gold</dd>
               </div>
             ) : null}
+            {result.confirmations != null ? (
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                <dt className="text-mist">confirmations</dt>
+                <dd className="text-[var(--agora-ink)]">{result.confirmations}</dd>
+              </div>
+            ) : null}
             {result.block_id ? (
               <div className="flex flex-wrap gap-x-3 gap-y-1">
                 <dt className="text-mist">block</dt>
