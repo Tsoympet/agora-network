@@ -29,7 +29,7 @@ Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
 - `meta/genesis_hash`, `meta/max_supply`, `meta/premine`, `meta/tips`, `meta/virtual_tip`
 - premine UTXO into `cf_utxo` (virtual-chain baseline; no per-block journal)
 
-Default caps: max supply 100,000,000 AGORA; premine 10,000,000 AGORA.
+Default caps: max supply 100,000,000 **TLT**; premine 10,000,000 **TLT** (8 decimals).
 
 Canonical networks live in `ChainParams` / `NetworkId` (`dev` | `testnet` | `mainnet`).
 Each network also locks consensus policy: `daa` (`DaaConfig`), `ghostdag_k`, and `pow_algorithm` (plus genesis `bits`).

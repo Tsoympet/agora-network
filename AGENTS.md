@@ -1,11 +1,14 @@
 # Agora Network — Agent Instructions
 
-Agora Network is a sovereign, multi-layer BlockDAG blockchain.
+Agora Network is a sovereign BlockDAG **L1** (GHOSTDAG + UTXO + RandomX). Testnet
+genesis is frozen in-repo; mainnet is not bootable until freeze. L2–L4 crates are
+scaffolds — do not describe them as a live multi-layer product.
 
 ## Mission
 - **Core:** Rust (Consensus, P2P, State Machine)
 - **Clients:** Tauri (Desktop), React Native/Expo (Mobile), Web (Explorer)
 - **Branding:** Obsidian & Gold — Agora Obsidian `#101218`, Burnished Gold `#C59835`, Aegean Cyan `#06BBDF`
+- **L1 asset:** TLT only; DRC/OVL are registry marks, not L1 UTXO assets
 
 ## Technical Stack Rules
 - Rust: idiomatic, thread-safe, async (Tokio). Serialization via `borsh`; state via `rocksdb`.
