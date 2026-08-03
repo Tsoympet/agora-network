@@ -175,11 +175,30 @@ impl Ghostdag {
         })
     }
 
+    /// Pick the virtual tip among `tips`: highest `blue_score`, then hash bytes.
+    ///
+    /// Same comparator as selected-parent choice among parents.
+    pub fn select_virtual_tip(&self, tips: &[Hash]) -> Option<Hash> {
+        tips.iter()
+            .copied()
+            .filter(|h| self.coloring.contains_key(h))
+            .max_by(|a, b| {
+                let sa = self.coloring[a].blue_score;
+                let sb = self.coloring[b].blue_score;
+                sa.cmp(&sb).then_with(|| a.as_bytes().cmp(b.as_bytes()))
+            })
+    }
+
     /// Color every block in insert order, then return a total order for a tip's past.
     pub fn order_past(&mut self, dag: &Dag, tip: Hash) -> Result<Vec<OrderedBlock>, ConsensusError> {
         for hash in dag.blocks_in_insert_order() {
             self.add_block(dag, *hash)?;
         }
+        self.order_past_view(dag, tip)
+    }
+
+    /// Total order for `tip`'s past assuming the DAG is already fully colored.
+    pub fn order_past_view(&self, dag: &Dag, tip: Hash) -> Result<Vec<OrderedBlock>, ConsensusError> {
         let past = dag.past_closure(tip)?;
         let tip_blues = &self
             .coloring
@@ -189,10 +208,17 @@ impl Ghostdag {
 
         let mut ordered: Vec<OrderedBlock> = past
             .into_iter()
-            .map(|hash| OrderedBlock {
-                hash,
-                blue_score: self.coloring[&hash].blue_score,
-                is_blue: tip_blues.contains(&hash),
+            .map(|hash| {
+                let blue_score = self
+                    .coloring
+                    .get(&hash)
+                    .map(|c| c.blue_score)
+                    .unwrap_or(0);
+                OrderedBlock {
+                    hash,
+                    blue_score,
+                    is_blue: tip_blues.contains(&hash),
+                }
             })
             .collect();
 
@@ -204,6 +230,16 @@ impl Ghostdag {
                 .then_with(|| a.hash.as_bytes().cmp(b.hash.as_bytes()))
         });
         Ok(ordered)
+    }
+
+    /// Blue hashes from [`order_past_view`] in apply order (ascending blue_score).
+    pub fn blue_order(&self, dag: &Dag, tip: Hash) -> Result<Vec<Hash>, ConsensusError> {
+        Ok(self
+            .order_past_view(dag, tip)?
+            .into_iter()
+            .filter(|b| b.is_blue)
+            .map(|b| b.hash)
+            .collect())
     }
 
     /// Backward-compatible helper: insert tip with parents into a temporary view is not done here.
@@ -282,5 +318,26 @@ mod tests {
         let non_selected = if selected == h(1) { h(2) } else { h(1) };
         let non_selected_block = ordered.iter().find(|b| b.hash == non_selected).unwrap();
         assert!(!non_selected_block.is_blue);
+    }
+
+    #[test]
+    fn select_virtual_tip_picks_highest_blue_score() {
+        let mut dag = Dag::new();
+        dag.insert(h(0), vec![]).unwrap();
+        dag.insert(h(1), vec![h(0)]).unwrap();
+        dag.insert(h(2), vec![h(0)]).unwrap();
+        let mut ghostdag = Ghostdag::new(GhostdagConfig { k: 18 });
+        ghostdag.add_block(&dag, h(0)).unwrap();
+        ghostdag.add_block(&dag, h(1)).unwrap();
+        ghostdag.add_block(&dag, h(2)).unwrap();
+        // Both children have blue_score 2; higher hash wins (h(2) > h(1)).
+        assert_eq!(
+            ghostdag.select_virtual_tip(&[h(1), h(2)]),
+            Some(h(2))
+        );
+        let view = ghostdag.order_past_view(&dag, h(2)).unwrap();
+        let mut again = Ghostdag::new(GhostdagConfig { k: 18 });
+        let via_mut = again.order_past(&dag, h(2)).unwrap();
+        assert_eq!(view, via_mut);
     }
 }

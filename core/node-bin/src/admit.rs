@@ -1,6 +1,8 @@
-//! Block admission: PoW verify → UTXO apply → DAG/GHOSTDAG → durable store.
+//! Block admission: PoW → persist DAG → GHOSTDAG → reorg virtual UTXO.
 //!
-//! Difficulty (`header.bits`) is driven by [`DaaConfig`] / [`next_difficulty`].
+//! Live `cf_utxo` follows blues of `order_past(virtual_tip)` (selected tip by
+//! blue_score). Non-selected tips are stored but do not spend until they join
+//! the virtual blue set. Difficulty (`header.bits`) uses [`DaaConfig`].
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -11,8 +13,8 @@ use agora_consensus::{
     EmissionSchedule, Ghostdag, GhostdagConfig, LeadingZeroPow, PowAlgorithm, PowVerifier,
 };
 use agora_state_machine::{
-    apply_block, index_block_transactions, meta_keys, revert_journal, sum_transfer_fees,
-    ColumnFamily, StateStore,
+    apply_block, delete_utxo_journal, index_block_transactions, load_utxo_journal, meta_keys,
+    revert_journal, store_utxo_journal, sum_transfer_fees, ColumnFamily, StateStore,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -43,6 +45,7 @@ pub enum AdmitError {
 /// Shared chain state mutated by RPC submit and gossip admission.
 pub struct ChainState {
     store: Arc<StateStore>,
+    genesis: Hash,
     dag: Dag,
     ghostdag: Ghostdag,
     pow: LeadingZeroPow,
@@ -69,8 +72,9 @@ impl ChainState {
         };
         let difficulty = load_or_init_difficulty(&store, initial_bits)?;
 
-        Ok(Self {
+        let chain = Self {
             store,
+            genesis,
             dag,
             ghostdag,
             pow: LeadingZeroPow::new(algo),
@@ -78,7 +82,23 @@ impl ChainState {
             daa,
             difficulty,
             storage,
-        })
+        };
+        // Fresh / upgraded datadirs: ensure virtual tip meta exists.
+        if chain.load_virtual_tip()?.is_none() {
+            let tip = chain.select_virtual_tip()?.unwrap_or(genesis);
+            chain.persist_virtual_tip(tip)?;
+        }
+        Ok(chain)
+    }
+
+    pub fn genesis(&self) -> Hash {
+        self.genesis
+    }
+
+    pub fn virtual_tip(&self) -> Result<Hash, AdmitError> {
+        Ok(self
+            .load_virtual_tip()?
+            .unwrap_or(self.genesis))
     }
 
     pub fn store(&self) -> &Arc<StateStore> {
@@ -97,16 +117,11 @@ impl ChainState {
         self.storage
     }
 
-    /// Confirmations for a block: `max_tip_blue_score − block_blue_score + 1`.
+    /// Confirmations for a block: `virtual_blue_score − block_blue_score + 1`.
     pub fn confirmations(&self, block_id: &Hash) -> Option<u64> {
         let block_score = self.ghostdag.blue_score(block_id)?;
-        let tip_score = self
-            .tips()
-            .ok()?
-            .iter()
-            .filter_map(|t| self.ghostdag.blue_score(t))
-            .max()
-            .unwrap_or(block_score);
+        let tip = self.virtual_tip().ok()?;
+        let tip_score = self.ghostdag.blue_score(&tip).unwrap_or(block_score);
         Some(tip_score.saturating_sub(block_score).saturating_add(1))
     }
 
@@ -243,7 +258,7 @@ impl ChainState {
             .map_err(|e| AdmitError::Storage(e.to_string()))
     }
 
-    /// Verify PoW + DAA bits, apply UTXOs, persist, update GHOSTDAG, retarget difficulty.
+    /// Verify PoW + DAA bits, persist body, color with GHOSTDAG, reorg virtual UTXO.
     pub fn admit_block(&mut self, block: Block) -> Result<Hash, AdmitError> {
         let id = block.id();
         if self.dag.contains(&id) {
@@ -272,18 +287,8 @@ impl ChainState {
             .verify(&block.header, &pow_hash)
             .map_err(|_| AdmitError::InvalidPow)?;
 
-        // Emission only — `apply_block` adds transfer fees into the coinbase budget.
-        let emission = self
-            .emission
-            .reward_at_blue_score(self.estimate_blue_score(&block.header.parents));
-        let journal = apply_block(self.store.as_ref(), &block, emission)
-            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
-
-        if let Err(err) = self.persist_block(&block, id) {
-            let _ = revert_journal(self.store.as_ref(), &journal);
-            return Err(err);
-        }
-
+        // Persist + color first — UTXO follows virtual tip after GHOSTDAG.
+        self.persist_block(&block, id)?;
         self.dag
             .insert(id, block.header.parents.clone())
             .map_err(|e| AdmitError::Consensus(e.to_string()))?;
@@ -291,7 +296,16 @@ impl ChainState {
             .add_block(&self.dag, id)
             .map_err(|e| AdmitError::Consensus(e.to_string()))?;
 
-        let window = self.daa_window(id)?;
+        let old_virtual = self.virtual_tip()?;
+        let new_virtual = self
+            .select_virtual_tip()?
+            .ok_or_else(|| AdmitError::Consensus("no virtual tip".into()))?;
+
+        // On failure, `reorg_utxo_to_virtual` restores UTXO to `old_virtual` blues.
+        self.reorg_utxo_to_virtual(old_virtual, new_virtual)?;
+        self.persist_virtual_tip(new_virtual)?;
+
+        let window = self.daa_window(new_virtual)?;
         self.difficulty = next_difficulty_weighted(&self.daa, self.difficulty, &window);
         self.persist_difficulty()?;
 
@@ -300,6 +314,114 @@ impl ChainState {
         }
 
         Ok(id)
+    }
+
+    fn load_virtual_tip(&self) -> Result<Option<Hash>, AdmitError> {
+        let Some(bytes) = self
+            .store
+            .get_cf(ColumnFamily::Meta, meta_keys::VIRTUAL_TIP)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+        if bytes.len() != 32 {
+            return Ok(None);
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        Ok(Some(Hash(arr)))
+    }
+
+    fn persist_virtual_tip(&self, tip: Hash) -> Result<(), AdmitError> {
+        self.store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::VIRTUAL_TIP,
+                tip.as_bytes(),
+            )
+            .map_err(|e| AdmitError::Storage(e.to_string()))
+    }
+
+    fn select_virtual_tip(&self) -> Result<Option<Hash>, AdmitError> {
+        let tips = self.tips()?;
+        Ok(self.ghostdag.select_virtual_tip(&tips))
+    }
+
+    /// Blues of `order_past(tip)` in apply order (genesis first).
+    fn applied_blues(&self, tip: Hash) -> Result<Vec<Hash>, AdmitError> {
+        self.ghostdag
+            .blue_order(&self.dag, tip)
+            .map_err(|e| AdmitError::Consensus(e.to_string()))
+    }
+
+    /// Sync live UTXO from blues(`old`) → blues(`new`) via durable journals.
+    fn reorg_utxo_to_virtual(&mut self, old: Hash, new: Hash) -> Result<(), AdmitError> {
+        let applied = self.applied_blues(old)?;
+        let target = self.applied_blues(new)?;
+        let prefix = common_prefix_len(&applied, &target);
+
+        for hash in applied[prefix..].iter().rev() {
+            self.unapply_block_from_virtual(*hash)?;
+        }
+
+        for (offset, hash) in target[prefix..].iter().enumerate() {
+            if let Err(err) = self.apply_block_to_virtual(*hash) {
+                for undo in target[prefix..prefix + offset].iter().rev() {
+                    let _ = self.unapply_block_from_virtual(*undo);
+                }
+                for redo in &applied[prefix..] {
+                    let _ = self.apply_block_to_virtual(*redo);
+                }
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_block_to_virtual(&self, hash: Hash) -> Result<(), AdmitError> {
+        // Genesis premine is the UTXO baseline (written at ignite); never re-apply.
+        if hash == self.genesis {
+            return Ok(());
+        }
+        if load_utxo_journal(self.store.as_ref(), &hash)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?
+            .is_some()
+        {
+            // Already applied (idempotent).
+            return Ok(());
+        }
+        let block = self
+            .load_block(&hash)?
+            .ok_or_else(|| AdmitError::Storage(format!("missing block {}", hash.to_hex())))?;
+        let blue_score = self
+            .ghostdag
+            .blue_score(&hash)
+            .ok_or_else(|| AdmitError::Consensus(format!("uncolored {}", hash.to_hex())))?;
+        let emission = self.emission.reward_at_blue_score(blue_score);
+        let journal = apply_block(self.store.as_ref(), &block, emission)
+            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        store_utxo_journal(self.store.as_ref(), &hash, &journal)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    fn unapply_block_from_virtual(&self, hash: Hash) -> Result<(), AdmitError> {
+        if hash == self.genesis {
+            return Ok(());
+        }
+        let Some(journal) = load_utxo_journal(self.store.as_ref(), &hash)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?
+        else {
+            return Err(AdmitError::Utxo(format!(
+                "missing utxo journal for {}",
+                hash.to_hex()
+            )));
+        };
+        revert_journal(self.store.as_ref(), &journal)
+            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        delete_utxo_journal(self.store.as_ref(), &hash)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        Ok(())
     }
 
     fn persist_block(&self, block: &Block, id: Hash) -> Result<(), AdmitError> {
@@ -473,6 +595,13 @@ fn rebuild_dag_from_store(store: &StateStore, genesis: Hash) -> Result<(Dag, Gho
     }
 
     Ok((dag, ghostdag))
+}
+
+fn common_prefix_len(a: &[Hash], b: &[Hash]) -> usize {
+    a.iter()
+        .zip(b.iter())
+        .take_while(|(x, y)| x == y)
+        .count()
 }
 
 fn load_or_init_difficulty(
@@ -691,5 +820,134 @@ mod tests {
         assert_eq!(chain.confirmations(&b2), Some(1));
         assert!(chain.confirmations(&b1).unwrap() >= 2);
         assert!(chain.confirmations(&genesis).unwrap() >= 3);
+    }
+
+    fn mine_child(
+        chain: &mut ChainState,
+        parents: &[Hash],
+        payout: Address,
+        nonce: u64,
+    ) -> Hash {
+        let mut block = chain.block_template(payout, &[]).unwrap();
+        block.header.parents = parents.to_vec();
+        block.header.nonce = nonce;
+        block.header.timestamp_ms = nonce;
+        // Recompute coinbase for emission estimate from these parents.
+        let emission = chain
+            .emission
+            .reward_at_blue_score(chain.estimate_blue_score(parents));
+        block.transactions = vec![Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(emission),
+                address: payout,
+            }],
+            nonce,
+        )];
+        block.header.tx_root = Block::compute_tx_root(&block.transactions);
+        let digest = RandomXPowHasher.pow_hash(&block.header);
+        LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&block.header, &digest)
+            .unwrap();
+        chain.admit_block(block).unwrap()
+    }
+
+    #[test]
+    fn parallel_tip_does_not_mutate_utxo_until_selected() {
+        use agora_state_machine::balance_of;
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store.clone(),
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        assert_eq!(chain.virtual_tip().unwrap(), genesis);
+
+        let miner_a = Address([0xAAu8; 20]);
+        let miner_b = Address([0xBBu8; 20]);
+        let a = mine_child(&mut chain, &[genesis], miner_a, 100);
+        assert_eq!(chain.virtual_tip().unwrap(), a);
+        let reward = chain.emission.reward_at_blue_score(2);
+        assert_eq!(
+            balance_of(store.as_ref(), &miner_a)
+                .unwrap()
+                .as_base_units(),
+            reward
+        );
+
+        let b = mine_child(&mut chain, &[genesis], miner_b, 101);
+        let virtual_tip = chain.virtual_tip().unwrap();
+        assert!(virtual_tip == a || virtual_tip == b);
+        // Only the selected tip's coinbase is live; the other remains unapplied.
+        let bal_a = balance_of(store.as_ref(), &miner_a)
+            .unwrap()
+            .as_base_units();
+        let bal_b = balance_of(store.as_ref(), &miner_b)
+            .unwrap()
+            .as_base_units();
+        if virtual_tip == a {
+            assert_eq!(bal_a, reward);
+            assert_eq!(bal_b, 0);
+        } else {
+            assert_eq!(bal_b, reward);
+            assert_eq!(bal_a, 0);
+        }
+
+        // Merge tip brings both blues into the virtual past.
+        let miner_c = Address([0xCCu8; 20]);
+        let c = mine_child(&mut chain, &[a, b], miner_c, 102);
+        assert_eq!(chain.virtual_tip().unwrap(), c);
+        assert_eq!(
+            balance_of(store.as_ref(), &miner_a)
+                .unwrap()
+                .as_base_units(),
+            reward
+        );
+        assert_eq!(
+            balance_of(store.as_ref(), &miner_b)
+                .unwrap()
+                .as_base_units(),
+            reward
+        );
+        let reward_c = chain.emission.reward_at_blue_score(
+            chain.ghostdag.blue_score(&c).unwrap(),
+        );
+        assert_eq!(
+            balance_of(store.as_ref(), &miner_c)
+                .unwrap()
+                .as_base_units(),
+            reward_c
+        );
+    }
+
+    #[test]
+    fn virtual_tip_survives_bootstrap() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store.clone(),
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        let tip = mine_one(&mut chain, 33);
+        assert_eq!(chain.virtual_tip().unwrap(), tip);
+        let reloaded = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        assert_eq!(reloaded.virtual_tip().unwrap(), tip);
     }
 }

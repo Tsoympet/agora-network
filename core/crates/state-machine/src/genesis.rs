@@ -121,8 +121,13 @@ impl GenesisBuilder {
         let tips = vec![genesis_hash];
         let tips_bytes = borsh::to_vec(&tips).map_err(|e| StateError::Storage(e.to_string()))?;
         store.put_cf(ColumnFamily::Meta, meta_keys::TIPS, &tips_bytes)?;
+        store.put_cf(
+            ColumnFamily::Meta,
+            meta_keys::VIRTUAL_TIP,
+            genesis_hash.as_bytes(),
+        )?;
 
-        // Genesis UTXO: coinbase output 0.
+        // Genesis UTXO: coinbase output 0 (baseline for virtual chain; no journal).
         let mut utxo_key = Vec::with_capacity(36);
         utxo_key.extend_from_slice(block.transactions[0].tx_id().as_bytes());
         utxo_key.extend_from_slice(&0u32.to_le_bytes());
