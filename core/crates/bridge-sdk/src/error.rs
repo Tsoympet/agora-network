@@ -8,10 +8,14 @@ pub enum BridgeError {
     DuplicateMessage,
     #[error("insufficient locked amount")]
     InsufficientLock,
+    #[error("insufficient district DRC balance")]
+    InsufficientDistrict,
     #[error("message not claimable: {0}")]
     NotClaimable(String),
     #[error("invalid light-client proof: {0}")]
     InvalidProof(String),
     #[error("transport error: {0}")]
     Transport(String),
+    #[error("constraint: {0}")]
+    Constraint(String),
 }

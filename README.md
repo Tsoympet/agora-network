@@ -30,7 +30,7 @@ Agora is a proof-of-work **BlockDAG**: blocks can reference multiple parents, or
 | **DRC** (Drachma) | L2+ registry mark (not L1 UTXO) |
 | **OVL** (Ovolos) | L2 rollup registry mark (not L1 UTXO) |
 
-> **Status:** Testnet genesis is **frozen in-repo** and the full node stack runs locally / via Docker. **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot. L2–L4 crates are scaffolds, not a live multi-layer network.
+> **Status:** Testnet genesis is **frozen in-repo** and the full node stack runs locally / via Docker. **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot. L2–L4 run in-process via `agora-layers` (OVL/DRC ledgers + intents); they are **not** a publicly deployed multi-chain network until ops wire DA to L1.
 
 ## Features
 
@@ -127,6 +127,12 @@ Desktop (Win/macOS/Linux) and mobile (iOS/Android) packaging: [`docs/apps/PLATFO
 cd apps/explorer && npm install && npm run dev   # BlockDAG explorer
 cd apps/desktop  && npm install && npm run dev   # wallet shell + vault
 cd apps/mobile   && npm install && npm start     # Expo light client
+```
+
+### L2 / L3 / L4 (operator runtime)
+
+```bash
+cargo run -p agora-layers   # JSON-RPC on 127.0.0.1:8555 — see docs/scaling/OVERVIEW.md
 ```
 
 ## Architecture

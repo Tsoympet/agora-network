@@ -36,4 +36,18 @@ impl DistrictConfig {
             rpc_hint: String::new(),
         }
     }
+
+    pub fn general(district_id: impl Into<String>, chain_id: u64) -> Self {
+        Self {
+            district_id: district_id.into(),
+            kind: DistrictKind::General,
+            chain_id,
+            rpc_hint: String::new(),
+        }
+    }
+
+    pub fn with_rpc_hint(mut self, hint: impl Into<String>) -> Self {
+        self.rpc_hint = hint.into();
+        self
+    }
 }

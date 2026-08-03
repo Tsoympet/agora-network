@@ -6,8 +6,10 @@ SDK for custom **District Chains** (gaming / privacy / general).
 
 | Direction | Hub action | District action |
 | --- | --- | --- |
-| `LockAndMint` | Lock sender balance | Mint to recipient |
-| `BurnAndUnlock` | Unlock to recipient | Burn sender balance |
+| `LockAndMint` | Debit hub lock + burn hub DRC | Mint DRC on claim |
+| `BurnAndUnlock` | Credit hub lock + mint hub DRC | Burn district DRC |
+
+Deposit into the hub with `credit_hub_lock` before `lock_and_mint`.
 
 ## Light-client proofs
 
@@ -20,10 +22,15 @@ SDK for custom **District Chains** (gaming / privacy / general).
 
 - `publish` / `poll` per district lane
 - `commit_root` / `prove` / `verify_against_root`
-- `InMemoryTransport` for local multi-district sims (libp2p adapter can implement the same trait)
+- `InMemoryTransport` for local multi-district sims
+- Optional `BridgeBox::with_transport` publishes on lock/burn
+
+## DRC ledger
+
+`DrcLedger` holds district/hub balances under the genesis DRC cap. Layered mark only — not an L1 UTXO asset.
 
 ## API
 
-- `DistrictConfig::{gaming,privacy}`
+- `DistrictConfig::{gaming,privacy,general}`
 - `BridgeBox::register_district`
-- `lock_and_mint` / `claim_mint` / `claim_mint_with_proof` / `burn_and_unlock`
+- `credit_hub_lock` / `lock_and_mint` / `claim_mint` / `claim_mint_with_proof` / `burn_and_unlock`

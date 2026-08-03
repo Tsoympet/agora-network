@@ -6,8 +6,12 @@ pub enum RollupError {
     SequenceGap { expected: u64, got: u64 },
     #[error("batch already finalized")]
     AlreadyFinalized,
+    #[error("batch already reverted")]
+    AlreadyReverted,
     #[error("challenge window still open")]
     ChallengeWindowOpen,
+    #[error("unknown batch")]
+    UnknownBatch,
     #[error("invalid fraud proof: {0}")]
     InvalidFraudProof(String),
     #[error("execution error: {0}")]

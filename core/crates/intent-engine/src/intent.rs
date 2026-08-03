@@ -32,6 +32,7 @@ pub enum IntentStatus {
     Routed,
     Settled,
     Failed,
+    Cancelled,
 }
 
 /// Concrete route produced by a solver.
@@ -40,4 +41,6 @@ pub struct Solution {
     pub intent_id: Hash,
     pub receive_amount: Amount,
     pub route: Vec<String>,
+    /// `amm` | `bridge` | `composite`
+    pub strategy: String,
 }

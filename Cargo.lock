@@ -113,6 +113,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "agora-layers"
+version = "0.1.0"
+dependencies = [
+ "agora-bridge-sdk",
+ "agora-intent-engine",
+ "agora-layers-runtime",
+ "agora-ovolos-rollup",
+ "agora-types",
+ "hex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "agora-layers-runtime"
+version = "0.1.0"
+dependencies = [
+ "agora-bridge-sdk",
+ "agora-intent-engine",
+ "agora-ovolos-rollup",
+ "agora-types",
+ "borsh",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
 name = "agora-miner-sidecar"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,18 @@
+[package]
+name = "agora-layers-runtime"
+description = "Composable L2/L3/L4 runtime (Ovolos + Bridge + Intents)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+agora-types = { workspace = true }
+agora-ovolos-rollup = { workspace = true }
+agora-bridge-sdk = { workspace = true }
+agora-intent-engine = { workspace = true }
+borsh = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
