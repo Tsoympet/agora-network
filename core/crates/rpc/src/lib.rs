@@ -5,7 +5,7 @@ mod dispatch;
 mod error;
 mod methods;
 
-pub use backend::{InMemoryBackend, RpcBackend, TxLookup, TxStatus, UtxoEntry};
+pub use backend::{InMemoryBackend, MempoolEntry, RpcBackend, TxLookup, TxStatus, UtxoEntry};
 pub use dispatch::RpcDispatcher;
 pub use error::RpcError;
 pub use methods::{RpcErrorBody, RpcMethod, RpcRequest, RpcResponse};

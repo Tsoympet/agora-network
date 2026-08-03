@@ -14,7 +14,7 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. The **Live DAG** section polls `agora_getDagTips` + `agora_getBlock` every 2s (override with `VITE_AGORA_POLL_MS`). **Tx lookup** (`#tx`) calls `agora_getTransaction` and polls while status is `pending` (Live DAG block txs deep-link here).
+Open `http://127.0.0.1:5173`. The **Live DAG** section polls `agora_getDagTips` + `agora_getBlock` every 2s (override with `VITE_AGORA_POLL_MS`). **Tx lookup** (`#tx`) calls `agora_getTransaction` and polls while status is `pending` (Live DAG block txs deep-link here). **Mempool** (`#mempool`) polls `agora_getMempool` and links rows into `#tx`.
 
 | Env | Default | Meaning |
 | --- | --- | --- |

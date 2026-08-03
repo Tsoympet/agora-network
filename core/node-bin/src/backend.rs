@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use agora_p2p::{
     Mempool, NetworkHandle, NetworkMessage, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT,
 };
-use agora_rpc::{RpcBackend, RpcError, TxLookup, UtxoEntry};
+use agora_rpc::{MempoolEntry, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
     lookup_tx_location, outpoint_key, validate_mempool_tx, ColumnFamily, StateStore,
 };
@@ -156,6 +156,22 @@ impl RpcBackend for NodeBackend {
             return Ok(TxLookup::unknown(*tx_id));
         };
         Ok(TxLookup::confirmed(tx.clone(), block_id, index))
+    }
+
+    fn get_mempool(&self, limit: usize) -> Result<Vec<MempoolEntry>, RpcError> {
+        let pool = self
+            .mempool
+            .lock()
+            .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+        Ok(pool
+            .pending_entries(limit)
+            .into_iter()
+            .map(|(tx, fee)| MempoolEntry {
+                tx_id: tx.tx_id(),
+                fee: Some(fee),
+                transaction: tx,
+            })
+            .collect())
     }
 
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError> {

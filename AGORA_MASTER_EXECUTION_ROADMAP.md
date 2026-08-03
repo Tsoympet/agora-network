@@ -139,9 +139,13 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **Stable PeerId:** `$AGORA_DATA/p2p/identity.key` (libp2p protobuf) load-or-generate on `agora-node` boot
 
-## Phase 18: Explorer tx lookup — in progress
+## Phase 18: Explorer tx lookup — done
 
 - [x] **Explorer `agora_getTransaction` UI:** `#tx` lookup + pending watch; Live DAG txs deep-link
+
+## Phase 19: Mempool RPC — in progress
+
+- [x] **`agora_getMempool`:** fee-ordered pending snapshot + light-client helper + explorer `#mempool` panel
 
 ## Directory Structure Reference
 

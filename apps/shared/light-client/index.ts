@@ -6,6 +6,8 @@ export {
   type LightClientConfig,
   type LightTx,
   type LightTxIn,
+  type LightMempool,
+  type LightMempoolEntry,
   type LightTxLookup,
   type LightTxOut,
   type LightTxStatus,

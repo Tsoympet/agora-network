@@ -137,3 +137,4 @@ Optional tx gossip: `agora_submitTransaction` on A → `agora_getTransaction` on
 - [x] Two-node local seeder + gossip/IBD runbook
 - [x] Automated mined-block IBD smoke (`smoke-ibd`)
 - [x] Persistent libp2p identity (`$AGORA_DATA/p2p/identity.key`)
+- [x] `agora_getMempool` pending snapshot RPC
