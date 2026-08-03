@@ -3,11 +3,34 @@
 //! `dev` remains free-form for local experiments. `testnet` freezes Block 0
 //! (premine, timestamp, bits, supply) so every peer agrees on the same root.
 
-use agora_consensus::EmissionSchedule;
+use agora_consensus::{DaaConfig, EmissionSchedule, GhostdagConfig, PowAlgorithm};
 use agora_types::{Address, Amount, Hash};
 use serde::{Deserialize, Serialize};
 
 use crate::genesis::{GenesisBuilder, SupplyCaps};
+
+/// Testnet / local DAA: 1s target, wide window, may start at bits=0.
+pub fn daa_config_testnet() -> DaaConfig {
+    DaaConfig {
+        target_block_time_ms: 1_000,
+        window_size: 90,
+        max_adjustment_factor: 2.0,
+        min_level: 0,
+    }
+}
+
+/// Mainnet-oriented DAA floor (genesis bits still frozen separately).
+pub fn daa_config_mainnet() -> DaaConfig {
+    DaaConfig {
+        target_block_time_ms: 1_000,
+        window_size: 90,
+        max_adjustment_factor: 2.0,
+        min_level: 8,
+    }
+}
+
+/// Default GHOSTDAG `k` for Agora networks.
+pub const DEFAULT_GHOSTDAG_K: u32 = 18;
 
 /// Well-known Agora network identifiers (`AGORA_NETWORK`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,7 +84,7 @@ pub const TESTNET_GENESIS_BITS: u32 = 0;
 pub const TESTNET_GENESIS_HASH_HEX: &str =
     "afe59232cd20a16bd56948044149d2b8013e63f3694c113074fef75ab0cb9b98";
 
-/// Monetary + genesis parameters for one network.
+/// Monetary + genesis + consensus policy parameters for one network.
 #[derive(Debug, Clone)]
 pub struct ChainParams {
     pub network: NetworkId,
@@ -71,6 +94,12 @@ pub struct ChainParams {
     pub timestamp_ms: u64,
     /// When set, boot must produce / load this genesis hash.
     pub expected_genesis: Option<Hash>,
+    /// Work-weighted DAA policy (not part of the genesis hash).
+    pub daa: DaaConfig,
+    /// GHOSTDAG anticone bound `k`.
+    pub ghostdag_k: u32,
+    /// Canonical PoW algorithm for this network.
+    pub pow_algorithm: PowAlgorithm,
 }
 
 impl ChainParams {
@@ -83,6 +112,9 @@ impl ChainParams {
             bits: 0,
             timestamp_ms: 0,
             expected_genesis: None,
+            daa: daa_config_testnet(),
+            ghostdag_k: DEFAULT_GHOSTDAG_K,
+            pow_algorithm: PowAlgorithm::RandomX,
         }
     }
 
@@ -100,6 +132,9 @@ impl ChainParams {
             bits: TESTNET_GENESIS_BITS,
             timestamp_ms: TESTNET_GENESIS_TIMESTAMP_MS,
             expected_genesis: Some(expected),
+            daa: daa_config_testnet(),
+            ghostdag_k: DEFAULT_GHOSTDAG_K,
+            pow_algorithm: PowAlgorithm::RandomX,
         }
     }
 
@@ -109,9 +144,19 @@ impl ChainParams {
             network: NetworkId::Mainnet,
             supply: SupplyCaps::default(),
             emission: EmissionSchedule::default(),
-            bits: 0,
+            // Placeholder initial leading-zero requirement once genesis is frozen.
+            bits: 16,
             timestamp_ms: 0,
             expected_genesis: None,
+            daa: daa_config_mainnet(),
+            ghostdag_k: DEFAULT_GHOSTDAG_K,
+            pow_algorithm: PowAlgorithm::RandomX,
+        }
+    }
+
+    pub fn ghostdag_config(&self) -> GhostdagConfig {
+        GhostdagConfig {
+            k: self.ghostdag_k,
         }
     }
 
@@ -222,6 +267,11 @@ impl GenesisArtifact {
             .ok_or_else(|| "invalid genesis_hash in artifact".to_string())?;
         let max_supply = Amount::from_base_units(self.max_supply);
         let premine = Amount::from_base_units(self.premine);
+        let base = match self.network {
+            NetworkId::Mainnet => ChainParams::mainnet(),
+            NetworkId::Testnet => ChainParams::testnet(),
+            NetworkId::Dev => ChainParams::dev(),
+        };
         let params = ChainParams {
             network: self.network,
             supply: SupplyCaps {
@@ -236,6 +286,9 @@ impl GenesisArtifact {
             bits: self.bits,
             timestamp_ms: self.timestamp_ms,
             expected_genesis: Some(expected),
+            daa: base.daa,
+            ghostdag_k: base.ghostdag_k,
+            pow_algorithm: base.pow_algorithm,
         };
         let computed = params.compute_genesis_hash();
         if computed != expected {
@@ -272,5 +325,19 @@ mod tests {
         assert_eq!(NetworkId::parse("TESTNET"), Some(NetworkId::Testnet));
         assert_eq!(NetworkId::parse("dev"), Some(NetworkId::Dev));
         assert!(ChainParams::for_network(NetworkId::Mainnet).is_err());
+    }
+
+    #[test]
+    fn consensus_policy_locked_per_network() {
+        let testnet = ChainParams::testnet();
+        assert_eq!(testnet.bits, TESTNET_GENESIS_BITS);
+        assert_eq!(testnet.daa.min_level, 0);
+        assert_eq!(testnet.ghostdag_k, DEFAULT_GHOSTDAG_K);
+        assert_eq!(testnet.pow_algorithm, PowAlgorithm::RandomX);
+
+        let mainnet = ChainParams::mainnet();
+        assert!(mainnet.daa.min_level >= 8);
+        assert_eq!(mainnet.bits, 16);
+        assert_eq!(mainnet.pow_algorithm, PowAlgorithm::RandomX);
     }
 }

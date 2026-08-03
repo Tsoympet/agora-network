@@ -94,6 +94,43 @@ pub struct ChainState {
     limits: ConsensusLimits,
 }
 
+/// Runtime consensus knobs loaded from [`agora_state_machine::ChainParams`].
+#[derive(Debug, Clone)]
+pub struct ChainBootConfig {
+    pub pow: PowAlgorithm,
+    pub initial_bits: u32,
+    pub daa: DaaConfig,
+    pub ghostdag: GhostdagConfig,
+    pub emission: EmissionSchedule,
+}
+
+impl Default for ChainBootConfig {
+    fn default() -> Self {
+        Self {
+            pow: PowAlgorithm::RandomX,
+            initial_bits: 0,
+            daa: DaaConfig {
+                min_level: 0,
+                ..DaaConfig::default()
+            },
+            ghostdag: GhostdagConfig::default(),
+            emission: EmissionSchedule::default(),
+        }
+    }
+}
+
+impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
+    fn from(params: &agora_state_machine::ChainParams) -> Self {
+        Self {
+            pow: params.pow_algorithm,
+            initial_bits: params.bits,
+            daa: params.daa.clone(),
+            ghostdag: params.ghostdag_config(),
+            emission: params.emission.clone(),
+        }
+    }
+}
+
 impl ChainState {
     pub fn bootstrap(
         store: Arc<StateStore>,
@@ -102,23 +139,32 @@ impl ChainState {
         initial_bits: u32,
         storage: StoragePolicy,
     ) -> Result<Self, AdmitError> {
-        let (dag, ghostdag) = rebuild_dag_from_store(store.as_ref(), genesis)?;
+        let mut boot = ChainBootConfig::default();
+        boot.pow = algo;
+        boot.initial_bits = initial_bits;
+        boot.daa.min_level = if initial_bits == 0 { 0 } else { boot.daa.min_level.max(1) };
+        Self::bootstrap_with(store, genesis, boot, storage)
+    }
 
-        let daa = DaaConfig {
-            // Allow bits=0 testnets when operators start at zero.
-            min_level: if initial_bits == 0 { 0 } else { 1 },
-            ..DaaConfig::default()
-        };
-        let difficulty = load_or_init_difficulty(&store, initial_bits)?;
+    pub fn bootstrap_with(
+        store: Arc<StateStore>,
+        genesis: Hash,
+        boot: ChainBootConfig,
+        storage: StoragePolicy,
+    ) -> Result<Self, AdmitError> {
+        let (dag, ghostdag) =
+            rebuild_dag_from_store(store.as_ref(), genesis, boot.ghostdag.clone())?;
+
+        let difficulty = load_or_init_difficulty(&store, boot.initial_bits)?;
 
         let chain = Self {
             store,
             genesis,
             dag,
             ghostdag,
-            pow: LeadingZeroPow::new(algo),
-            emission: EmissionSchedule::default(),
-            daa,
+            pow: LeadingZeroPow::new(boot.pow),
+            emission: boot.emission,
+            daa: boot.daa,
             difficulty,
             storage,
             limits: ConsensusLimits::default(),
@@ -846,7 +892,11 @@ fn load_tips_meta(store: &StateStore) -> Result<Vec<Hash>, AdmitError> {
 }
 
 /// Rebuild in-memory DAG/GHOSTDAG from durable tips → genesis ancestors.
-fn rebuild_dag_from_store(store: &StateStore, genesis: Hash) -> Result<(Dag, Ghostdag), AdmitError> {
+fn rebuild_dag_from_store(
+    store: &StateStore,
+    genesis: Hash,
+    ghostdag_config: GhostdagConfig,
+) -> Result<(Dag, Ghostdag), AdmitError> {
     let mut tips = load_tips_meta(store)?;
     if tips.is_empty() {
         tips.push(genesis);
@@ -870,7 +920,7 @@ fn rebuild_dag_from_store(store: &StateStore, genesis: Hash) -> Result<(Dag, Gho
     let mut dag = Dag::new();
     dag.insert(genesis, vec![])
         .map_err(|e| AdmitError::Consensus(e.to_string()))?;
-    let mut ghostdag = Ghostdag::new(GhostdagConfig::default());
+    let mut ghostdag = Ghostdag::new(ghostdag_config);
     ghostdag
         .add_block(&dag, genesis)
         .map_err(|e| AdmitError::Consensus(e.to_string()))?;

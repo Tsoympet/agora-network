@@ -22,7 +22,8 @@ pub use columns::{meta_keys, ColumnFamily};
 pub use error::StateError;
 pub use genesis::{GenesisBuilder, SupplyCaps};
 pub use network::{
-    ChainParams, GenesisArtifact, NetworkId, TESTNET_GENESIS_BITS, TESTNET_GENESIS_HASH_HEX,
+    daa_config_mainnet, daa_config_testnet, ChainParams, GenesisArtifact, NetworkId,
+    DEFAULT_GHOSTDAG_K, TESTNET_GENESIS_BITS, TESTNET_GENESIS_HASH_HEX,
     TESTNET_GENESIS_TIMESTAMP_MS, TESTNET_PREMINE_ADDRESS_HEX,
 };
 pub use store::StateStore;

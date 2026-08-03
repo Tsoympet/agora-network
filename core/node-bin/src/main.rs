@@ -23,7 +23,7 @@ use agora_state_machine::{ChainParams, NetworkId, StateStore};
 use agora_types::{Address, Block, Hash};
 use tracing::{info, warn};
 
-use crate::admit::ChainState;
+use crate::admit::{ChainBootConfig, ChainState};
 use crate::backend::{admit_transaction, NodeBackend};
 use crate::http::serve_rpc;
 use crate::storage_policy::StoragePolicy;
@@ -90,15 +90,51 @@ fn resolve_chain_params() -> ChainParams {
     params
 }
 
-fn parse_pow_algo() -> PowAlgorithm {
-    match std::env::var("AGORA_POW_ALGO")
-        .unwrap_or_else(|_| "randomx".into())
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "kheavyhash" | "kheavy" | "asic" => PowAlgorithm::KHeavyHash,
-        _ => PowAlgorithm::RandomX,
+fn parse_pow_algo_env() -> Option<PowAlgorithm> {
+    std::env::var("AGORA_POW_ALGO").ok().map(|s| {
+        match s.to_ascii_lowercase().as_str() {
+            "kheavyhash" | "kheavy" | "asic" => PowAlgorithm::KHeavyHash,
+            _ => PowAlgorithm::RandomX,
+        }
+    })
+}
+
+/// Resolve PoW + initial bits from [`ChainParams`], allowing env overrides on `dev` only.
+fn resolve_boot_config(params: &ChainParams) -> ChainBootConfig {
+    let mut boot = ChainBootConfig::from(params);
+
+    if params.network == NetworkId::Dev {
+        // Dev keeps a separate template/DAA initial level (default 1) from genesis bits.
+        let bits = std::env::var("AGORA_TEMPLATE_BITS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1);
+        boot.initial_bits = bits;
+        boot.daa.min_level = if bits == 0 { 0 } else { boot.daa.min_level.max(1) };
+        if let Some(algo) = parse_pow_algo_env() {
+            boot.pow = algo;
+        }
+    } else {
+        if std::env::var("AGORA_TEMPLATE_BITS").is_ok() {
+            warn!(
+                network = %params.network,
+                bits = params.bits,
+                "AGORA_TEMPLATE_BITS ignored — using ChainParams.bits"
+            );
+        }
+        if let Some(algo) = parse_pow_algo_env() {
+            if algo != params.pow_algorithm {
+                warn!(
+                    network = %params.network,
+                    ?algo,
+                    canonical = ?params.pow_algorithm,
+                    "AGORA_POW_ALGO ignored — using ChainParams.pow_algorithm"
+                );
+            }
+        }
     }
+
+    boot
 }
 
 fn admit_gossip_block(
@@ -187,11 +223,9 @@ async fn main() {
 
     let chain_params = resolve_chain_params();
     let emission = chain_params.emission.clone();
-    let pow_algo = parse_pow_algo();
-    let template_bits = std::env::var("AGORA_TEMPLATE_BITS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
+    let boot = resolve_boot_config(&chain_params);
+    let pow_algo = boot.pow;
+    let template_bits = boot.initial_bits;
 
     let listen = std::env::var("AGORA_LISTEN")
         .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/16111".into());
@@ -258,14 +292,8 @@ async fn main() {
     );
 
     let chain = Arc::new(Mutex::new(
-        ChainState::bootstrap(
-            store.clone(),
-            genesis_hash,
-            pow_algo,
-            template_bits,
-            storage,
-        )
-        .expect("chain bootstrap"),
+        ChainState::bootstrap_with(store.clone(), genesis_hash, boot.clone(), storage)
+            .expect("chain bootstrap"),
     ));
     info!(
         %data_dir,
