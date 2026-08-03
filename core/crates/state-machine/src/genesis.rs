@@ -117,6 +117,11 @@ impl GenesisBuilder {
             meta_keys::PREMINE,
             &self.supply.premine.as_base_units().to_le_bytes(),
         )?;
+        store.put_cf(
+            ColumnFamily::Meta,
+            meta_keys::ISSUED_SUPPLY,
+            &self.supply.premine.as_base_units().to_le_bytes(),
+        )?;
 
         let tips = vec![genesis_hash];
         let tips_bytes = borsh::to_vec(&tips).map_err(|e| StateError::Storage(e.to_string()))?;
@@ -206,6 +211,21 @@ mod tests {
             .get_cf(ColumnFamily::Archival, hash.as_bytes())
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn genesis_writes_issued_supply_eq_premine() {
+        let store = StateStore::open_in_memory();
+        GenesisBuilder::default().ignite(&store).unwrap();
+        let issued = store
+            .get_cf(ColumnFamily::Meta, meta_keys::ISSUED_SUPPLY)
+            .unwrap()
+            .unwrap();
+        let premine = store
+            .get_cf(ColumnFamily::Meta, meta_keys::PREMINE)
+            .unwrap()
+            .unwrap();
+        assert_eq!(issued, premine);
     }
 
     #[test]

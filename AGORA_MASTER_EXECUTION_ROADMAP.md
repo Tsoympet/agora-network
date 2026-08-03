@@ -183,6 +183,10 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **Selected virtual tip + UTXO journals:** `meta/virtual_tip`, Warm `utxo_diff/*`, admit reorgs blues of `order_past(virtual)`; parallel tips no longer spend until selected
 
+## Phase 29: Consensus admission limits — done
+
+- [x] **Parents / size / time / maturity / supply:** `ConsensusLimits`, template tip trim, coinbase maturity (premine exempt), `meta/issued_supply` clamp
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.
