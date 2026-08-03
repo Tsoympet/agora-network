@@ -51,6 +51,8 @@ When a full body arrives but parents are unknown, `agora-node` **parks** it in a
 
 On `PeerConnected`, the node builds a Bitcoin-style **block locator** along the virtual selected-parent spine and requests headers over **`/agora/<network>/getheaders/1`** (CBOR request-response). The peer returns an oldest→newest header batch after the common ancestor. The client validates parent links, then fetches missing bodies with GetBlock (oldest-first). Full batches re-issue GetHeaders until the peer is not ahead.
 
+Serving peers walk durable Warm `header/*` records (Phase 34), so **pruned nodes** (`AGORA_ARCHIVAL=0`) can answer GetHeaders even after Hot bodies are dropped.
+
 Empty-tx templates reconstruct immediately (no mempool lookup).
 
 | Test | Covers |

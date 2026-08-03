@@ -101,6 +101,7 @@ impl GenesisBuilder {
         if self.write_archival {
             store.put_cf(ColumnFamily::Archival, genesis_hash.as_bytes(), &block_bytes)?;
         }
+        crate::headers::store_header(store, &genesis_hash, &block.header)?;
         crate::tx_index::index_block_transactions(store, &block)?;
         store.put_cf(
             ColumnFamily::Meta,
