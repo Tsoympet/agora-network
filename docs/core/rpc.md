@@ -35,6 +35,7 @@ Wired in `core/node-bin`:
 | `AGORA_RPC_TOKEN` | unset | When set, wallet/mining/fund RPC methods require `Authorization: Bearer <token>` |
 | `AGORA_RPC_ALLOW_PUBLIC_BIND` | unset | When `1`/`true`, allow binding RPC on a non-loopback address |
 | `AGORA_RPC_ALLOW_FUND` | unset | When `1`/`true`, enable `agora_fundAddress` on `dev`/`testnet` only (ignored on mainnet) |
+| `AGORA_RPC_RATE_LIMIT` | `120` | Max POST `/rpc` requests per peer IP per rolling minute (`0` disables) |
 | `AGORA_POW_ALGO` | `randomx` | PoW algorithm (**dev override only**; testnet/mainnet use `ChainParams.pow_algorithm`) |
 | `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty on **dev** only; frozen networks use `ChainParams.bits` |
 | `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout (`agora1…` Bech32m or 40-char hex) for templates |

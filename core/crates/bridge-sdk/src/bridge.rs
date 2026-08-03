@@ -5,11 +5,20 @@ use agora_types::{Address, Amount, Hash};
 
 use crate::district::DistrictConfig;
 use crate::drc::{DrcLedger, DRC_MAX_SUPPLY_BASE};
-use crate::genesis::DrachmaGenesis;
+use crate::genesis::{DrachmaGenesis, DEFAULT_DRC_POW_BITS};
 use crate::messages::{BridgeDirection, BridgeMessage, MessageStatus};
+use crate::pow::{
+    messages_root, mine_drc_block, verify_pow, DrcBlock, DrcBlockHeader, DrcEmission,
+};
 use crate::proof::{verify_inclusion, LightClientProof};
 use crate::transport::MessageTransport;
 use crate::BridgeError;
+
+#[derive(Debug, Clone)]
+struct DistrictTip {
+    tip_hash: Hash,
+    tip_height: u64,
+}
 
 /// Bridge-in-a-Box runtime for District Chain asset moves.
 pub struct BridgeBox {
@@ -19,6 +28,10 @@ pub struct BridgeBox {
     messages: HashMap<Hash, (BridgeMessage, MessageStatus)>,
     drc: DrcLedger,
     transport: Option<Arc<dyn MessageTransport>>,
+    tips: HashMap<String, DistrictTip>,
+    pow_bits: u32,
+    emission: DrcEmission,
+    pow_blocks: HashMap<(String, u64), Hash>,
 }
 
 impl Default for BridgeBox {
@@ -29,6 +42,10 @@ impl Default for BridgeBox {
             messages: HashMap::new(),
             drc: DrcLedger::new(DRC_MAX_SUPPLY_BASE),
             transport: None,
+            tips: HashMap::new(),
+            pow_bits: DEFAULT_DRC_POW_BITS,
+            emission: DrcEmission::default(),
+            pow_blocks: HashMap::new(),
         }
     }
 }
@@ -38,7 +55,7 @@ impl BridgeBox {
         Self::default()
     }
 
-    /// Boot bridge from a frozen Drachma L3 genesis (caps, districts, premine).
+    /// Boot bridge from a frozen Drachma L3 genesis (caps, districts, premine, PoW).
     pub fn from_genesis(genesis: &DrachmaGenesis) -> Result<Self, BridgeError> {
         genesis.validate()?;
         let ledger = genesis.ignite_ledger()?;
@@ -48,6 +65,10 @@ impl BridgeBox {
             messages: HashMap::new(),
             drc: ledger,
             transport: None,
+            tips: HashMap::new(),
+            pow_bits: genesis.pow_bits,
+            emission: genesis.emission(),
+            pow_blocks: HashMap::new(),
         };
         for cfg in genesis.district_configs()? {
             bridge.register_district(cfg);
@@ -78,6 +99,12 @@ impl BridgeBox {
     }
 
     pub fn register_district(&mut self, config: DistrictConfig) {
+        self.tips
+            .entry(config.district_id.clone())
+            .or_insert(DistrictTip {
+                tip_hash: Hash::ZERO,
+                tip_height: 0,
+            });
         self.districts.insert(config.district_id.clone(), config);
     }
 
@@ -258,6 +285,125 @@ impl BridgeBox {
             .copied()
             .unwrap_or(Amount::ZERO)
     }
+
+    pub fn pow_bits(&self) -> u32 {
+        self.pow_bits
+    }
+
+    pub fn emission(&self) -> &DrcEmission {
+        &self.emission
+    }
+
+    pub fn tip_hash(&self, district_id: &str) -> Option<Hash> {
+        self.tips.get(district_id).map(|t| t.tip_hash)
+    }
+
+    pub fn tip_height(&self, district_id: &str) -> Option<u64> {
+        self.tips.get(district_id).map(|t| t.tip_height)
+    }
+
+    /// Admit a mined DRC PoW block for a district/hub: verify PoW, mint coinbase.
+    pub fn admit_mined_block(&mut self, block: DrcBlock) -> Result<Hash, BridgeError> {
+        verify_pow(&block.header)?;
+        if !self.districts.contains_key(&block.header.district_id) {
+            return Err(BridgeError::UnknownDistrict(block.header.district_id.clone()));
+        }
+        if block.header.bits != self.pow_bits {
+            return Err(BridgeError::Constraint(format!(
+                "DRC PoW bits {} != configured {}",
+                block.header.bits, self.pow_bits
+            )));
+        }
+        let tip = self
+            .tips
+            .get(&block.header.district_id)
+            .cloned()
+            .unwrap_or(DistrictTip {
+                tip_hash: Hash::ZERO,
+                tip_height: 0,
+            });
+        if block.header.height != tip.tip_height {
+            return Err(BridgeError::Constraint(format!(
+                "DRC block height {} != tip {}",
+                block.header.height, tip.tip_height
+            )));
+        }
+        if block.header.prev_block_hash != tip.tip_hash {
+            return Err(BridgeError::Constraint(
+                "DRC prev_block_hash does not match tip".into(),
+            ));
+        }
+        let root = messages_root(&block.message_ids);
+        if root != block.header.messages_root {
+            return Err(BridgeError::Constraint(
+                "DRC messages_root mismatch".into(),
+            ));
+        }
+        let expected_reward = self.emission.reward_at_height(block.header.height);
+        if block.header.reward != expected_reward {
+            return Err(BridgeError::Constraint(format!(
+                "DRC coinbase reward {} != expected {}",
+                block.header.reward, expected_reward
+            )));
+        }
+        if expected_reward > 0 {
+            self.drc.mint(
+                &block.header.district_id,
+                block.header.miner,
+                Amount::from_base_units(expected_reward),
+            )?;
+        }
+        let id = block.id();
+        self.pow_blocks
+            .insert((block.header.district_id.clone(), block.header.height), id);
+        self.tips.insert(
+            block.header.district_id.clone(),
+            DistrictTip {
+                tip_hash: id,
+                tip_height: block.header.height.saturating_add(1),
+            },
+        );
+        Ok(id)
+    }
+
+    /// Mine and admit a native DRC PoW block for `district_id`.
+    pub fn mine_and_admit(
+        &mut self,
+        district_id: impl Into<String>,
+        message_ids: Vec<Hash>,
+        miner: Address,
+        timestamp_ms: u64,
+        max_nonces: u64,
+    ) -> Result<DrcBlock, BridgeError> {
+        let district_id = district_id.into();
+        if !self.districts.contains_key(&district_id) {
+            return Err(BridgeError::UnknownDistrict(district_id));
+        }
+        let tip = self
+            .tips
+            .get(&district_id)
+            .cloned()
+            .unwrap_or(DistrictTip {
+                tip_hash: Hash::ZERO,
+                tip_height: 0,
+            });
+        let height = tip.tip_height;
+        let reward = self.emission.reward_at_height(height);
+        let header = DrcBlockHeader {
+            district_id,
+            height,
+            prev_block_hash: tip.tip_hash,
+            messages_root: messages_root(&message_ids),
+            timestamp_ms,
+            bits: self.pow_bits,
+            nonce: 0,
+            miner,
+            reward,
+        };
+        let block = mine_drc_block(header, message_ids, max_nonces)?;
+        self.admit_mined_block(block.clone())?;
+        Ok(block)
+    }
 }
 
 #[cfg(test)]
@@ -302,5 +448,22 @@ mod tests {
         );
         assert_eq!(bridge.drc().balance("arena", bob), Amount::ZERO);
         assert_eq!(bridge.locked_balance("agora", alice), amount);
+    }
+
+    #[test]
+    fn mine_and_admit_mints_native_drc_coinbase() {
+        let mut bridge = BridgeBox::new();
+        bridge.pow_bits = 0;
+        bridge.register_district(DistrictConfig::gaming("arena", 9001));
+        let miner = Address([9u8; 20]);
+        let before = bridge.drc().balance("arena", miner).as_base_units();
+        let block = bridge
+            .mine_and_admit("arena", vec![Hash([1u8; 32])], miner, 1, 8)
+            .unwrap();
+        verify_pow(&block.header).unwrap();
+        assert_eq!(bridge.tip_height("arena"), Some(1));
+        assert_eq!(bridge.tip_hash("arena"), Some(block.id()));
+        let after = bridge.drc().balance("arena", miner).as_base_units();
+        assert_eq!(after - before, bridge.emission().reward_at_height(0));
     }
 }

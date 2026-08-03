@@ -27,7 +27,7 @@ Deposit into the hub with `credit_hub_lock` before `lock_and_mint`.
 
 ## DRC ledger + genesis
 
-`DrcLedger` holds district/hub balances under the **Drachma L3 genesis** cap. Layered mark only — not an L1 UTXO asset.
+`DrcLedger` holds district/hub balances under the **Drachma L3 genesis** cap. DRC is native L3 PoW money (`sha256_leading_zero` blocks + coinbase) — not an L1 UTXO asset.
 
 | Artifact | Path |
 | --- | --- |

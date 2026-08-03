@@ -283,6 +283,62 @@ async fn dispatch(
                 "balance": rt.drc_balance(district, parse_addr(addr)?).as_base_units()
             }))
         }
+        "agora_layers_mineOvlBlock" => {
+            let p: MineOvlParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let batch = Batch {
+                sequence: p.sequence,
+                prev_state_root: parse_hash(&p.prev_state_root)?,
+                post_state_root: parse_hash(&p.post_state_root)?,
+                transactions: {
+                    let mut txs = Vec::with_capacity(p.transactions.len());
+                    for t in p.transactions {
+                        let raw =
+                            hex::decode(t.trim_start_matches("0x")).map_err(|e| e.to_string())?;
+                        txs.push(EvmTx(raw));
+                    }
+                    txs
+                },
+                posted_at_ms: p.posted_at_ms,
+            };
+            let block = rt
+                .mine_ovl_block(
+                    batch,
+                    parse_addr(&p.miner)?,
+                    p.timestamp_ms,
+                    p.max_nonces.unwrap_or(1_000_000),
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(json!({
+                "block_id": block.id().to_hex(),
+                "height": block.header.height,
+                "nonce": block.header.nonce,
+                "reward": block.header.reward,
+                "batch_id": block.header.batch_id.to_hex(),
+            }))
+        }
+        "agora_layers_mineDrcBlock" => {
+            let p: MineDrcParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let mut ids = Vec::with_capacity(p.message_ids.len());
+            for id in p.message_ids {
+                ids.push(parse_hash(&id)?);
+            }
+            let block = rt
+                .mine_drc_block(
+                    &p.district_id,
+                    ids,
+                    parse_addr(&p.miner)?,
+                    p.timestamp_ms,
+                    p.max_nonces.unwrap_or(1_000_000),
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(json!({
+                "block_id": block.id().to_hex(),
+                "district_id": block.header.district_id,
+                "height": block.header.height,
+                "nonce": block.header.nonce,
+                "reward": block.header.reward,
+            }))
+        }
         _ => Err(format!("unknown method {method}")),
     }
 }
@@ -365,4 +421,25 @@ struct IntentParams {
     deadline_ms: u64,
     solver_hint: Option<String>,
     now_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MineOvlParams {
+    sequence: u64,
+    prev_state_root: String,
+    post_state_root: String,
+    transactions: Vec<String>,
+    posted_at_ms: u64,
+    miner: String,
+    timestamp_ms: u64,
+    max_nonces: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MineDrcParams {
+    district_id: String,
+    message_ids: Vec<String>,
+    miner: String,
+    timestamp_ms: u64,
+    max_nonces: Option<u64>,
 }

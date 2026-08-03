@@ -2,7 +2,7 @@
   "layer": "L3",
   "mark": "DRC",
   "network": "mainnet",
-  "version": 1,
+  "version": 2,
   "chain_name": "Drachma Bridge Hub",
   "chain_id": "agora-drachma-mainnet-1",
   "status": "DRAFT — not frozen; awaits L1 mainnet genesis freeze",
@@ -21,5 +21,10 @@
       "rpc_hint": ""
     }
   ],
+  "native": true,
+  "pow_algorithm": "sha256_leading_zero",
+  "pow_bits": 8,
+  "initial_block_reward": 5000000000,
+  "halving_interval": 210000,
   "genesis_hash": "TBD"
 }

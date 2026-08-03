@@ -555,8 +555,13 @@ async fn main() {
         genesis_hash,
     );
     let dispatcher = Arc::new(tokio::sync::Mutex::new(RpcDispatcher::new(backend)));
+    let rate_limit_per_minute = std::env::var("AGORA_RPC_RATE_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(120);
     let rpc_http = RpcHttpConfig {
         token: rpc_token.clone(),
+        rate_limit_per_minute,
     };
     tokio::spawn(serve_rpc(rpc_bind.clone(), dispatcher.clone(), rpc_http));
 

@@ -1,27 +1,28 @@
 # Canonical genesis
 
-Agora freezes a genesis document **per layer** so peers share the same economic root:
+Agora freezes a genesis document **per layer** so peers share the same economic root.
+Each mark is **native PoW money on its own layer**:
 
-| Layer | Mark | Artifact (testnet) | Artifact (mainnet) |
-| --- | --- | --- | --- |
-| **L1** BlockDAG | **TLT** | [`testnet.genesis.json`](testnet.genesis.json) | [`mainnet.genesis.draft.json`](mainnet.genesis.draft.json) |
-| **L2** Ovolos rollup | **OVL** | [`ovolos.testnet.genesis.json`](ovolos.testnet.genesis.json) | [`ovolos.mainnet.genesis.draft.json`](ovolos.mainnet.genesis.draft.json) |
-| **L3** Drachma bridge | **DRC** | [`drachma.testnet.genesis.json`](drachma.testnet.genesis.json) | [`drachma.mainnet.genesis.draft.json`](drachma.mainnet.genesis.draft.json) |
+| Layer | Mark | PoW | Artifact (testnet) | Artifact (mainnet) |
+| --- | --- | --- | --- | --- |
+| **L1** BlockDAG | **TLT** | RandomX | [`testnet.genesis.json`](testnet.genesis.json) | [`mainnet.genesis.draft.json`](mainnet.genesis.draft.json) |
+| **L2** Ovolos rollup | **OVL** | sha256_leading_zero | [`ovolos.testnet.genesis.json`](ovolos.testnet.genesis.json) | [`ovolos.mainnet.genesis.draft.json`](ovolos.mainnet.genesis.draft.json) |
+| **L3** Drachma bridge | **DRC** | sha256_leading_zero | [`drachma.testnet.genesis.json`](drachma.testnet.genesis.json) | [`drachma.mainnet.genesis.draft.json`](drachma.mainnet.genesis.draft.json) |
 
 `dev` has no frozen L1 file (env-driven). Layer runtimes default to embedded testnet OVL/DRC genesis when no file is set.
 
 ## Token economy (whole units @ 8 decimals)
 
-| Ticker | Name | Layer | Max supply | Role |
-| --- | --- | --- | --- | --- |
-| **TLT** | Talanton | L1 | **100,000,000** | Native BlockDAG asset (`SupplyCaps.max_supply`) |
-| **DRC** | Drachma | L3 | **6,000,000,000** | Medium of exchange / district & bridge ledger |
-| **OVL** | Ovolos | L2 | **21,000,000,000** | Rollup gas / micro-unit ledger |
+| Ticker | Name | Layer | Max supply | Native? | PoW | Role |
+| --- | --- | --- | --- | --- | --- | --- |
+| **TLT** | Talanton | L1 | **100,000,000** | yes | RandomX | BlockDAG UTXO settlement |
+| **OVL** | Ovolos | L2 | **21,000,000,000** | yes | sha256_leading_zero | Rollup gas / L2 coinbase |
+| **DRC** | Drachma | L3 | **6,000,000,000** | yes | sha256_leading_zero | District & bridge / L3 coinbase |
 
-Only **TLT** is created by L1 consensus (`cf_utxo` / emission). **OVL** and **DRC** each boot from their own layer genesis (caps, premine, parent L1 hash). They are **not** L1 UTXO asset ids.
+Only **TLT** is an L1 UTXO asset id (`cf_utxo` / RandomX emission). **OVL** and **DRC** are native on their layers with their own PoW seals, coinbase emission, caps, premine, and parent L1 hash — they are **not** L1 UTXO asset ids.
 
-L1 emission mirrors Bitcoin-shaped policy: 50 TLT initial reward, halvings every
-210,000 blue-score, 10% premine.
+L1 / L2 / L3 emission mirrors Bitcoin-shaped policy: 50 units initial reward, halvings every
+210,000 score/height, 10% testnet premine.
 
 Testnet layer premines (10% of mark cap) use the same treasury pubkey hash as L1
 testnet (`ff9ec96f…`).
@@ -43,14 +44,15 @@ Embedded in `agora-state-machine`:
 - `TESTNET_GENESIS_TIMESTAMP_MS` = `1785715200000` (2026-08-03T00:00:00.000Z)
 - `TESTNET_GENESIS_BITS` = `0`
 
-## L2 / L3 constants (frozen in docs + Rust)
+## L2 / L3 constants (frozen in docs + Rust, genesis v2)
 
 | Mark | Testnet `genesis_hash` | Loader |
 | --- | --- | --- |
-| OVL | `440bb8eb…9e01` | `OvolosGenesis` / `AGORA_OVL_GENESIS_FILE` |
-| DRC | `2c4217b5…b314` | `DrachmaGenesis` / `AGORA_DRC_GENESIS_FILE` |
+| OVL | `538a5d0f…b86d` | `OvolosGenesis` / `AGORA_OVL_GENESIS_FILE` |
+| DRC | `e9b8ce67…d01b` | `DrachmaGenesis` / `AGORA_DRC_GENESIS_FILE` |
 
-Both documents pin `parent_l1_genesis_hash` to the L1 testnet Block 0 hash.
+Both documents pin `parent_l1_genesis_hash` to the L1 testnet Block 0 hash and set
+`native=true`, `pow_algorithm=sha256_leading_zero`, `pow_bits=8`.
 
 ## CLI
 
@@ -59,7 +61,7 @@ Both documents pin `parent_l1_genesis_hash` to the L1 testnet Block 0 hash.
 cargo run -p agora-node -- genesis dump --network testnet
 cargo run -p agora-node -- genesis verify --network testnet --file docs/genesis/testnet.genesis.json
 
-# L2 / L3 runtime (loads layer genesis)
+# L2 / L3 runtime (loads layer genesis; mine via agora_layers_mineOvlBlock / mineDrcBlock)
 AGORA_OVL_GENESIS_FILE=docs/genesis/ovolos.testnet.genesis.json \
 AGORA_DRC_GENESIS_FILE=docs/genesis/drachma.testnet.genesis.json \
   cargo run -p agora-layers

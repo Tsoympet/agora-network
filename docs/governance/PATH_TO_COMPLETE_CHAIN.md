@@ -9,7 +9,8 @@ What remains for a live public network is ops deployment + human freeze decision
 - RandomX (testnet/mainnet policy) + kHeavyHash (dev/stratum)
 - Testnet post-genesis PoW floor (`daa_min_level = 8`; genesis hash unchanged)
 - Headers-first IBD, durable headers, **durable orphans**
-- JSON-RPC including `agora_estimateFee` + Bearer auth + public-bind gate
+- JSON-RPC including `agora_estimateFee` + Bearer auth + public-bind gate + per-IP rate limit
+- Three native PoW marks: TLT (L1 RandomX), OVL (L2 sha256), DRC (L3 sha256)
 - Docker / compose + [`docs/ops/PUBLIC_TESTNET.md`](../ops/PUBLIC_TESTNET.md)
 - Wallets: vault, BIP-44 change chain, fee estimate helper
 - OpenAPI sketch: [`docs/core/openapi.yaml`](../core/openapi.yaml)

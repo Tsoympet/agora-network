@@ -15,11 +15,11 @@ Mainnet refuses boot until a frozen Block 0 is published. This checklist turns
 
 | Ticker | Max supply (whole) | Layer |
 | --- | --- | --- |
-| TLT | 100,000,000 | L1 native |
-| DRC | 6,000,000,000 | L2+ registry |
-| OVL | 21,000,000,000 | L2 registry |
+| TLT | 100,000,000 | L1 native PoW (RandomX UTXO) |
+| OVL | 21,000,000,000 | L2 native PoW (sha256_leading_zero) |
+| DRC | 6,000,000,000 | L3 native PoW (sha256_leading_zero) |
 
-L1 consensus only mints **TLT**. DRC/OVL caps stay registry-only until their layers issue.
+L1 consensus only mints **TLT** UTXOs. **OVL** and **DRC** mint via their layer PoW coinbase under each layer genesis cap.
 
 ## Freeze procedure
 

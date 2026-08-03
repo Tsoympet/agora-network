@@ -1,6 +1,7 @@
-//! Drachma (DRC) district ledger — layered mark balances for Bridge-in-a-Box.
+//! Drachma (DRC) native L3 ledger — district balances + PoW coinbase under cap.
 //!
-//! DRC is **not** an L1 UTXO asset. Caps align with the genesis registry mark.
+//! DRC is **native money on L3**. It is not an L1 UTXO asset. Caps align with
+//! the genesis registry mark.
 
 use std::collections::HashMap;
 

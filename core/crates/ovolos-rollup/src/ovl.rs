@@ -1,7 +1,7 @@
-//! Ovolos (OVL) rollup gas ledger — layered mark balances, not L1 UTXOs.
+//! Ovolos (OVL) native L2 ledger — balances + coinbase mint under supply cap.
 //!
-//! Caps align with the genesis registry mark (`TokenMark::ovolos`). Issuance
-//! here is L2-local until bridge/hub operators wire deposits.
+//! OVL is **native money on L2** (PoW coinbase + gas). It is not an L1 UTXO asset.
+//! Caps align with the genesis registry mark (`TokenMark::ovolos`).
 
 use std::collections::HashMap;
 

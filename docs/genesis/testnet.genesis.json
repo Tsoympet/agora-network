@@ -22,16 +22,18 @@
       "max_supply": 10000000000000000,
       "decimals": 8,
       "role": "native store of value / BlockDAG settlement",
-      "native": true
+      "native": true,
+      "pow_algorithm": "randomx"
     },
     {
       "ticker": "DRC",
       "name": "Drachma",
-      "layer": "L2+",
+      "layer": "L3",
       "max_supply": 600000000000000000,
       "decimals": 8,
-      "role": "medium of exchange / district & bridge settlements",
-      "native": false
+      "role": "native L3 PoW money / district & bridge settlements",
+      "native": true,
+      "pow_algorithm": "sha256_leading_zero"
     },
     {
       "ticker": "OVL",
@@ -39,8 +41,9 @@
       "layer": "L2",
       "max_supply": 2100000000000000000,
       "decimals": 8,
-      "role": "Ovolos rollup gas / micro-unit brand",
-      "native": false
+      "role": "native L2 PoW money / Ovolos rollup gas",
+      "native": true,
+      "pow_algorithm": "sha256_leading_zero"
     }
   ],
   "consensus": {
