@@ -7,6 +7,7 @@ mod apply;
 mod columns;
 mod error;
 mod genesis;
+mod headers;
 mod marks;
 mod network;
 mod store;
@@ -22,6 +23,7 @@ pub use apply::{
 pub use columns::{meta_keys, ColumnFamily};
 pub use error::StateError;
 pub use genesis::{GenesisBuilder, SupplyCaps};
+pub use headers::{header_key, load_header, store_header};
 pub use marks::{default_token_marks, TokenMark};
 pub use network::{
     daa_config_mainnet, daa_config_testnet, ChainParams, GenesisArtifact, GenesisConsensusPolicy,

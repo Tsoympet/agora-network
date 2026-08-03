@@ -102,6 +102,7 @@ impl GenesisBuilder {
                 &block_bytes,
             )?;
         }
+        crate::headers::store_header(store, &genesis_hash, &block.header)?;
         crate::tx_index::index_block_transactions(store, &block)?;
         store.put_cf(
             ColumnFamily::Meta,

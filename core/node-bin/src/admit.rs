@@ -14,9 +14,9 @@ use agora_consensus::{
     PowVerifier,
 };
 use agora_state_machine::{
-    apply_block, delete_utxo_journal, index_block_transactions, load_utxo_journal,
-    lookup_tx_location, meta_keys, revert_journal, store_utxo_journal, sum_transfer_fees,
-    ColumnFamily, StateStore,
+    apply_block, delete_utxo_journal, index_block_transactions, load_header, load_utxo_journal,
+    lookup_tx_location, meta_keys, revert_journal, store_header, store_utxo_journal,
+    sum_transfer_fees, ColumnFamily, StateStore,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -283,13 +283,13 @@ impl ChainState {
 
         let mut ancestor = None;
         for hash in locator {
-            if self.has_block(hash)? {
+            if self.has_header(hash)? {
                 ancestor = Some(*hash);
                 break;
             }
         }
         let ancestor = ancestor.unwrap_or(self.genesis);
-        if !self.has_block(&ancestor)? {
+        if !self.has_header(&ancestor)? {
             return Ok(Vec::new());
         }
 
@@ -298,17 +298,17 @@ impl ChainState {
             return Ok(Vec::new());
         }
 
-        // Walk tip → ancestor (newest first), then reverse to oldest → newest.
+        // Walk tip → ancestor via durable headers (bodies may be pruned).
         let mut newest_first = Vec::new();
         let mut cursor = tip;
         loop {
             if cursor == ancestor {
                 break;
             }
-            let block = self
-                .load_block(&cursor)?
-                .ok_or_else(|| AdmitError::Storage(format!("missing body {}", cursor.to_hex())))?;
-            newest_first.push(block.header);
+            let header = self.load_header(&cursor)?.ok_or_else(|| {
+                AdmitError::Storage(format!("missing header {}", cursor.to_hex()))
+            })?;
+            newest_first.push(header);
             match self.ghostdag.selected_parent(&cursor) {
                 Some(parent) => cursor = parent,
                 None => return Ok(Vec::new()), // exhausted without shared ancestor
@@ -329,26 +329,29 @@ impl ChainState {
     }
 
     pub fn load_block(&self, hash: &Hash) -> Result<Option<Block>, AdmitError> {
-        for cf in [
-            ColumnFamily::Hot,
-            ColumnFamily::Warm,
-            ColumnFamily::Archival,
-        ] {
-            if let Some(bytes) = self
-                .store
-                .get_cf(cf, hash.as_bytes())
-                .map_err(|e| AdmitError::Storage(e.to_string()))?
-            {
-                let block =
-                    borsh::from_slice(&bytes).map_err(|e| AdmitError::Storage(e.to_string()))?;
-                return Ok(Some(block));
-            }
+        load_block_bytes(self.store.as_ref(), hash)
+    }
+
+    /// Load a durable header (Warm `header/*`), backfilling from a full body if needed.
+    pub fn load_header(&self, hash: &Hash) -> Result<Option<BlockHeader>, AdmitError> {
+        if let Some(header) = load_header(self.store.as_ref(), hash)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?
+        {
+            return Ok(Some(header));
+        }
+        if let Some(block) = self.load_block(hash)? {
+            let _ = store_header(self.store.as_ref(), hash, &block.header);
+            return Ok(Some(block.header));
         }
         Ok(None)
     }
 
     pub fn has_block(&self, hash: &Hash) -> Result<bool, AdmitError> {
         Ok(self.load_block(hash)?.is_some() || self.dag.contains(hash))
+    }
+
+    pub fn has_header(&self, hash: &Hash) -> Result<bool, AdmitError> {
+        Ok(self.load_header(hash)?.is_some() || self.dag.contains(hash))
     }
 
     /// Parents of `block` that are not yet in the local DAG / store.
@@ -896,6 +899,8 @@ impl ChainState {
                 .put_cf(ColumnFamily::Archival, id.as_bytes(), &block_bytes)
                 .map_err(|e| AdmitError::Storage(e.to_string()))?;
         }
+        store_header(self.store.as_ref(), &id, &block.header)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
         index_block_transactions(self.store.as_ref(), block)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
 
@@ -931,8 +936,9 @@ impl ChainState {
             if dist >= window {
                 continue;
             }
-            if let Some(block) = self.load_block(&hash)? {
-                for parent in block.header.parents {
+            // Prefer durable headers so prune BFS works after bodies are dropped.
+            if let Some(header) = self.load_header(&hash)? {
+                for parent in header.parents {
                     q.push_back((parent, dist + 1));
                 }
             }
@@ -979,11 +985,7 @@ impl ChainState {
 }
 
 fn load_block_bytes(store: &StateStore, hash: &Hash) -> Result<Option<Block>, AdmitError> {
-    for cf in [
-        ColumnFamily::Hot,
-        ColumnFamily::Warm,
-        ColumnFamily::Archival,
-    ] {
+    for cf in [ColumnFamily::Hot, ColumnFamily::Archival] {
         if let Some(bytes) = store
             .get_cf(cf, hash.as_bytes())
             .map_err(|e| AdmitError::Storage(e.to_string()))?
@@ -993,7 +995,31 @@ fn load_block_bytes(store: &StateStore, hash: &Hash) -> Result<Option<Block>, Ad
             return Ok(Some(block));
         }
     }
+    // Legacy: some older writes may have placed bodies in Warm under the raw hash key.
+    if let Some(bytes) = store
+        .get_cf(ColumnFamily::Warm, hash.as_bytes())
+        .map_err(|e| AdmitError::Storage(e.to_string()))?
+    {
+        if let Ok(block) = borsh::from_slice::<Block>(&bytes) {
+            return Ok(Some(block));
+        }
+    }
     Ok(None)
+}
+
+fn load_parents_for_rebuild(store: &StateStore, hash: &Hash) -> Result<Vec<Hash>, AdmitError> {
+    if let Some(block) = load_block_bytes(store, hash)? {
+        let _ = store_header(store, hash, &block.header);
+        return Ok(block.header.parents);
+    }
+    if let Some(header) = load_header(store, hash).map_err(|e| AdmitError::Storage(e.to_string()))?
+    {
+        return Ok(header.parents);
+    }
+    Err(AdmitError::Storage(format!(
+        "missing header/body {} while rebuilding dag",
+        hash.to_hex()
+    )))
 }
 
 fn load_tips_meta(store: &StateStore) -> Result<Vec<Hash>, AdmitError> {
@@ -1018,22 +1044,17 @@ fn rebuild_dag_from_store(
         tips.push(genesis);
     }
 
-    let mut pending: HashMap<Hash, Block> = HashMap::new();
+    let mut pending: HashMap<Hash, Vec<Hash>> = HashMap::new();
     let mut stack = tips;
     while let Some(hash) = stack.pop() {
         if hash == genesis || pending.contains_key(&hash) {
             continue;
         }
-        let block = load_block_bytes(store, &hash)?.ok_or_else(|| {
-            AdmitError::Storage(format!(
-                "missing block {} while rebuilding dag",
-                hash.to_hex()
-            ))
-        })?;
-        for parent in &block.header.parents {
+        let parents = load_parents_for_rebuild(store, &hash)?;
+        for parent in &parents {
             stack.push(*parent);
         }
-        pending.insert(hash, block);
+        pending.insert(hash, parents);
     }
 
     let mut dag = Dag::new();
@@ -1047,7 +1068,7 @@ fn rebuild_dag_from_store(
     while !pending.is_empty() {
         let ready: Vec<Hash> = pending
             .iter()
-            .filter(|(_, block)| block.header.parents.iter().all(|p| dag.contains(p)))
+            .filter(|(_, parents)| parents.iter().all(|p| dag.contains(p)))
             .map(|(hash, _)| *hash)
             .collect();
         if ready.is_empty() {
@@ -1056,8 +1077,8 @@ fn rebuild_dag_from_store(
             ));
         }
         for hash in ready {
-            let block = pending.remove(&hash).expect("ready hash");
-            dag.insert(hash, block.header.parents.clone())
+            let parents = pending.remove(&hash).expect("ready hash");
+            dag.insert(hash, parents)
                 .map_err(|e| AdmitError::Consensus(e.to_string()))?;
             ghostdag
                 .add_block(&dag, hash)
@@ -1295,8 +1316,82 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(chain.load_block(&genesis).unwrap().is_none());
+        // Durable header remains for IBD / restart.
+        assert!(chain.load_header(&genesis).unwrap().is_some());
         // Tips still load.
         assert!(chain.load_block(&_b2).unwrap().is_some());
+    }
+
+    #[test]
+    fn pruned_node_serves_headers_after_locator() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default()
+            .with_archival(false)
+            .ignite(&store)
+            .unwrap();
+        let policy = StoragePolicy {
+            archival: false,
+            hot_window: 1,
+        };
+        let mut chain =
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, policy)
+                .unwrap();
+        let mut tip = genesis;
+        for nonce in 1..=6u64 {
+            tip = mine_child(&mut chain, &[tip], Address::ZERO, nonce);
+        }
+        assert!(chain.load_block(&genesis).unwrap().is_none());
+        assert!(chain.load_header(&genesis).unwrap().is_some());
+
+        let headers = chain
+            .headers_after_locator(&[genesis], 4, None)
+            .unwrap();
+        assert_eq!(headers.len(), 4);
+        assert!(headers[0].parents.contains(&genesis));
+        for window in headers.windows(2) {
+            assert!(window[1].parents.contains(&window[0].hash()));
+        }
+        assert_eq!(chain.virtual_tip().unwrap(), tip);
+    }
+
+    #[test]
+    fn pruned_node_restarts_from_headers() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default()
+            .with_archival(false)
+            .ignite(&store)
+            .unwrap();
+        let policy = StoragePolicy {
+            archival: false,
+            hot_window: 1,
+        };
+        let mut chain = ChainState::bootstrap(
+            store.clone(),
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            policy.clone(),
+        )
+        .unwrap();
+        let mut tip = genesis;
+        for nonce in 20..=24u64 {
+            tip = mine_child(&mut chain, &[tip], Address::ZERO, nonce);
+        }
+        assert!(chain.load_block(&genesis).unwrap().is_none());
+        drop(chain);
+
+        let reloaded = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            policy,
+        )
+        .unwrap();
+        assert_eq!(reloaded.virtual_tip().unwrap(), tip);
+        assert!(reloaded.has_header(&genesis).unwrap());
+        assert!(reloaded.has_header(&tip).unwrap());
+        assert!(reloaded.tips().unwrap().contains(&tip));
     }
 
     #[test]

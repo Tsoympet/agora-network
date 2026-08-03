@@ -208,11 +208,10 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **`ChainState::{block_locator,headers_after_locator}`** + PeerConnected sync kickoff
 - [x] **Mainnet freeze scaffolding:** `docs/governance/{SLIP0044,MAINNET_GENESIS_FREEZE}.md` + `scripts/prepare_mainnet_genesis.sh`
 
-## Phase 35: CI + RPC auth / bind hardening — done
+## Phase 34: Prune-safe durable header index — done
 
-- [x] **GitHub Actions:** fast portable crate job + slower node/RandomX job (`.github/workflows/ci.yml`)
-- [x] **`AGORA_RPC_TOKEN`:** Bearer auth for wallet/mining/fund methods; explorer reads stay public
-- [x] **Public bind gate:** non-loopback `AGORA_RPC_BIND` requires `AGORA_RPC_ALLOW_PUBLIC_BIND=1`
+- [x] **Warm `header/*`:** persist on genesis + every admit; outlives Hot body prune
+- [x] **GetHeaders / DAG rebuild / prune BFS** use headers when bodies are gone; pruned-node restart + serve tests
 
 ## Directory Structure Reference
 
