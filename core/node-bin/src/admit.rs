@@ -189,10 +189,6 @@ impl ChainState {
         Ok(self.load_virtual_tip()?.unwrap_or(self.genesis))
     }
 
-    pub fn store(&self) -> &Arc<StateStore> {
-        &self.store
-    }
-
     pub fn pow_algorithm(&self) -> PowAlgorithm {
         self.pow.algorithm()
     }
