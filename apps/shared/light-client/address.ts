@@ -43,6 +43,10 @@ export function addressHrpForNetwork(network: string): string {
     case "testnet":
     case "test":
       return ADDRESS_HRP_TESTNET;
+    case "devnet":
+    case "dev":
+    case "local":
+      return ADDRESS_HRP_DEV;
     default:
       return ADDRESS_HRP_DEV;
   }

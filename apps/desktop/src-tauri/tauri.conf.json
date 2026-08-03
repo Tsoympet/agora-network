@@ -22,11 +22,23 @@
   },
   "bundle": {
     "active": true,
+    "targets": "all",
+    "category": "Finance",
+    "shortDescription": "Agora Network desktop wallet",
+    "longDescription": "Agora Network light wallet: Bech32 receive, BIP-39 send, encrypted vault, and live DAG tip sync over JSON-RPC. Shows Devnet / Testnet / Mainnet from the connected node.",
     "icon": [
       "icons/icon.png",
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/henry.w@example.net"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }

@@ -37,6 +37,14 @@ export {
   shortAddress,
 } from "./address";
 export {
+  networkAccent,
+  networkHrpHint,
+  networkLabel,
+  normalizeNetworkId,
+  walletNetworkFromNode,
+  type AgoraNetworkId,
+} from "./network";
+export {
   addressBech32FromMnemonic,
   addressFromMnemonic,
   buildSignedTransfer,

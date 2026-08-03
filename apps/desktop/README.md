@@ -5,7 +5,8 @@ hooks live under `src-tauri/`; day-to-day development uses `npm run dev`.
 
 ## Features
 
-- Bech32m receive (`agora1…`) with hex secondary + copy
+- Clear **Devnet / Testnet / Mainnet** badge (from `agora_getNodeInfo`)
+- Bech32m receive with network HRP (`agoradev` / `agoratest` / `agora`) + hex secondary
 - BIP-39 generate / derive (`m/44'/8888'/0'/0/0`) and signed send
 - Password vault (AES-256-GCM) persisted in `localStorage` — Unlock / Save / Lock
 - Compact node strip via `agora_getNodeInfo` (mempool, PoW, peers, archival)
@@ -19,7 +20,10 @@ AGORA_TEMPLATE_BITS=0 cargo run -p agora-node
 cd apps/desktop
 npm install
 npm run dev
+# native installers (host OS): npm run tauri:build
 ```
+
+Multi-OS targets: [`docs/apps/PLATFORMS.md`](../../docs/apps/PLATFORMS.md).
 
 | Env | Default | Meaning |
 | --- | --- | --- |
