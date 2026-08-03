@@ -235,7 +235,11 @@ export function App() {
 
   return (
     <main className="agora-shell">
-      <img src="/nexus-icon.svg" alt="" className="agora-icon-lg agora-rise" />
+      <img
+        src="/agora-network.png"
+        alt="Agora Network"
+        className="agora-icon-lg agora-rise"
+      />
       <h1
         className="agora-brand agora-rise agora-rise-delay-1"
         style={{ fontSize: "2.75rem", marginTop: "1.25rem" }}

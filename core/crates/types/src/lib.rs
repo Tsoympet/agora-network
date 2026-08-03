@@ -5,14 +5,17 @@
 mod amount;
 mod block;
 mod hash;
+mod hrp;
 mod transaction;
 
 pub use amount::Amount;
 pub use block::{Block, BlockHeader};
 pub use hash::Hash;
-pub use transaction::{
-    Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut, ADDRESS_HRP,
+pub use hrp::{
+    address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
+    ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
 };
+pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 
 #[cfg(test)]
 mod tests {
@@ -34,7 +37,11 @@ mod tests {
         assert_eq!(encoded, "agora1l70vjmcfav256qu225hv4evu2qsya2dfajrcqc");
         assert_eq!(Address::from_bech32(&encoded), Some(addr));
         assert_eq!(Address::from_bech32(&encoded.to_uppercase()), Some(addr));
+        let testnet = addr.to_bech32_hrp(ADDRESS_HRP_TESTNET);
+        assert!(testnet.starts_with("agoratest1"));
+        assert_eq!(Address::from_bech32(&testnet), Some(addr));
         assert_eq!(Address::parse(&encoded), Some(addr));
+        assert_eq!(Address::parse(&testnet), Some(addr));
         assert_eq!(Address::parse(&addr.to_hex()), Some(addr));
         assert_eq!(Address::parse(&format!("0x{}", addr.to_hex())), Some(addr));
         assert_eq!(format!("{addr}"), encoded);

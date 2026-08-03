@@ -26,6 +26,10 @@ export {
 export { watchTransaction, type TxWatchOptions } from "./txWatch";
 export {
   ADDRESS_HRP,
+  ADDRESS_HRP_DEV,
+  ADDRESS_HRP_MAINNET,
+  ADDRESS_HRP_TESTNET,
+  addressHrpForNetwork,
   encodeAddress,
   isAddress,
   parseAddress,

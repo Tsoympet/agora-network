@@ -32,6 +32,8 @@ Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
 Default caps: max supply 100,000,000 AGORA; premine 10,000,000 AGORA.
 
 Canonical networks live in `ChainParams` / `NetworkId` (`dev` | `testnet` | `mainnet`).
+Each network also locks consensus policy: `daa` (`DaaConfig`), `ghostdag_k`, and `pow_algorithm` (plus genesis `bits`).
+Genesis artifacts (v2) additionally freeze wallet HRP / provisional SLIP-0044 coin type and the TLT/DRC/OVL mark registry.
 Testnet freezes Block 0 — see [`docs/genesis/`](../genesis/README.md). `load_or_ignite_checked`
 rejects a datadir whose `meta/genesis_hash` ≠ the expected network hash.
 

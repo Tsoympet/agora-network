@@ -14,7 +14,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_submitTransaction` | UTXO-check + admit a signed tx into the mempool and gossip it |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
-| `agora_fundAddress` | Testnet mint: write a spendable `cf_utxo` (disabled unless `AGORA_RPC_ALLOW_FUND`) |
+| `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
 | `agora_getBlockTemplate` | Mining template block (tips as parents + coinbase) |
 | `agora_submitBlock` | Admit a mined block (PoW verify + store + gossip) |
 
@@ -31,9 +31,9 @@ Wired in `core/node-bin`:
 | Env | Default | Meaning |
 | --- | --- | --- |
 | `AGORA_RPC_BIND` | `127.0.0.1:8545` | HTTP JSON-RPC listen address |
-| `AGORA_RPC_ALLOW_FUND` | unset | When `1`/`true`, enable `agora_fundAddress` (mints spendable UTXOs) |
-| `AGORA_POW_ALGO` | `randomx` | `randomx` or `kheavyhash` for admission / templates |
-| `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty (`header.bits`); retargets after admits |
+| `AGORA_RPC_ALLOW_FUND` | unset | When `1`/`true`, enable `agora_fundAddress` on `dev`/`testnet` only (ignored on mainnet) |
+| `AGORA_POW_ALGO` | `randomx` | PoW algorithm (**dev override only**; testnet/mainnet use `ChainParams.pow_algorithm`) |
+| `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty on **dev** only; frozen networks use `ChainParams.bits` |
 | `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout (`agora1…` Bech32m or 40-char hex) for templates |
 | `AGORA_NETWORK` | `dev` | `dev` (free genesis) / `testnet` (frozen) / `mainnet` (not frozen); also scopes P2P gossip topics |
 | `AGORA_PREMINE_ADDRESS` | `00…00` | Genesis premine (**dev only**; ignored on frozen networks); fresh `AGORA_DATA` |

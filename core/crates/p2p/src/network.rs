@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::hash::{Hash as StdHash, Hasher};
 use std::time::Duration;
 
-use agora_types::{Block, Hash};
+use agora_types::{Block, BlockHeader, Hash};
 use futures::StreamExt;
 use libp2p::gossipsub::{self, IdentTopic, MessageAuthenticity};
 use libp2p::identity::Keypair;
@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use crate::getblock::{GetBlockRequest, GetBlockResponse};
+use crate::getheaders::{GetHeadersRequest, GetHeadersResponse};
 use crate::limits::connection_limits_behaviour;
 use crate::messages::NetworkMessage;
 use crate::scoring::{enable_peer_scoring, APP_SCORE_BAD_PEER, APP_SCORE_GOOD_PEER};
@@ -21,11 +22,14 @@ use crate::topics::NetworkTopics;
 use crate::{NetworkConfig, P2pError};
 
 type GetBlockBehaviour = request_response::cbor::Behaviour<GetBlockRequest, GetBlockResponse>;
+type GetHeadersBehaviour =
+    request_response::cbor::Behaviour<GetHeadersRequest, GetHeadersResponse>;
 
 #[derive(NetworkBehaviour)]
 pub struct AgoraBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub getblock: GetBlockBehaviour,
+    pub getheaders: GetHeadersBehaviour,
     pub connection_limits: libp2p::connection_limits::Behaviour,
 }
 
@@ -58,6 +62,24 @@ pub enum NetworkEvent {
         hash: Hash,
         error: String,
     },
+    /// Inbound getheaders — respond via [`NetworkHandle::respond_get_headers`].
+    GetHeadersRequest {
+        peer: PeerId,
+        locator: Vec<Hash>,
+        limit: u32,
+        stop_hash: Option<Hash>,
+        request_id: request_response::InboundRequestId,
+    },
+    /// Outbound getheaders completed.
+    GetHeadersResponse {
+        peer: PeerId,
+        headers: Vec<BlockHeader>,
+    },
+    /// Outbound getheaders failed.
+    GetHeadersFailure {
+        peer: PeerId,
+        error: String,
+    },
 }
 
 enum Command {
@@ -67,6 +89,14 @@ enum Command {
     RespondGetBlock {
         request_id: request_response::InboundRequestId,
         block: Option<Block>,
+    },
+    RequestHeaders {
+        peer: PeerId,
+        request: GetHeadersRequest,
+    },
+    RespondGetHeaders {
+        request_id: request_response::InboundRequestId,
+        headers: Vec<BlockHeader>,
     },
     SetAppScore { peer: PeerId, score: f64 },
     Shutdown,
@@ -114,6 +144,28 @@ impl NetworkHandle {
             .map_err(|_| P2pError::Network("swarm task stopped".into()))
     }
 
+    /// Request headers after a block locator from a connected peer.
+    pub fn request_headers(
+        &self,
+        peer: PeerId,
+        request: GetHeadersRequest,
+    ) -> Result<(), P2pError> {
+        self.commands
+            .send(Command::RequestHeaders { peer, request })
+            .map_err(|_| P2pError::Network("swarm task stopped".into()))
+    }
+
+    /// Answer an inbound [`NetworkEvent::GetHeadersRequest`].
+    pub fn respond_get_headers(
+        &self,
+        request_id: request_response::InboundRequestId,
+        headers: Vec<BlockHeader>,
+    ) -> Result<(), P2pError> {
+        self.commands
+            .send(Command::RespondGetHeaders { request_id, headers })
+            .map_err(|_| P2pError::Network("swarm task stopped".into()))
+    }
+
     /// Adjust gossipsub application-specific peer score (P5).
     pub fn set_application_score(&self, peer: PeerId, score: f64) -> Result<(), P2pError> {
         self.commands
@@ -136,7 +188,7 @@ impl NetworkHandle {
     }
 }
 
-/// libp2p gossip + getblock request-response node for Agora.
+/// libp2p gossip + getblock/getheaders request-response node for Agora.
 pub struct NetworkNode {
     swarm: Swarm<AgoraBehaviour>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
@@ -147,6 +199,12 @@ pub struct NetworkNode {
         ResponseChannel<GetBlockResponse>,
     >,
     outbound_hashes: HashMap<request_response::OutboundRequestId, Hash>,
+    inbound_header_channels: HashMap<
+        request_response::InboundRequestId,
+        ResponseChannel<GetHeadersResponse>,
+    >,
+    /// Outbound getheaders request ids (no payload keyed — response carries headers).
+    outbound_headers: HashMap<request_response::OutboundRequestId, ()>,
 }
 
 impl NetworkNode {
@@ -194,6 +252,10 @@ impl NetworkNode {
             [(topics.getblock_protocol(), ProtocolSupport::Full)],
             request_response::Config::default(),
         );
+        let getheaders = request_response::cbor::Behaviour::new(
+            [(topics.getheaders_protocol(), ProtocolSupport::Full)],
+            request_response::Config::default(),
+        );
 
         let connection_limits = connection_limits_behaviour(config.max_peers);
         info!(
@@ -206,6 +268,7 @@ impl NetworkNode {
         let behaviour = AgoraBehaviour {
             gossipsub,
             getblock,
+            getheaders,
             connection_limits,
         };
 
@@ -255,6 +318,8 @@ impl NetworkNode {
                 topics,
                 inbound_channels: HashMap::new(),
                 outbound_hashes: HashMap::new(),
+                inbound_header_channels: HashMap::new(),
+                outbound_headers: HashMap::new(),
             },
         ))
     }
@@ -323,6 +388,98 @@ impl NetworkNode {
             .is_err()
         {
             warn!(%request_id, "getblock send_response failed (channel closed)");
+        }
+    }
+
+    fn request_headers(&mut self, peer: PeerId, request: GetHeadersRequest) {
+        let id = self
+            .swarm
+            .behaviour_mut()
+            .getheaders
+            .send_request(&peer, request);
+        self.outbound_headers.insert(id, ());
+        debug!(%peer, %id, "getheaders request sent");
+    }
+
+    fn respond_get_headers(
+        &mut self,
+        request_id: request_response::InboundRequestId,
+        headers: Vec<BlockHeader>,
+    ) {
+        let Some(channel) = self.inbound_header_channels.remove(&request_id) else {
+            warn!(%request_id, "getheaders response channel missing");
+            return;
+        };
+        if self
+            .swarm
+            .behaviour_mut()
+            .getheaders
+            .send_response(channel, GetHeadersResponse::with_headers(headers))
+            .is_err()
+        {
+            warn!(%request_id, "getheaders send_response failed (channel closed)");
+        }
+    }
+
+    fn handle_getheaders_event(
+        &mut self,
+        event: request_response::Event<GetHeadersRequest, GetHeadersResponse>,
+    ) {
+        match event {
+            request_response::Event::Message { peer, message, .. } => match message {
+                request_response::Message::Request {
+                    request_id,
+                    request,
+                    channel,
+                } => {
+                    self.inbound_header_channels.insert(request_id, channel);
+                    let _ = self.event_tx.send(NetworkEvent::GetHeadersRequest {
+                        peer,
+                        locator: request.locator,
+                        limit: request.limit,
+                        stop_hash: request.stop_hash,
+                        request_id,
+                    });
+                }
+                request_response::Message::Response {
+                    request_id,
+                    response,
+                } => {
+                    self.outbound_headers.remove(&request_id);
+                    let _ = self.event_tx.send(NetworkEvent::GetHeadersResponse {
+                        peer,
+                        headers: response.headers,
+                    });
+                }
+            },
+            request_response::Event::OutboundFailure {
+                peer,
+                request_id,
+                error,
+                ..
+            } => {
+                self.outbound_headers.remove(&request_id);
+                let _ = self.event_tx.send(NetworkEvent::GetHeadersFailure {
+                    peer,
+                    error: error.to_string(),
+                });
+            }
+            request_response::Event::InboundFailure {
+                peer,
+                request_id,
+                error,
+                ..
+            } => {
+                self.inbound_header_channels.remove(&request_id);
+                warn!(%peer, %request_id, error = %error, "getheaders inbound failure");
+            }
+            request_response::Event::ResponseSent {
+                peer,
+                request_id,
+                ..
+            } => {
+                debug!(%peer, %request_id, "getheaders response sent");
+            }
         }
     }
 
@@ -416,6 +573,12 @@ impl NetworkNode {
                         Some(Command::RespondGetBlock { request_id, block }) => {
                             self.respond_get_block(request_id, block);
                         }
+                        Some(Command::RequestHeaders { peer, request }) => {
+                            self.request_headers(peer, request);
+                        }
+                        Some(Command::RespondGetHeaders { request_id, headers }) => {
+                            self.respond_get_headers(request_id, headers);
+                        }
                         Some(Command::SetAppScore { peer, score }) => {
                             let ok = self
                                 .swarm
@@ -461,6 +624,9 @@ impl NetworkNode {
                         },
                         SwarmEvent::Behaviour(AgoraBehaviourEvent::Getblock(ev)) => {
                             self.handle_getblock_event(ev);
+                        }
+                        SwarmEvent::Behaviour(AgoraBehaviourEvent::Getheaders(ev)) => {
+                            self.handle_getheaders_event(ev);
                         }
                         SwarmEvent::IncomingConnectionError { error, .. } => {
                             warn!(error = %error, "incoming connection failed (limits or handshake)");

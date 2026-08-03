@@ -26,10 +26,10 @@ This document is the definitive command center. It bridges architectural theory 
 
 ### Assets
 
-- [x] **TLT:** Talanton (Scales) — `apps/shared/brand/assets/talanton.svg`
-- [x] **DRC:** Drachma (Helmet) — `apps/shared/brand/assets/drachma.svg`
-- [x] **OBL:** Ovolos (Shield/Spears) — `apps/shared/brand/assets/ovolos.svg`
-- [x] **Nexus Icon:** gold `A` — `apps/shared/brand/assets/nexus-icon.svg` / `.png`
+- [x] **TLT:** Talanton (Scales) — `apps/shared/brand/assets/talanton.png`
+- [x] **DRC:** Drachma (Corinthian helm) — `apps/shared/brand/assets/drachma.png`
+- [x] **OVL:** Ovolos (Winged helm / spears) — `apps/shared/brand/assets/ovolos.png`
+- [x] **Brand / app icon:** column `A` — `agora-network.png` / `agora-app-icon.png`
 
 ### Implementation
 
@@ -186,6 +186,27 @@ This document is the definitive command center. It bridges architectural theory 
 ## Phase 29: Consensus admission limits — done
 
 - [x] **Parents / size / time / maturity / supply:** `ConsensusLimits`, template tip trim, coinbase maturity (premine exempt), `meta/issued_supply` clamp
+
+## Phase 30: Production DAA / PoW in ChainParams — done
+
+- [x] **Network-locked consensus policy:** `ChainParams.{daa,ghostdag_k,pow_algorithm,bits}` → `ChainBootConfig`; `AGORA_TEMPLATE_BITS` / `AGORA_POW_ALGO` override only on `dev`
+
+## Phase 31: Orphan pool + parent-fetch IBD — done
+
+- [x] **`OrphanPool` + drain:** park `MissingParent` bodies, fetch ancestors via GetBlock, re-admit children; no peer penalty for parent-miss alone
+- [x] **`agora_fundAddress` hard-off on mainnet:** env cannot enable fund RPC when `network=mainnet`
+
+## Phase 32: Genesis v2 + HRPs / SLIP-0044 prep — done
+
+- [x] **Genesis artifact v2:** chain id, consensus + wallet policy, three-mark registry (TLT 100M / DRC 6B / OVL 21B)
+- [x] **Network HRPs:** `agora` / `agoratest` / `agoradev` (decode accepts all; encode per network)
+- [x] **Provisional SLIP-0044:** coin type `8888` documented pending registration; mainnet draft artifact
+
+## Phase 33: Headers-first / locator IBD — done
+
+- [x] **`/agora/<network>/getheaders/1`:** locator → header batch RR; validate spine; GetBlock bodies oldest-first
+- [x] **`ChainState::{block_locator,headers_after_locator}`** + PeerConnected sync kickoff
+- [x] **Mainnet freeze scaffolding:** `docs/governance/{SLIP0044,MAINNET_GENESIS_FREEZE}.md` + `scripts/prepare_mainnet_genesis.sh`
 
 ## Directory Structure Reference
 

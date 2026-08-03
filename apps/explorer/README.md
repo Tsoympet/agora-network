@@ -23,4 +23,4 @@ Open `http://127.0.0.1:5173`. The **Live DAG** section polls `agora_getDagTips` 
 | `AGORA_RPC_PROXY` | `http://127.0.0.1:8545` | Vite proxy target for `/rpc` |
 
 Brand source: `apps/shared/brand/Agora_Brand_System.css`  
-Marks: Talanton (TLT), Drachma (DRC), Ovolos (OBL) + Nexus icon.
+Marks: Talanton (TLT), Drachma (DRC), Ovolos (OVL) + Agora Network brand icon.

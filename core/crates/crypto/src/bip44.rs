@@ -4,10 +4,18 @@ use bip32::{DerivationPath, XPrv};
 
 use crate::{CryptoError, KeyPair};
 
-/// Provisional BIP-44 coin type for Agora (unregisterd / testnet-facing).
+/// Provisional BIP-44 / SLIP-0044 coin type for Agora.
 ///
-/// Replace with a SLIP-0044 assignment before mainnet freeze.
+/// **Not yet registered** with SLIP-0044 — replace before mainnet freeze.
+/// Until then every Agora network (including testnet) derives with this type so
+/// existing premine / faucet vectors stay stable.
 pub const AGORA_COIN_TYPE: u32 = 8888;
+
+/// Alias documenting the SLIP-0044 application target.
+pub const AGORA_COIN_TYPE_PROVISIONAL: u32 = AGORA_COIN_TYPE;
+
+/// BIP-44 coin type used for public testnet wallets (same as provisional until SLIP assign).
+pub const AGORA_COIN_TYPE_TESTNET: u32 = AGORA_COIN_TYPE;
 
 /// BIP-44 account path builder: `m/44'/coin_type'/account'/change/index`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

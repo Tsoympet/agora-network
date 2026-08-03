@@ -30,8 +30,8 @@ pub enum AdmitError {
     InvalidPow,
     #[error("wrong difficulty: expected bits={expected}, got={got}")]
     WrongDifficulty { expected: u32, got: u32 },
-    #[error("missing parent: {0}")]
-    MissingParent(String),
+    #[error("missing parent: {}", .0.to_hex())]
+    MissingParent(Hash),
     #[error("duplicate block: {0}")]
     Duplicate(String),
     #[error("storage: {0}")]
@@ -94,6 +94,43 @@ pub struct ChainState {
     limits: ConsensusLimits,
 }
 
+/// Runtime consensus knobs loaded from [`agora_state_machine::ChainParams`].
+#[derive(Debug, Clone)]
+pub struct ChainBootConfig {
+    pub pow: PowAlgorithm,
+    pub initial_bits: u32,
+    pub daa: DaaConfig,
+    pub ghostdag: GhostdagConfig,
+    pub emission: EmissionSchedule,
+}
+
+impl Default for ChainBootConfig {
+    fn default() -> Self {
+        Self {
+            pow: PowAlgorithm::RandomX,
+            initial_bits: 0,
+            daa: DaaConfig {
+                min_level: 0,
+                ..DaaConfig::default()
+            },
+            ghostdag: GhostdagConfig::default(),
+            emission: EmissionSchedule::default(),
+        }
+    }
+}
+
+impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
+    fn from(params: &agora_state_machine::ChainParams) -> Self {
+        Self {
+            pow: params.pow_algorithm,
+            initial_bits: params.bits,
+            daa: params.daa.clone(),
+            ghostdag: params.ghostdag_config(),
+            emission: params.emission.clone(),
+        }
+    }
+}
+
 impl ChainState {
     pub fn bootstrap(
         store: Arc<StateStore>,
@@ -102,23 +139,32 @@ impl ChainState {
         initial_bits: u32,
         storage: StoragePolicy,
     ) -> Result<Self, AdmitError> {
-        let (dag, ghostdag) = rebuild_dag_from_store(store.as_ref(), genesis)?;
+        let mut boot = ChainBootConfig::default();
+        boot.pow = algo;
+        boot.initial_bits = initial_bits;
+        boot.daa.min_level = if initial_bits == 0 { 0 } else { boot.daa.min_level.max(1) };
+        Self::bootstrap_with(store, genesis, boot, storage)
+    }
 
-        let daa = DaaConfig {
-            // Allow bits=0 testnets when operators start at zero.
-            min_level: if initial_bits == 0 { 0 } else { 1 },
-            ..DaaConfig::default()
-        };
-        let difficulty = load_or_init_difficulty(&store, initial_bits)?;
+    pub fn bootstrap_with(
+        store: Arc<StateStore>,
+        genesis: Hash,
+        boot: ChainBootConfig,
+        storage: StoragePolicy,
+    ) -> Result<Self, AdmitError> {
+        let (dag, ghostdag) =
+            rebuild_dag_from_store(store.as_ref(), genesis, boot.ghostdag.clone())?;
+
+        let difficulty = load_or_init_difficulty(&store, boot.initial_bits)?;
 
         let chain = Self {
             store,
             genesis,
             dag,
             ghostdag,
-            pow: LeadingZeroPow::new(algo),
-            emission: EmissionSchedule::default(),
-            daa,
+            pow: LeadingZeroPow::new(boot.pow),
+            emission: boot.emission,
+            daa: boot.daa,
             difficulty,
             storage,
             limits: ConsensusLimits::default(),
@@ -177,6 +223,109 @@ impl ChainState {
         borsh::from_slice(&bytes).map_err(|e| AdmitError::Storage(e.to_string()))
     }
 
+    /// Bitcoin-style block locator along the virtual selected-parent spine (newest → genesis).
+    pub fn block_locator(&self) -> Result<Vec<Hash>, AdmitError> {
+        use agora_p2p::MAX_LOCATOR_HASHES;
+
+        let tip = self.virtual_tip()?;
+        let mut hashes = Vec::with_capacity(MAX_LOCATOR_HASHES);
+        let mut hash = tip;
+        let mut step: u64 = 1;
+        let mut index: u64 = 0;
+        loop {
+            hashes.push(hash);
+            if hash == self.genesis || hashes.len() >= MAX_LOCATOR_HASHES.saturating_sub(1) {
+                break;
+            }
+            // Walk `step` selected parents toward genesis.
+            for _ in 0..step {
+                match self.ghostdag.selected_parent(&hash) {
+                    Some(parent) => hash = parent,
+                    None => {
+                        hash = self.genesis;
+                        break;
+                    }
+                }
+                if hash == self.genesis {
+                    break;
+                }
+            }
+            index = index.saturating_add(1);
+            if index >= 10 {
+                step = step.saturating_mul(2).max(1);
+            }
+        }
+        if hashes.last().copied() != Some(self.genesis) {
+            hashes.push(self.genesis);
+        }
+        Ok(hashes)
+    }
+
+    /// Headers on the selected-parent path from the first known locator hash toward virtual tip.
+    ///
+    /// Returns oldest → newest, excluding the common ancestor, capped by `limit`.
+    pub fn headers_after_locator(
+        &self,
+        locator: &[Hash],
+        limit: u32,
+        stop_hash: Option<Hash>,
+    ) -> Result<Vec<agora_types::BlockHeader>, AdmitError> {
+        use agora_p2p::{MAX_HEADERS_PER_RESPONSE, MAX_LOCATOR_HASHES};
+
+        let limit = (limit.max(1)).min(MAX_HEADERS_PER_RESPONSE) as usize;
+        let locator = if locator.len() > MAX_LOCATOR_HASHES {
+            &locator[..MAX_LOCATOR_HASHES]
+        } else {
+            locator
+        };
+
+        let mut ancestor = None;
+        for hash in locator {
+            if self.has_block(hash)? {
+                ancestor = Some(*hash);
+                break;
+            }
+        }
+        let ancestor = ancestor.unwrap_or(self.genesis);
+        if !self.has_block(&ancestor)? {
+            return Ok(Vec::new());
+        }
+
+        let tip = self.virtual_tip()?;
+        if tip == ancestor {
+            return Ok(Vec::new());
+        }
+
+        // Walk tip → ancestor (newest first), then reverse to oldest → newest.
+        let mut newest_first = Vec::new();
+        let mut cursor = tip;
+        loop {
+            if cursor == ancestor {
+                break;
+            }
+            let block = self
+                .load_block(&cursor)?
+                .ok_or_else(|| AdmitError::Storage(format!("missing body {}", cursor.to_hex())))?;
+            newest_first.push(block.header);
+            match self.ghostdag.selected_parent(&cursor) {
+                Some(parent) => cursor = parent,
+                None => return Ok(Vec::new()), // exhausted without shared ancestor
+            }
+            if newest_first.len() > 1_000_000 {
+                return Err(AdmitError::Storage("headers path too long".into()));
+            }
+        }
+
+        newest_first.reverse();
+        if let Some(stop) = stop_hash {
+            if let Some(pos) = newest_first.iter().position(|h| h.hash() == stop) {
+                newest_first.truncate(pos + 1);
+            }
+        }
+        newest_first.truncate(limit);
+        Ok(newest_first)
+    }
+
     pub fn load_block(&self, hash: &Hash) -> Result<Option<Block>, AdmitError> {
         for cf in [ColumnFamily::Hot, ColumnFamily::Warm, ColumnFamily::Archival] {
             if let Some(bytes) = self
@@ -194,6 +343,17 @@ impl ChainState {
 
     pub fn has_block(&self, hash: &Hash) -> Result<bool, AdmitError> {
         Ok(self.load_block(hash)?.is_some() || self.dag.contains(hash))
+    }
+
+    /// Parents of `block` that are not yet in the local DAG / store.
+    pub fn missing_parents_of(&self, block: &Block) -> Vec<Hash> {
+        block
+            .header
+            .parents
+            .iter()
+            .copied()
+            .filter(|p| !self.dag.contains(p))
+            .collect()
     }
 
     /// Build a mining template parented to current tips with coinbase + transfers.
@@ -387,7 +547,7 @@ impl ChainState {
                 return Err(AdmitError::DuplicateParent(parent.to_hex()));
             }
             if !self.dag.contains(parent) {
-                return Err(AdmitError::MissingParent(parent.to_hex()));
+                return Err(AdmitError::MissingParent(*parent));
             }
         }
         Ok(())
@@ -846,7 +1006,11 @@ fn load_tips_meta(store: &StateStore) -> Result<Vec<Hash>, AdmitError> {
 }
 
 /// Rebuild in-memory DAG/GHOSTDAG from durable tips → genesis ancestors.
-fn rebuild_dag_from_store(store: &StateStore, genesis: Hash) -> Result<(Dag, Ghostdag), AdmitError> {
+fn rebuild_dag_from_store(
+    store: &StateStore,
+    genesis: Hash,
+    ghostdag_config: GhostdagConfig,
+) -> Result<(Dag, Ghostdag), AdmitError> {
     let mut tips = load_tips_meta(store)?;
     if tips.is_empty() {
         tips.push(genesis);
@@ -870,7 +1034,7 @@ fn rebuild_dag_from_store(store: &StateStore, genesis: Hash) -> Result<(Dag, Gho
     let mut dag = Dag::new();
     dag.insert(genesis, vec![])
         .map_err(|e| AdmitError::Consensus(e.to_string()))?;
-    let mut ghostdag = Ghostdag::new(GhostdagConfig::default());
+    let mut ghostdag = Ghostdag::new(ghostdag_config);
     ghostdag
         .add_block(&dag, genesis)
         .map_err(|e| AdmitError::Consensus(e.to_string()))?;
@@ -1394,5 +1558,123 @@ mod tests {
         .unwrap();
         assert_eq!(reloaded.virtual_tip().unwrap(), tip);
         assert_eq!(reloaded.genesis(), genesis);
+    }
+
+    fn mine_block_pow(chain: &ChainState, parents: &[Hash], nonce: u64) -> Block {
+        let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
+        block.header.parents = parents.to_vec();
+        block.header.nonce = nonce;
+        block.header.timestamp_ms = nonce;
+        let emission = chain
+            .emission
+            .reward_at_blue_score(chain.estimate_blue_score(parents));
+        block.transactions = vec![Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(emission),
+                address: Address::ZERO,
+            }],
+            nonce,
+        )];
+        block.header.tx_root = Block::compute_tx_root(&block.transactions);
+        let digest = RandomXPowHasher.pow_hash(&block.header);
+        LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&block.header, &digest)
+            .unwrap();
+        block
+    }
+
+    #[test]
+    fn block_locator_and_headers_after_locator() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+
+        let mut tip = genesis;
+        for nonce in 1..=12u64 {
+            tip = mine_child(&mut chain, &[tip], Address::ZERO, nonce);
+        }
+
+        let locator = chain.block_locator().unwrap();
+        assert_eq!(locator.first().copied(), Some(tip));
+        assert_eq!(locator.last().copied(), Some(genesis));
+        assert!(locator.len() <= agora_p2p::MAX_LOCATOR_HASHES);
+
+        // Peer at genesis asks for headers toward tip.
+        let headers = chain
+            .headers_after_locator(&[genesis], 5, None)
+            .unwrap();
+        assert_eq!(headers.len(), 5);
+        assert!(headers[0].parents.contains(&genesis));
+        for window in headers.windows(2) {
+            assert!(window[1].parents.contains(&window[0].hash()));
+        }
+
+        // Already at tip → empty.
+        assert!(chain
+            .headers_after_locator(&[tip], 100, None)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn orphan_pool_recovers_out_of_order_child() {
+        use agora_p2p::{drain_orphans_after, OrphanPool};
+        use std::time::Duration;
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+
+        let mid = mine_block_pow(&chain, &[genesis], 70);
+        let mid_id = mid.id();
+        let tip = mine_block_pow(&chain, &[mid_id], 71);
+        let tip_id = tip.id();
+
+        assert!(matches!(
+            chain.admit_block(tip.clone()),
+            Err(AdmitError::MissingParent(h)) if h == mid_id
+        ));
+        assert_eq!(chain.missing_parents_of(&tip), vec![mid_id]);
+
+        let mut orphans = OrphanPool::new(Duration::from_secs(60), 16);
+        assert!(orphans.park(tip, &[mid_id], None));
+
+        let mid_admitted = chain.admit_block(mid).unwrap();
+        assert_eq!(mid_admitted, mid_id);
+
+        let drained = drain_orphans_after(&mut orphans, mid_id, |child| {
+            match chain.admit_block(child.clone()) {
+                Ok(id) => Ok(id),
+                Err(AdmitError::MissingParent(_)) => {
+                    let missing = chain.missing_parents_of(&child);
+                    if missing.is_empty() {
+                        Err(None)
+                    } else {
+                        Err(Some(missing))
+                    }
+                }
+                Err(_) => Err(None),
+            }
+        });
+        assert!(drained.contains(&tip_id));
+        assert!(orphans.is_empty());
+        assert!(chain.has_block(&tip_id).unwrap());
+        assert_eq!(chain.virtual_tip().unwrap(), tip_id);
     }
 }

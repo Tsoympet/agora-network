@@ -1,4 +1,36 @@
 /** Shared Agora brand tokens for TS clients (desktop / mobile / explorer). */
+
+/** Max supplies in whole units (8 decimals on-chain). */
+export const agoraTokenSupplies = {
+  /** L1 native — BlockDAG settlement asset. */
+  TLT: {
+    name: "Talanton",
+    layer: "L1",
+    maxSupplyWhole: 100_000_000,
+    decimals: 8,
+    role: "native store of value / BlockDAG settlement",
+    native: true,
+  },
+  /** District / bridge medium of exchange (not L1 UTXO asset id yet). */
+  DRC: {
+    name: "Drachma",
+    layer: "L2+",
+    maxSupplyWhole: 6_000_000_000,
+    decimals: 8,
+    role: "medium of exchange / district & bridge settlements",
+    native: false,
+  },
+  /** Ovolos rollup gas brand (not L1 UTXO asset id yet). */
+  OVL: {
+    name: "Ovolos",
+    layer: "L2",
+    maxSupplyWhole: 21_000_000_000,
+    decimals: 8,
+    role: "Ovolos rollup gas / micro-unit brand",
+    native: false,
+  },
+} as const;
+
 export const agoraBrand = {
   colors: {
     obsidian: "#101218",
@@ -14,15 +46,38 @@ export const agoraBrand = {
     ui: "Inter, Segoe UI, sans-serif",
   },
   assets: {
-    nexus: "nexus-icon.svg",
-    talanton: "talanton.svg",
-    drachma: "drachma.svg",
-    ovolos: "ovolos.svg",
+    nexus: "nexus-icon.png",
+    agoraNetwork: "agora-network.png",
+    appIcon: "agora-app-icon.png",
+    talanton: "talanton.png",
+    drachma: "drachma.png",
+    ovolos: "ovolos.png",
   },
   marks: {
-    TLT: { name: "Talanton", meaning: "Scales" },
-    DRC: { name: "Drachma", meaning: "Helmet" },
-    OBL: { name: "Ovolos", meaning: "Shield / Spears" },
+    TLT: {
+      name: "Talanton",
+      meaning: "Scales of value",
+      ...agoraTokenSupplies.TLT,
+    },
+    DRC: {
+      name: "Drachma",
+      meaning: "Corinthian helm",
+      ...agoraTokenSupplies.DRC,
+    },
+    OVL: {
+      name: "Ovolos",
+      meaning: "Winged helm / spears",
+      ...agoraTokenSupplies.OVL,
+    },
+  },
+  wallet: {
+    coinType: 8888,
+    coinTypeStatus: "provisional-slip44-pending",
+    hrp: {
+      mainnet: "agora",
+      testnet: "agoratest",
+      dev: "agoradev",
+    },
   },
 } as const;
 

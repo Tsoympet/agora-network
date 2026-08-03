@@ -7,6 +7,7 @@ mod apply;
 mod columns;
 mod error;
 mod genesis;
+mod marks;
 mod network;
 mod store;
 mod tx_index;
@@ -21,9 +22,11 @@ pub use apply::{
 pub use columns::{meta_keys, ColumnFamily};
 pub use error::StateError;
 pub use genesis::{GenesisBuilder, SupplyCaps};
+pub use marks::{default_token_marks, TokenMark};
 pub use network::{
-    ChainParams, GenesisArtifact, NetworkId, TESTNET_GENESIS_BITS, TESTNET_GENESIS_HASH_HEX,
-    TESTNET_GENESIS_TIMESTAMP_MS, TESTNET_PREMINE_ADDRESS_HEX,
+    daa_config_mainnet, daa_config_testnet, ChainParams, GenesisArtifact, GenesisConsensusPolicy,
+    GenesisWalletPolicy, NetworkId, DEFAULT_GHOSTDAG_K, TESTNET_GENESIS_BITS,
+    TESTNET_GENESIS_HASH_HEX, TESTNET_GENESIS_TIMESTAMP_MS, TESTNET_PREMINE_ADDRESS_HEX,
 };
 pub use store::StateStore;
 pub use tx_index::{

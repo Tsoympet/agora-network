@@ -11,7 +11,7 @@ export default function App() {
       <header className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-6 py-5 md:px-10">
         <div className="flex items-center gap-3">
           <img
-            src="/brand/nexus-icon.svg"
+            src="/brand/agora-network.png"
             alt=""
             className="h-10 w-10 agora-rise"
           />

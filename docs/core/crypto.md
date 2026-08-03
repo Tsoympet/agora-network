@@ -11,7 +11,7 @@ Wallet and signature primitives for Agora Network.
 ## Current surface
 
 - BIP-39 24-word mnemonic generation and seed derivation
-- BIP-44 paths via `bip32` CKD (`m/44'/8888'/account'/change/index`)
+- BIP-44 paths via `bip32` CKD (`m/44'/8888'/account'/change/index`) — provisional SLIP-0044
 - Address = first 20 bytes of SHA-256(compressed pubkey)
 - String form = **Bech32m** with HRP `agora` (`Address::to_bech32` / light-client `encodeAddress`); hex still accepted at RPC/env boundaries
 - ECDSA sign / verify over SHA-256 digests
@@ -19,7 +19,8 @@ Wallet and signature primitives for Agora Network.
 
 ## BIP-44 notes
 
-- `AGORA_COIN_TYPE = 8888` is provisional until a SLIP-0044 code is assigned.
+- `AGORA_COIN_TYPE = 8888` is provisional until a SLIP-0044 code is assigned (recorded in genesis `wallet.coin_type`).
+- Bech32m HRPs are network-scoped: mainnet `agora`, testnet `agoratest`, dev `agoradev`.
 - Prefer `derive_bip44` over `KeyPair::from_seed` for wallet accounts.
 
 ## Non-goals
