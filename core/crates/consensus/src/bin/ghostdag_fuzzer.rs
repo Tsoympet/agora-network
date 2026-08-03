@@ -51,8 +51,7 @@ fn run_partition_scenario(seed: u64, tag: u32) -> Result<(), String> {
 
     let mut dag = Dag::new();
     let genesis = hash_from(tag, 0, 0);
-    dag.insert(genesis, vec![])
-        .map_err(|e| e.to_string())?;
+    dag.insert(genesis, vec![]).map_err(|e| e.to_string())?;
 
     let mut left_tip = genesis;
     for n in 1..=left_blocks {
@@ -107,7 +106,10 @@ fn run_partition_scenario(seed: u64, tag: u32) -> Result<(), String> {
     let mut seen = HashSet::new();
     for block in &ordered {
         if !past.contains(&block.hash) {
-            return Err(format!("ordered hash missing from past: {}", block.hash.to_hex()));
+            return Err(format!(
+                "ordered hash missing from past: {}",
+                block.hash.to_hex()
+            ));
         }
         if !seen.insert(block.hash) {
             return Err(format!("duplicate ordered hash: {}", block.hash.to_hex()));

@@ -13,12 +13,10 @@ use crate::P2pError;
 pub fn load_or_generate_identity(path: impl AsRef<Path>) -> Result<Keypair, P2pError> {
     let path = path.as_ref();
     if path.exists() {
-        let bytes = std::fs::read(path).map_err(|e| {
-            P2pError::Identity(format!("read {}: {e}", path.display()))
-        })?;
-        return Keypair::from_protobuf_encoding(&bytes).map_err(|e| {
-            P2pError::Identity(format!("decode {}: {e}", path.display()))
-        });
+        let bytes = std::fs::read(path)
+            .map_err(|e| P2pError::Identity(format!("read {}: {e}", path.display())))?;
+        return Keypair::from_protobuf_encoding(&bytes)
+            .map_err(|e| P2pError::Identity(format!("decode {}: {e}", path.display())));
     }
 
     let keypair = Keypair::generate_ed25519();
@@ -30,9 +28,8 @@ pub fn load_or_generate_identity(path: impl AsRef<Path>) -> Result<Keypair, P2pE
 pub fn save_identity(path: impl AsRef<Path>, keypair: &Keypair) -> Result<(), P2pError> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            P2pError::Identity(format!("mkdir {}: {e}", parent.display()))
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| P2pError::Identity(format!("mkdir {}: {e}", parent.display())))?;
     }
     let bytes = keypair
         .to_protobuf_encoding()
@@ -51,10 +48,7 @@ mod tests {
 
     #[test]
     fn load_or_generate_persists_stable_peer_id() {
-        let dir = std::env::temp_dir().join(format!(
-            "agora-p2p-identity-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("agora-p2p-identity-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("p2p").join("identity.key");
         let first = load_or_generate_identity(&path).unwrap();

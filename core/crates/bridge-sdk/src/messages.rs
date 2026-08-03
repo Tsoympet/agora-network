@@ -2,7 +2,9 @@ use agora_types::{Address, Amount, Hash};
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
+)]
 pub enum BridgeDirection {
     /// Lock on Agora / L2, mint on District.
     LockAndMint,

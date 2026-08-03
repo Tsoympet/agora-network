@@ -49,6 +49,8 @@ cargo check --workspace
 # Run unit tests
 cargo test --workspace
 
+# CI (GitHub Actions): portable crates + optional RandomX/node job — see `.github/workflows/ci.yml`
+
 # Optional: check state-machine RocksDB feature in isolation (agora-node enables it by default)
 cargo check -p agora-state-machine --features rocksdb
 
@@ -69,7 +71,8 @@ TypeScript bindings for shared types are generated under `core/crates/types/bind
 # RocksDB under AGORA_DATA (default data/agora-node). Memory-only:
 #   cargo run -p agora-node --no-default-features
 # Optional: AGORA_NETWORK (dev|testnet), AGORA_LISTEN, AGORA_BOOTSTRAP, AGORA_DATA,
-#           AGORA_RPC_BIND, AGORA_RPC_ALLOW_FUND, AGORA_POW_ALGO, AGORA_TEMPLATE_BITS,
+#           AGORA_RPC_BIND, AGORA_RPC_TOKEN, AGORA_RPC_ALLOW_PUBLIC_BIND,
+#           AGORA_RPC_ALLOW_FUND, AGORA_POW_ALGO, AGORA_TEMPLATE_BITS,
 #           AGORA_MINER_ADDRESS, AGORA_PREMINE_ADDRESS (dev only), AGORA_MIN_RELAY_FEE
 # Frozen testnet genesis: docs/genesis/testnet.genesis.json
 #   cargo run -p agora-node -- genesis dump|verify --network testnet

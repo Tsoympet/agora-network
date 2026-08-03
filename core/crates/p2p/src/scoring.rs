@@ -109,14 +109,12 @@ fn score_decay(target: Duration) -> f64 {
 /// Peer score params with blocks weighted above txs for `topics`.
 pub fn agora_peer_score_params(topics: &NetworkTopics) -> PeerScoreParams {
     let mut params = PeerScoreParams::default();
-    params.topics.insert(
-        topics.blocks().hash(),
-        agora_topic_score_params(1.0),
-    );
-    params.topics.insert(
-        topics.transactions().hash(),
-        agora_topic_score_params(0.5),
-    );
+    params
+        .topics
+        .insert(topics.blocks().hash(), agora_topic_score_params(1.0));
+    params
+        .topics
+        .insert(topics.transactions().hash(), agora_topic_score_params(0.5));
     // App-specific score (set via NetworkHandle) can reward good IBD peers.
     params.app_specific_weight = 1.0;
     // Soften IP colocation for local docker/dev (many peers on 127.0.0.1).
@@ -165,9 +163,7 @@ mod tests {
     fn default_tuning_builds_valid_gossip_config() {
         let tuning = GossipTuning::default();
         let cfg = tuning
-            .build_config(|msg| {
-                gossipsub::MessageId::from(format!("t-{}", msg.data.len()))
-            })
+            .build_config(|msg| gossipsub::MessageId::from(format!("t-{}", msg.data.len())))
             .expect("config");
         assert_eq!(cfg.mesh_n(), 6);
         assert_eq!(cfg.mesh_n_low(), 4);
@@ -178,10 +174,10 @@ mod tests {
     #[test]
     fn peer_score_params_validate() {
         let topics = NetworkTopics::new("dev");
-        agora_peer_score_params(&topics)
+        agora_peer_score_params(&topics).validate().expect("params");
+        agora_peer_score_thresholds()
             .validate()
-            .expect("params");
-        agora_peer_score_thresholds().validate().expect("thresholds");
+            .expect("thresholds");
         agora_topic_score_params(1.0).validate().expect("topic");
     }
 }

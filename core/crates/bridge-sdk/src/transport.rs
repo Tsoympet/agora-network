@@ -78,7 +78,9 @@ impl MessageTransport for InMemoryTransport {
     }
 
     fn prove(&self, district_id: &str, message_id: Hash) -> Result<LightClientProof, BridgeError> {
-        self.with_lane(district_id, |lane| prove_message(&lane.committed, message_id))?
+        self.with_lane(district_id, |lane| {
+            prove_message(&lane.committed, message_id)
+        })?
     }
 
     fn verify_against_root(

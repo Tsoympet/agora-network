@@ -42,7 +42,10 @@ fn hash_pair(left: &Hash, right: &Hash) -> Hash {
 }
 
 /// Build an inclusion proof for `leaf_index` within `leaves`.
-pub fn prove_inclusion(leaves: &[Hash], leaf_index: usize) -> Result<LightClientProof, BridgeError> {
+pub fn prove_inclusion(
+    leaves: &[Hash],
+    leaf_index: usize,
+) -> Result<LightClientProof, BridgeError> {
     if leaves.is_empty() || leaf_index >= leaves.len() {
         return Err(BridgeError::InvalidProof("leaf index out of range".into()));
     }

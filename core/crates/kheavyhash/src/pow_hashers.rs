@@ -65,4 +65,3 @@ mod keccak256 {
         keccak::f1600(state);
     }
 }
-

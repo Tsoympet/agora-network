@@ -211,11 +211,7 @@ impl RpcBackend for NodeBackend {
             PowAlgorithm::RandomX => "randomx",
             PowAlgorithm::KHeavyHash => "kheavyhash",
         };
-        let mempool_count = self
-            .mempool
-            .lock()
-            .map(|p| p.len())
-            .unwrap_or(0);
+        let mempool_count = self.mempool.lock().map(|p| p.len()).unwrap_or(0);
         Ok(NodeInfo {
             network: self.network.clone(),
             version: env!("CARGO_PKG_VERSION").into(),
@@ -282,12 +278,8 @@ impl RpcBackend for NodeBackend {
             value: amount,
             address,
         };
-        let key = outpoint_key(&OutPoint {
-            tx_id,
-            index: 0,
-        });
-        let bytes =
-            borsh::to_vec(&out).map_err(|e| RpcError::Internal(e.to_string()))?;
+        let key = outpoint_key(&OutPoint { tx_id, index: 0 });
+        let bytes = borsh::to_vec(&out).map_err(|e| RpcError::Internal(e.to_string()))?;
         self.store
             .put_cf(ColumnFamily::Utxo, &key, &bytes)
             .map_err(|e| RpcError::Internal(e.to_string()))?;
@@ -323,14 +315,10 @@ impl RpcBackend for NodeBackend {
                 crate::admit::AdmitError::MissingParent(h) => {
                     RpcError::Rejected(format!("missing parent {}", h.to_hex()))
                 }
-                crate::admit::AdmitError::Utxo(msg) => {
-                    RpcError::Rejected(format!("utxo: {msg}"))
-                }
-                crate::admit::AdmitError::WrongDifficulty { expected, got } => {
-                    RpcError::Rejected(format!(
-                        "wrong difficulty: expected bits={expected}, got={got}"
-                    ))
-                }
+                crate::admit::AdmitError::Utxo(msg) => RpcError::Rejected(format!("utxo: {msg}")),
+                crate::admit::AdmitError::WrongDifficulty { expected, got } => RpcError::Rejected(
+                    format!("wrong difficulty: expected bits={expected}, got={got}"),
+                ),
                 crate::admit::AdmitError::BadTxRoot => {
                     RpcError::Rejected("tx_root mismatch".into())
                 }
@@ -372,7 +360,14 @@ mod tests {
             .unwrap();
 
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
         ));
         let miner = Address([1u8; 20]);
         let mut backend = NodeBackend::new(
@@ -435,7 +430,14 @@ mod tests {
         };
         let premine_txid = genesis_block.transactions[0].tx_id();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
         ));
         let mut backend = NodeBackend::new(
             chain,
@@ -521,7 +523,14 @@ mod tests {
         };
         let premine_txid = genesis_block.transactions[0].tx_id();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
         ));
         let miner = Address([2u8; 20]);
         let mut backend = NodeBackend::new(
@@ -615,7 +624,14 @@ mod tests {
             .ignite(&store)
             .unwrap();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
         ));
         let mut backend = NodeBackend::new(
             chain,
@@ -630,10 +646,7 @@ mod tests {
         );
 
         let drip = Amount::from_base_units(5_000);
-        assert_eq!(
-            backend.fund_address(funded.address(), drip).unwrap(),
-            drip
-        );
+        assert_eq!(backend.fund_address(funded.address(), drip).unwrap(), drip);
         assert_eq!(backend.get_balance(&funded.address()), drip);
         let minted = backend.get_utxos(&funded.address()).unwrap();
         assert_eq!(minted.len(), 1);

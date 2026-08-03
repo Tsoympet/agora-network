@@ -109,8 +109,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
             RpcMethod::GetBlockTemplate => {
                 let block = self.backend.get_block_template()?;
                 // Keep native serde shape (`Hash` as byte arrays) for miner-sidecar.
-                Ok(serde_json::to_value(block)
-                    .map_err(|e| RpcError::Internal(e.to_string()))?)
+                Ok(serde_json::to_value(block).map_err(|e| RpcError::Internal(e.to_string()))?)
             }
             RpcMethod::SubmitBlock => {
                 let raw = block_param(&req.params)?;
@@ -126,11 +125,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
 /// Hex-friendly block JSON for wallets / explorer (hashes as hex strings).
 fn block_to_explorer_json(block: &Block) -> Value {
     let id = block.id().to_hex();
-    let transactions: Vec<Value> = block
-        .transactions
-        .iter()
-        .map(tx_to_explorer_json)
-        .collect();
+    let transactions: Vec<Value> = block.transactions.iter().map(tx_to_explorer_json).collect();
     json!({
         "id": id,
         "header": header_to_explorer_json(&block.header, Some(id)),
@@ -362,10 +357,7 @@ mod tests {
             method: "agora_getDagTips".into(),
             params: json!([]),
         });
-        assert_eq!(
-            tips.result.unwrap(),
-            json!([genesis_id.to_hex()])
-        );
+        assert_eq!(tips.result.unwrap(), json!([genesis_id.to_hex()]));
 
         let addr = Address::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
         let funded = rpc.handle(RpcRequest {
@@ -410,7 +402,10 @@ mod tests {
             method: "agora_submitTransaction".into(),
             params: json!(tx.clone()),
         });
-        let tx_id = submitted.result.unwrap()["tx_id"].as_str().unwrap().to_string();
+        let tx_id = submitted.result.unwrap()["tx_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
         let pending = rpc.handle(RpcRequest {
             id: Some(json!(31)),

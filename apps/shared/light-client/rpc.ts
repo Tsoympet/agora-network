@@ -100,6 +100,8 @@ export type RpcStatus = "idle" | "ok" | "error";
 export type LightClientConfig = {
   /** Full URL or path to JSON-RPC (`http://127.0.0.1:8545/rpc` or `/rpc`). */
   rpcUrl: string;
+  /** Optional bearer token matching node `AGORA_RPC_TOKEN` (wallet / submit paths). */
+  rpcToken?: string;
 };
 
 export type LightClient = {
@@ -119,11 +121,18 @@ export type LightClient = {
 export function createLightClient(config: LightClientConfig): LightClient {
   let nextId = 1;
   const rpcUrl = config.rpcUrl;
+  const rpcToken = config.rpcToken?.trim() || undefined;
 
   async function call<T>(method: string, params: unknown = []): Promise<T> {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+    };
+    if (rpcToken) {
+      headers.authorization = `Bearer ${rpcToken}`;
+    }
     const res = await fetch(rpcUrl, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({ id: nextId++, method, params }),
     });
     if (!res.ok) {

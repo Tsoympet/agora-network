@@ -8,8 +8,7 @@ use crate::{Hash, Transaction};
 ///
 /// Multiple parents enable parallel block production; GHOSTDAG later imposes order.
 #[derive(
-    Clone, PartialEq, Eq, Debug,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct BlockHeader {
@@ -29,8 +28,7 @@ impl BlockHeader {
 
 /// Full block: header + transactions.
 #[derive(
-    Clone, PartialEq, Eq, Debug,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct Block {

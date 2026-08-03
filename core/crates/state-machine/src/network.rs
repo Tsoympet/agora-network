@@ -5,7 +5,9 @@
 
 use agora_consensus::{DaaConfig, EmissionSchedule, GhostdagConfig, PowAlgorithm};
 use agora_crypto::AGORA_COIN_TYPE;
-use agora_types::{Address, Amount, Hash, ADDRESS_HRP_DEV, ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET};
+use agora_types::{
+    Address, Amount, Hash, ADDRESS_HRP_DEV, ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::genesis::{GenesisBuilder, SupplyCaps};
@@ -146,11 +148,12 @@ impl ChainParams {
 
     /// Canonical Agora testnet — frozen Block 0.
     pub fn testnet() -> Self {
-        let premine_address = Address::from_hex(TESTNET_PREMINE_ADDRESS_HEX)
-            .expect("static testnet premine hex");
+        let premine_address =
+            Address::from_hex(TESTNET_PREMINE_ADDRESS_HEX).expect("static testnet premine hex");
         let mut supply = SupplyCaps::default();
         supply.premine_address = premine_address;
-        let expected = Hash::from_hex(TESTNET_GENESIS_HASH_HEX).expect("static testnet genesis hex");
+        let expected =
+            Hash::from_hex(TESTNET_GENESIS_HASH_HEX).expect("static testnet genesis hex");
         Self {
             network: NetworkId::Testnet,
             supply,
@@ -181,18 +184,16 @@ impl ChainParams {
     }
 
     pub fn ghostdag_config(&self) -> GhostdagConfig {
-        GhostdagConfig {
-            k: self.ghostdag_k,
-        }
+        GhostdagConfig { k: self.ghostdag_k }
     }
 
     pub fn for_network(id: NetworkId) -> Result<Self, String> {
         match id {
             NetworkId::Dev => Ok(Self::dev()),
             NetworkId::Testnet => Ok(Self::testnet()),
-            NetworkId::Mainnet => Err(
-                "mainnet genesis is not frozen yet — use AGORA_NETWORK=testnet or dev".into(),
-            ),
+            NetworkId::Mainnet => {
+                Err("mainnet genesis is not frozen yet — use AGORA_NETWORK=testnet or dev".into())
+            }
         }
     }
 
@@ -506,7 +507,10 @@ mod tests {
         assert_eq!(artifact.version, 1);
         assert!(artifact.tokens.is_empty());
         let params = artifact.to_params().unwrap();
-        assert_eq!(params.compute_genesis_hash().to_hex(), TESTNET_GENESIS_HASH_HEX);
+        assert_eq!(
+            params.compute_genesis_hash().to_hex(),
+            TESTNET_GENESIS_HASH_HEX
+        );
     }
 
     #[test]

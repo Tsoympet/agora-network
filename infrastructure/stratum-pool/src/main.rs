@@ -151,10 +151,7 @@ async fn handle_miner(
             match req.method.as_str() {
                 "mining.subscribe" => {
                     notify_job = pool.current_job().cloned();
-                    StratumResponse::ok(
-                        req.id.clone(),
-                        json!([["mining.notify", "agora"], "00"]),
-                    )
+                    StratumResponse::ok(req.id.clone(), json!([["mining.notify", "agora"], "00"]))
                 }
                 "mining.authorize" => {
                     let name = req
@@ -170,10 +167,7 @@ async fn handle_miner(
                 }
                 "mining.submit" => {
                     let params = req.params.as_array().cloned().unwrap_or_default();
-                    let job_id = params
-                        .get(1)
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default();
+                    let job_id = params.get(1).and_then(|v| v.as_str()).unwrap_or_default();
                     let nonce = params
                         .get(2)
                         .and_then(|v| v.as_str())
@@ -202,8 +196,10 @@ async fn handle_miner(
                 .await?;
 
             if let Some(job) = notify_job {
-                w.write_all(format!("{}\n", serde_json::to_string(&notify_payload(&job))?).as_bytes())
-                    .await?;
+                w.write_all(
+                    format!("{}\n", serde_json::to_string(&notify_payload(&job))?).as_bytes(),
+                )
+                .await?;
             }
         }
 

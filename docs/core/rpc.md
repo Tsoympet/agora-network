@@ -30,7 +30,9 @@ Wired in `core/node-bin`:
 
 | Env | Default | Meaning |
 | --- | --- | --- |
-| `AGORA_RPC_BIND` | `127.0.0.1:8545` | HTTP JSON-RPC listen address |
+| `AGORA_RPC_BIND` | `127.0.0.1:8545` | HTTP JSON-RPC listen address (non-loopback requires `AGORA_RPC_ALLOW_PUBLIC_BIND=1`) |
+| `AGORA_RPC_TOKEN` | unset | When set, wallet/mining/fund RPC methods require `Authorization: Bearer <token>` |
+| `AGORA_RPC_ALLOW_PUBLIC_BIND` | unset | When `1`/`true`, allow binding RPC on a non-loopback address |
 | `AGORA_RPC_ALLOW_FUND` | unset | When `1`/`true`, enable `agora_fundAddress` on `dev`/`testnet` only (ignored on mainnet) |
 | `AGORA_POW_ALGO` | `randomx` | PoW algorithm (**dev override only**; testnet/mainnet use `ChainParams.pow_algorithm`) |
 | `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty on **dev** only; frozen networks use `ChainParams.bits` |
@@ -45,9 +47,25 @@ Wired in `core/node-bin`:
 
 Endpoints:
 
-- `GET /health` → `{"ok":true}`
+- `GET /health` → `{"ok":true}` (always unauthenticated)
 - `POST /` or `POST /rpc` → JSON body is an `RpcRequest`
-- CORS enabled (`Access-Control-Allow-Origin: *`) for browser explorers; `OPTIONS` preflight supported
+- CORS enabled (`Access-Control-Allow-Origin: *`) for browser explorers; `OPTIONS` preflight supported (`authorization` allowed)
+
+### Auth (`AGORA_RPC_TOKEN`)
+
+When unset, JSON-RPC stays open (safe with the default loopback bind). When set:
+
+| Always public | Token required |
+| --- | --- |
+| `GET /health` | `agora_submitTransaction` / `agora_submitBlock` |
+| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` | `agora_getBlockTemplate` / `agora_fundAddress` |
+| `agora_getMempool` / `agora_getNodeInfo` | `agora_getBalance` / `agora_getUtxos` |
+
+Clients (`agora-miner-sidecar`, stratum, faucet) forward `AGORA_RPC_TOKEN` as `Authorization: Bearer …`. Light clients accept optional `rpcToken` in `createLightClient`. Unauthorized calls return HTTP **401** with JSON-RPC error code `-32001`.
+
+### Public bind
+
+Non-loopback `AGORA_RPC_BIND` (e.g. `0.0.0.0:8545`) refuses to start unless `AGORA_RPC_ALLOW_PUBLIC_BIND=1`. Binding publicly without a token logs a warning.
 
 `agora_getBlock` returns explorer-friendly JSON (`id`, hex parent hashes, `tx_count`, and hex `transactions` with inputs/outputs). Address fields in tx outputs / balance / UTXO responses are **Bech32m** (`agora1…`); request params still accept hex or Bech32m.  
 `agora_getTransaction` returns `{ tx_id, status, block_id, index, fee, confirmations, transaction }` — wallets should poll until `confirmed` (missing txs return `status: "unknown"`, not an RPC error). Confirmed locations are indexed in `cf_warm` (`tx/` ‖ tx_id → block_id ‖ index) on admit / genesis. `confirmations` is blue-score depth vs the best tip (`max_tip_blue − block_blue + 1`) on live nodes (tip parent-distance on the in-memory test backend).  

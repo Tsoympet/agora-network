@@ -17,6 +17,4 @@ pub use bip44::{
 pub use error::CryptoError;
 pub use keys::{KeyPair, PublicKeyBytes, SignatureBytes};
 pub use mnemonic::{generate_mnemonic, seed_fingerprint, seed_from_mnemonic};
-pub use transaction::{
-    sign_transaction, signature_from_slice, signer_address, verify_transaction,
-};
+pub use transaction::{sign_transaction, signature_from_slice, signer_address, verify_transaction};

@@ -127,9 +127,8 @@ impl EvmExecutor for RevmExecutor {
                 .build()
                 .map_err(|e| RollupError::Execution(format!("tx env: {e:?}")))?;
 
-            evm.transact_commit(tx).map_err(|e| {
-                RollupError::Execution(format!("revm tx {idx} failed: {e:?}"))
-            })?;
+            evm.transact_commit(tx)
+                .map_err(|e| RollupError::Execution(format!("revm tx {idx} failed: {e:?}")))?;
         }
 
         let db_ref = &evm.ctx.journaled_state.database;

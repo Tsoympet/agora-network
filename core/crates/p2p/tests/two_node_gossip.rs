@@ -5,20 +5,19 @@ use agora_p2p::{dial_addr, Mempool, NetworkConfig, NetworkEvent, NetworkMessage,
 use agora_types::{Amount, Hash, OutPoint, Transaction, TxIn, TxOut};
 use tokio::time::timeout;
 
-const PHRASE: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const PHRASE: &str =
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 #[tokio::test]
 async fn two_nodes_exchange_signed_transaction() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (handle_a, mut events_a, node_a) = NetworkNode::build(
-        &NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"),
-    )
-    .expect("node a");
-    let (handle_b, mut events_b, node_b) = NetworkNode::build(
-        &NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"),
-    )
-    .expect("node b");
+    let (handle_a, mut events_a, node_a) =
+        NetworkNode::build(&NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"))
+            .expect("node a");
+    let (handle_b, mut events_b, node_b) =
+        NetworkNode::build(&NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"))
+            .expect("node b");
 
     tokio::spawn(node_a.run());
     tokio::spawn(node_b.run());

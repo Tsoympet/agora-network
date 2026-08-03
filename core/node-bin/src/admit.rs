@@ -142,7 +142,11 @@ impl ChainState {
         let mut boot = ChainBootConfig::default();
         boot.pow = algo;
         boot.initial_bits = initial_bits;
-        boot.daa.min_level = if initial_bits == 0 { 0 } else { boot.daa.min_level.max(1) };
+        boot.daa.min_level = if initial_bits == 0 {
+            0
+        } else {
+            boot.daa.min_level.max(1)
+        };
         Self::bootstrap_with(store, genesis, boot, storage)
     }
 
@@ -182,9 +186,7 @@ impl ChainState {
     }
 
     pub fn virtual_tip(&self) -> Result<Hash, AdmitError> {
-        Ok(self
-            .load_virtual_tip()?
-            .unwrap_or(self.genesis))
+        Ok(self.load_virtual_tip()?.unwrap_or(self.genesis))
     }
 
     pub fn store(&self) -> &Arc<StateStore> {
@@ -327,14 +329,18 @@ impl ChainState {
     }
 
     pub fn load_block(&self, hash: &Hash) -> Result<Option<Block>, AdmitError> {
-        for cf in [ColumnFamily::Hot, ColumnFamily::Warm, ColumnFamily::Archival] {
+        for cf in [
+            ColumnFamily::Hot,
+            ColumnFamily::Warm,
+            ColumnFamily::Archival,
+        ] {
             if let Some(bytes) = self
                 .store
                 .get_cf(cf, hash.as_bytes())
                 .map_err(|e| AdmitError::Storage(e.to_string()))?
             {
-                let block = borsh::from_slice(&bytes)
-                    .map_err(|e| AdmitError::Storage(e.to_string()))?;
+                let block =
+                    borsh::from_slice(&bytes).map_err(|e| AdmitError::Storage(e.to_string()))?;
                 return Ok(Some(block));
             }
         }
@@ -560,8 +566,7 @@ impl ChainState {
                 max: self.limits.max_block_transactions,
             });
         }
-        let block_bytes =
-            borsh::to_vec(block).map_err(|e| AdmitError::Storage(e.to_string()))?;
+        let block_bytes = borsh::to_vec(block).map_err(|e| AdmitError::Storage(e.to_string()))?;
         if block_bytes.len() > self.limits.max_block_bytes {
             return Err(AdmitError::BlockTooLarge {
                 got: block_bytes.len(),
@@ -583,8 +588,7 @@ impl ChainState {
                     max: self.limits.max_tx_outputs,
                 });
             }
-            let tx_bytes =
-                borsh::to_vec(tx).map_err(|e| AdmitError::Storage(e.to_string()))?;
+            let tx_bytes = borsh::to_vec(tx).map_err(|e| AdmitError::Storage(e.to_string()))?;
             if tx_bytes.len() > self.limits.max_tx_bytes {
                 return Err(AdmitError::TxTooLarge {
                     tx_index,
@@ -732,11 +736,7 @@ impl ChainState {
 
     fn persist_virtual_tip(&self, tip: Hash) -> Result<(), AdmitError> {
         self.store
-            .put_cf(
-                ColumnFamily::Meta,
-                meta_keys::VIRTUAL_TIP,
-                tip.as_bytes(),
-            )
+            .put_cf(ColumnFamily::Meta, meta_keys::VIRTUAL_TIP, tip.as_bytes())
             .map_err(|e| AdmitError::Storage(e.to_string()))
     }
 
@@ -887,8 +887,7 @@ impl ChainState {
     }
 
     fn persist_block(&self, block: &Block, id: Hash) -> Result<(), AdmitError> {
-        let block_bytes =
-            borsh::to_vec(block).map_err(|e| AdmitError::Storage(e.to_string()))?;
+        let block_bytes = borsh::to_vec(block).map_err(|e| AdmitError::Storage(e.to_string()))?;
         self.store
             .put_cf(ColumnFamily::Hot, id.as_bytes(), &block_bytes)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -905,8 +904,7 @@ impl ChainState {
         if !tips.contains(&id) {
             tips.push(id);
         }
-        let tips_bytes =
-            borsh::to_vec(&tips).map_err(|e| AdmitError::Storage(e.to_string()))?;
+        let tips_bytes = borsh::to_vec(&tips).map_err(|e| AdmitError::Storage(e.to_string()))?;
         self.store
             .put_cf(ColumnFamily::Meta, meta_keys::TIPS, &tips_bytes)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -981,13 +979,17 @@ impl ChainState {
 }
 
 fn load_block_bytes(store: &StateStore, hash: &Hash) -> Result<Option<Block>, AdmitError> {
-    for cf in [ColumnFamily::Hot, ColumnFamily::Warm, ColumnFamily::Archival] {
+    for cf in [
+        ColumnFamily::Hot,
+        ColumnFamily::Warm,
+        ColumnFamily::Archival,
+    ] {
         if let Some(bytes) = store
             .get_cf(cf, hash.as_bytes())
             .map_err(|e| AdmitError::Storage(e.to_string()))?
         {
-            let block = borsh::from_slice(&bytes)
-                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            let block =
+                borsh::from_slice(&bytes).map_err(|e| AdmitError::Storage(e.to_string()))?;
             return Ok(Some(block));
         }
     }
@@ -1023,7 +1025,10 @@ fn rebuild_dag_from_store(
             continue;
         }
         let block = load_block_bytes(store, &hash)?.ok_or_else(|| {
-            AdmitError::Storage(format!("missing block {} while rebuilding dag", hash.to_hex()))
+            AdmitError::Storage(format!(
+                "missing block {} while rebuilding dag",
+                hash.to_hex()
+            ))
         })?;
         for parent in &block.header.parents {
             stack.push(*parent);
@@ -1064,10 +1069,7 @@ fn rebuild_dag_from_store(
 }
 
 fn common_prefix_len(a: &[Hash], b: &[Hash]) -> usize {
-    a.iter()
-        .zip(b.iter())
-        .take_while(|(x, y)| x == y)
-        .count()
+    a.iter().zip(b.iter()).take_while(|(x, y)| x == y).count()
 }
 
 fn load_or_init_difficulty(
@@ -1104,11 +1106,21 @@ mod tests {
     fn rejects_wrong_bits_and_persists_difficulty() {
         let store = Arc::new(StateStore::open_in_memory());
         let genesis = GenesisBuilder::default().ignite(&store).unwrap();
-        let mut chain =
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, StoragePolicy::default()).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store.clone(),
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
         assert_eq!(chain.difficulty().as_bits(), 0);
         assert_eq!(
-            chain.block_template(Address::ZERO, &[]).unwrap().header.bits,
+            chain
+                .block_template(Address::ZERO, &[])
+                .unwrap()
+                .header
+                .bits,
             0
         );
 
@@ -1117,7 +1129,10 @@ mod tests {
         bad.header.nonce = 1;
         assert!(matches!(
             chain.admit_block(bad),
-            Err(AdmitError::WrongDifficulty { expected: 0, got: 3 })
+            Err(AdmitError::WrongDifficulty {
+                expected: 0,
+                got: 3
+            })
         ));
 
         let mut bad_root = chain.block_template(Address::ZERO, &[]).unwrap();
@@ -1150,8 +1165,14 @@ mod tests {
         chain.difficulty = next;
         chain.persist_difficulty().unwrap();
 
-        let reloaded =
-            ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0, StoragePolicy::default()).unwrap();
+        let reloaded = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
         assert_eq!(reloaded.difficulty().as_bits(), next.level);
         assert_eq!(
             reloaded
@@ -1167,8 +1188,14 @@ mod tests {
     fn bootstrap_rebuilds_dag_from_store_tips() {
         let store = Arc::new(StateStore::open_in_memory());
         let genesis = GenesisBuilder::default().ignite(&store).unwrap();
-        let mut chain =
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, StoragePolicy::default()).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store.clone(),
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
         let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
         block.header.nonce = 3;
         let digest = RandomXPowHasher.pow_hash(&block.header);
@@ -1177,8 +1204,14 @@ mod tests {
             .unwrap();
         let id = chain.admit_block(block).unwrap();
 
-        let reloaded =
-            ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0, StoragePolicy::default()).unwrap();
+        let reloaded = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
         assert!(reloaded.has_block(&id).unwrap());
         assert!(reloaded.tips().unwrap().contains(&id));
         let child = reloaded.block_template(Address::ZERO, &[]).unwrap();
@@ -1288,12 +1321,7 @@ mod tests {
         assert!(chain.confirmations(&genesis).unwrap() >= 3);
     }
 
-    fn mine_child(
-        chain: &mut ChainState,
-        parents: &[Hash],
-        payout: Address,
-        nonce: u64,
-    ) -> Hash {
+    fn mine_child(chain: &mut ChainState, parents: &[Hash], payout: Address, nonce: u64) -> Hash {
         let mut block = chain.block_template(payout, &[]).unwrap();
         block.header.parents = parents.to_vec();
         block.header.nonce = nonce;
@@ -1381,9 +1409,9 @@ mod tests {
                 .as_base_units(),
             reward
         );
-        let reward_c = chain.emission.reward_at_blue_score(
-            chain.ghostdag.blue_score(&c).unwrap(),
-        );
+        let reward_c = chain
+            .emission
+            .reward_at_blue_score(chain.ghostdag.blue_score(&c).unwrap());
         assert_eq!(
             balance_of(store.as_ref(), &miner_c)
                 .unwrap()
@@ -1609,9 +1637,7 @@ mod tests {
         assert!(locator.len() <= agora_p2p::MAX_LOCATOR_HASHES);
 
         // Peer at genesis asks for headers toward tip.
-        let headers = chain
-            .headers_after_locator(&[genesis], 5, None)
-            .unwrap();
+        let headers = chain.headers_after_locator(&[genesis], 5, None).unwrap();
         assert_eq!(headers.len(), 5);
         assert!(headers[0].parents.contains(&genesis));
         for window in headers.windows(2) {

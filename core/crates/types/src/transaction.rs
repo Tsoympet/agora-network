@@ -8,8 +8,20 @@ use crate::{Amount, Hash};
 
 /// Bech32-ready raw payload for a secp256k1-derived address (20-byte hash of pubkey).
 #[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    Default,
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
+    TS,
 )]
 #[ts(export)]
 pub struct Address(pub [u8; 20]);
@@ -39,9 +51,8 @@ impl Address {
 
     /// Bech32m encoding with an explicit HRP (`agora` / `agoratest` / `agoradev`).
     pub fn to_bech32_hrp(&self, hrp: &str) -> String {
-        let hrp = Hrp::parse(hrp).unwrap_or_else(|_| {
-            Hrp::parse(ADDRESS_HRP).expect("static ADDRESS_HRP")
-        });
+        let hrp = Hrp::parse(hrp)
+            .unwrap_or_else(|_| Hrp::parse(ADDRESS_HRP).expect("static ADDRESS_HRP"));
         bech32::encode::<Bech32m>(hrp, &self.0).expect("20-byte bech32m encode")
     }
 
@@ -82,8 +93,18 @@ impl std::fmt::Display for Address {
 
 /// Reference to a previous transaction output spent by an input.
 #[derive(
-    Clone, Copy, PartialEq, Eq, Hash, Debug, Default,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Debug,
+    Default,
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
+    TS,
 )]
 #[ts(export)]
 pub struct OutPoint {
@@ -93,8 +114,7 @@ pub struct OutPoint {
 
 /// Single transaction input.
 #[derive(
-    Clone, PartialEq, Eq, Debug,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct TxIn {
@@ -103,8 +123,7 @@ pub struct TxIn {
 
 /// Single transaction output.
 #[derive(
-    Clone, PartialEq, Eq, Debug,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct TxOut {
@@ -123,8 +142,7 @@ pub struct TransactionBody {
 
 /// Transfer transaction used across consensus, mempool, and RPC.
 #[derive(
-    Clone, PartialEq, Eq, Debug,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct Transaction {

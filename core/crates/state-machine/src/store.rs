@@ -46,16 +46,15 @@ impl StateStore {
         use rocksdb::{ColumnFamilyDescriptor, Options, DB};
 
         if let Some(parent) = path.as_ref().parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| StateError::Storage(e.to_string()))?;
+            std::fs::create_dir_all(parent).map_err(|e| StateError::Storage(e.to_string()))?;
         }
 
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
-        let cfs = ColumnFamily::ALL
-            .map(|cf| ColumnFamilyDescriptor::new(cf.name(), Options::default()));
+        let cfs =
+            ColumnFamily::ALL.map(|cf| ColumnFamilyDescriptor::new(cf.name(), Options::default()));
 
         let db = DB::open_cf_descriptors(&opts, path, cfs)
             .map_err(|e| StateError::Storage(e.to_string()))?;
@@ -150,8 +149,7 @@ impl StateStore {
                 let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
                 let iter = db.iterator_cf(handle, rocksdb::IteratorMode::Start);
                 for item in iter {
-                    let (key, value) =
-                        item.map_err(|e| StateError::Storage(e.to_string()))?;
+                    let (key, value) = item.map_err(|e| StateError::Storage(e.to_string()))?;
                     f(key.as_ref(), value.as_ref())?;
                 }
                 Ok(())
@@ -177,7 +175,11 @@ mod tests {
             );
         }
         store
-            .put_cf(ColumnFamily::Meta, meta_keys::MAX_SUPPLY, &1_000u64.to_le_bytes())
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::MAX_SUPPLY,
+                &1_000u64.to_le_bytes(),
+            )
             .unwrap();
         assert!(store
             .get_cf(ColumnFamily::Meta, meta_keys::MAX_SUPPLY)

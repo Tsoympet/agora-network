@@ -11,9 +11,11 @@ name = "agora-node"
 path = "src/main.rs"
 
 [features]
-default = ["rocksdb"]
+default = ["rocksdb", "randomx"]
 # Durable column-family storage (requires C++ toolchain / libstdc++).
 rocksdb = ["agora-state-machine/rocksdb"]
+# Official RandomX verify/mine path (cmake + libstdc++).
+randomx = ["agora-consensus/randomx"]
 
 [dependencies]
 agora-types = { workspace = true }

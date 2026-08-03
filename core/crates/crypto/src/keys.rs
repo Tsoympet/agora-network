@@ -18,8 +18,8 @@ pub struct KeyPair {
 impl KeyPair {
     pub fn from_secret_bytes(secret: &[u8]) -> Result<Self, CryptoError> {
         let secp = Secp256k1::new();
-        let secret = SecretKey::from_slice(secret)
-            .map_err(|e| CryptoError::Secp256k1(e.to_string()))?;
+        let secret =
+            SecretKey::from_slice(secret).map_err(|e| CryptoError::Secp256k1(e.to_string()))?;
         let public = PublicKey::from_secret_key(&secp, &secret);
         Ok(Self { secret, public })
     }

@@ -272,10 +272,7 @@ impl RpcBackend for InMemoryBackend {
     }
 
     fn get_balance(&self, address: &Address) -> Amount {
-        self.balances
-            .get(address)
-            .copied()
-            .unwrap_or(Amount::ZERO)
+        self.balances.get(address).copied().unwrap_or(Amount::ZERO)
     }
 
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError> {
@@ -301,10 +298,7 @@ impl RpcBackend for InMemoryBackend {
             amount.as_base_units(),
             self.fund_nonce,
         ));
-        let op = OutPoint {
-            tx_id,
-            index: 0,
-        };
+        let op = OutPoint { tx_id, index: 0 };
         self.utxos.insert(
             op,
             TxOut {
