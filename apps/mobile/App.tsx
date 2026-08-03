@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import * as Clipboard from "expo-clipboard";
 import { StatusBar } from "expo-status-bar";
 import {
   Image,
@@ -11,13 +12,16 @@ import {
 } from "react-native";
 import { agoraBrand } from "../shared/brand/tokens";
 import {
-  addressFromMnemonic,
+  addressBech32FromMnemonic,
   createLightClient,
+  generateMnemonic,
   parseAddress,
   sendTransfer,
+  shortAddress,
   shortHash,
   startTipSync,
   watchTransaction,
+  type LightNodeInfo,
   type LightTxLookup,
   type LightUtxo,
   type TipSyncSnapshot,
@@ -45,6 +49,7 @@ export default function App() {
     error: null,
     updatedAt: null,
   });
+  const [nodeInfo, setNodeInfo] = useState<LightNodeInfo | null>(null);
   const [address, setAddress] = useState("");
   const [balance, setBalance] = useState<number | null>(null);
   const [utxos, setUtxos] = useState<LightUtxo[]>([]);
@@ -59,11 +64,31 @@ export default function App() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastTxId, setLastTxId] = useState<string | null>(null);
   const [txLookup, setTxLookup] = useState<LightTxLookup | null>(null);
-  const [derivedAddress, setDerivedAddress] = useState<string | null>(null);
+  const [receiveBech32, setReceiveBech32] = useState<string | null>(null);
+  const [receiveHex, setReceiveHex] = useState<string | null>(null);
+  const [copyHint, setCopyHint] = useState<string | null>(null);
 
   useEffect(() => startTipSync({ client, pollMs: POLL_MS, onUpdate: setSnap }), [
     client,
   ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function pollNode() {
+      try {
+        const info = await client.getNodeInfo();
+        if (!cancelled) setNodeInfo(info);
+      } catch {
+        if (!cancelled) setNodeInfo(null);
+      }
+    }
+    void pollNode();
+    const id = setInterval(pollNode, Math.max(POLL_MS, 4000));
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [client]);
 
   useEffect(() => {
     if (!lastTxId) {
@@ -115,13 +140,45 @@ export default function App() {
 
   function onDerive() {
     try {
-      const hex = addressFromMnemonic(mnemonic);
-      setDerivedAddress(hex);
-      setAddress(hex);
+      const bech32 = addressBech32FromMnemonic(mnemonic);
+      const hex = parseAddress(bech32);
+      setReceiveBech32(bech32);
+      setReceiveHex(hex);
+      setAddress(bech32);
       setSendError(null);
+      setCopyHint(null);
     } catch (err) {
-      setDerivedAddress(null);
+      setReceiveBech32(null);
+      setReceiveHex(null);
       setSendError(err instanceof Error ? err.message : "invalid mnemonic");
+    }
+  }
+
+  function onGenerate() {
+    const phrase = generateMnemonic(128);
+    setMnemonic(phrase);
+    try {
+      const bech32 = addressBech32FromMnemonic(phrase);
+      const hex = parseAddress(bech32);
+      setReceiveBech32(bech32);
+      setReceiveHex(hex);
+      setAddress(bech32);
+      setSendError(null);
+      setCopyHint(null);
+    } catch (err) {
+      setReceiveBech32(null);
+      setReceiveHex(null);
+      setSendError(err instanceof Error ? err.message : "generate failed");
+    }
+  }
+
+  async function onCopyReceive() {
+    if (!receiveBech32) return;
+    try {
+      await Clipboard.setStringAsync(receiveBech32);
+      setCopyHint("Copied Bech32 address");
+    } catch {
+      setCopyHint("Clipboard unavailable");
     }
   }
 
@@ -148,8 +205,9 @@ export default function App() {
         fee: Math.floor(feeN),
       });
       setLastTxId(tx_id);
-      setDerivedAddress(built.from);
-      setAddress(built.from);
+      setReceiveBech32(built.fromBech32);
+      setReceiveHex(built.from);
+      setAddress(built.fromBech32);
       const [bal, set] = await Promise.all([
         client.getBalance(built.from),
         client.getUtxos(built.from),
@@ -170,11 +228,11 @@ export default function App() {
         <Image source={require("./assets/icon.png")} style={styles.icon} />
         <Text style={styles.brand}>Agora Network</Text>
         <Text style={styles.lede}>
-          Light client shell. Tip sync, UTXO lookup, and signed BIP-44 sends
-          follow the live DAG over HTTP JSON-RPC.
+          Mobile wallet: Bech32 receive, BIP-39 send, and live DAG tip sync over
+          HTTP JSON-RPC.
         </Text>
 
-        <Text style={styles.eyebrow}>Light client</Text>
+        <Text style={styles.eyebrow}>Node</Text>
         <Text style={styles.meta}>
           <Text style={{ color: statusColor }}>
             {snap.status === "ok"
@@ -184,8 +242,22 @@ export default function App() {
                 : "connecting"}
           </Text>
           {` · ${snap.tips.length} tip${snap.tips.length === 1 ? "" : "s"}`}
+          {nodeInfo
+            ? ` · mempool ${nodeInfo.mempool_count} · ${nodeInfo.pow_algorithm}`
+            : ""}
+          {nodeInfo
+            ? nodeInfo.archival
+              ? " · archival"
+              : ` · hot ${nodeInfo.hot_window}`
+            : ""}
+          {nodeInfo?.connected_peers != null
+            ? ` · peers ${nodeInfo.connected_peers}`
+            : ""}
         </Text>
-        <Text style={styles.rpc}>{client.rpcUrl}</Text>
+        <Text style={styles.rpc}>
+          {client.rpcUrl}
+          {nodeInfo?.version ? ` · ${nodeInfo.version}` : ""}
+        </Text>
         {snap.error ? <Text style={styles.error}>{snap.error}</Text> : null}
 
         <View style={styles.tipList}>
@@ -213,12 +285,35 @@ export default function App() {
           </Text>
         ) : null}
 
+        <Text style={styles.eyebrow}>Receive</Text>
+        <Text style={styles.meta}>
+          Primary address is Bech32m (agora1…). Hex is secondary.
+        </Text>
+        {receiveBech32 ? (
+          <>
+            <Text style={[styles.tipRow, { color: agoraBrand.colors.cyan }]}>
+              {receiveBech32}
+            </Text>
+            {receiveHex ? (
+              <Text style={styles.tipRow}>hex {receiveHex}</Text>
+            ) : null}
+            <Pressable onPress={() => void onCopyReceive()} style={styles.lookupBtn}>
+              <Text style={styles.lookupLabel}>Copy address</Text>
+            </Pressable>
+            {copyHint ? <Text style={styles.meta}>{copyHint}</Text> : null}
+          </>
+        ) : (
+          <Text style={styles.meta}>
+            Generate or derive a mnemonic below to get a receive address.
+          </Text>
+        )}
+
         <Text style={styles.eyebrow}>Wallet</Text>
         <View style={styles.walletRow}>
           <TextInput
             value={address}
             onChangeText={setAddress}
-            placeholder="40-hex address"
+            placeholder="agora1… or 40-hex"
             placeholderTextColor={agoraBrand.colors.inkMuted}
             autoCapitalize="none"
             autoCorrect={false}
@@ -261,16 +356,23 @@ export default function App() {
           multiline
           style={[styles.input, styles.mnemonic]}
         />
-        <Pressable onPress={onDerive} style={styles.lookupBtn}>
-          <Text style={styles.lookupLabel}>Derive address</Text>
-        </Pressable>
-        {derivedAddress ? (
-          <Text style={styles.tipRow}>{derivedAddress}</Text>
+        <View style={styles.actions}>
+          <Pressable onPress={onGenerate} style={styles.lookupBtn}>
+            <Text style={styles.lookupLabel}>Generate mnemonic</Text>
+          </Pressable>
+          <Pressable onPress={onDerive} style={styles.lookupBtn}>
+            <Text style={styles.lookupLabel}>Derive address</Text>
+          </Pressable>
+        </View>
+        {receiveBech32 ? (
+          <Text style={styles.tipRow} numberOfLines={1}>
+            {shortAddress(receiveBech32)}
+          </Text>
         ) : null}
         <TextInput
           value={toAddress}
           onChangeText={setToAddress}
-          placeholder="to address (40-hex)"
+          placeholder="to agora1… or 40-hex"
           placeholderTextColor={agoraBrand.colors.inkMuted}
           autoCapitalize="none"
           autoCorrect={false}
@@ -313,6 +415,7 @@ export default function App() {
             {txLookup?.status === "confirmed" && txLookup.block_id
               ? ` @ ${shortHash(txLookup.block_id)}`
               : ""}
+            {txLookup?.fee != null ? ` · fee ${txLookup.fee}` : ""}
           </Text>
         ) : null}
       </ScrollView>
@@ -394,6 +497,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     alignItems: "center",
+  },
+  actions: {
+    marginTop: 4,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
   },
   input: {
     flex: 1,

@@ -6,12 +6,21 @@
 import { sha256 } from "@noble/hashes/sha256";
 import * as secp from "@noble/secp256k1";
 import { HDKey } from "@scure/bip32";
-import { mnemonicToSeedSync, validateMnemonic as bip39Validate } from "@scure/bip39";
+import {
+  generateMnemonic as bip39Generate,
+  mnemonicToSeedSync,
+  validateMnemonic as bip39Validate,
+} from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 
 export { wordlist };
 export const validateMnemonic = (mnemonic: string): boolean =>
   bip39Validate(mnemonic.trim().toLowerCase().replace(/\s+/g, " "), wordlist);
+
+/** Fresh BIP-39 mnemonic (`strength` 128 → 12 words, 256 → 24). */
+export function generateMnemonic(strength: 128 | 256 = 128): string {
+  return bip39Generate(wordlist, strength);
+}
 
 import { encodeAddress, parseAddress } from "./address";
 import type { LightClient, LightUtxo } from "./rpc";
@@ -31,8 +40,14 @@ export type WalletAccount = {
 export type BuiltTransfer = {
   /** Native-serde JSON body for `agora_submitTransaction`. */
   tx: Record<string, unknown>;
+  /** Sender hex (consensus). */
   from: string;
+  /** Sender Bech32m display. */
+  fromBech32: string;
+  /** Destination hex. */
   to: string;
+  /** Destination Bech32m. */
+  toBech32: string;
   amount: number;
   change: number;
   fee: number;
@@ -108,6 +123,15 @@ export function addressFromMnemonic(
   passphrase = "",
 ): string {
   return deriveAccount(mnemonic, index, passphrase).addressHex;
+}
+
+/** Bech32m (`agora1…`) form of the derived external address. */
+export function addressBech32FromMnemonic(
+  mnemonic: string,
+  index = 0,
+  passphrase = "",
+): string {
+  return deriveAccount(mnemonic, index, passphrase).addressBech32;
 }
 
 export function deriveAccount(mnemonic: string, index = 0, passphrase = ""): WalletAccount {
@@ -225,7 +249,9 @@ export async function buildSignedTransfer(options: {
   return {
     tx,
     from: account.addressHex,
+    fromBech32: account.addressBech32,
     to: toHex,
+    toBech32: encodeAddress(toHex),
     amount: options.amount,
     change,
     fee,

@@ -1,6 +1,14 @@
 # Agora Desktop
 
-Tauri + Vite wallet shell (Obsidian & Gold) with HTTP JSON-RPC tip sync.
+Vite wallet shell (Obsidian & Gold) with HTTP JSON-RPC tip sync. Tauri packaging
+hooks live under `src-tauri/`; day-to-day development uses `npm run dev`.
+
+## Features
+
+- Bech32m receive (`agora1…`) with hex secondary + copy
+- BIP-39 generate / derive (`m/44'/8888'/0'/0/0`) and signed send
+- Compact node strip via `agora_getNodeInfo` (mempool, PoW, peers, archival)
+- Post-send pending → confirmed + confirmation depth
 
 ```bash
 # Terminal A

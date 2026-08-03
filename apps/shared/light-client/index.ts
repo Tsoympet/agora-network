@@ -32,10 +32,12 @@ export {
   shortAddress,
 } from "./address";
 export {
+  addressBech32FromMnemonic,
   addressFromMnemonic,
   buildSignedTransfer,
   deriveAccount,
   encodeTransactionBody,
+  generateMnemonic,
   sendTransfer,
   validateMnemonic,
   wordlist,
