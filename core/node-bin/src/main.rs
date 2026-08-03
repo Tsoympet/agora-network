@@ -8,6 +8,7 @@ mod genesis_cli;
 mod http;
 mod storage_policy;
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,9 +16,9 @@ use std::time::Duration;
 use agora_consensus::PowAlgorithm;
 use agora_p2p::{
     dial_addr, drain_orphans_after, fetch_seeder_peers_best_effort, load_or_generate_identity,
-    merge_bootstrap_peers, reconstruct_compact_block, Mempool, NetworkConfig, NetworkEvent,
-    NetworkHandle, NetworkMessage, NetworkNode, OrphanPool, PeerId, PendingFetches,
-    ReconstructError, SeederBook,
+    merge_bootstrap_peers, reconstruct_compact_block, validate_header_chain, GetHeadersRequest,
+    Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage, NetworkNode, OrphanPool,
+    PeerId, PendingFetches, ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{ChainParams, NetworkId, StateStore};
@@ -304,6 +305,88 @@ fn gossip_getblock_fallback(pending: &mut PendingFetches, net: &NetworkHandle, h
     }
 }
 
+fn kick_headers_sync(
+    chain: &Arc<Mutex<ChainState>>,
+    net: &NetworkHandle,
+    peer: PeerId,
+    header_sync: &mut HashSet<PeerId>,
+) {
+    if !header_sync.insert(peer) {
+        return;
+    }
+    let locator = match chain.lock() {
+        Ok(guard) => match guard.block_locator() {
+            Ok(l) => l,
+            Err(err) => {
+                warn!(%peer, error = %err, "block locator failed");
+                header_sync.remove(&peer);
+                return;
+            }
+        },
+        Err(_) => {
+            header_sync.remove(&peer);
+            return;
+        }
+    };
+    let req = GetHeadersRequest::new(locator, MAX_HEADERS_PER_RESPONSE);
+    if let Err(err) = net.request_headers(peer, req) {
+        warn!(%peer, error = %err, "getheaders request failed");
+        header_sync.remove(&peer);
+    } else {
+        info!(%peer, "headers-first IBD requested");
+    }
+}
+
+fn process_headers_response(
+    chain: &Arc<Mutex<ChainState>>,
+    pending: &mut PendingFetches,
+    net: &NetworkHandle,
+    peer: PeerId,
+    headers: Vec<agora_types::BlockHeader>,
+    header_sync: &mut HashSet<PeerId>,
+) {
+    if headers.is_empty() {
+        header_sync.remove(&peer);
+        info!(%peer, "getheaders empty — peer not ahead");
+        return;
+    }
+    if let Err(err) = validate_header_chain(&headers) {
+        score_peer(net, peer, false);
+        header_sync.remove(&peer);
+        warn!(%peer, error = %err, "rejected getheaders chain");
+        return;
+    }
+
+    let mut missing = 0usize;
+    for header in &headers {
+        let hash = header.hash();
+        let have = chain
+            .lock()
+            .ok()
+            .and_then(|g| g.has_block(&hash).ok())
+            .unwrap_or(false);
+        if !have {
+            missing += 1;
+            request_block_if_missing(chain, pending, net, peer, hash);
+        }
+    }
+    score_peer(net, peer, true);
+    info!(
+        %peer,
+        headers = headers.len(),
+        missing,
+        "getheaders batch — fetching bodies oldest-first"
+    );
+
+    // Continue until the peer reports no further headers.
+    if headers.len() as u32 >= MAX_HEADERS_PER_RESPONSE {
+        header_sync.remove(&peer);
+        kick_headers_sync(chain, net, peer, header_sync);
+    } else {
+        header_sync.remove(&peer);
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let mut argv = std::env::args().skip(1);
@@ -483,6 +566,7 @@ async fn main() {
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));
         let mut orphans = OrphanPool::new(Duration::from_secs(120), 1_024);
+        let mut header_sync: HashSet<PeerId> = HashSet::new();
         let refresh_every = seeder_book
             .as_ref()
             .map(|b| b.refresh_interval())
@@ -539,11 +623,13 @@ async fn main() {
                 NetworkEvent::PeerConnected(peer) => {
                     let n = connected_peers.fetch_add(1, Ordering::Relaxed) + 1;
                     info!(%peer, connected = n, "peer connected");
+                    kick_headers_sync(&chain, &net, peer, &mut header_sync);
                 }
                 NetworkEvent::PeerDisconnected(peer) => {
                     let prev = connected_peers.load(Ordering::Relaxed);
                     let n = prev.saturating_sub(1);
                     connected_peers.store(n, Ordering::Relaxed);
+                    header_sync.remove(&peer);
                     info!(%peer, connected = n, "peer disconnected");
                 }
                 NetworkEvent::GetBlockRequest {
@@ -569,6 +655,39 @@ async fn main() {
                     } else {
                         info!(%peer, hash = %hash.to_hex(), "getblock rr miss");
                     }
+                }
+                NetworkEvent::GetHeadersRequest {
+                    peer,
+                    locator,
+                    limit,
+                    stop_hash,
+                    request_id,
+                } => {
+                    let headers = chain
+                        .lock()
+                        .ok()
+                        .and_then(|g| g.headers_after_locator(&locator, limit, stop_hash).ok())
+                        .unwrap_or_default();
+                    let n = headers.len();
+                    if let Err(err) = net.respond_get_headers(request_id, headers) {
+                        warn!(%peer, error = %err, "getheaders rr respond failed");
+                    } else {
+                        info!(%peer, headers = n, "served getheaders rr");
+                    }
+                }
+                NetworkEvent::GetHeadersResponse { peer, headers } => {
+                    process_headers_response(
+                        &chain,
+                        &mut pending,
+                        &net,
+                        peer,
+                        headers,
+                        &mut header_sync,
+                    );
+                }
+                NetworkEvent::GetHeadersFailure { peer, error } => {
+                    header_sync.remove(&peer);
+                    warn!(%peer, %error, "getheaders rr failure");
                 }
                 NetworkEvent::GetBlockResponse { peer, hash, block } => match block {
                     Some(block) => {

@@ -47,15 +47,21 @@ Receivers try `reconstruct_compact_block` against the local mempool. On miss (or
 
 When a full body arrives but parents are unknown, `agora-node` **parks** it in an in-memory `OrphanPool` (TTL + max size) and issues GetBlock for each missing parent — without penalizing the peer. After a parent admits, `drain_orphans_after` re-tries waiting children (re-parking if other parents are still missing). Orphans are not persisted across restart.
 
+### Headers-first / locator IBD
+
+On `PeerConnected`, the node builds a Bitcoin-style **block locator** along the virtual selected-parent spine and requests headers over **`/agora/<network>/getheaders/1`** (CBOR request-response). The peer returns an oldest→newest header batch after the common ancestor. The client validates parent links, then fetches missing bodies with GetBlock (oldest-first). Full batches re-issue GetHeaders until the peer is not ahead.
+
 Empty-tx templates reconstruct immediately (no mempool lookup).
 
 | Test | Covers |
 | --- | --- |
 | `compact_block_ibd` | gossip announce / compact wire path |
 | `getblock_request_response` | direct getblock roundtrip |
+| `getheaders_request_response` | locator → headers RR |
 | `topics` unit tests | `dev` vs `testnet` topic / protocol isolation |
 | `ibd::orphan_pool_*` / `drain_orphans_*` | park / release / capacity / BFS drain |
 | `admit::orphan_pool_recovers_out_of_order_child` | tip-before-parent → fetch path via pool |
+| `admit::block_locator_and_headers_after_locator` | spine locator + header slice |
 
 ## Mempool
 

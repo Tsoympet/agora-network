@@ -202,6 +202,12 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Network HRPs:** `agora` / `agoratest` / `agoradev` (decode accepts all; encode per network)
 - [x] **Provisional SLIP-0044:** coin type `8888` documented pending registration; mainnet draft artifact
 
+## Phase 33: Headers-first / locator IBD — done
+
+- [x] **`/agora/<network>/getheaders/1`:** locator → header batch RR; validate spine; GetBlock bodies oldest-first
+- [x] **`ChainState::{block_locator,headers_after_locator}`** + PeerConnected sync kickoff
+- [x] **Mainnet freeze scaffolding:** `docs/governance/{SLIP0044,MAINNET_GENESIS_FREEZE}.md` + `scripts/prepare_mainnet_genesis.sh`
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

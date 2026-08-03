@@ -68,3 +68,12 @@ cargo run -p agora-node -- genesis verify --network testnet --file docs/genesis/
 | `AGORA_GENESIS_BITS` | `0` | **dev only** |
 
 `scripts/local_testnet.sh` sets `AGORA_NETWORK=testnet`. Wipe `AGORA_DATA*` after changing the frozen genesis hash fields.
+
+## Mainnet freeze
+
+See [`docs/governance/MAINNET_GENESIS_FREEZE.md`](../governance/MAINNET_GENESIS_FREEZE.md) and
+[`docs/governance/SLIP0044.md`](../governance/SLIP0044.md). Prep helper:
+
+```bash
+./scripts/prepare_mainnet_genesis.sh
+```
