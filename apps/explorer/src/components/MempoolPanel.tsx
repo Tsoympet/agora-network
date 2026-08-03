@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { shortAddress } from "../../../shared/light-client";
 import {
   getMempool,
   rpcUrl,
@@ -129,7 +130,7 @@ export function MempoolPanel() {
               <div className="mt-1 text-mist">
                 {entry.transaction.outputs.slice(0, 3).map((o, oi) => (
                   <div key={`${entry.tx_id}-o${oi}`}>
-                    → {shortHash(o.address)} · {o.value}
+                    → {shortAddress(o.address)} · {o.value}
                   </div>
                 ))}
               </div>

@@ -70,3 +70,13 @@ export function isAddress(input: string): boolean {
     return false;
   }
 }
+
+/** Abbreviate `agora1…` / hex for UI (keeps HRP visible for Bech32). */
+export function shortAddress(addr: string, side = 6): string {
+  const s = addr.trim();
+  if (s.startsWith("agora1") && s.length > side * 2 + 6) {
+    return `${s.slice(0, 6 + side)}…${s.slice(-side)}`;
+  }
+  if (s.length <= side * 2) return s;
+  return `${s.slice(0, side)}…${s.slice(-side)}`;
+}

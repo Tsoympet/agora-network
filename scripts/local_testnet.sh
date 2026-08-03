@@ -153,6 +153,8 @@ Suggested two-node IBD + tx gossip smoke:
   7. ./scripts/local_testnet.sh smoke-ibd   # mines 1 block on A, waits for B
 
 Premine mnemonic (abandon…about) external(0) → $PREMINE
+  (Bech32m: agora1l70vjmcfav256qu225hv4evu2qsya2dfajrcqc)
+Retention: AGORA_ARCHIVAL=1 AGORA_HOT_WINDOW=64 (set ARCHIVAL=0 for pruned)
 Note: agora_fundAddress is local mint only — use smoke-tx / mined blocks to prove gossip/IBD.
 EOF
 }

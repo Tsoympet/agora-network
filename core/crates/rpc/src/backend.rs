@@ -48,6 +48,24 @@ pub struct MempoolEntry {
     pub transaction: Transaction,
 }
 
+/// Operator-facing node snapshot for `agora_getNodeInfo`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeInfo {
+    pub network: String,
+    pub version: String,
+    pub peer_id: Option<String>,
+    pub connected_peers: Option<u32>,
+    pub tip_count: usize,
+    pub mempool_count: usize,
+    pub pow_algorithm: String,
+    pub bits: u32,
+    pub archival: bool,
+    pub hot_window: u32,
+    pub allow_fund: bool,
+    /// Bech32m miner payout address when known.
+    pub miner_address: Option<String>,
+}
+
 impl TxLookup {
     pub fn unknown(tx_id: Hash) -> Self {
         Self {
@@ -91,6 +109,8 @@ pub trait RpcBackend: Send {
     fn get_transaction(&self, tx_id: &Hash) -> Result<TxLookup, RpcError>;
     /// Pending mempool snapshot (fee-desc, then `tx_id`), capped by `limit`.
     fn get_mempool(&self, limit: usize) -> Result<Vec<MempoolEntry>, RpcError>;
+    /// Local node / storage / tip snapshot for explorers and operators.
+    fn get_node_info(&self) -> Result<NodeInfo, RpcError>;
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
     /// Live UTXO set for wallet coin selection.
@@ -183,6 +203,23 @@ impl RpcBackend for InMemoryBackend {
             entries.truncate(limit);
         }
         Ok(entries)
+    }
+
+    fn get_node_info(&self) -> Result<NodeInfo, RpcError> {
+        Ok(NodeInfo {
+            network: "agora".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            peer_id: None,
+            connected_peers: None,
+            tip_count: self.tips.len(),
+            mempool_count: self.mempool.len(),
+            pow_algorithm: "test".into(),
+            bits: self.template_bits,
+            archival: true,
+            hot_window: 0,
+            allow_fund: true,
+            miner_address: None,
+        })
     }
 
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError> {
