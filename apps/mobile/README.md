@@ -7,6 +7,7 @@ Expo light-client wallet with HTTP JSON-RPC tip sync. Metro watches
 
 - Bech32m receive (`agora1…`) with hex secondary + clipboard copy
 - BIP-39 generate / derive (`m/44'/8888'/0'/0/0`) and signed send
+- Password vault (AES-256-GCM) persisted via Expo SecureStore — Unlock / Save / Lock
 - Compact node strip via `agora_getNodeInfo`
 - Post-send pending → confirmed + confirmation depth + fee
 

@@ -11,11 +11,18 @@ import {
   View,
 } from "react-native";
 import { agoraBrand } from "../shared/brand/tokens";
+import * as SecureStore from "expo-secure-store";
 import {
   addressBech32FromMnemonic,
+  clearPersistedVault,
   createLightClient,
   generateMnemonic,
+  keyValueVault,
+  loadSealedVault,
+  openVault,
   parseAddress,
+  persistSealedVault,
+  sealVault,
   sendTransfer,
   shortAddress,
   shortHash,
@@ -26,6 +33,8 @@ import {
   type LightUtxo,
   type TipSyncSnapshot,
 } from "../shared/light-client";
+
+const vaultStorage = keyValueVault(SecureStore);
 
 function env(name: string): string | undefined {
   try {
@@ -57,6 +66,11 @@ export default function App() {
   const [walletBusy, setWalletBusy] = useState(false);
 
   const [mnemonic, setMnemonic] = useState("");
+  const [vaultPassword, setVaultPassword] = useState("");
+  const [vaultHasBlob, setVaultHasBlob] = useState(false);
+  const [vaultUnlocked, setVaultUnlocked] = useState(false);
+  const [vaultBusy, setVaultBusy] = useState(false);
+  const [vaultMsg, setVaultMsg] = useState<string | null>(null);
   const [toAddress, setToAddress] = useState("");
   const [amount, setAmount] = useState("1");
   const [fee, setFee] = useState("1");
@@ -71,6 +85,12 @@ export default function App() {
   useEffect(() => startTipSync({ client, pollMs: POLL_MS, onUpdate: setSnap }), [
     client,
   ]);
+
+  useEffect(() => {
+    void loadSealedVault(vaultStorage).then((sealed) => {
+      setVaultHasBlob(sealed !== null);
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,6 +177,7 @@ export default function App() {
   function onGenerate() {
     const phrase = generateMnemonic(128);
     setMnemonic(phrase);
+    setVaultUnlocked(true);
     try {
       const bech32 = addressBech32FromMnemonic(phrase);
       const hex = parseAddress(bech32);
@@ -165,10 +186,69 @@ export default function App() {
       setAddress(bech32);
       setSendError(null);
       setCopyHint(null);
+      setVaultMsg("New mnemonic in memory — set password and Save vault");
     } catch (err) {
       setReceiveBech32(null);
       setReceiveHex(null);
       setSendError(err instanceof Error ? err.message : "generate failed");
+    }
+  }
+
+  async function onSaveVault() {
+    setVaultBusy(true);
+    setVaultMsg(null);
+    try {
+      const sealed = await sealVault(mnemonic, vaultPassword);
+      await persistSealedVault(vaultStorage, sealed);
+      setVaultHasBlob(true);
+      setVaultUnlocked(true);
+      setVaultMsg("Vault saved to SecureStore");
+    } catch (err) {
+      setVaultMsg(err instanceof Error ? err.message : "save failed");
+    } finally {
+      setVaultBusy(false);
+    }
+  }
+
+  async function onUnlockVault() {
+    setVaultBusy(true);
+    setVaultMsg(null);
+    try {
+      const sealed = await loadSealedVault(vaultStorage);
+      if (!sealed) throw new Error("no vault on this device");
+      const phrase = await openVault(sealed, vaultPassword);
+      setMnemonic(phrase);
+      setVaultUnlocked(true);
+      const bech32 = addressBech32FromMnemonic(phrase);
+      setReceiveBech32(bech32);
+      setReceiveHex(parseAddress(bech32));
+      setAddress(bech32);
+      setVaultMsg("Vault unlocked");
+    } catch (err) {
+      setVaultMsg(err instanceof Error ? err.message : "unlock failed");
+    } finally {
+      setVaultBusy(false);
+    }
+  }
+
+  function onLockVault() {
+    setMnemonic("");
+    setVaultUnlocked(false);
+    setVaultPassword("");
+    setVaultMsg("Locked — mnemonic cleared from memory");
+  }
+
+  async function onDeleteVault() {
+    setVaultBusy(true);
+    try {
+      await clearPersistedVault(vaultStorage);
+      setVaultHasBlob(false);
+      setMnemonic("");
+      setVaultUnlocked(false);
+      setVaultPassword("");
+      setVaultMsg("Persisted vault deleted");
+    } finally {
+      setVaultBusy(false);
     }
   }
 
@@ -348,12 +428,67 @@ export default function App() {
 
         <Text style={styles.eyebrow}>Send</Text>
         <Text style={styles.meta}>
-          BIP-39 → m/44&apos;/8888&apos;/0&apos;/0/0 · fee to miner (min 1)
+          BIP-39 vault (AES-GCM + SecureStore) · m/44&apos;/8888&apos;/0&apos;/0/0 · fee ≥ 1
+        </Text>
+        <TextInput
+          value={vaultPassword}
+          onChangeText={setVaultPassword}
+          placeholder="vault password (min 8)"
+          placeholderTextColor={agoraBrand.colors.inkMuted}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={styles.input}
+        />
+        <View style={styles.actions}>
+          <Pressable
+            onPress={() => void onUnlockVault()}
+            disabled={vaultBusy || !vaultHasBlob}
+            style={styles.lookupBtn}
+          >
+            <Text style={styles.lookupLabel}>Unlock</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => void onSaveVault()}
+            disabled={vaultBusy || !mnemonic}
+            style={styles.lookupBtn}
+          >
+            <Text style={styles.lookupLabel}>Save vault</Text>
+          </Pressable>
+          <Pressable
+            onPress={onLockVault}
+            disabled={!vaultUnlocked}
+            style={styles.lookupBtn}
+          >
+            <Text style={styles.lookupLabel}>Lock</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => void onDeleteVault()}
+            disabled={vaultBusy || !vaultHasBlob}
+            style={styles.lookupBtn}
+          >
+            <Text style={styles.lookupLabel}>Delete</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.meta}>
+          {vaultMsg ||
+            (vaultHasBlob
+              ? vaultUnlocked
+                ? "Vault unlocked"
+                : "Vault found — unlock"
+              : "No vault — generate then Save")}
         </Text>
         <TextInput
           value={mnemonic}
-          onChangeText={setMnemonic}
-          placeholder="mnemonic"
+          onChangeText={(v) => {
+            setMnemonic(v);
+            if (v.trim()) setVaultUnlocked(true);
+          }}
+          placeholder={
+            vaultHasBlob && !vaultUnlocked
+              ? "unlock vault to load mnemonic"
+              : "mnemonic"
+          }
           placeholderTextColor={agoraBrand.colors.inkMuted}
           autoCapitalize="none"
           autoCorrect={false}

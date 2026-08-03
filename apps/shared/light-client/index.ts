@@ -48,3 +48,18 @@ export {
   type BuiltTransfer,
   type WalletAccount,
 } from "./wallet";
+export {
+  clearPersistedVault,
+  DEFAULT_VAULT_STORAGE_KEY,
+  keyValueVault,
+  loadSealedVault,
+  localStorageVault,
+  openVault,
+  parseVault,
+  persistSealedVault,
+  sealVault,
+  serializeVault,
+  vaultSelfTest,
+  type SealedVault,
+  type VaultStorage,
+} from "./vault";

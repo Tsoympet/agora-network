@@ -225,6 +225,13 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **`smoke-ibd-catchup`:** late-join helper (no mine) — wait for B to catch A's tips
 - [x] **`multiblock_headers_first_catchup`:** Rust test — lagging peer syncs via small GetHeaders batches + body admit
 
+## Phase 37: Encrypted wallet vault — done
+
+- [x] **AES-256-GCM + PBKDF2 vault** in `apps/shared/light-client/vault.ts` (seal / open / storage adapters)
+- [x] **Desktop:** localStorage persistence + unlock / lock / save / delete
+- [x] **Mobile:** Expo SecureStore adapter + same unlock flow
+- [x] **Finish-line doc:** [`docs/governance/PATH_TO_COMPLETE_CHAIN.md`](docs/governance/PATH_TO_COMPLETE_CHAIN.md)
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

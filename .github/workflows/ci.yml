@@ -43,6 +43,11 @@ jobs:
           cargo test -p agora-consensus --no-default-features
           cargo test -p agora-p2p
 
+      - name: Wallet vault crypto smoke
+        run: |
+          (cd apps/shared && npm ci --ignore-scripts)
+          node scripts/test_vault.mjs
+
       - name: Clippy (portable)
         run: >
           cargo clippy --workspace

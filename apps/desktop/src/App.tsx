@@ -1,9 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   addressBech32FromMnemonic,
+  clearPersistedVault,
   createLightClient,
   generateMnemonic,
+  loadSealedVault,
+  localStorageVault,
+  openVault,
   parseAddress,
+  persistSealedVault,
+  sealVault,
   sendTransfer,
   shortAddress,
   shortHash,
@@ -14,6 +20,8 @@ import {
   type LightUtxo,
   type TipSyncSnapshot,
 } from "../../shared/light-client";
+
+const vaultStorage = localStorageVault();
 
 function resolveRpcUrl(): string {
   return (
@@ -53,6 +61,11 @@ export function App() {
   const [walletBusy, setWalletBusy] = useState(false);
 
   const [mnemonic, setMnemonic] = useState("");
+  const [vaultPassword, setVaultPassword] = useState("");
+  const [vaultHasBlob, setVaultHasBlob] = useState(false);
+  const [vaultUnlocked, setVaultUnlocked] = useState(false);
+  const [vaultBusy, setVaultBusy] = useState(false);
+  const [vaultMsg, setVaultMsg] = useState<string | null>(null);
   const [toAddress, setToAddress] = useState("");
   const [amount, setAmount] = useState("1");
   const [fee, setFee] = useState("1");
@@ -65,6 +78,12 @@ export function App() {
   const [copyHint, setCopyHint] = useState<string | null>(null);
 
   useEffect(() => startTipSync({ client, pollMs, onUpdate: setSnap }), [client]);
+
+  useEffect(() => {
+    void loadSealedVault(vaultStorage).then((sealed) => {
+      setVaultHasBlob(sealed !== null);
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +171,7 @@ export function App() {
   function onGenerate() {
     const phrase = generateMnemonic(128);
     setMnemonic(phrase);
+    setVaultUnlocked(true);
     try {
       const bech32 = addressBech32FromMnemonic(phrase);
       const hex = parseAddress(bech32);
@@ -160,10 +180,71 @@ export function App() {
       setAddress(bech32);
       setSendError(null);
       setCopyHint(null);
+      setVaultMsg("New mnemonic in memory — set a password and Save vault");
     } catch (err) {
       setReceiveBech32(null);
       setReceiveHex(null);
       setSendError(err instanceof Error ? err.message : "generate failed");
+    }
+  }
+
+  async function onSaveVault() {
+    setVaultBusy(true);
+    setVaultMsg(null);
+    try {
+      const sealed = await sealVault(mnemonic, vaultPassword);
+      await persistSealedVault(vaultStorage, sealed);
+      setVaultHasBlob(true);
+      setVaultUnlocked(true);
+      setVaultMsg("Vault saved (AES-GCM). Lock to clear mnemonic from memory.");
+    } catch (err) {
+      setVaultMsg(err instanceof Error ? err.message : "save failed");
+    } finally {
+      setVaultBusy(false);
+    }
+  }
+
+  async function onUnlockVault() {
+    setVaultBusy(true);
+    setVaultMsg(null);
+    try {
+      const sealed = await loadSealedVault(vaultStorage);
+      if (!sealed) {
+        throw new Error("no vault on this device");
+      }
+      const phrase = await openVault(sealed, vaultPassword);
+      setMnemonic(phrase);
+      setVaultUnlocked(true);
+      const bech32 = addressBech32FromMnemonic(phrase);
+      setReceiveBech32(bech32);
+      setReceiveHex(parseAddress(bech32));
+      setAddress(bech32);
+      setVaultMsg("Vault unlocked");
+    } catch (err) {
+      setVaultMsg(err instanceof Error ? err.message : "unlock failed");
+    } finally {
+      setVaultBusy(false);
+    }
+  }
+
+  function onLockVault() {
+    setMnemonic("");
+    setVaultUnlocked(false);
+    setVaultPassword("");
+    setVaultMsg("Locked — mnemonic cleared from memory");
+  }
+
+  async function onDeleteVault() {
+    setVaultBusy(true);
+    try {
+      await clearPersistedVault(vaultStorage);
+      setVaultHasBlob(false);
+      setMnemonic("");
+      setVaultUnlocked(false);
+      setVaultPassword("");
+      setVaultMsg("Persisted vault deleted");
+    } finally {
+      setVaultBusy(false);
     }
   }
 
@@ -479,16 +560,77 @@ export function App() {
       >
         <p className="agora-eyebrow">Send</p>
         <p style={{ marginTop: "0.55rem", fontSize: "0.85rem", color: "var(--agora-ink-muted)" }}>
-          BIP-39 mnemonic → m/44&apos;/8888&apos;/0&apos;/0/0. Fee paid to miner (min relay 1).
+          BIP-39 → m/44&apos;/8888&apos;/0&apos;/0/0. Password vault seals the mnemonic with
+          AES-256-GCM (localStorage). Fee to miner (min relay 1).
         </p>
         <form
           onSubmit={onSend}
           style={{ marginTop: "0.85rem", display: "grid", gap: "0.75rem" }}
         >
+          <input
+            type="password"
+            value={vaultPassword}
+            onChange={(e) => setVaultPassword(e.target.value)}
+            placeholder="vault password (min 8 chars)"
+            aria-label="Vault password"
+            autoComplete="current-password"
+            style={fieldStyle}
+          />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
+            <button
+              type="button"
+              onClick={() => void onUnlockVault()}
+              disabled={vaultBusy || !vaultHasBlob}
+              style={btnStyle}
+            >
+              Unlock
+            </button>
+            <button
+              type="button"
+              onClick={() => void onSaveVault()}
+              disabled={vaultBusy || !mnemonic}
+              style={btnStyle}
+            >
+              Save vault
+            </button>
+            <button type="button" onClick={onLockVault} disabled={!vaultUnlocked} style={btnStyle}>
+              Lock
+            </button>
+            <button
+              type="button"
+              onClick={() => void onDeleteVault()}
+              disabled={vaultBusy || !vaultHasBlob}
+              style={btnStyle}
+            >
+              Delete vault
+            </button>
+          </div>
+          {vaultMsg ? (
+            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--agora-ink-muted)" }}>
+              {vaultHasBlob ? "Vault on disk · " : ""}
+              {vaultUnlocked ? "unlocked · " : "locked · "}
+              {vaultMsg}
+            </p>
+          ) : (
+            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--agora-ink-muted)" }}>
+              {vaultHasBlob
+                ? vaultUnlocked
+                  ? "Vault unlocked in memory"
+                  : "Vault found — unlock with password"
+                : "No vault yet — generate or paste a mnemonic, then Save vault"}
+            </p>
+          )}
           <textarea
             value={mnemonic}
-            onChange={(e) => setMnemonic(e.target.value)}
-            placeholder="twelve or twenty-four word mnemonic"
+            onChange={(e) => {
+              setMnemonic(e.target.value);
+              if (e.target.value.trim()) setVaultUnlocked(true);
+            }}
+            placeholder={
+              vaultHasBlob && !vaultUnlocked
+                ? "unlock vault to load mnemonic"
+                : "twelve or twenty-four word mnemonic"
+            }
             aria-label="Mnemonic"
             rows={3}
             style={{ ...fieldStyle, resize: "vertical" as const }}
