@@ -1,12 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  addressFromMnemonic,
+  addressBech32FromMnemonic,
   createLightClient,
+  generateMnemonic,
   parseAddress,
   sendTransfer,
+  shortAddress,
   shortHash,
   startTipSync,
   watchTransaction,
+  type LightNodeInfo,
   type LightTxLookup,
   type LightUtxo,
   type TipSyncSnapshot,
@@ -21,6 +24,15 @@ function resolveRpcUrl(): string {
 
 const pollMs = Number(import.meta.env.VITE_AGORA_POLL_MS) || 2000;
 
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function App() {
   const client = useMemo(
     () => createLightClient({ rpcUrl: resolveRpcUrl() }),
@@ -33,6 +45,7 @@ export function App() {
     error: null,
     updatedAt: null,
   });
+  const [nodeInfo, setNodeInfo] = useState<LightNodeInfo | null>(null);
   const [address, setAddress] = useState("");
   const [balance, setBalance] = useState<number | null>(null);
   const [utxos, setUtxos] = useState<LightUtxo[]>([]);
@@ -47,9 +60,29 @@ export function App() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastTxId, setLastTxId] = useState<string | null>(null);
   const [txLookup, setTxLookup] = useState<LightTxLookup | null>(null);
-  const [derivedAddress, setDerivedAddress] = useState<string | null>(null);
+  const [receiveBech32, setReceiveBech32] = useState<string | null>(null);
+  const [receiveHex, setReceiveHex] = useState<string | null>(null);
+  const [copyHint, setCopyHint] = useState<string | null>(null);
 
   useEffect(() => startTipSync({ client, pollMs, onUpdate: setSnap }), [client]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function pollNode() {
+      try {
+        const info = await client.getNodeInfo();
+        if (!cancelled) setNodeInfo(info);
+      } catch {
+        if (!cancelled) setNodeInfo(null);
+      }
+    }
+    void pollNode();
+    const id = window.setInterval(pollNode, Math.max(pollMs, 4000));
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [client]);
 
   useEffect(() => {
     if (!lastTxId) {
@@ -102,14 +135,42 @@ export function App() {
 
   function onDerive() {
     try {
-      const hex = addressFromMnemonic(mnemonic);
-      setDerivedAddress(hex);
-      setAddress(hex);
+      const bech32 = addressBech32FromMnemonic(mnemonic);
+      const hex = parseAddress(bech32);
+      setReceiveBech32(bech32);
+      setReceiveHex(hex);
+      setAddress(bech32);
       setSendError(null);
+      setCopyHint(null);
     } catch (err) {
-      setDerivedAddress(null);
+      setReceiveBech32(null);
+      setReceiveHex(null);
       setSendError(err instanceof Error ? err.message : "invalid mnemonic");
     }
+  }
+
+  function onGenerate() {
+    const phrase = generateMnemonic(128);
+    setMnemonic(phrase);
+    try {
+      const bech32 = addressBech32FromMnemonic(phrase);
+      const hex = parseAddress(bech32);
+      setReceiveBech32(bech32);
+      setReceiveHex(hex);
+      setAddress(bech32);
+      setSendError(null);
+      setCopyHint(null);
+    } catch (err) {
+      setReceiveBech32(null);
+      setReceiveHex(null);
+      setSendError(err instanceof Error ? err.message : "generate failed");
+    }
+  }
+
+  async function onCopyReceive() {
+    if (!receiveBech32) return;
+    const ok = await copyText(receiveBech32);
+    setCopyHint(ok ? "Copied Bech32 address" : "Clipboard unavailable");
   }
 
   async function onSend(e: FormEvent) {
@@ -136,8 +197,9 @@ export function App() {
         fee: Math.floor(feeN),
       });
       setLastTxId(tx_id);
-      setDerivedAddress(built.from);
-      setAddress(built.from);
+      setReceiveBech32(built.fromBech32);
+      setReceiveHex(built.from);
+      setAddress(built.fromBech32);
       const [bal, set] = await Promise.all([
         client.getBalance(built.from),
         client.getUtxos(built.from),
@@ -184,8 +246,8 @@ export function App() {
         className="agora-lede agora-rise agora-rise-delay-2"
         style={{ marginTop: "0.85rem" }}
       >
-        Desktop wallet shell with RandomX sidecar hooks. Tip sync, UTXO lookup,
-        and signed BIP-44 sends follow the live DAG over HTTP JSON-RPC.
+        Desktop wallet: Bech32 receive, BIP-39 send, and live DAG tip sync over
+        HTTP JSON-RPC.
       </p>
 
       <section
@@ -193,7 +255,7 @@ export function App() {
         style={{ marginTop: "2.5rem", maxWidth: 520 }}
         aria-live="polite"
       >
-        <p className="agora-eyebrow">Light client</p>
+        <p className="agora-eyebrow">Node</p>
         <p style={{ marginTop: "0.65rem", fontSize: "0.95rem" }}>
           <span style={{ color: statusColor }}>
             {snap.status === "ok"
@@ -204,10 +266,30 @@ export function App() {
           </span>
           {" · "}
           {snap.tips.length} tip{snap.tips.length === 1 ? "" : "s"}
-          {" · "}
-          <span style={{ opacity: 0.75, fontFamily: "ui-monospace, monospace", fontSize: "0.8rem" }}>
-            {client.rpcUrl}
-          </span>
+          {nodeInfo ? (
+            <>
+              {" · "}
+              mempool {nodeInfo.mempool_count}
+              {" · "}
+              {nodeInfo.pow_algorithm}
+              {" · "}
+              {nodeInfo.archival ? "archival" : `hot ${nodeInfo.hot_window}`}
+              {nodeInfo.connected_peers != null
+                ? ` · peers ${nodeInfo.connected_peers}`
+                : null}
+            </>
+          ) : null}
+        </p>
+        <p
+          style={{
+            marginTop: "0.35rem",
+            opacity: 0.75,
+            fontFamily: "ui-monospace, monospace",
+            fontSize: "0.8rem",
+          }}
+        >
+          {client.rpcUrl}
+          {nodeInfo?.version ? ` · ${nodeInfo.version}` : null}
         </p>
         {snap.error ? (
           <p style={{ marginTop: "0.5rem", color: "var(--agora-danger)", fontSize: "0.9rem" }}>
@@ -268,6 +350,57 @@ export function App() {
         className="agora-rise agora-rise-delay-3"
         style={{ marginTop: "2.75rem", maxWidth: 520 }}
       >
+        <p className="agora-eyebrow">Receive</p>
+        <p style={{ marginTop: "0.55rem", fontSize: "0.85rem", color: "var(--agora-ink-muted)" }}>
+          Primary address is Bech32m (`agora1…`). Hex is shown for tooling.
+        </p>
+        {receiveBech32 ? (
+          <div style={{ marginTop: "0.85rem" }}>
+            <p
+              style={{
+                fontFamily: "ui-monospace, monospace",
+                fontSize: "0.85rem",
+                color: "var(--agora-cyan)",
+                wordBreak: "break-all",
+              }}
+            >
+              {receiveBech32}
+            </p>
+            {receiveHex ? (
+              <p
+                style={{
+                  marginTop: "0.35rem",
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: "0.75rem",
+                  color: "var(--agora-ink-muted)",
+                  wordBreak: "break-all",
+                }}
+              >
+                hex {receiveHex}
+              </p>
+            ) : null}
+            <div style={{ marginTop: "0.65rem", display: "flex", gap: "0.75rem", alignItems: "center" }}>
+              <button type="button" onClick={() => void onCopyReceive()} style={btnStyle}>
+                Copy address
+              </button>
+              {copyHint ? (
+                <span style={{ fontSize: "0.8rem", color: "var(--agora-ink-muted)" }}>
+                  {copyHint}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <p style={{ marginTop: "0.85rem", fontSize: "0.9rem", color: "var(--agora-ink-muted)" }}>
+            Generate or derive a mnemonic below to get a receive address.
+          </p>
+        )}
+      </section>
+
+      <section
+        className="agora-rise agora-rise-delay-3"
+        style={{ marginTop: "2.75rem", maxWidth: 520 }}
+      >
         <p className="agora-eyebrow">Wallet</p>
         <form
           onSubmit={onLookup}
@@ -282,7 +415,7 @@ export function App() {
           <input
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="40-hex address"
+            placeholder="agora1… or 40-hex"
             aria-label="Address"
             spellCheck={false}
             style={fieldStyle}
@@ -351,29 +484,31 @@ export function App() {
             rows={3}
             style={{ ...fieldStyle, resize: "vertical" as const }}
           />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "0.75rem" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
+            <button type="button" onClick={onGenerate} style={btnStyle}>
+              Generate mnemonic
+            </button>
             <button type="button" onClick={onDerive} style={btnStyle}>
               Derive address
             </button>
-            {derivedAddress ? (
+            {receiveBech32 ? (
               <span
                 style={{
                   fontFamily: "ui-monospace, monospace",
                   fontSize: "0.75rem",
                   color: "var(--agora-cyan)",
                   alignSelf: "center",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
                 }}
+                title={receiveBech32}
               >
-                {derivedAddress}
+                {shortAddress(receiveBech32)}
               </span>
             ) : null}
           </div>
           <input
             value={toAddress}
             onChange={(e) => setToAddress(e.target.value)}
-            placeholder="to address (40-hex)"
+            placeholder="to agora1… or 40-hex"
             aria-label="To address"
             spellCheck={false}
             style={fieldStyle}

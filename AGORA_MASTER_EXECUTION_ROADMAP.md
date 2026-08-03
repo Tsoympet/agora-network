@@ -163,9 +163,13 @@ This document is the definitive command center. It bridges architectural theory 
 
 - [x] **`agora_getNodeInfo`:** peer id / connected peers / tips / mempool / PoW / archival + explorer `#node`
 
-## Phase 24: Tx confirmation depth — in progress
+## Phase 24: Tx confirmation depth — done
 
 - [x] **`confirmations` on `agora_getTransaction`:** blue-score tip depth + light-client `minConfirmations` watch
+
+## Phase 25: Wallet apps MVP — done
+
+- [x] **Desktop / mobile receive+send UX:** Bech32 primary, copy, generate mnemonic, node strip (`getNodeInfo`), post-send confirmations; mobile Metro `watchFolders` + clipboard
 
 ## Directory Structure Reference
 
