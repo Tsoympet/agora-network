@@ -306,7 +306,9 @@ impl BridgeBox {
     pub fn admit_mined_block(&mut self, block: DrcBlock) -> Result<Hash, BridgeError> {
         verify_pow(&block.header)?;
         if !self.districts.contains_key(&block.header.district_id) {
-            return Err(BridgeError::UnknownDistrict(block.header.district_id.clone()));
+            return Err(BridgeError::UnknownDistrict(
+                block.header.district_id.clone(),
+            ));
         }
         if block.header.bits != self.pow_bits {
             return Err(BridgeError::Constraint(format!(
@@ -335,9 +337,7 @@ impl BridgeBox {
         }
         let root = messages_root(&block.message_ids);
         if root != block.header.messages_root {
-            return Err(BridgeError::Constraint(
-                "DRC messages_root mismatch".into(),
-            ));
+            return Err(BridgeError::Constraint("DRC messages_root mismatch".into()));
         }
         let expected_reward = self.emission.reward_at_height(block.header.height);
         if block.header.reward != expected_reward {
@@ -379,14 +379,10 @@ impl BridgeBox {
         if !self.districts.contains_key(&district_id) {
             return Err(BridgeError::UnknownDistrict(district_id));
         }
-        let tip = self
-            .tips
-            .get(&district_id)
-            .cloned()
-            .unwrap_or(DistrictTip {
-                tip_hash: Hash::ZERO,
-                tip_height: 0,
-            });
+        let tip = self.tips.get(&district_id).cloned().unwrap_or(DistrictTip {
+            tip_hash: Hash::ZERO,
+            tip_height: 0,
+        });
         let height = tip.tip_height;
         let reward = self.emission.reward_at_height(height);
         let header = DrcBlockHeader {

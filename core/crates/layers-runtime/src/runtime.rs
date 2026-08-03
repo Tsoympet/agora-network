@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use agora_bridge_sdk::{
-    DistrictConfig, DrachmaGenesis, DrcBlock, InMemoryTransport, MessageStatus, DRACHMA_POW_ALGORITHM,
+    BridgeBox, DistrictConfig, DrachmaGenesis, DrcBlock, InMemoryTransport, MessageStatus,
+    DRACHMA_POW_ALGORITHM,
 };
 use agora_intent_engine::{
     AmmSolver, CompositeSolver, ConstantProductPool, Intent, IntentEngine, IntentStatus, Solution,
 };
 use agora_ovolos_rollup::{
-    Batch, BatchCommitment, BatchStatus, FraudProof, OvolosGenesis, OvolosRollup, OvlBlock,
+    Batch, BatchCommitment, BatchStatus, FraudProof, OvlBlock, OvolosGenesis, OvolosRollup,
     StubEvmExecutor, OVOLOS_POW_ALGORITHM,
 };
 use agora_types::{Address, Amount, Hash};
