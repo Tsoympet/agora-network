@@ -6,6 +6,9 @@ import {
   generateMnemonic,
   loadSealedVault,
   localStorageVault,
+  networkAccent,
+  networkHrpHint,
+  networkLabel,
   openVault,
   parseAddress,
   persistSealedVault,
@@ -14,6 +17,7 @@ import {
   shortAddress,
   shortHash,
   startTipSync,
+  walletNetworkFromNode,
   watchTransaction,
   type LightNodeInfo,
   type LightTxLookup,
@@ -116,6 +120,23 @@ export function App() {
     });
   }, [client, lastTxId]);
 
+  // Prefer live node network for Bech32 HRP; local default is devnet.
+  const walletNetwork = walletNetworkFromNode(nodeInfo?.network ?? "devnet");
+  const netLabel = nodeInfo ? networkLabel(nodeInfo.network) : null;
+  const netAccent = networkAccent(nodeInfo?.network ?? "devnet");
+
+  useEffect(() => {
+    if (!mnemonic.trim()) return;
+    try {
+      const bech32 = addressBech32FromMnemonic(mnemonic, 0, "", walletNetwork);
+      setReceiveBech32(bech32);
+      setReceiveHex(parseAddress(bech32));
+      setAddress(bech32);
+    } catch {
+      /* keep previous receive address on transient mnemonic edits */
+    }
+  }, [walletNetwork, mnemonic]);
+
   const statusColor =
     snap.status === "ok"
       ? "var(--agora-cyan)"
@@ -154,7 +175,7 @@ export function App() {
 
   function onDerive() {
     try {
-      const bech32 = addressBech32FromMnemonic(mnemonic);
+      const bech32 = addressBech32FromMnemonic(mnemonic, 0, "", walletNetwork);
       const hex = parseAddress(bech32);
       setReceiveBech32(bech32);
       setReceiveHex(hex);
@@ -173,7 +194,7 @@ export function App() {
     setMnemonic(phrase);
     setVaultUnlocked(true);
     try {
-      const bech32 = addressBech32FromMnemonic(phrase);
+      const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
       const hex = parseAddress(bech32);
       setReceiveBech32(bech32);
       setReceiveHex(hex);
@@ -215,7 +236,7 @@ export function App() {
       const phrase = await openVault(sealed, vaultPassword);
       setMnemonic(phrase);
       setVaultUnlocked(true);
-      const bech32 = addressBech32FromMnemonic(phrase);
+      const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
       setReceiveBech32(bech32);
       setReceiveHex(parseAddress(bech32));
       setAddress(bech32);
@@ -276,6 +297,7 @@ export function App() {
         toAddressHex: toAddress.trim(),
         amount: Math.floor(amt),
         fee: Math.floor(feeN),
+        network: walletNetwork,
       });
       setLastTxId(tx_id);
       setReceiveBech32(built.fromBech32);
@@ -328,6 +350,26 @@ export function App() {
         Agora Network
       </h1>
       <p
+        className="agora-net-badge agora-rise agora-rise-delay-1"
+        style={{ color: netAccent, borderColor: netAccent }}
+        aria-live="polite"
+        title={
+          nodeInfo
+            ? `Connected node reports network=${nodeInfo.network}`
+            : "Waiting for agora_getNodeInfo"
+        }
+      >
+        <span
+          className="agora-net-dot"
+          style={{ background: netAccent }}
+          aria-hidden
+        />
+        {netLabel ?? "Connecting…"}
+        <span className="agora-net-hrp">
+          {networkHrpHint(nodeInfo?.network ?? "devnet")}
+        </span>
+      </p>
+      <p
         className="agora-lede agora-rise agora-rise-delay-2"
         style={{ marginTop: "0.85rem" }}
       >
@@ -353,8 +395,6 @@ export function App() {
           {snap.tips.length} tip{snap.tips.length === 1 ? "" : "s"}
           {nodeInfo ? (
             <>
-              {" · "}
-              {nodeInfo.network}
               {" · "}
               mempool {nodeInfo.mempool_count}
               {" · "}

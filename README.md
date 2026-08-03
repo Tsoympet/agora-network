@@ -120,6 +120,9 @@ AGORA_RPC_URL=http://127.0.0.1:8545/rpc cargo run -p agora-miner-sidecar
 
 ### Clients
 
+Apps show **Devnet / Testnet / Mainnet** from the connected node and use matching Bech32 HRPs.
+Desktop (Win/macOS/Linux) and mobile (iOS/Android) packaging: [`docs/apps/PLATFORMS.md`](docs/apps/PLATFORMS.md).
+
 ```bash
 cd apps/explorer && npm install && npm run dev   # BlockDAG explorer
 cd apps/desktop  && npm install && npm run dev   # wallet shell + vault

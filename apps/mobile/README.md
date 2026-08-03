@@ -5,7 +5,8 @@ Expo light-client wallet with HTTP JSON-RPC tip sync. Metro watches
 
 ## Features
 
-- Bech32m receive (`agora1…`) with hex secondary + clipboard copy
+- Clear **Devnet / Testnet / Mainnet** badge (from `agora_getNodeInfo`)
+- Bech32m receive with network HRP (`agoradev` / `agoratest` / `agora`) + clipboard copy
 - BIP-39 generate / derive (`m/44'/8888'/0'/0/0`) and signed send
 - Password vault (AES-256-GCM) persisted via Expo SecureStore — Unlock / Save / Lock
 - Compact node strip via `agora_getNodeInfo`
@@ -19,7 +20,11 @@ AGORA_TEMPLATE_BITS=0 cargo run -p agora-node
 cd apps/mobile
 npm install
 npm start
+# device builds: npm run android | npm run ios
+# store/EAS: npm run build:android | npm run build:ios
 ```
+
+iOS + Android packaging: [`docs/apps/PLATFORMS.md`](../../docs/apps/PLATFORMS.md).
 
 | Env | Default | Meaning |
 | --- | --- | --- |

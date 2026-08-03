@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "build:linux": "tauri build --bundles deb,appimage,rpm",
+    "build:windows": "tauri build --bundles nsis,msi",
+    "build:macos": "tauri build --bundles app,dmg"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",

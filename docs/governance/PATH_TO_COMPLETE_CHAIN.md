@@ -37,6 +37,8 @@ What remains for a live public network is ops deployment + human freeze decision
 | B3 | BIP-44 change chain | **done** |
 | B4 | Desktop Tauri mining sidecar | optional follow-up |
 | B5 | OpenAPI + TLS story | **done** (docs) |
+| B6 | Devnet / Testnet / Mainnet badge + HRP wiring | **done** (apps) |
+| B7 | Multi-OS desktop + iOS/Android packaging docs | **done** — see [`docs/apps/PLATFORMS.md`](../apps/PLATFORMS.md); store signing is ops |
 
 ### C — Mainnet freeze (needs humans)
 

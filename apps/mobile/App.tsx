@@ -19,6 +19,9 @@ import {
   generateMnemonic,
   keyValueVault,
   loadSealedVault,
+  networkAccent,
+  networkHrpHint,
+  networkLabel,
   openVault,
   parseAddress,
   persistSealedVault,
@@ -27,6 +30,7 @@ import {
   shortAddress,
   shortHash,
   startTipSync,
+  walletNetworkFromNode,
   watchTransaction,
   type LightNodeInfo,
   type LightTxLookup,
@@ -123,6 +127,22 @@ export default function App() {
     });
   }, [client, lastTxId]);
 
+  const walletNetwork = walletNetworkFromNode(nodeInfo?.network ?? "devnet");
+  const netLabel = nodeInfo ? networkLabel(nodeInfo.network) : null;
+  const netAccent = networkAccent(nodeInfo?.network ?? "devnet");
+
+  useEffect(() => {
+    if (!mnemonic.trim()) return;
+    try {
+      const bech32 = addressBech32FromMnemonic(mnemonic, 0, "", walletNetwork);
+      setReceiveBech32(bech32);
+      setReceiveHex(parseAddress(bech32));
+      setAddress(bech32);
+    } catch {
+      /* ignore while typing mnemonic */
+    }
+  }, [walletNetwork, mnemonic]);
+
   const statusColor =
     snap.status === "ok"
       ? agoraBrand.colors.cyan
@@ -160,7 +180,7 @@ export default function App() {
 
   function onDerive() {
     try {
-      const bech32 = addressBech32FromMnemonic(mnemonic);
+      const bech32 = addressBech32FromMnemonic(mnemonic, 0, "", walletNetwork);
       const hex = parseAddress(bech32);
       setReceiveBech32(bech32);
       setReceiveHex(hex);
@@ -179,7 +199,7 @@ export default function App() {
     setMnemonic(phrase);
     setVaultUnlocked(true);
     try {
-      const bech32 = addressBech32FromMnemonic(phrase);
+      const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
       const hex = parseAddress(bech32);
       setReceiveBech32(bech32);
       setReceiveHex(hex);
@@ -219,7 +239,7 @@ export default function App() {
       const phrase = await openVault(sealed, vaultPassword);
       setMnemonic(phrase);
       setVaultUnlocked(true);
-      const bech32 = addressBech32FromMnemonic(phrase);
+      const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
       setReceiveBech32(bech32);
       setReceiveHex(parseAddress(bech32));
       setAddress(bech32);
@@ -283,6 +303,7 @@ export default function App() {
         toAddressHex: toAddress.trim(),
         amount: Math.floor(amt),
         fee: Math.floor(feeN),
+        network: walletNetwork,
       });
       setLastTxId(tx_id);
       setReceiveBech32(built.fromBech32);
@@ -307,6 +328,22 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.content}>
         <Image source={require("./assets/icon.png")} style={styles.icon} />
         <Text style={styles.brand}>Agora Network</Text>
+        <View
+          style={[styles.netBadge, { borderBottomColor: netAccent }]}
+          accessibilityLabel={
+            netLabel
+              ? `Network ${netLabel}`
+              : "Waiting for node network"
+          }
+        >
+          <View style={[styles.netDot, { backgroundColor: netAccent }]} />
+          <Text style={[styles.netLabel, { color: netAccent }]}>
+            {netLabel ?? "Connecting…"}
+          </Text>
+          <Text style={styles.netHrp}>
+            {networkHrpHint(nodeInfo?.network ?? "devnet")}
+          </Text>
+        </View>
         <Text style={styles.lede}>
           Mobile wallet: Bech32 receive, BIP-39 send, and live DAG tip sync over
           HTTP JSON-RPC.
@@ -322,7 +359,6 @@ export default function App() {
                 : "connecting"}
           </Text>
           {` · ${snap.tips.length} tip${snap.tips.length === 1 ? "" : "s"}`}
-          {nodeInfo ? ` · ${nodeInfo.network}` : ""}
           {nodeInfo
             ? ` · mempool ${nodeInfo.mempool_count} · ${nodeInfo.pow_algorithm}`
             : ""}
@@ -584,6 +620,32 @@ const styles = StyleSheet.create({
     fontSize: 34,
     fontWeight: "700",
     letterSpacing: 1,
+  },
+  netBadge: {
+    marginTop: 12,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingBottom: 6,
+    borderBottomWidth: 2,
+  },
+  netDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  netLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 2,
+    textTransform: "uppercase",
+  },
+  netHrp: {
+    marginLeft: 2,
+    fontSize: 12,
+    fontFamily: "monospace",
+    color: agoraBrand.colors.inkMuted,
   },
   lede: {
     marginTop: 12,

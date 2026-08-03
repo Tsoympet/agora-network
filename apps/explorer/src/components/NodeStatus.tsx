@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { networkAccent, networkLabel } from "../../../shared/light-client";
 import { getNodeInfo, rpcUrl, type LightNodeInfo, type RpcStatus } from "../lib/rpc";
 
 const POLL_MS = Number(import.meta.env.VITE_AGORA_POLL_MS) || 2000;
@@ -79,7 +80,12 @@ export function NodeStatus() {
           <div>
             <dt className="text-mist">network / version</dt>
             <dd className="text-[var(--agora-ink)]">
-              {info.network} · {info.version}
+              <span style={{ color: networkAccent(info.network) }}>
+                {networkLabel(info.network)}
+              </span>
+              <span className="text-mist"> ({info.network})</span>
+              {" · "}
+              {info.version}
             </dd>
           </div>
           <div>

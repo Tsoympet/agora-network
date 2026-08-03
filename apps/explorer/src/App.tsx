@@ -2,6 +2,7 @@ import { DagField } from "./components/DagField";
 import { LiveDag } from "./components/LiveDag";
 import { MarkRow } from "./components/MarkRow";
 import { MempoolPanel } from "./components/MempoolPanel";
+import { NetworkBadge } from "./components/NetworkBadge";
 import { NodeStatus } from "./components/NodeStatus";
 import { TxLookup } from "./components/TxLookup";
 
@@ -9,15 +10,20 @@ export default function App() {
   return (
     <div className="relative min-h-screen overflow-x-hidden">
       <header className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-6 py-5 md:px-10">
-        <div className="flex items-center gap-3">
-          <img
-            src="/brand/agora-network.png"
-            alt=""
-            className="h-10 w-10 agora-rise"
-          />
-          <span className="agora-brand text-lg tracking-[0.14em] agora-rise agora-rise-delay-1">
-            AGORA
-          </span>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3">
+            <img
+              src="/brand/agora-network.png"
+              alt=""
+              className="h-10 w-10 agora-rise"
+            />
+            <span className="agora-brand text-lg tracking-[0.14em] agora-rise agora-rise-delay-1">
+              AGORA
+            </span>
+          </div>
+          <div className="agora-rise agora-rise-delay-1 pl-[3.25rem]">
+            <NetworkBadge />
+          </div>
         </div>
         <nav className="flex items-center gap-4 agora-rise agora-rise-delay-2">
           <a href="#live" className="agora-btn agora-btn-ghost text-sm">

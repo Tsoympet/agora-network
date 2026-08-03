@@ -291,7 +291,7 @@ export async function buildSignedTransfer(options: {
     from: account.addressHex,
     fromBech32: account.addressBech32,
     to: toHex,
-    toBech32: encodeAddress(toHex),
+    toBech32: encodeAddress(toHex, addressHrpForNetwork(network)),
     amount: options.amount,
     change,
     fee,
