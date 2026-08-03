@@ -2,7 +2,7 @@
 //!
 //! Difficulty (`header.bits`) is driven by [`DaaConfig`] / [`next_difficulty`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -16,6 +16,9 @@ use agora_state_machine::{
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
+use tracing::debug;
+
+use crate::storage_policy::StoragePolicy;
 
 #[derive(Debug, Error)]
 pub enum AdmitError {
@@ -46,6 +49,7 @@ pub struct ChainState {
     emission: EmissionSchedule,
     daa: DaaConfig,
     difficulty: Difficulty,
+    storage: StoragePolicy,
 }
 
 impl ChainState {
@@ -54,6 +58,7 @@ impl ChainState {
         genesis: Hash,
         algo: PowAlgorithm,
         initial_bits: u32,
+        storage: StoragePolicy,
     ) -> Result<Self, AdmitError> {
         let (dag, ghostdag) = rebuild_dag_from_store(store.as_ref(), genesis)?;
 
@@ -72,6 +77,7 @@ impl ChainState {
             emission: EmissionSchedule::default(),
             daa,
             difficulty,
+            storage,
         })
     }
 
@@ -272,6 +278,10 @@ impl ChainState {
         self.difficulty = next_difficulty_weighted(&self.daa, self.difficulty, &window);
         self.persist_difficulty()?;
 
+        if let Err(err) = self.prune_hot_window() {
+            debug!(error = %err, "hot prune skipped");
+        }
+
         Ok(id)
     }
 
@@ -281,9 +291,11 @@ impl ChainState {
         self.store
             .put_cf(ColumnFamily::Hot, id.as_bytes(), &block_bytes)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
-        self.store
-            .put_cf(ColumnFamily::Archival, id.as_bytes(), &block_bytes)
-            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        if self.storage.archival {
+            self.store
+                .put_cf(ColumnFamily::Archival, id.as_bytes(), &block_bytes)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        }
         index_block_transactions(self.store.as_ref(), block)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
 
@@ -297,6 +309,72 @@ impl ChainState {
         self.store
             .put_cf(ColumnFamily::Meta, meta_keys::TIPS, &tips_bytes)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Drop `cf_hot` bodies beyond [`StoragePolicy::hot_window`] tip-distance.
+    ///
+    /// Archival copies are required before delete when `archival` is enabled; pruned
+    /// nodes (`archival=false`) drop Hot bodies permanently past the window.
+    fn prune_hot_window(&self) -> Result<(), AdmitError> {
+        let window = self.storage.hot_window;
+        if window == 0 {
+            return Ok(());
+        }
+
+        let tips = self.tips()?;
+        let mut keep: HashSet<Hash> = HashSet::new();
+        let mut q: VecDeque<(Hash, u32)> = tips.into_iter().map(|t| (t, 0)).collect();
+        while let Some((hash, dist)) = q.pop_front() {
+            if !keep.insert(hash) {
+                continue;
+            }
+            if dist >= window {
+                continue;
+            }
+            if let Some(block) = self.load_block(&hash)? {
+                for parent in block.header.parents {
+                    q.push_back((parent, dist + 1));
+                }
+            }
+        }
+
+        let mut drop: Vec<Hash> = Vec::new();
+        self.store
+            .for_each_cf(ColumnFamily::Hot, |key, _value| {
+                if key.len() != 32 {
+                    return Ok(());
+                }
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(key);
+                let hash = Hash(arr);
+                if !keep.contains(&hash) {
+                    drop.push(hash);
+                }
+                Ok(())
+            })
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+
+        let mut pruned = 0u32;
+        for hash in drop {
+            if self.storage.archival {
+                let has_archival = self
+                    .store
+                    .get_cf(ColumnFamily::Archival, hash.as_bytes())
+                    .map_err(|e| AdmitError::Storage(e.to_string()))?
+                    .is_some();
+                if !has_archival {
+                    continue;
+                }
+            }
+            self.store
+                .delete_cf(ColumnFamily::Hot, hash.as_bytes())
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            pruned += 1;
+        }
+        if pruned > 0 {
+            debug!(pruned, keep = keep.len(), window, "pruned hot block bodies");
+        }
         Ok(())
     }
 }
@@ -415,7 +493,7 @@ mod tests {
         let store = Arc::new(StateStore::open_in_memory());
         let genesis = GenesisBuilder::default().ignite(&store).unwrap();
         let mut chain =
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap();
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, StoragePolicy::default()).unwrap();
         assert_eq!(chain.difficulty().as_bits(), 0);
         assert_eq!(
             chain.block_template(Address::ZERO, &[]).unwrap().header.bits,
@@ -461,7 +539,7 @@ mod tests {
         chain.persist_difficulty().unwrap();
 
         let reloaded =
-            ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0).unwrap();
+            ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0, StoragePolicy::default()).unwrap();
         assert_eq!(reloaded.difficulty().as_bits(), next.level);
         assert_eq!(
             reloaded
@@ -478,7 +556,7 @@ mod tests {
         let store = Arc::new(StateStore::open_in_memory());
         let genesis = GenesisBuilder::default().ignite(&store).unwrap();
         let mut chain =
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap();
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, StoragePolicy::default()).unwrap();
         let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
         block.header.nonce = 3;
         let digest = RandomXPowHasher.pow_hash(&block.header);
@@ -488,10 +566,91 @@ mod tests {
         let id = chain.admit_block(block).unwrap();
 
         let reloaded =
-            ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0).unwrap();
+            ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0, StoragePolicy::default()).unwrap();
         assert!(reloaded.has_block(&id).unwrap());
         assert!(reloaded.tips().unwrap().contains(&id));
         let child = reloaded.block_template(Address::ZERO, &[]).unwrap();
         assert!(child.header.parents.contains(&id));
+    }
+
+    fn mine_one(chain: &mut ChainState, nonce: u64) -> Hash {
+        let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
+        block.header.nonce = nonce;
+        block.header.timestamp_ms = nonce;
+        let digest = RandomXPowHasher.pow_hash(&block.header);
+        LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&block.header, &digest)
+            .unwrap();
+        chain.admit_block(block).unwrap()
+    }
+
+    #[test]
+    fn hot_window_prunes_old_bodies_keeps_archival() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let policy = StoragePolicy {
+            archival: true,
+            hot_window: 1,
+        };
+        let mut chain =
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, policy)
+                .unwrap();
+
+        let b1 = mine_one(&mut chain, 1);
+        let b2 = mine_one(&mut chain, 2);
+
+        // Tip-distance window 1: keep tip + its parents (b2, b1). Genesis should leave Hot.
+        assert!(store
+            .get_cf(ColumnFamily::Hot, b2.as_bytes())
+            .unwrap()
+            .is_some());
+        assert!(store
+            .get_cf(ColumnFamily::Hot, b1.as_bytes())
+            .unwrap()
+            .is_some());
+        assert!(store
+            .get_cf(ColumnFamily::Hot, genesis.as_bytes())
+            .unwrap()
+            .is_none());
+        // Archival retains full history.
+        assert!(store
+            .get_cf(ColumnFamily::Archival, genesis.as_bytes())
+            .unwrap()
+            .is_some());
+        assert!(chain.load_block(&genesis).unwrap().is_some());
+    }
+
+    #[test]
+    fn pruned_node_skips_archival_writes() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default()
+            .with_archival(false)
+            .ignite(&store)
+            .unwrap();
+        assert!(store
+            .get_cf(ColumnFamily::Archival, genesis.as_bytes())
+            .unwrap()
+            .is_none());
+        let policy = StoragePolicy {
+            archival: false,
+            hot_window: 1,
+        };
+        let mut chain =
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, policy)
+                .unwrap();
+        let b1 = mine_one(&mut chain, 11);
+        assert!(store
+            .get_cf(ColumnFamily::Archival, b1.as_bytes())
+            .unwrap()
+            .is_none());
+        let _b2 = mine_one(&mut chain, 12);
+        // Genesis dropped from Hot past window; without archival it is gone from store bodies.
+        assert!(store
+            .get_cf(ColumnFamily::Hot, genesis.as_bytes())
+            .unwrap()
+            .is_none());
+        assert!(chain.load_block(&genesis).unwrap().is_none());
+        // Tips still load.
+        assert!(chain.load_block(&_b2).unwrap().is_some());
     }
 }

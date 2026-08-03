@@ -5,6 +5,7 @@
 mod admit;
 mod backend;
 mod http;
+mod storage_policy;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -23,6 +24,7 @@ use tracing::{info, warn};
 use crate::admit::ChainState;
 use crate::backend::{admit_transaction, NodeBackend};
 use crate::http::serve_rpc;
+use crate::storage_policy::StoragePolicy;
 
 fn parse_pow_algo() -> PowAlgorithm {
     match std::env::var("AGORA_POW_ALGO")
@@ -166,21 +168,34 @@ async fn main() {
     net_cfg = net_cfg.with_identity(identity);
 
     let store = Arc::new(StateStore::open(&data_dir).expect("open state store"));
+    let storage = StoragePolicy::from_env();
     let premine_address = std::env::var("AGORA_PREMINE_ADDRESS")
         .ok()
         .and_then(|s| Address::from_hex(&s))
         .unwrap_or(Address::ZERO);
     let genesis_hash = GenesisBuilder::default()
         .with_premine_address(premine_address)
+        .with_archival(storage.archival)
         .load_or_ignite(store.as_ref())
         .expect("genesis load_or_ignite");
     info!(premine = %premine_address.to_hex(), "genesis premine address");
 
     let chain = Arc::new(Mutex::new(
-        ChainState::bootstrap(store.clone(), genesis_hash, pow_algo, template_bits)
-            .expect("chain bootstrap"),
+        ChainState::bootstrap(
+            store.clone(),
+            genesis_hash,
+            pow_algo,
+            template_bits,
+            storage,
+        )
+        .expect("chain bootstrap"),
     ));
-    info!(%data_dir, "state store opened");
+    info!(
+        %data_dir,
+        archival = storage.archival,
+        hot_window = storage.hot_window,
+        "state store opened"
+    );
     let mempool = Arc::new(Mutex::new(Mempool::new(10_000)));
 
     let mut seeder_book = net_cfg.dns_seeder_url.as_ref().map(|url| {
