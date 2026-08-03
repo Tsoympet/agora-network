@@ -121,19 +121,32 @@ impl Mempool {
         Some(tx)
     }
 
-    /// Fee-ordered transfer selection for mining templates (fee desc, then `tx_id`).
-    pub fn select_transfers(&self, max: usize) -> Vec<Transaction> {
-        let mut txs: Vec<Transaction> = self.txs.values().cloned().collect();
-        txs.sort_by(|a, b| {
-            let fa = self.fees.get(&a.tx_id()).copied().unwrap_or(0);
-            let fb = self.fees.get(&b.tx_id()).copied().unwrap_or(0);
-            fb.cmp(&fa)
+    /// Fee-ordered pending entries (`fee` desc, then `tx_id`) for RPC / templates.
+    pub fn pending_entries(&self, max: usize) -> Vec<(Transaction, u64)> {
+        let mut entries: Vec<(Transaction, u64)> = self
+            .txs
+            .values()
+            .map(|tx| {
+                let fee = self.fees.get(&tx.tx_id()).copied().unwrap_or(0);
+                (tx.clone(), fee)
+            })
+            .collect();
+        entries.sort_by(|(a, fa), (b, fb)| {
+            fb.cmp(fa)
                 .then_with(|| a.tx_id().as_bytes().cmp(b.tx_id().as_bytes()))
         });
-        if txs.len() > max {
-            txs.truncate(max);
+        if entries.len() > max {
+            entries.truncate(max);
         }
-        txs
+        entries
+    }
+
+    /// Fee-ordered transfer selection for mining templates (fee desc, then `tx_id`).
+    pub fn select_transfers(&self, max: usize) -> Vec<Transaction> {
+        self.pending_entries(max)
+            .into_iter()
+            .map(|(tx, _)| tx)
+            .collect()
     }
 
     /// Drop included txs and any remaining pool txs that spend the same outpoints.
@@ -205,6 +218,20 @@ mod tests {
             tx_id: Hash::ZERO,
             index: 0,
         }));
+    }
+
+    #[test]
+    fn pending_entries_fee_ordered() {
+        let low = signed_spend(0, 1);
+        let high = signed_spend(1, 2);
+        let mut pool = Mempool::new(16);
+        pool.admit_priced(low.clone(), 1).unwrap();
+        pool.admit_priced(high.clone(), 10).unwrap();
+        let entries = pool.pending_entries(16);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0.tx_id(), high.tx_id());
+        assert_eq!(entries[0].1, 10);
+        assert_eq!(entries[1].0.tx_id(), low.tx_id());
     }
 
     #[test]

@@ -40,6 +40,14 @@ pub struct TxLookup {
     pub transaction: Option<Transaction>,
 }
 
+/// One pending mempool entry for `agora_getMempool`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MempoolEntry {
+    pub tx_id: Hash,
+    pub fee: Option<u64>,
+    pub transaction: Transaction,
+}
+
 impl TxLookup {
     pub fn unknown(tx_id: Hash) -> Self {
         Self {
@@ -81,6 +89,8 @@ pub trait RpcBackend: Send {
     fn get_block(&self, hash: &Hash) -> Option<Block>;
     /// Mempool → confirmed index → unknown (never hard-errors on missing).
     fn get_transaction(&self, tx_id: &Hash) -> Result<TxLookup, RpcError>;
+    /// Pending mempool snapshot (fee-desc, then `tx_id`), capped by `limit`.
+    fn get_mempool(&self, limit: usize) -> Result<Vec<MempoolEntry>, RpcError>;
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
     /// Live UTXO set for wallet coin selection.
@@ -156,6 +166,23 @@ impl RpcBackend for InMemoryBackend {
             }
         }
         Ok(TxLookup::unknown(*tx_id))
+    }
+
+    fn get_mempool(&self, limit: usize) -> Result<Vec<MempoolEntry>, RpcError> {
+        let mut entries: Vec<MempoolEntry> = self
+            .mempool
+            .iter()
+            .map(|(tx_id, tx)| MempoolEntry {
+                tx_id: *tx_id,
+                fee: None,
+                transaction: tx.clone(),
+            })
+            .collect();
+        entries.sort_by(|a, b| a.tx_id.as_bytes().cmp(b.tx_id.as_bytes()));
+        if entries.len() > limit {
+            entries.truncate(limit);
+        }
+        Ok(entries)
     }
 
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError> {

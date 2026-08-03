@@ -65,6 +65,17 @@ export type LightTxLookup = {
   transaction: LightTx | null;
 };
 
+export type LightMempoolEntry = {
+  tx_id: string;
+  fee: number | null;
+  transaction: LightTx;
+};
+
+export type LightMempool = {
+  count: number;
+  transactions: LightMempoolEntry[];
+};
+
 export type RpcStatus = "idle" | "ok" | "error";
 
 export type LightClientConfig = {
@@ -78,6 +89,7 @@ export type LightClient = {
   getDagTips: () => Promise<string[]>;
   getBlock: (hash: string) => Promise<LightBlock>;
   getTransaction: (txId: string) => Promise<LightTxLookup>;
+  getMempool: (limit?: number) => Promise<LightMempool>;
   getBalance: (address: string) => Promise<LightBalance>;
   getUtxos: (address: string) => Promise<LightUtxoSet>;
   /** Submit a signed transaction JSON body (native serde / byte-array hashes). */
@@ -117,6 +129,8 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getBlock: (hash: string) => call<LightBlock>("agora_getBlock", { hash }),
     getTransaction: (txId: string) =>
       call<LightTxLookup>("agora_getTransaction", { tx_id: txId }),
+    getMempool: (limit = 128) =>
+      call<LightMempool>("agora_getMempool", { limit }),
     getBalance: (address: string) =>
       call<LightBalance>("agora_getBalance", { address }),
     getUtxos: (address: string) =>

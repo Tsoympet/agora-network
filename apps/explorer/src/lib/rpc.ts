@@ -4,13 +4,15 @@ import {
   createLightClient,
   type LightBlock,
   type LightClient,
+  type LightMempool,
+  type LightMempoolEntry,
   type LightTxLookup,
   type LightTxStatus,
   type RpcStatus,
 } from "../../../shared/light-client";
 
 export type ExplorerBlock = LightBlock;
-export type { LightTxLookup, LightTxStatus, RpcStatus };
+export type { LightMempool, LightMempoolEntry, LightTxLookup, LightTxStatus, RpcStatus };
 
 const DEFAULT_RPC =
   (import.meta.env.VITE_AGORA_RPC_URL as string | undefined) || "/rpc";
@@ -43,6 +45,10 @@ export async function getBlock(hash: string): Promise<ExplorerBlock> {
 
 export async function getTransaction(txId: string): Promise<LightTxLookup> {
   return client.getTransaction(txId);
+}
+
+export async function getMempool(limit = 64): Promise<LightMempool> {
+  return client.getMempool(limit);
 }
 
 /** Fetch tip blocks plus one parent layer for a compact live DAG view. */

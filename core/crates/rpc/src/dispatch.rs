@@ -58,6 +58,14 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let lookup = self.backend.get_transaction(&tx_id)?;
                 Ok(tx_lookup_to_json(&lookup))
             }
+            RpcMethod::GetMempool => {
+                let limit = optional_limit(&req.params, 128)?;
+                let entries = self.backend.get_mempool(limit)?;
+                Ok(json!({
+                    "count": entries.len(),
+                    "transactions": entries.iter().map(mempool_entry_to_json).collect::<Vec<_>>(),
+                }))
+            }
             RpcMethod::SubmitTransaction => {
                 let raw = tx_param(&req.params)?;
                 let tx: Transaction = serde_json::from_value(raw)
@@ -153,6 +161,51 @@ fn tx_lookup_to_json(lookup: &crate::backend::TxLookup) -> Value {
         "fee": lookup.fee,
         "transaction": lookup.transaction.as_ref().map(tx_to_explorer_json),
     })
+}
+
+fn mempool_entry_to_json(entry: &crate::backend::MempoolEntry) -> Value {
+    json!({
+        "tx_id": entry.tx_id.to_hex(),
+        "fee": entry.fee,
+        "transaction": tx_to_explorer_json(&entry.transaction),
+    })
+}
+
+/// Optional `{ "limit": N }` / `[N]` / bare number; default when omitted.
+fn optional_limit(params: &Value, default: usize) -> Result<usize, RpcError> {
+    if params.is_null() {
+        return Ok(default);
+    }
+    if let Some(arr) = params.as_array() {
+        if arr.is_empty() {
+            return Ok(default);
+        }
+        return parse_limit_value(&arr[0], default);
+    }
+    if let Some(obj) = params.as_object() {
+        if obj.is_empty() {
+            return Ok(default);
+        }
+        if let Some(v) = obj.get("limit") {
+            return parse_limit_value(v, default);
+        }
+        return Ok(default);
+    }
+    parse_limit_value(params, default)
+}
+
+fn parse_limit_value(v: &Value, default: usize) -> Result<usize, RpcError> {
+    if v.is_null() {
+        return Ok(default);
+    }
+    let n = v
+        .as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        .ok_or_else(|| RpcError::InvalidParams("`limit` must be u64".into()))?;
+    if n == 0 {
+        return Ok(default);
+    }
+    Ok(n.min(10_000) as usize)
 }
 
 fn header_to_explorer_json(header: &agora_types::BlockHeader, id: Option<String>) -> Value {
@@ -343,6 +396,15 @@ mod tests {
         let pending_res = pending.result.unwrap();
         assert_eq!(pending_res["status"], json!("pending"));
         assert!(pending_res["transaction"].is_object());
+
+        let pool = rpc.handle(RpcRequest {
+            id: Some(json!(311)),
+            method: "agora_getMempool".into(),
+            params: json!([]),
+        });
+        let pool_res = pool.result.unwrap();
+        assert_eq!(pool_res["count"], json!(1));
+        assert_eq!(pool_res["transactions"][0]["tx_id"], json!(tx_id));
 
         let unknown = rpc.handle(RpcRequest {
             id: Some(json!(32)),
