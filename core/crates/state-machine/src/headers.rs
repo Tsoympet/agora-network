@@ -28,16 +28,16 @@ pub fn load_header(store: &StateStore, hash: &Hash) -> Result<Option<BlockHeader
     let Some(bytes) = store.get_cf(ColumnFamily::Warm, &header_key(hash))? else {
         return Ok(None);
     };
-    let header = BlockHeader::try_from_slice(&bytes)
-        .map_err(|e| StateError::Storage(e.to_string()))?;
+    let header =
+        BlockHeader::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))?;
     Ok(Some(header))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agora_types::Hash;
     use crate::StateStore;
+    use agora_types::Hash;
 
     #[test]
     fn header_roundtrip() {

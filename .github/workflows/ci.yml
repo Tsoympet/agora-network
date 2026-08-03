@@ -74,9 +74,10 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: Test agora-node HTTP auth + RandomX consensus
+      - name: Test agora-node HTTP auth + multi-block IBD + RandomX
         run: |
           export LIBCLANG_PATH="$(dirname "$(find /usr/lib -name 'libclang.so*' 2>/dev/null | head -1)")"
           echo "LIBCLANG_PATH=$LIBCLANG_PATH"
           cargo test -p agora-node --bin agora-node http::
+          cargo test -p agora-node --bin agora-node multiblock_headers_first_catchup
           cargo test -p agora-consensus --features randomx --lib

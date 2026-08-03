@@ -15,7 +15,8 @@
 #   ./scripts/local_testnet.sh node-a       # terminal 1 (RPC :8545, fund enabled)
 #   ./scripts/local_testnet.sh node-b       # terminal 2 (RPC :8546)
 #   ./scripts/local_testnet.sh tips
-#   ./scripts/local_testnet.sh smoke-ibd    # mine 1 block on A, wait for B tip converge
+#   ./scripts/local_testnet.sh smoke-ibd    # mine N blocks on A (default 3), wait for B tip converge
+#   ./scripts/local_testnet.sh smoke-ibd-catchup  # no mine — wait for late-joining B to catch A
 #   ./scripts/local_testnet.sh smoke-tx     # signed send on A → pending on B (tx gossip)
 #
 # Premine mnemonic (abandon…about) external(0):
@@ -42,6 +43,8 @@ MIN_RELAY="${AGORA_MIN_RELAY_FEE:-1}"
 LISTEN_A="${AGORA_LISTEN_A:-/ip4/127.0.0.1/tcp/16111}"
 LISTEN_B="${AGORA_LISTEN_B:-/ip4/127.0.0.1/tcp/16112}"
 SMOKE_TIMEOUT_SECS="${AGORA_SMOKE_TIMEOUT_SECS:-180}"
+# Multi-block IBD smoke depth (Phase 36). Override with AGORA_SMOKE_IBD_BLOCKS.
+SMOKE_IBD_BLOCKS="${AGORA_SMOKE_IBD_BLOCKS:-3}"
 
 export_common() {
   # Frozen testnet genesis (see docs/genesis/testnet.genesis.json). Wipe data dirs after upgrades.
@@ -105,6 +108,61 @@ tips_fingerprint() {
   tips_list "$1" | paste -sd, -
 }
 
+# tip_count from agora_getNodeInfo (0 on parse/RPC failure).
+tip_count() {
+  local url="$1"
+  local body
+  body="$(rpc_call "$url" "agora_getNodeInfo")" || { echo 0; return 1; }
+  python3 - "$body" <<'PY'
+import json, sys
+raw = sys.argv[1]
+try:
+    data = json.loads(raw)
+    print(int((data.get("result") or {}).get("tip_count") or 0))
+except Exception:
+    print(0)
+    sys.exit(1)
+PY
+}
+
+# Wait until B's tip set matches (or contains) A's. Uses global SMOKE_TIMEOUT_SECS deadline.
+wait_tips_converge() {
+  local label="$1"
+  local deadline=$((SECONDS + SMOKE_TIMEOUT_SECS))
+  local after_a after_b
+  after_a="$(tips_fingerprint "$RPC_A" || true)"
+  if [[ -z "$after_a" ]]; then
+    echo "error: could not read node-a tips during $label" >&2
+    return 1
+  fi
+  echo "A tips ($label): $after_a (tip_count=$(tip_count "$RPC_A" || echo '?'))"
+  after_b=""
+  while (( SECONDS < deadline )); do
+    after_a="$(tips_fingerprint "$RPC_A" || true)"
+    after_b="$(tips_fingerprint "$RPC_B" || true)"
+    echo "  B tips: ${after_b:-?}  |  A tips: ${after_a:-?}"
+    if [[ -n "$after_b" && -n "$after_a" && "$after_b" == "$after_a" ]]; then
+      echo "$label OK — A and B tip sets match"
+      return 0
+    fi
+    if [[ -n "$after_b" && -n "$after_a" ]] && python3 - "$after_a" "$after_b" <<'PY'
+import sys
+a=set(sys.argv[1].split(',')) if sys.argv[1] else set()
+b=set(sys.argv[2].split(',')) if sys.argv[2] else set()
+sys.exit(0 if a and a <= b else 1)
+PY
+    then
+      echo "$label OK — B contains all of A's tips"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "error: timed out waiting for tip convergence ($label)" >&2
+  echo "A=$after_a" >&2
+  echo "B=${after_b:-}" >&2
+  return 1
+}
+
 require_health() {
   local url="$1"
   local name="$2"
@@ -154,7 +212,8 @@ Suggested two-node IBD + tx gossip smoke:
   4. ./scripts/local_testnet.sh node-b
   5. ./scripts/local_testnet.sh wait-peers
   6. ./scripts/local_testnet.sh smoke-tx    # signed premine spend on A → pending on B
-  7. ./scripts/local_testnet.sh smoke-ibd   # mines 1 block on A, waits for B
+  7. ./scripts/local_testnet.sh smoke-ibd   # mines N blocks on A (AGORA_SMOKE_IBD_BLOCKS=${SMOKE_IBD_BLOCKS}), waits for B
+  8. ./scripts/local_testnet.sh smoke-ibd-catchup  # late-join: wait for B to catch A's tips (no mine)
 
 Premine mnemonic (abandon…about) external(0) → $PREMINE
   (Bech32m: agoratest1l70vjmcfav256qu225hv4evu2qsya2df646nyg)
@@ -276,13 +335,18 @@ case "$cmd" in
       echo "warn: A/B tips already diverge; continuing IBD smoke anyway" >&2
     fi
 
-    echo "Mining 1 block on node-a (AGORA_MINE_MAX_BLOCKS=1, bits≈$TEMPLATE_BITS)…"
+    blocks="$SMOKE_IBD_BLOCKS"
+    if ! [[ "$blocks" =~ ^[1-9][0-9]*$ ]]; then
+      echo "error: AGORA_SMOKE_IBD_BLOCKS must be a positive integer (got '$blocks')" >&2
+      exit 1
+    fi
+    echo "Mining $blocks block(s) on node-a (AGORA_MINE_MAX_BLOCKS=$blocks, bits≈$TEMPLATE_BITS)…"
     export AGORA_RPC_URL="$RPC_A"
-    export AGORA_MINE_MAX_BLOCKS=1
+    export AGORA_MINE_MAX_BLOCKS="$blocks"
     export AGORA_MINE_POLL_MS="${AGORA_MINE_POLL_MS:-500}"
     run_bin_fg agora-miner-sidecar
 
-    echo "Waiting for node-a tip to advance…"
+    echo "Waiting for node-a tip to advance after $blocks mined block(s)…"
     deadline=$((SECONDS + SMOKE_TIMEOUT_SECS))
     after_a=""
     while (( SECONDS < deadline )); do
@@ -298,32 +362,25 @@ case "$cmd" in
     fi
     echo "after  A tips: $after_a"
 
-    echo "Waiting for node-b tips to converge with node-a…"
-    after_b=""
-    while (( SECONDS < deadline )); do
-      after_b="$(tips_fingerprint "$RPC_B" || true)"
-      echo "  B tips: ${after_b:-?}"
-      if [[ -n "$after_b" && "$after_b" == "$after_a" ]]; then
-        echo "IBD smoke OK — A and B tip sets match after mined block"
-        exit 0
-      fi
-      # Also accept B containing every tip from A (subset equality for multi-tip cases).
-      if [[ -n "$after_b" ]] && python3 - "$after_a" "$after_b" <<'PY'
-import sys
-a=set(sys.argv[1].split(',')) if sys.argv[1] else set()
-b=set(sys.argv[2].split(',')) if sys.argv[2] else set()
-sys.exit(0 if a and a <= b else 1)
-PY
-      then
-        echo "IBD smoke OK — B contains all of A's tips"
-        exit 0
-      fi
-      sleep 2
-    done
-    echo "error: timed out waiting for tip convergence" >&2
-    echo "A=$after_a" >&2
-    echo "B=${after_b:-}" >&2
-    exit 1
+    wait_tips_converge "multi-block IBD ($blocks blocks)" || exit 1
+    ;;
+  smoke-ibd-catchup)
+    # Late-join proof: node-b was wiped/restarted after node-a already advanced.
+    # Does not mine — only waits for headers-first / GetBlock catch-up.
+    require_health "$RPC_A" "node-a"
+    require_health "$RPC_B" "node-b"
+    before_a="$(tips_fingerprint "$RPC_A")"
+    before_b="$(tips_fingerprint "$RPC_B")"
+    echo "catchup A tips: $before_a (tip_count=$(tip_count "$RPC_A" || echo '?'))"
+    echo "catchup B tips: $before_b (tip_count=$(tip_count "$RPC_B" || echo '?'))"
+    if [[ -z "$before_a" ]]; then
+      echo "error: could not read tips from node-a" >&2
+      exit 1
+    fi
+    if [[ "$before_a" == "$before_b" ]]; then
+      echo "warn: A and B already match — catch-up is a no-op (mine with smoke-ibd first)" >&2
+    fi
+    wait_tips_converge "IBD catch-up" || exit 1
     ;;
   faucet)
     export AGORA_RPC_URL="${AGORA_RPC_URL:-$RPC_A}"

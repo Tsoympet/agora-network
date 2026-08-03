@@ -26,7 +26,7 @@ Env:
 | --- | --- | --- |
 | `AGORA_RPC_URL` | `http://127.0.0.1:8545/rpc` | Node JSON-RPC |
 | `AGORA_MINE_POLL_MS` | `2000` | Pause between nonce windows |
-| `AGORA_MINE_MAX_BLOCKS` | `0` | Exit after N successful submits (`0` = unlimited; use `1` for IBD smoke) |
+| `AGORA_MINE_MAX_BLOCKS` | `0` | Exit after N successful submits (`0` = unlimited; local testnet `smoke-ibd` uses `AGORA_SMOKE_IBD_BLOCKS`, default 3) |
 
 Node payout: `AGORA_MINER_ADDRESS` (20-byte hex; default `00…00`).
 

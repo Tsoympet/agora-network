@@ -1012,7 +1012,8 @@ fn load_parents_for_rebuild(store: &StateStore, hash: &Hash) -> Result<Vec<Hash>
         let _ = store_header(store, hash, &block.header);
         return Ok(block.header.parents);
     }
-    if let Some(header) = load_header(store, hash).map_err(|e| AdmitError::Storage(e.to_string()))?
+    if let Some(header) =
+        load_header(store, hash).map_err(|e| AdmitError::Storage(e.to_string()))?
     {
         return Ok(header.parents);
     }
@@ -1343,9 +1344,7 @@ mod tests {
         assert!(chain.load_block(&genesis).unwrap().is_none());
         assert!(chain.load_header(&genesis).unwrap().is_some());
 
-        let headers = chain
-            .headers_after_locator(&[genesis], 4, None)
-            .unwrap();
+        let headers = chain.headers_after_locator(&[genesis], 4, None).unwrap();
         assert_eq!(headers.len(), 4);
         assert!(headers[0].parents.contains(&genesis));
         for window in headers.windows(2) {
@@ -1380,14 +1379,8 @@ mod tests {
         assert!(chain.load_block(&genesis).unwrap().is_none());
         drop(chain);
 
-        let reloaded = ChainState::bootstrap(
-            store,
-            genesis,
-            PowAlgorithm::RandomX,
-            0,
-            policy,
-        )
-        .unwrap();
+        let reloaded =
+            ChainState::bootstrap(store, genesis, PowAlgorithm::RandomX, 0, policy).unwrap();
         assert_eq!(reloaded.virtual_tip().unwrap(), tip);
         assert!(reloaded.has_header(&genesis).unwrap());
         assert!(reloaded.has_header(&tip).unwrap());
@@ -1744,6 +1737,79 @@ mod tests {
             .headers_after_locator(&[tip], 100, None)
             .unwrap()
             .is_empty());
+    }
+
+    /// Lagging peer catches up via small GetHeaders batches + body admit (Phase 36).
+    #[test]
+    fn multiblock_headers_first_catchup() {
+        use agora_p2p::validate_header_chain;
+        use std::collections::BTreeSet;
+
+        let store_a = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store_a).unwrap();
+        let mut chain_a = ChainState::bootstrap(
+            store_a,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+
+        let mut tip = genesis;
+        const DEPTH: u64 = 6;
+        for nonce in 1..=DEPTH {
+            tip = mine_child(&mut chain_a, &[tip], Address::ZERO, nonce);
+        }
+        assert_eq!(chain_a.virtual_tip().unwrap(), tip);
+
+        let store_b = Arc::new(StateStore::open_in_memory());
+        let genesis_b = GenesisBuilder::default().ignite(&store_b).unwrap();
+        assert_eq!(genesis_b, genesis);
+        let mut chain_b = ChainState::bootstrap(
+            store_b,
+            genesis_b,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        assert_eq!(chain_b.virtual_tip().unwrap(), genesis);
+
+        // Force several GetHeaders rounds (limit 2) to mimic multi-batch IBD.
+        let mut rounds = 0u32;
+        loop {
+            rounds += 1;
+            assert!(rounds < 20, "catch-up did not finish");
+            let locator = chain_b.block_locator().unwrap();
+            let headers = chain_a.headers_after_locator(&locator, 2, None).unwrap();
+            if headers.is_empty() {
+                break;
+            }
+            validate_header_chain(&headers).unwrap();
+            for header in headers {
+                let id = header.hash();
+                let block = chain_a
+                    .load_block(&id)
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("missing body for {}", id.to_hex()));
+                chain_b.admit_block(block).unwrap();
+            }
+        }
+        assert!(
+            rounds > 1,
+            "expected multi-batch header sync, got {rounds} round(s)"
+        );
+
+        let tips_a: BTreeSet<_> = chain_a.tips().unwrap().into_iter().collect();
+        let tips_b: BTreeSet<_> = chain_b.tips().unwrap().into_iter().collect();
+        assert_eq!(tips_a, tips_b);
+        assert_eq!(
+            chain_a.virtual_tip().unwrap(),
+            chain_b.virtual_tip().unwrap()
+        );
+        assert_eq!(chain_b.confirmations(&tip), Some(1));
+        assert!(chain_b.confirmations(&genesis).unwrap() >= DEPTH);
     }
 
     #[test]
