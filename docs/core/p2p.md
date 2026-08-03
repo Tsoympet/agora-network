@@ -64,6 +64,7 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 | `ibd::orphan_pool_*` / `drain_orphans_*` | park / release / capacity / BFS drain |
 | `admit::orphan_pool_recovers_out_of_order_child` | tip-before-parent → fetch path via pool |
 | `admit::block_locator_and_headers_after_locator` | spine locator + header slice |
+| `admit::multiblock_headers_first_catchup` | lagging peer syncs via batched GetHeaders + bodies |
 
 ## Mempool
 
@@ -141,14 +142,19 @@ cargo build -p agora-dns-seeder -p agora-node -p agora-miner-sidecar
 ./scripts/local_testnet.sh node-b          # terminal 2 — both should log "peer connected"
 ./scripts/local_testnet.sh wait-peers      # optional readiness gate
 ./scripts/local_testnet.sh smoke-tx        # signed premine spend on A → pending on B
-./scripts/local_testnet.sh smoke-ibd       # mine 1 block on A, wait for B tip converge
+./scripts/local_testnet.sh smoke-ibd       # mine N blocks on A (default 3), wait for B tip converge
+./scripts/local_testnet.sh smoke-ibd-catchup  # late-join: wait for B to catch A (no mine)
 ```
 
 The script prefers `target/debug/<bin>` when present. `smoke-tx` needs `apps/shared` npm deps (auto-installs once).
 
 **Smoke proof (`smoke-tx`):** BIP-39 premine wallet (`abandon…about` external(0)) signs a small transfer via the shared light-client, submits on node-a, then polls node-b until `agora_getTransaction` is `pending` (or the tx appears in `agora_getMempool`). Both nodes must share the same fresh genesis premine UTXO (`wipe-two` first). Do **not** use `agora_fundAddress` — it only mints locally.
 
-**Smoke proof (`smoke-ibd`):** mines one RandomX block against node-a (`AGORA_MINE_MAX_BLOCKS=1`), then polls until node-b’s tip set matches (CompactBlock / `GetBlock` IBD).
+**Smoke proof (`smoke-ibd`):** mines `AGORA_SMOKE_IBD_BLOCKS` RandomX blocks against node-a (default **3** via `AGORA_MINE_MAX_BLOCKS`), then polls until node-b’s tip set matches (CompactBlock / GetHeaders / `GetBlock` IBD).
+
+**Late-join (`smoke-ibd-catchup`):** does not mine — waits for a freshly started / wiped node-b to catch node-a’s existing tips (headers-first catch-up). Mine with `smoke-ibd` first if both nodes are still at genesis.
+
+**Unit proof:** `admit::tests::multiblock_headers_first_catchup` syncs six blocks through limit-2 GetHeaders batches + body admit and asserts matching tips / virtual tip.
 
 ## Follow-ons
 
@@ -157,6 +163,7 @@ The script prefers `target/debug/<bin>` when present. `smoke-tx` needs `apps/sha
 - [x] Mempool transfers in mining templates + eviction on admit
 - [x] Two-node local seeder + gossip/IBD runbook
 - [x] Automated mined-block IBD smoke (`smoke-ibd`)
+- [x] Multi-block IBD smoke + late-join catch-up (`AGORA_SMOKE_IBD_BLOCKS`, `smoke-ibd-catchup`)
 - [x] Persistent libp2p identity (`$AGORA_DATA/p2p/identity.key`)
 - [x] `agora_getMempool` pending snapshot RPC
 - [x] Automated tx gossip smoke (`smoke-tx`)

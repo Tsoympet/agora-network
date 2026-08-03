@@ -81,7 +81,8 @@ cargo run -p agora-node
 # Local testnet helpers (single-node + two-node IBD smoke; AGORA_NETWORK=testnet):
 #   ./scripts/local_testnet.sh              # print runbook
 #   ./scripts/local_testnet.sh up           # single node
-#   ./scripts/local_testnet.sh seeder / node-a / node-b / smoke-ibd
+#   ./scripts/local_testnet.sh seeder / node-a / node-b / smoke-ibd / smoke-ibd-catchup
+#   AGORA_SMOKE_IBD_BLOCKS=3 ./scripts/local_testnet.sh smoke-ibd
 # Example: curl -s http://127.0.0.1:8545/rpc -H 'content-type: application/json' \
 #   -d '{"id":1,"method":"agora_getDagTips","params":[]}'
 

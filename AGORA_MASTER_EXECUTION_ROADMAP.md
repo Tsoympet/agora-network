@@ -213,6 +213,18 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Warm `header/*`:** persist on genesis + every admit; outlives Hot body prune
 - [x] **GetHeaders / DAG rebuild / prune BFS** use headers when bodies are gone; pruned-node restart + serve tests
 
+## Phase 35: CI + RPC auth / bind hardening — done
+
+- [x] **GitHub Actions:** fast portable crate job + slower node/RandomX job (`.github/workflows/ci.yml`)
+- [x] **`AGORA_RPC_TOKEN`:** Bearer auth for wallet/mining/fund methods; explorer reads stay public
+- [x] **Public bind gate:** non-loopback `AGORA_RPC_BIND` requires `AGORA_RPC_ALLOW_PUBLIC_BIND=1`
+
+## Phase 36: Multi-block IBD smoke + catch-up — done
+
+- [x] **`smoke-ibd`:** mine `AGORA_SMOKE_IBD_BLOCKS` (default 3) on A, wait for B tip converge
+- [x] **`smoke-ibd-catchup`:** late-join helper (no mine) — wait for B to catch A's tips
+- [x] **`multiblock_headers_first_catchup`:** Rust test — lagging peer syncs via small GetHeaders batches + body admit
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.
