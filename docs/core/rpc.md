@@ -35,7 +35,7 @@ Wired in `core/node-bin`:
 | `AGORA_POW_ALGO` | `randomx` | `randomx` or `kheavyhash` for admission / templates |
 | `AGORA_TEMPLATE_BITS` | `1` | Initial DAA difficulty (`header.bits`); retargets after admits |
 | `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout (`agora1…` Bech32m or 40-char hex) for templates |
-| `AGORA_NETWORK` | `dev` | `dev` (free genesis) / `testnet` (frozen) / `mainnet` (not frozen) |
+| `AGORA_NETWORK` | `dev` | `dev` (free genesis) / `testnet` (frozen) / `mainnet` (not frozen); also scopes P2P gossip topics |
 | `AGORA_PREMINE_ADDRESS` | `00…00` | Genesis premine (**dev only**; ignored on frozen networks); fresh `AGORA_DATA` |
 | `AGORA_GENESIS_FILE` | unset | Optional path to a genesis JSON artifact (`docs/genesis/*.genesis.json`) |
 | `AGORA_EXPECTED_GENESIS` | unset | Extra hex Block 0 check after load/ignite |

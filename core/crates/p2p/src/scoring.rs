@@ -9,7 +9,7 @@ use libp2p::gossipsub::{
     self, PeerScoreParams, PeerScoreThresholds, TopicScoreParams, ValidationMode,
 };
 
-use crate::topics::{blocks_topic, transactions_topic};
+use crate::topics::NetworkTopics;
 use crate::P2pError;
 
 /// Mesh / heartbeat knobs applied when building the gossipsub behaviour.
@@ -106,15 +106,15 @@ fn score_decay(target: Duration) -> f64 {
     gossipsub::score_parameter_decay(target)
 }
 
-/// Peer score params with blocks weighted above txs.
-pub fn agora_peer_score_params() -> PeerScoreParams {
+/// Peer score params with blocks weighted above txs for `topics`.
+pub fn agora_peer_score_params(topics: &NetworkTopics) -> PeerScoreParams {
     let mut params = PeerScoreParams::default();
     params.topics.insert(
-        blocks_topic().hash(),
+        topics.blocks().hash(),
         agora_topic_score_params(1.0),
     );
     params.topics.insert(
-        transactions_topic().hash(),
+        topics.transactions().hash(),
         agora_topic_score_params(0.5),
     );
     // App-specific score (set via NetworkHandle) can reward good IBD peers.
@@ -138,10 +138,16 @@ pub fn agora_peer_score_thresholds() -> PeerScoreThresholds {
     }
 }
 
-/// Activate peer scoring and attach Agora topic params.
-pub fn enable_peer_scoring(gossipsub: &mut gossipsub::Behaviour) -> Result<(), P2pError> {
+/// Activate peer scoring and attach Agora topic params for `topics`.
+pub fn enable_peer_scoring(
+    gossipsub: &mut gossipsub::Behaviour,
+    topics: &NetworkTopics,
+) -> Result<(), P2pError> {
     gossipsub
-        .with_peer_score(agora_peer_score_params(), agora_peer_score_thresholds())
+        .with_peer_score(
+            agora_peer_score_params(topics),
+            agora_peer_score_thresholds(),
+        )
         .map_err(P2pError::Gossip)?;
     Ok(())
 }
@@ -171,7 +177,10 @@ mod tests {
 
     #[test]
     fn peer_score_params_validate() {
-        agora_peer_score_params().validate().expect("params");
+        let topics = NetworkTopics::new("dev");
+        agora_peer_score_params(&topics)
+            .validate()
+            .expect("params");
         agora_peer_score_thresholds().validate().expect("thresholds");
         agora_topic_score_params(1.0).validate().expect("topic");
     }

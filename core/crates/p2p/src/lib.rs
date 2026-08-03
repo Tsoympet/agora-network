@@ -19,7 +19,7 @@ mod topics;
 pub use config::NetworkConfig;
 pub use error::P2pError;
 pub use identity::{load_or_generate_identity, save_identity};
-pub use getblock::{GetBlockRequest, GetBlockResponse, GETBLOCK_PROTOCOL};
+pub use getblock::{getblock_protocol, GetBlockRequest, GetBlockResponse, GETBLOCK_PROTOCOL};
 pub use ibd::{
     reconstruct_compact_block, short_ids_for_block, tx_short_id, PendingFetches, ReconstructError,
 };
@@ -36,4 +36,7 @@ pub use seeder::{
     fetch_seeder_peers, fetch_seeder_peers_best_effort, merge_bootstrap_peers, normalize_seeder_url,
     register_with_seeder, SeederBook,
 };
-pub use topics::{blocks_topic, transactions_topic, TOPIC_BLOCKS, TOPIC_TRANSACTIONS};
+pub use topics::{
+    blocks_topic, transactions_topic, NetworkTopics, TOPIC_BLOCKS, TOPIC_TRANSACTIONS,
+    TOPIC_VERSION,
+};

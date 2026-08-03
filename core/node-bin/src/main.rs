@@ -219,6 +219,7 @@ async fn main() {
         .unwrap_or(64);
 
     let mut net_cfg = NetworkConfig::default()
+        .with_network(chain_params.network.as_str())
         .with_listen(listen)
         .with_bootstrap(bootstrap.clone())
         .with_max_peers(max_peers)

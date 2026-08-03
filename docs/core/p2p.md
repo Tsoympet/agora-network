@@ -20,14 +20,19 @@ Network communications for Agora **must** use `libp2p`.
 | flood_publish | true |
 | peer scoring | on |
 
-Peer scoring uses gossipsub P1–P7 with Agora topic weights (`agora/blocks/1` = 1.0, `agora/txs/1` = 0.5). Soft mesh-delivery thresholds avoid graylisting tiny local meshes. `agora-node` also sets application scores (`reward_peer` / `penalize_peer`) when RR/gossip blocks admit or reject.
+Peer scoring uses gossipsub P1–P7 with Agora topic weights (blocks = 1.0, txs = 0.5) for the configured network. Soft mesh-delivery thresholds avoid graylisting tiny local meshes. `agora-node` also sets application scores (`reward_peer` / `penalize_peer`) when RR/gossip blocks admit or reject.
 
-## Topics (v1)
+## Topics (v1, network-scoped)
 
-| Topic | Payload |
-| --- | --- |
-| `agora/blocks/1` | `Block` / `BlockAnnounce` / `CompactBlock` / `GetBlock` |
-| `agora/txs/1` | `Transaction` |
+Topics and the getblock protocol are scoped by `NetworkConfig::network` (from `AGORA_NETWORK`):
+
+| Name | Example (`testnet`) | Payload |
+| --- | --- | --- |
+| blocks | `agora/testnet/blocks/1` | `Block` / `BlockAnnounce` / `CompactBlock` / `GetBlock` |
+| txs | `agora/testnet/txs/1` | `Transaction` |
+| getblock RR | `/agora/testnet/getblock/1` | CBOR `GetBlockRequest` / `GetBlockResponse` |
+
+`dev` (default) uses `agora/dev/…`. Peers on different networks never share a gossip mesh even on the same underlay.
 
 ## Compact blocks / IBD
 
@@ -36,14 +41,15 @@ After a block is admitted locally, `agora-node` gossips:
 1. `CompactBlock { header, short_ids }` — BIP152-style short ids (first 8 bytes of each `tx_id`)
 2. `BlockAnnounce { hash }` — hash-only tip signal
 
-Receivers try `reconstruct_compact_block` against the local mempool. On miss (or hash-only announce without a body), they request the body from the announcing peer over **`/agora/getblock/1`** (libp2p request-response, CBOR). `PendingFetches` dedupes in-flight hashes. If request-response fails, the node falls back to gossip `GetBlock` / `Block`.
+Receivers try `reconstruct_compact_block` against the local mempool. On miss (or hash-only announce without a body), they request the body from the announcing peer over the network-scoped **`/agora/<network>/getblock/1`** protocol (libp2p request-response, CBOR). `PendingFetches` dedupes in-flight hashes. If request-response fails, the node falls back to gossip `GetBlock` / `Block`.
 
 Empty-tx templates reconstruct immediately (no mempool lookup).
 
 | Test | Covers |
 | --- | --- |
 | `compact_block_ibd` | gossip announce / compact wire path |
-| `getblock_request_response` | direct `/agora/getblock/1` roundtrip |
+| `getblock_request_response` | direct getblock roundtrip |
+| `topics` unit tests | `dev` vs `testnet` topic / protocol isolation |
 
 ## Mempool
 

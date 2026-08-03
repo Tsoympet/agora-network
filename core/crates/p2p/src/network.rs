@@ -13,11 +13,11 @@ use libp2p::{Multiaddr, PeerId, Swarm, SwarmBuilder};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-use crate::getblock::{getblock_protocol, GetBlockRequest, GetBlockResponse};
+use crate::getblock::{GetBlockRequest, GetBlockResponse};
 use crate::limits::connection_limits_behaviour;
 use crate::messages::NetworkMessage;
 use crate::scoring::{enable_peer_scoring, APP_SCORE_BAD_PEER, APP_SCORE_GOOD_PEER};
-use crate::topics::{blocks_topic, transactions_topic};
+use crate::topics::NetworkTopics;
 use crate::{NetworkConfig, P2pError};
 
 type GetBlockBehaviour = request_response::cbor::Behaviour<GetBlockRequest, GetBlockResponse>;
@@ -40,7 +40,7 @@ pub enum NetworkEvent {
         topic: String,
         message: NetworkMessage,
     },
-    /// Inbound `/agora/getblock/1` request — respond via [`NetworkHandle::respond_get_block`].
+    /// Inbound network-scoped getblock request — respond via [`NetworkHandle::respond_get_block`].
     GetBlockRequest {
         peer: PeerId,
         hash: Hash,
@@ -141,6 +141,7 @@ pub struct NetworkNode {
     swarm: Swarm<AgoraBehaviour>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
     command_rx: mpsc::UnboundedReceiver<Command>,
+    topics: NetworkTopics,
     inbound_channels: HashMap<
         request_response::InboundRequestId,
         ResponseChannel<GetBlockResponse>,
@@ -157,6 +158,7 @@ impl NetworkNode {
             .clone()
             .unwrap_or_else(Keypair::generate_ed25519);
         let peer_id = id_keys.public().to_peer_id();
+        let topics = config.topics();
 
         let message_id_fn = |message: &gossipsub::Message| {
             let mut hasher = DefaultHasher::new();
@@ -173,7 +175,7 @@ impl NetworkNode {
         .map_err(|e| P2pError::Gossip(e.to_string()))?;
 
         if config.gossip.peer_scoring {
-            enable_peer_scoring(&mut gossipsub)?;
+            enable_peer_scoring(&mut gossipsub, &topics)?;
             info!(
                 heartbeat_ms = config.gossip.heartbeat_interval.as_millis() as u64,
                 mesh_n = config.gossip.mesh_n,
@@ -182,19 +184,24 @@ impl NetworkNode {
         }
 
         gossipsub
-            .subscribe(&transactions_topic())
+            .subscribe(&topics.transactions())
             .map_err(|e| P2pError::Gossip(e.to_string()))?;
         gossipsub
-            .subscribe(&blocks_topic())
+            .subscribe(&topics.blocks())
             .map_err(|e| P2pError::Gossip(e.to_string()))?;
 
         let getblock = request_response::cbor::Behaviour::new(
-            [(getblock_protocol(), ProtocolSupport::Full)],
+            [(topics.getblock_protocol(), ProtocolSupport::Full)],
             request_response::Config::default(),
         );
 
         let connection_limits = connection_limits_behaviour(config.max_peers);
-        info!(max_peers = config.max_peers, "connection limits enabled");
+        info!(
+            max_peers = config.max_peers,
+            network = %topics.network,
+            blocks_topic = %topics.blocks_name(),
+            "connection limits enabled"
+        );
 
         let behaviour = AgoraBehaviour {
             gossipsub,
@@ -226,7 +233,12 @@ impl NetworkNode {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-        info!(%peer_id, listen = %config.listen_addr, "agora p2p node built");
+        info!(
+            %peer_id,
+            listen = %config.listen_addr,
+            network = %topics.network,
+            "agora p2p node built"
+        );
 
         let handle = NetworkHandle {
             peer_id,
@@ -240,6 +252,7 @@ impl NetworkNode {
                 swarm,
                 event_tx,
                 command_rx,
+                topics,
                 inbound_channels: HashMap::new(),
                 outbound_hashes: HashMap::new(),
             },
@@ -268,13 +281,13 @@ impl NetworkNode {
     fn publish_message(&mut self, message: &NetworkMessage) -> Result<(), P2pError> {
         match message {
             NetworkMessage::Transaction(_) => {
-                self.publish(transactions_topic(), message.encode())
+                self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::Block(_)
             | NetworkMessage::BlockAnnounce { .. }
             | NetworkMessage::CompactBlock { .. }
             | NetworkMessage::GetBlock { .. } => {
-                self.publish(blocks_topic(), message.encode())
+                self.publish(self.topics.blocks(), message.encode())
             }
         }
     }
