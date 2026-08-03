@@ -308,7 +308,7 @@ mod tests {
             .unwrap();
 
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap(),
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
         let miner = Address([1u8; 20]);
         let mut backend = NodeBackend::new(chain.clone(), store, None, false, mempool, miner);
@@ -361,7 +361,7 @@ mod tests {
         };
         let premine_txid = genesis_block.transactions[0].tx_id();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap(),
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
         let mut backend =
             NodeBackend::new(chain, store, None, false, mempool, Address::ZERO);
@@ -438,7 +438,7 @@ mod tests {
         };
         let premine_txid = genesis_block.transactions[0].tx_id();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap(),
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
         let miner = Address([2u8; 20]);
         let mut backend = NodeBackend::new(chain, store, None, false, mempool.clone(), miner);
@@ -522,7 +522,7 @@ mod tests {
             .ignite(&store)
             .unwrap();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0).unwrap(),
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, crate::storage_policy::StoragePolicy::default()).unwrap(),
         ));
         let mut backend =
             NodeBackend::new(chain, store.clone(), None, true, mempool, Address::ZERO);

@@ -33,6 +33,8 @@ pub struct GenesisBuilder {
     pub emission: EmissionSchedule,
     pub bits: u32,
     pub timestamp_ms: u64,
+    /// When false, skip writing genesis payload into `cf_archival` (pruned node).
+    pub write_archival: bool,
 }
 
 impl Default for GenesisBuilder {
@@ -42,6 +44,7 @@ impl Default for GenesisBuilder {
             emission: EmissionSchedule::default(),
             bits: 0,
             timestamp_ms: 0,
+            write_archival: true,
         }
     }
 }
@@ -49,6 +52,11 @@ impl Default for GenesisBuilder {
 impl GenesisBuilder {
     pub fn with_premine_address(mut self, address: Address) -> Self {
         self.supply.premine_address = address;
+        self
+    }
+
+    pub fn with_archival(mut self, write_archival: bool) -> Self {
+        self.write_archival = write_archival;
         self
     }
 
@@ -89,8 +97,10 @@ impl GenesisBuilder {
         let block_bytes = borsh::to_vec(&block)
             .map_err(|e| StateError::Storage(e.to_string()))?;
 
-        store.put_cf(ColumnFamily::Archival, genesis_hash.as_bytes(), &block_bytes)?;
         store.put_cf(ColumnFamily::Hot, genesis_hash.as_bytes(), &block_bytes)?;
+        if self.write_archival {
+            store.put_cf(ColumnFamily::Archival, genesis_hash.as_bytes(), &block_bytes)?;
+        }
         crate::tx_index::index_block_transactions(store, &block)?;
         store.put_cf(
             ColumnFamily::Meta,
@@ -168,5 +178,26 @@ mod tests {
         let tips = store.get_cf(ColumnFamily::Meta, meta_keys::TIPS).unwrap().unwrap();
         let tips: Vec<Hash> = borsh::from_slice(&tips).unwrap();
         assert_eq!(tips, vec![hash]);
+        assert!(store
+            .get_cf(ColumnFamily::Archival, hash.as_bytes())
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn genesis_can_skip_archival() {
+        let store = StateStore::open_in_memory();
+        let hash = GenesisBuilder::default()
+            .with_archival(false)
+            .ignite(&store)
+            .unwrap();
+        assert!(store
+            .get_cf(ColumnFamily::Hot, hash.as_bytes())
+            .unwrap()
+            .is_some());
+        assert!(store
+            .get_cf(ColumnFamily::Archival, hash.as_bytes())
+            .unwrap()
+            .is_none());
     }
 }

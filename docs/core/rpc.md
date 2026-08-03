@@ -36,6 +36,8 @@ Wired in `core/node-bin`:
 | `AGORA_MINER_ADDRESS` | `00…00` | Coinbase payout (`agora1…` Bech32m or 40-char hex) for templates |
 | `AGORA_PREMINE_ADDRESS` | `00…00` | Genesis premine payout (Bech32m or hex); only applied on a fresh `AGORA_DATA` |
 | `AGORA_MIN_RELAY_FEE` | `1` | Minimum implicit fee (`in − out`) for mempool admission |
+| `AGORA_ARCHIVAL` | `1` | Persist full block history in `cf_archival` (`0` = pruned node) |
+| `AGORA_HOT_WINDOW` | `64` | Tip-distance of block bodies kept in `cf_hot` (`0` = unlimited) |
 
 Endpoints:
 

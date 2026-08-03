@@ -6,13 +6,20 @@ Applies consensus-ordered blocks to durable storage.
 
 | CF | Name | Purpose |
 | --- | --- | --- |
-| Hot | `cf_hot` | Tips + recent headers for sub-second validation |
-| Warm | `cf_warm` | Recent history for RPC / explorer |
-| Archival | `cf_archival` | Long-term block payloads |
-| Meta | `cf_meta` | Genesis hash, supply caps, tips set |
-| UTXO | `cf_utxo` | Spendable outputs keyed by outpoint |
+| Hot | `cf_hot` | Recent block bodies for tip validation (pruned by `AGORA_HOT_WINDOW`) |
+| Warm | `cf_warm` | Tx index (`tx/` ‖ tx_id) for RPC lookups — not pruned |
+| Archival | `cf_archival` | Long-term block payloads (optional via `AGORA_ARCHIVAL`) |
+| Meta | `cf_meta` | Genesis hash, supply caps, tips set — never pruned |
+| UTXO | `cf_utxo` | Spendable outputs keyed by outpoint — never pruned |
 
 Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
+
+### Retention (`agora-node`)
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `AGORA_ARCHIVAL` | `1` | When `0`/`false`, skip writing block bodies to `cf_archival` (pruned node) |
+| `AGORA_HOT_WINDOW` | `64` | Tip-distance of bodies kept in `cf_hot` (`0` = unlimited). Older Hot bodies are deleted after admit (only if Archival still holds a copy when archival mode is on) |
 
 ## Genesis
 
