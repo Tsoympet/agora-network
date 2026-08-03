@@ -949,5 +949,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(reloaded.virtual_tip().unwrap(), tip);
+        assert_eq!(reloaded.genesis(), genesis);
     }
 }
