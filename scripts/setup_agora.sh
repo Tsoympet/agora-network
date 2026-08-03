@@ -1,16 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Legacy helper — the monorepo already contains the full tree.
+# Prefer: cargo check --workspace  /  ./scripts/local_testnet.sh
 set -euo pipefail
 
-# Agora Network Monorepo Initialization Script
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
-echo "Initializing Agora Network monorepo structure..."
-
-mkdir -p apps/desktop apps/mobile apps/explorer
-mkdir -p core/crates/{types,consensus,state-machine,p2p,rpc,crypto,miner-sidecar}
-mkdir -p core/node-bin
-mkdir -p infrastructure/{dns-seeder,stratum-pool,testnet-faucet}
-mkdir -p docs/core scripts
-
-echo "Directory structure ready."
-echo "Next: cargo check --workspace"
-echo "Docs: PROJECT_STRUCTURE.md, AGORA_MASTER_EXECUTION_ROADMAP.md, docs/core/"
+echo "Agora Network workspace: $ROOT"
+echo "Docs: README.md · PROJECT_STRUCTURE.md · docs/ops/PUBLIC_TESTNET.md"
+echo ""
+echo "Quick checks:"
+echo "  cargo check --workspace"
+echo "  cargo run -p agora-node -- genesis verify --network testnet"
+echo "  ./scripts/local_testnet.sh"

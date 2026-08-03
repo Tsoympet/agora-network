@@ -16,7 +16,7 @@ agora-network/
 │   │   ├── kheavyhash/     # Audited Kaspa kHeavyHash digest (vendored)
 │   │   ├── state-machine/  # RocksDB, Triple-Zone Logic
 │   │   ├── p2p/            # Gossipsub, Mempool, Compact Blocks
-│   │   ├── rpc/            # CEX Gateway, JSON-RPC, REST API
+│   │   ├── rpc/            # HTTP JSON-RPC methods + dispatcher
 │   │   ├── crypto/         # BIP-39/44 Wallet, secp256k1 Signatures
 │   │   ├── governance/     # Quadratic voting + anti-whale caps
 │   │   ├── ovolos-rollup/  # L2 optimistic rollup (EVM batches)
