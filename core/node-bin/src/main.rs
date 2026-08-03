@@ -27,7 +27,7 @@ use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{admit_transaction, NodeBackend};
-use crate::http::serve_rpc;
+use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::storage_policy::StoragePolicy;
 
 fn resolve_chain_params() -> ChainParams {
@@ -61,7 +61,10 @@ fn resolve_chain_params() -> ChainParams {
             params = params.with_bits(bits);
         }
     } else if std::env::var("AGORA_PREMINE_ADDRESS").is_ok() {
-        warn!("AGORA_PREMINE_ADDRESS ignored on frozen network {}", network);
+        warn!(
+            "AGORA_PREMINE_ADDRESS ignored on frozen network {}",
+            network
+        );
     }
 
     if let Some(path) = std::env::var_os("AGORA_GENESIS_FILE") {
@@ -93,12 +96,12 @@ fn resolve_chain_params() -> ChainParams {
 }
 
 fn parse_pow_algo_env() -> Option<PowAlgorithm> {
-    std::env::var("AGORA_POW_ALGO").ok().map(|s| {
-        match s.to_ascii_lowercase().as_str() {
+    std::env::var("AGORA_POW_ALGO")
+        .ok()
+        .map(|s| match s.to_ascii_lowercase().as_str() {
             "kheavyhash" | "kheavy" | "asic" => PowAlgorithm::KHeavyHash,
             _ => PowAlgorithm::RandomX,
-        }
-    })
+        })
 }
 
 /// Resolve PoW + initial bits from [`ChainParams`], allowing env overrides on `dev` only.
@@ -112,7 +115,11 @@ fn resolve_boot_config(params: &ChainParams) -> ChainBootConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
         boot.initial_bits = bits;
-        boot.daa.min_level = if bits == 0 { 0 } else { boot.daa.min_level.max(1) };
+        boot.daa.min_level = if bits == 0 {
+            0
+        } else {
+            boot.daa.min_level.max(1)
+        };
         if let Some(algo) = parse_pow_algo_env() {
             boot.pow = algo;
         }
@@ -156,10 +163,7 @@ fn admit_gossip_block(
     Ok(id)
 }
 
-fn missing_parents(
-    chain: &Arc<Mutex<ChainState>>,
-    block: &Block,
-) -> Result<Vec<Hash>, AdmitError> {
+fn missing_parents(chain: &Arc<Mutex<ChainState>>, block: &Block) -> Result<Vec<Hash>, AdmitError> {
     let guard = chain
         .lock()
         .map_err(|_| AdmitError::Storage("chain lock poisoned".into()))?;
@@ -207,9 +211,8 @@ fn handle_incoming_block(
             }
         }
         Err(AdmitError::MissingParent(_)) => {
-            let missing = missing_parents(chain, &block).unwrap_or_else(|_| {
-                block.header.parents.clone()
-            });
+            let missing =
+                missing_parents(chain, &block).unwrap_or_else(|_| block.header.parents.clone());
             if missing.is_empty() {
                 score_peer(net, peer, false);
                 warn!(%peer, block = %block_id.to_hex(), "missing parent race — rejecting");
@@ -402,8 +405,7 @@ async fn main() {
     let pow_algo = boot.pow;
     let template_bits = boot.initial_bits;
 
-    let listen = std::env::var("AGORA_LISTEN")
-        .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/16111".into());
+    let listen = std::env::var("AGORA_LISTEN").unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/16111".into());
     let bootstrap = std::env::var("AGORA_BOOTSTRAP")
         .ok()
         .map(|s| {
@@ -438,7 +440,9 @@ async fn main() {
     }
 
     let data_dir = std::env::var("AGORA_DATA").unwrap_or_else(|_| "data/agora-node".into());
-    let identity_path = std::path::Path::new(&data_dir).join("p2p").join("identity.key");
+    let identity_path = std::path::Path::new(&data_dir)
+        .join("p2p")
+        .join("identity.key");
     let identity = load_or_generate_identity(&identity_path).expect("p2p identity");
     info!(
         path = %identity_path.display(),
@@ -503,16 +507,19 @@ async fn main() {
         book.note_dialed(&dial_peers);
     }
 
-    let rpc_bind =
-        std::env::var("AGORA_RPC_BIND").unwrap_or_else(|_| "127.0.0.1:8545".into());
+    let rpc_bind = std::env::var("AGORA_RPC_BIND").unwrap_or_else(|_| "127.0.0.1:8545".into());
+    let rpc_token = std::env::var("AGORA_RPC_TOKEN")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(std::sync::Arc::<str>::from);
+    enforce_rpc_bind_policy(&rpc_bind, rpc_token.is_some());
     let allow_fund = chain_params.network != NetworkId::Mainnet
         && matches!(
             std::env::var("AGORA_RPC_ALLOW_FUND").as_deref(),
             Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
         );
-    if chain_params.network == NetworkId::Mainnet
-        && std::env::var("AGORA_RPC_ALLOW_FUND").is_ok()
-    {
+    if chain_params.network == NetworkId::Mainnet && std::env::var("AGORA_RPC_ALLOW_FUND").is_ok() {
         warn!("AGORA_RPC_ALLOW_FUND ignored on mainnet — fund RPC permanently disabled");
     }
     let miner_address = std::env::var("AGORA_MINER_ADDRESS")
@@ -532,7 +539,10 @@ async fn main() {
         genesis_hash,
     );
     let dispatcher = Arc::new(tokio::sync::Mutex::new(RpcDispatcher::new(backend)));
-    tokio::spawn(serve_rpc(rpc_bind.clone(), dispatcher.clone()));
+    let rpc_http = RpcHttpConfig {
+        token: rpc_token.clone(),
+    };
+    tokio::spawn(serve_rpc(rpc_bind.clone(), dispatcher.clone(), rpc_http));
 
     info!(
         network = %chain_params.network,
@@ -558,7 +568,10 @@ async fn main() {
         genesis_hash.to_hex(),
         rpc_bind,
         pow_algo,
-        chain.lock().map(|c| c.difficulty().as_bits()).unwrap_or(template_bits)
+        chain
+            .lock()
+            .map(|c| c.difficulty().as_bits())
+            .unwrap_or(template_bits)
     );
 
     let net = handle.clone();

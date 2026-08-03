@@ -190,7 +190,11 @@ impl Ghostdag {
     }
 
     /// Color every block in insert order, then return a total order for a tip's past.
-    pub fn order_past(&mut self, dag: &Dag, tip: Hash) -> Result<Vec<OrderedBlock>, ConsensusError> {
+    pub fn order_past(
+        &mut self,
+        dag: &Dag,
+        tip: Hash,
+    ) -> Result<Vec<OrderedBlock>, ConsensusError> {
         for hash in dag.blocks_in_insert_order() {
             self.add_block(dag, *hash)?;
         }
@@ -198,7 +202,11 @@ impl Ghostdag {
     }
 
     /// Total order for `tip`'s past assuming the DAG is already fully colored.
-    pub fn order_past_view(&self, dag: &Dag, tip: Hash) -> Result<Vec<OrderedBlock>, ConsensusError> {
+    pub fn order_past_view(
+        &self,
+        dag: &Dag,
+        tip: Hash,
+    ) -> Result<Vec<OrderedBlock>, ConsensusError> {
         let past = dag.past_closure(tip)?;
         let tip_blues = &self
             .coloring
@@ -209,11 +217,7 @@ impl Ghostdag {
         let mut ordered: Vec<OrderedBlock> = past
             .into_iter()
             .map(|hash| {
-                let blue_score = self
-                    .coloring
-                    .get(&hash)
-                    .map(|c| c.blue_score)
-                    .unwrap_or(0);
+                let blue_score = self.coloring.get(&hash).map(|c| c.blue_score).unwrap_or(0);
                 OrderedBlock {
                     hash,
                     blue_score,
@@ -244,7 +248,11 @@ impl Ghostdag {
 
     /// Backward-compatible helper: insert tip with parents into a temporary view is not done here.
     /// Prefer [`Self::order_past`] with an explicit [`Dag`].
-    pub fn order_tip(&self, tip: Hash, parents: &[Hash]) -> Result<Vec<OrderedBlock>, ConsensusError> {
+    pub fn order_tip(
+        &self,
+        tip: Hash,
+        parents: &[Hash],
+    ) -> Result<Vec<OrderedBlock>, ConsensusError> {
         let mut ordered = Vec::with_capacity(parents.len() + 1);
         for (i, parent) in parents.iter().enumerate() {
             ordered.push(OrderedBlock {
@@ -331,10 +339,7 @@ mod tests {
         ghostdag.add_block(&dag, h(1)).unwrap();
         ghostdag.add_block(&dag, h(2)).unwrap();
         // Both children have blue_score 2; higher hash wins (h(2) > h(1)).
-        assert_eq!(
-            ghostdag.select_virtual_tip(&[h(1), h(2)]),
-            Some(h(2))
-        );
+        assert_eq!(ghostdag.select_virtual_tip(&[h(1), h(2)]), Some(h(2)));
         let view = ghostdag.order_past_view(&dag, h(2)).unwrap();
         let mut again = Ghostdag::new(GhostdagConfig { k: 18 });
         let via_mut = again.order_past(&dag, h(2)).unwrap();

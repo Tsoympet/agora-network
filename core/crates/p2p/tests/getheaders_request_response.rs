@@ -3,7 +3,8 @@
 use std::time::Duration;
 
 use agora_p2p::{
-    dial_addr, GetHeadersRequest, NetworkConfig, NetworkEvent, NetworkNode, MAX_HEADERS_PER_RESPONSE,
+    dial_addr, GetHeadersRequest, NetworkConfig, NetworkEvent, NetworkNode,
+    MAX_HEADERS_PER_RESPONSE,
 };
 use agora_types::{BlockHeader, Hash};
 use tokio::time::timeout;
@@ -12,14 +13,12 @@ use tokio::time::timeout;
 async fn direct_getheaders_returns_spine() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (handle_a, mut events_a, node_a) = NetworkNode::build(
-        &NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"),
-    )
-    .expect("node a");
-    let (handle_b, mut events_b, node_b) = NetworkNode::build(
-        &NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"),
-    )
-    .expect("node b");
+    let (handle_a, mut events_a, node_a) =
+        NetworkNode::build(&NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"))
+            .expect("node a");
+    let (handle_b, mut events_b, node_b) =
+        NetworkNode::build(&NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"))
+            .expect("node b");
 
     tokio::spawn(node_a.run());
     tokio::spawn(node_b.run());

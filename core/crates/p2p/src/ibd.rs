@@ -80,7 +80,8 @@ impl PendingFetches {
     }
 
     fn purge_expired(&mut self, now: Instant) {
-        self.pending.retain(|_, at| now.duration_since(*at) < self.ttl);
+        self.pending
+            .retain(|_, at| now.duration_since(*at) < self.ttl);
     }
 
     /// Returns `true` when a new fetch should be issued for `hash`.

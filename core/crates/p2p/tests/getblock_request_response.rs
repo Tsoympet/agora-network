@@ -10,14 +10,12 @@ use tokio::time::timeout;
 async fn direct_getblock_returns_full_block() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (handle_a, mut events_a, node_a) = NetworkNode::build(
-        &NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"),
-    )
-    .expect("node a");
-    let (handle_b, mut events_b, node_b) = NetworkNode::build(
-        &NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"),
-    )
-    .expect("node b");
+    let (handle_a, mut events_a, node_a) =
+        NetworkNode::build(&NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"))
+            .expect("node a");
+    let (handle_b, mut events_b, node_b) =
+        NetworkNode::build(&NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"))
+            .expect("node b");
 
     tokio::spawn(node_a.run());
     tokio::spawn(node_b.run());

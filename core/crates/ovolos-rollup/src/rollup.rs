@@ -169,7 +169,13 @@ mod tests {
     fn submit_and_finalize_happy_path() {
         let exec = StubEvmExecutor;
         let genesis = Hash::ZERO;
-        let mut rollup = OvolosRollup::new(RollupConfig { challenge_window_ms: 1000 }, exec, genesis);
+        let mut rollup = OvolosRollup::new(
+            RollupConfig {
+                challenge_window_ms: 1000,
+            },
+            exec,
+            genesis,
+        );
         let batch = sample_batch(0, genesis, &StubEvmExecutor, 0);
         let id = rollup.submit_batch(batch).unwrap();
         assert_eq!(rollup.batch_status(&id), Some(BatchStatus::Pending));

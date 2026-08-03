@@ -10,16 +10,12 @@ pub struct WhaleCapConfig {
 
 impl Default for WhaleCapConfig {
     fn default() -> Self {
-        Self {
-            max_share_bps: 500,
-        }
+        Self { max_share_bps: 500 }
     }
 }
 
 impl WhaleCapConfig {
-    pub const FIVE_PERCENT: Self = Self {
-        max_share_bps: 500,
-    };
+    pub const FIVE_PERCENT: Self = Self { max_share_bps: 500 };
 
     pub fn max_countable_balance(&self, total_supply: u64) -> Result<u64, GovernanceError> {
         if total_supply == 0 {

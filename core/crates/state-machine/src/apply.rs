@@ -204,9 +204,7 @@ fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
     let key = outpoint_key(op);
     let bytes = store
         .get_cf(ColumnFamily::Utxo, &key)?
-        .ok_or_else(|| {
-            StateError::MissingUtxo(format!("{}:{}", op.tx_id.to_hex(), op.index))
-        })?;
+        .ok_or_else(|| StateError::MissingUtxo(format!("{}:{}", op.tx_id.to_hex(), op.index)))?;
     TxOut::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))
 }
 
@@ -298,8 +296,7 @@ pub fn validate_mempool_tx(
             agora_consensus::MAX_TX_OUTPUTS
         )));
     }
-    let tx_bytes =
-        borsh::to_vec(tx).map_err(|e| StateError::Storage(e.to_string()))?;
+    let tx_bytes = borsh::to_vec(tx).map_err(|e| StateError::Storage(e.to_string()))?;
     if tx_bytes.len() > agora_consensus::MAX_TX_BYTES {
         return Err(StateError::BlockLimit(format!(
             "tx too large: {} > {}",
@@ -349,11 +346,13 @@ pub fn validate_mempool_tx(
 }
 
 /// Sum of all UTXO values for `address` (same scan used by RPC balances).
-pub fn balance_of(store: &StateStore, address: &agora_types::Address) -> Result<Amount, StateError> {
+pub fn balance_of(
+    store: &StateStore,
+    address: &agora_types::Address,
+) -> Result<Amount, StateError> {
     let mut total = Amount::ZERO;
     store.for_each_cf(ColumnFamily::Utxo, |_key, value| {
-        let out = TxOut::try_from_slice(value)
-            .map_err(|e| StateError::Storage(e.to_string()))?;
+        let out = TxOut::try_from_slice(value).map_err(|e| StateError::Storage(e.to_string()))?;
         if &out.address == address {
             total = total
                 .checked_add(out.value)
@@ -369,7 +368,9 @@ mod tests {
     use std::collections::HashSet;
 
     use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
-    use agora_types::{Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TxIn, TxOut};
+    use agora_types::{
+        Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TxIn, TxOut,
+    };
 
     use super::*;
     use crate::genesis::GenesisBuilder;
@@ -619,7 +620,10 @@ mod tests {
             transactions: txs,
         };
         apply_block(&store, &block, emission).unwrap();
-        assert_eq!(balance_of(&store, &miner).unwrap().as_base_units(), emission + fee);
+        assert_eq!(
+            balance_of(&store, &miner).unwrap().as_base_units(),
+            emission + fee
+        );
         assert_eq!(balance_of(&store, &to).unwrap().as_base_units(), pay);
     }
 

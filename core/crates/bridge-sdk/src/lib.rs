@@ -15,7 +15,5 @@ pub use bridge::BridgeBox;
 pub use district::{DistrictConfig, DistrictKind};
 pub use error::BridgeError;
 pub use messages::{BridgeDirection, BridgeMessage, MessageStatus};
-pub use proof::{
-    merkle_root, prove_inclusion, prove_message, verify_inclusion, LightClientProof,
-};
+pub use proof::{merkle_root, prove_inclusion, prove_message, verify_inclusion, LightClientProof};
 pub use transport::{InMemoryTransport, MessageTransport};

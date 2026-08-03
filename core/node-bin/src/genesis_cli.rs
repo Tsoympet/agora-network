@@ -2,9 +2,7 @@
 
 use std::path::PathBuf;
 
-use agora_state_machine::{
-    ChainParams, GenesisArtifact, NetworkId, TESTNET_GENESIS_HASH_HEX,
-};
+use agora_state_machine::{ChainParams, GenesisArtifact, NetworkId, TESTNET_GENESIS_HASH_HEX};
 
 fn usage() -> ! {
     eprintln!(

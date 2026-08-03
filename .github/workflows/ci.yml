@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  fast:
+    name: Fast crates (no RandomX / RocksDB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: Test portable crates
+        run: >
+          cargo test --workspace
+          --exclude agora-node
+          --exclude agora-miner-sidecar
+          --exclude agora-consensus
+          --exclude agora-p2p
+          --exclude agora-stratum-pool
+          --exclude agora-dns-seeder
+          --exclude agora-testnet-faucet
+
+      - name: Consensus / P2P without RandomX
+        run: |
+          cargo test -p agora-consensus --no-default-features
+          cargo test -p agora-p2p
+
+      - name: Clippy (portable)
+        run: >
+          cargo clippy --workspace
+          --exclude agora-node
+          --exclude agora-miner-sidecar
+          --exclude agora-consensus
+          --exclude agora-stratum-pool
+          --exclude agora-dns-seeder
+          --exclude agora-testnet-faucet
+          -- -D warnings
+        continue-on-error: true
+
+  node:
+    name: Node + RandomX (slow)
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake clang pkg-config libclang-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test agora-node HTTP auth + RandomX consensus
+        run: |
+          export LIBCLANG_PATH="$(dirname "$(find /usr/lib -name 'libclang.so*' 2>/dev/null | head -1)")"
+          echo "LIBCLANG_PATH=$LIBCLANG_PATH"
+          cargo test -p agora-node --bin agora-node http::
+          cargo test -p agora-consensus --features randomx --lib

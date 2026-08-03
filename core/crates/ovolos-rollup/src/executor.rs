@@ -34,9 +34,6 @@ impl EvmExecutor for StubEvmExecutor {
 }
 
 /// Helper to re-execute a batch and compare against its claimed root.
-pub fn reexecute_batch(
-    executor: &dyn EvmExecutor,
-    batch: &Batch,
-) -> Result<Hash, RollupError> {
+pub fn reexecute_batch(executor: &dyn EvmExecutor, batch: &Batch) -> Result<Hash, RollupError> {
     executor.apply_batch(&batch.prev_state_root, &batch.transactions)
 }

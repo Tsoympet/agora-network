@@ -46,7 +46,10 @@ pub fn index_block_transactions(store: &StateStore, block: &Block) -> Result<(),
 }
 
 /// Resolve `tx_id` → `(block_id, index)` if indexed.
-pub fn lookup_tx_location(store: &StateStore, tx_id: &Hash) -> Result<Option<(Hash, u32)>, StateError> {
+pub fn lookup_tx_location(
+    store: &StateStore,
+    tx_id: &Hash,
+) -> Result<Option<(Hash, u32)>, StateError> {
     let key = tx_index_key(tx_id);
     let Some(bytes) = store.get_cf(ColumnFamily::Warm, &key)? else {
         return Ok(None);

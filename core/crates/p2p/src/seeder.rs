@@ -361,12 +361,7 @@ mod tests {
         });
 
         let url = format!("http://{addr}/peers");
-        let mut book = SeederBook::new(
-            &url,
-            Vec::new(),
-            8,
-            std::time::Duration::from_secs(30),
-        );
+        let mut book = SeederBook::new(&url, Vec::new(), 8, std::time::Duration::from_secs(30));
         book.set_dialable("/ip4/127.0.0.1/tcp/16111/p2p/12D3KooWLocal");
         let dialed = Arc::new(Mutex::new(Vec::new()));
         let dialed_c = dialed.clone();

@@ -51,7 +51,9 @@ impl GetHeadersRequest {
 
 impl GetHeadersResponse {
     pub fn empty() -> Self {
-        Self { headers: Vec::new() }
+        Self {
+            headers: Vec::new(),
+        }
     }
 
     pub fn with_headers(headers: Vec<BlockHeader>) -> Self {

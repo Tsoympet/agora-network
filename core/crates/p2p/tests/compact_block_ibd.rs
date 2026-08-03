@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use agora_p2p::{
-    reconstruct_compact_block, dial_addr, NetworkConfig, NetworkEvent, NetworkMessage, NetworkNode,
+    dial_addr, reconstruct_compact_block, NetworkConfig, NetworkEvent, NetworkMessage, NetworkNode,
 };
 use agora_types::{Block, BlockHeader, Hash};
 use tokio::time::timeout;
@@ -12,14 +12,12 @@ use tokio::time::timeout;
 async fn announce_triggers_getblock_and_full_serve() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let (handle_a, mut events_a, node_a) = NetworkNode::build(
-        &NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"),
-    )
-    .expect("node a");
-    let (handle_b, mut events_b, node_b) = NetworkNode::build(
-        &NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"),
-    )
-    .expect("node b");
+    let (handle_a, mut events_a, node_a) =
+        NetworkNode::build(&NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"))
+            .expect("node a");
+    let (handle_b, mut events_b, node_b) =
+        NetworkNode::build(&NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"))
+            .expect("node b");
 
     tokio::spawn(node_a.run());
     tokio::spawn(node_b.run());
@@ -58,7 +56,11 @@ async fn announce_triggers_getblock_and_full_serve() {
         loop {
             match events_a.recv().await {
                 Some(NetworkEvent::Message {
-                    message: NetworkMessage::CompactBlock { header: h, short_ids },
+                    message:
+                        NetworkMessage::CompactBlock {
+                            header: h,
+                            short_ids,
+                        },
                     ..
                 }) if h.hash() == hash => {
                     let rebuilt = reconstruct_compact_block(h, &short_ids, |_| None).unwrap();

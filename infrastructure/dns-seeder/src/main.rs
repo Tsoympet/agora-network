@@ -75,7 +75,8 @@ async fn handle_request(req: &str, peers: &Arc<Mutex<HashSet<String>>>) -> Strin
                 return http_response(400, "empty body");
             }
             // Accept raw multiaddr or JSON string.
-            let peer = if let Ok(serde_json::Value::String(s)) = serde_json::from_str::<serde_json::Value>(body)
+            let peer = if let Ok(serde_json::Value::String(s)) =
+                serde_json::from_str::<serde_json::Value>(body)
             {
                 s
             } else {

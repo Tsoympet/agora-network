@@ -9,14 +9,18 @@ pub enum NetworkMessage {
     Transaction(Transaction),
     Block(Block),
     /// Hash-only tip signal; peers that lack the body issue [`Self::GetBlock`].
-    BlockAnnounce { hash: Hash },
+    BlockAnnounce {
+        hash: Hash,
+    },
     /// Header + short tx ids for mempool inflation (BIP152-style scaffold).
     CompactBlock {
         header: BlockHeader,
         short_ids: Vec<[u8; 8]>,
     },
     /// IBD / compact-miss follow-up: request the full block body by hash.
-    GetBlock { hash: Hash },
+    GetBlock {
+        hash: Hash,
+    },
 }
 
 impl NetworkMessage {

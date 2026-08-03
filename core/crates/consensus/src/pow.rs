@@ -115,11 +115,8 @@ impl PowHasher for KHeavyHashPowHasher {
 
     fn pow_hash(&self, header: &BlockHeader) -> Hash {
         let pre = Self::pre_pow_hash(header);
-        let digest = agora_kheavyhash::calculate_pow(
-            *pre.as_bytes(),
-            header.timestamp_ms,
-            header.nonce,
-        );
+        let digest =
+            agora_kheavyhash::calculate_pow(*pre.as_bytes(), header.timestamp_ms, header.nonce);
         Hash(digest)
     }
 }

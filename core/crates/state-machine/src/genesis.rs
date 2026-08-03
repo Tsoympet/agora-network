@@ -87,19 +87,20 @@ impl GenesisBuilder {
     /// Persist genesis block bytes, tips, and supply caps.
     pub fn ignite(&self, store: &StateStore) -> Result<Hash, StateError> {
         if self.supply.premine.as_base_units() > self.supply.max_supply.as_base_units() {
-            return Err(StateError::Storage(
-                "premine exceeds max supply".into(),
-            ));
+            return Err(StateError::Storage("premine exceeds max supply".into()));
         }
 
         let block = self.build_block();
         let genesis_hash = block.id();
-        let block_bytes = borsh::to_vec(&block)
-            .map_err(|e| StateError::Storage(e.to_string()))?;
+        let block_bytes = borsh::to_vec(&block).map_err(|e| StateError::Storage(e.to_string()))?;
 
         store.put_cf(ColumnFamily::Hot, genesis_hash.as_bytes(), &block_bytes)?;
         if self.write_archival {
-            store.put_cf(ColumnFamily::Archival, genesis_hash.as_bytes(), &block_bytes)?;
+            store.put_cf(
+                ColumnFamily::Archival,
+                genesis_hash.as_bytes(),
+                &block_bytes,
+            )?;
         }
         crate::headers::store_header(store, &genesis_hash, &block.header)?;
         crate::tx_index::index_block_transactions(store, &block)?;
@@ -205,7 +206,10 @@ mod tests {
             Amount::from_whole(100_000_000).unwrap().as_base_units()
         );
 
-        let tips = store.get_cf(ColumnFamily::Meta, meta_keys::TIPS).unwrap().unwrap();
+        let tips = store
+            .get_cf(ColumnFamily::Meta, meta_keys::TIPS)
+            .unwrap()
+            .unwrap();
         let tips: Vec<Hash> = borsh::from_slice(&tips).unwrap();
         assert_eq!(tips, vec![hash]);
         assert!(store

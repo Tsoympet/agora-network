@@ -79,7 +79,11 @@ impl<S: IntentSolver> IntentEngine<S> {
     }
 
     /// Solve and settle via Bridge-in-a-Box lock/mint for the scaffold path.
-    pub fn route_and_settle(&mut self, intent_id: Hash, now_ms: u64) -> Result<Solution, IntentError> {
+    pub fn route_and_settle(
+        &mut self,
+        intent_id: Hash,
+        now_ms: u64,
+    ) -> Result<Solution, IntentError> {
         let (intent, status) = self
             .intents
             .get(&intent_id)

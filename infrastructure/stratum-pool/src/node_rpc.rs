@@ -24,7 +24,11 @@ pub async fn submit_block(rpc_url: &str, block: &Block) -> Result<Hash, String> 
     Hash::from_hex(id).ok_or_else(|| format!("invalid block_id hex `{id}`"))
 }
 
-async fn rpc_call(url: &str, method: &str, params: serde_json::Value) -> Result<RpcResponse, String> {
+async fn rpc_call(
+    url: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<RpcResponse, String> {
     let body = serde_json::to_string(&RpcRequest {
         id: Some(json!(1)),
         method: method.into(),
@@ -50,8 +54,13 @@ async fn rpc_call(url: &str, method: &str, params: serde_json::Value) -> Result<
     let mut stream = tokio::net::TcpStream::connect(host_port)
         .await
         .map_err(|e| format!("connect {host_port}: {e}"))?;
+    let auth = std::env::var("AGORA_RPC_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(|t| format!("Authorization: Bearer {t}\r\n"))
+        .unwrap_or_default();
     let req = format!(
-        "POST {path} HTTP/1.1\r\nHost: {host_port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST {path} HTTP/1.1\r\nHost: {host_port}\r\nContent-Type: application/json\r\n{auth}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

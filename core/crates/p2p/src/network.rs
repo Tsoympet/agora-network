@@ -22,8 +22,7 @@ use crate::topics::NetworkTopics;
 use crate::{NetworkConfig, P2pError};
 
 type GetBlockBehaviour = request_response::cbor::Behaviour<GetBlockRequest, GetBlockResponse>;
-type GetHeadersBehaviour =
-    request_response::cbor::Behaviour<GetHeadersRequest, GetHeadersResponse>;
+type GetHeadersBehaviour = request_response::cbor::Behaviour<GetHeadersRequest, GetHeadersResponse>;
 
 #[derive(NetworkBehaviour)]
 pub struct AgoraBehaviour {
@@ -85,7 +84,10 @@ pub enum NetworkEvent {
 enum Command {
     Dial(String),
     Publish(NetworkMessage),
-    RequestBlock { peer: PeerId, hash: Hash },
+    RequestBlock {
+        peer: PeerId,
+        hash: Hash,
+    },
     RespondGetBlock {
         request_id: request_response::InboundRequestId,
         block: Option<Block>,
@@ -98,7 +100,10 @@ enum Command {
         request_id: request_response::InboundRequestId,
         headers: Vec<BlockHeader>,
     },
-    SetAppScore { peer: PeerId, score: f64 },
+    SetAppScore {
+        peer: PeerId,
+        score: f64,
+    },
     Shutdown,
 }
 
@@ -162,7 +167,10 @@ impl NetworkHandle {
         headers: Vec<BlockHeader>,
     ) -> Result<(), P2pError> {
         self.commands
-            .send(Command::RespondGetHeaders { request_id, headers })
+            .send(Command::RespondGetHeaders {
+                request_id,
+                headers,
+            })
             .map_err(|_| P2pError::Network("swarm task stopped".into()))
     }
 
@@ -194,15 +202,11 @@ pub struct NetworkNode {
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
     command_rx: mpsc::UnboundedReceiver<Command>,
     topics: NetworkTopics,
-    inbound_channels: HashMap<
-        request_response::InboundRequestId,
-        ResponseChannel<GetBlockResponse>,
-    >,
+    inbound_channels:
+        HashMap<request_response::InboundRequestId, ResponseChannel<GetBlockResponse>>,
     outbound_hashes: HashMap<request_response::OutboundRequestId, Hash>,
-    inbound_header_channels: HashMap<
-        request_response::InboundRequestId,
-        ResponseChannel<GetHeadersResponse>,
-    >,
+    inbound_header_channels:
+        HashMap<request_response::InboundRequestId, ResponseChannel<GetHeadersResponse>>,
     /// Outbound getheaders request ids (no payload keyed — response carries headers).
     outbound_headers: HashMap<request_response::OutboundRequestId, ()>,
 }
@@ -474,9 +478,7 @@ impl NetworkNode {
                 warn!(%peer, %request_id, error = %error, "getheaders inbound failure");
             }
             request_response::Event::ResponseSent {
-                peer,
-                request_id,
-                ..
+                peer, request_id, ..
             } => {
                 debug!(%peer, %request_id, "getheaders response sent");
             }
@@ -542,9 +544,7 @@ impl NetworkNode {
                 warn!(%peer, %request_id, error = %error, "getblock inbound failure");
             }
             request_response::Event::ResponseSent {
-                peer,
-                request_id,
-                ..
+                peer, request_id, ..
             } => {
                 debug!(%peer, %request_id, "getblock response sent");
             }

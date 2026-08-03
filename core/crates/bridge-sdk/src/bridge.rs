@@ -171,7 +171,10 @@ mod tests {
         assert_eq!(bridge.locked_balance("agora", alice), amount);
 
         bridge.claim_mint(mint_id).unwrap();
-        assert_eq!(bridge.message_status(&mint_id), Some(MessageStatus::Claimed));
+        assert_eq!(
+            bridge.message_status(&mint_id),
+            Some(MessageStatus::Claimed)
+        );
 
         let unlock_id = bridge
             .burn_and_unlock("arena", "agora", bob, alice, amount, 2)
