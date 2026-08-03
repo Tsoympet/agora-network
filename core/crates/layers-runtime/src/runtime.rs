@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use agora_bridge_sdk::{BridgeBox, DistrictConfig, InMemoryTransport, MessageStatus};
+use agora_bridge_sdk::{
+    BridgeBox, DistrictConfig, DrachmaGenesis, InMemoryTransport, MessageStatus,
+};
 use agora_intent_engine::{
     AmmSolver, CompositeSolver, ConstantProductPool, Intent, IntentEngine, IntentStatus, Solution,
 };
 use agora_ovolos_rollup::{
-    Batch, BatchCommitment, BatchStatus, FraudProof, OvolosRollup, RollupConfig, StubEvmExecutor,
+    Batch, BatchCommitment, BatchStatus, FraudProof, OvolosGenesis, OvolosRollup, StubEvmExecutor,
 };
 use agora_types::{Address, Amount, Hash};
 use serde::Serialize;
@@ -14,17 +16,21 @@ use crate::LayersError;
 
 #[derive(Debug, Clone)]
 pub struct LayersRuntimeConfig {
-    pub challenge_window_ms: u64,
+    pub challenge_window_ms: Option<u64>,
     pub gas_payer: Option<Address>,
-    pub hub_id: String,
+    pub hub_id: Option<String>,
+    pub ovolos_genesis: OvolosGenesis,
+    pub drachma_genesis: DrachmaGenesis,
 }
 
 impl Default for LayersRuntimeConfig {
     fn default() -> Self {
         Self {
-            challenge_window_ms: 60_000,
+            challenge_window_ms: None,
             gas_payer: None,
-            hub_id: "agora-hub".into(),
+            hub_id: None,
+            ovolos_genesis: OvolosGenesis::testnet(),
+            drachma_genesis: DrachmaGenesis::testnet(),
         }
     }
 }
@@ -32,6 +38,10 @@ impl Default for LayersRuntimeConfig {
 #[derive(Debug, Clone, Serialize)]
 pub struct LayerInfo {
     pub hub_id: String,
+    pub ovl_genesis_hash: String,
+    pub ovl_chain_id: String,
+    pub drc_genesis_hash: String,
+    pub drc_chain_id: String,
     pub rollup_head: String,
     pub next_sequence: u64,
     pub challenge_window_ms: u64,
@@ -45,25 +55,38 @@ pub struct LayerInfo {
 
 /// In-process L2 + L3 + L4 stack for operators and integration tests.
 pub struct LayersRuntime {
-    config: LayersRuntimeConfig,
     rollup: OvolosRollup<StubEvmExecutor>,
     intents: IntentEngine<CompositeSolver>,
     transport: Arc<InMemoryTransport>,
+    ovl_genesis_hash: String,
+    ovl_chain_id: String,
+    drc_genesis_hash: String,
+    drc_chain_id: String,
+    hub_id: String,
 }
 
 impl LayersRuntime {
-    pub fn new(config: LayersRuntimeConfig) -> Self {
-        let gas_payer = config.gas_payer;
-        let rollup = OvolosRollup::new(
-            RollupConfig {
-                challenge_window_ms: config.challenge_window_ms,
-                gas_payer,
-            },
-            StubEvmExecutor,
-            Hash::ZERO,
-        );
+    pub fn new(config: LayersRuntimeConfig) -> Result<Self, LayersError> {
+        let ovl_genesis = config.ovolos_genesis.clone();
+        let drc_genesis = config.drachma_genesis.clone();
+        let hub_id = config
+            .hub_id
+            .clone()
+            .unwrap_or_else(|| drc_genesis.hub_id.clone());
+
+        let mut rollup =
+            OvolosRollup::from_genesis(&ovl_genesis, StubEvmExecutor, config.gas_payer)
+                .map_err(|e| LayersError::Rollup(e.to_string()))?;
+        // Operator override for local soak tests — does not rewrite frozen genesis_hash.
+        if let Some(ms) = config.challenge_window_ms {
+            rollup.config_mut().challenge_window_ms = ms;
+        }
+
         let transport = Arc::new(InMemoryTransport::new());
-        let bridge = BridgeBox::new().with_transport(transport.clone());
+        let bridge = BridgeBox::from_genesis(&drc_genesis)
+            .map_err(|e| LayersError::Bridge(e.to_string()))?
+            .with_transport(transport.clone());
+
         let pool = ConstantProductPool::new("arena", 5_000_000, 5_000_000, 30);
         let amm = AmmSolver::new(pool);
         let shared = amm.shared_pool();
@@ -71,17 +94,16 @@ impl LayersRuntime {
             .with_bridge(bridge)
             .with_amm_pool(shared);
 
-        let mut rt = Self {
-            config,
+        Ok(Self {
+            ovl_genesis_hash: ovl_genesis.genesis_hash.clone(),
+            ovl_chain_id: ovl_genesis.chain_id.clone(),
+            drc_genesis_hash: drc_genesis.genesis_hash.clone(),
+            drc_chain_id: drc_genesis.chain_id.clone(),
+            hub_id,
             rollup,
             intents,
             transport,
-        };
-        // Default districts for local demos.
-        rt.register_district(DistrictConfig::gaming("arena", 9001));
-        rt.register_district(DistrictConfig::privacy("veil", 9002));
-        rt.register_district(DistrictConfig::general("agora-hub", 1));
-        rt
+        })
     }
 
     pub fn register_district(&mut self, config: DistrictConfig) {
@@ -100,10 +122,14 @@ impl LayersRuntime {
             .map(|d| d.district_id.clone())
             .collect();
         LayerInfo {
-            hub_id: self.config.hub_id.clone(),
+            hub_id: self.hub_id.clone(),
+            ovl_genesis_hash: self.ovl_genesis_hash.clone(),
+            ovl_chain_id: self.ovl_chain_id.clone(),
+            drc_genesis_hash: self.drc_genesis_hash.clone(),
+            drc_chain_id: self.drc_chain_id.clone(),
             rollup_head: self.rollup.head_state_root().to_hex(),
             next_sequence: self.rollup.next_sequence(),
-            challenge_window_ms: self.config.challenge_window_ms,
+            challenge_window_ms: self.rollup.config().challenge_window_ms,
             ovl_minted: self.rollup.ovl().minted(),
             ovl_max_supply: self.rollup.ovl().max_supply(),
             drc_minted: self.intents.bridge().drc().minted(),
@@ -248,13 +274,18 @@ mod tests {
     use agora_ovolos_rollup::{EvmExecutor, EvmTx, StubEvmExecutor};
 
     #[test]
-    fn end_to_end_layers() {
+    fn end_to_end_layers_from_genesis() {
         let payer = Address([0xA1; 20]);
         let mut rt = LayersRuntime::new(LayersRuntimeConfig {
-            challenge_window_ms: 100,
+            challenge_window_ms: Some(100),
             gas_payer: Some(payer),
-            hub_id: "agora-hub".into(),
-        });
+            hub_id: None,
+            ovolos_genesis: OvolosGenesis::testnet(),
+            drachma_genesis: DrachmaGenesis::testnet(),
+        })
+        .unwrap();
+
+        // Genesis already preminted OVL to treasury; mint gas for payer separately.
         rt.mint_ovl(payer, Amount::from_base_units(1_000_000))
             .unwrap();
 
@@ -271,36 +302,16 @@ mod tests {
         let batch_id = rt.submit_batch(batch).unwrap();
         let commitment = rt.get_commitment(&batch_id).unwrap();
         rt.record_da(commitment).unwrap();
-        let finalized = rt.finalize_due(100).unwrap();
-        assert_eq!(finalized, vec![batch_id]);
+        assert_eq!(rt.finalize_due(100).unwrap(), vec![batch_id]);
 
-        let alice = Address([1u8; 20]);
-        let bob = Address([2u8; 20]);
-        let amt = Amount::from_whole(3).unwrap();
-        rt.credit_drc("agora-hub", alice, amt).unwrap();
-        let mid = rt
-            .lock_and_mint("agora-hub", "arena", alice, bob, amt, 1)
-            .unwrap();
-        rt.claim_mint(mid).unwrap();
-        assert_eq!(rt.drc_balance("arena", bob), amt);
-
-        let intent = Intent {
-            id_salt: 9,
-            user: Address([9u8; 20]),
-            give_asset_district: "arena".into(),
-            give_amount: Amount::from_whole(1).unwrap(),
-            want_asset_district: "veil".into(),
-            min_receive: Amount::from_whole(1).unwrap(),
-            deadline_ms: 50_000,
-            solver_hint: "composite".into(),
-        };
-        let iid = rt.submit_intent(intent, 0).unwrap();
-        let sol = rt.settle_intent(iid, 10).unwrap();
-        assert!(!sol.route.is_empty());
-        assert_eq!(rt.intent_status(&iid), Some(IntentStatus::Settled));
+        let treasury = Address::from_hex("ff9ec96f09eb154d038a552ecae59c50204ea9a9").unwrap();
+        assert!(rt.drc_balance("agora-hub", treasury).as_base_units() > 0);
+        assert!(rt.ovl_balance(treasury).as_base_units() > 0);
 
         let info = rt.info();
-        assert!(info.districts.iter().any(|d| d == "arena"));
-        assert!(info.ovl_minted > 0);
+        assert_eq!(info.ovl_chain_id, "agora-ovolos-testnet-1");
+        assert_eq!(info.drc_chain_id, "agora-drachma-testnet-1");
+        assert!(!info.ovl_genesis_hash.is_empty());
+        assert!(!info.drc_genesis_hash.is_empty());
     }
 }

@@ -25,9 +25,16 @@ Deposit into the hub with `credit_hub_lock` before `lock_and_mint`.
 - `InMemoryTransport` for local multi-district sims
 - Optional `BridgeBox::with_transport` publishes on lock/burn
 
-## DRC ledger
+## DRC ledger + genesis
 
-`DrcLedger` holds district/hub balances under the genesis DRC cap. Layered mark only — not an L1 UTXO asset.
+`DrcLedger` holds district/hub balances under the **Drachma L3 genesis** cap. Layered mark only — not an L1 UTXO asset.
+
+| Artifact | Path |
+| --- | --- |
+| Testnet (frozen) | [`docs/genesis/drachma.testnet.genesis.json`](../genesis/drachma.testnet.genesis.json) |
+| Mainnet draft | [`docs/genesis/drachma.mainnet.genesis.draft.json`](../genesis/drachma.mainnet.genesis.draft.json) |
+
+`DrachmaGenesis` / `BridgeBox::from_genesis` load caps, hub id, districts, and premine. `agora-layers` reads `AGORA_DRC_GENESIS_FILE` (default: embedded testnet).
 
 ## API
 

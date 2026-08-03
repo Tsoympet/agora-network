@@ -1,0 +1,42 @@
+{
+  "layer": "L3",
+  "mark": "DRC",
+  "network": "testnet",
+  "version": 1,
+  "chain_name": "Drachma Bridge Hub",
+  "chain_id": "agora-drachma-testnet-1",
+  "parent_l1_network": "testnet",
+  "parent_l1_genesis_hash": "afe59232cd20a16bd56948044149d2b8013e63f3694c113074fef75ab0cb9b98",
+  "hub_id": "agora-hub",
+  "timestamp_ms": 1785715200000,
+  "max_supply": 600000000000000000,
+  "decimals": 8,
+  "premine": [
+    {
+      "district_id": "agora-hub",
+      "address_hex": "ff9ec96f09eb154d038a552ecae59c50204ea9a9",
+      "amount": 60000000000000000
+    }
+  ],
+  "districts": [
+    {
+      "district_id": "agora-hub",
+      "kind": "general",
+      "chain_id": 1,
+      "rpc_hint": ""
+    },
+    {
+      "district_id": "arena",
+      "kind": "gaming",
+      "chain_id": 9001,
+      "rpc_hint": ""
+    },
+    {
+      "district_id": "veil",
+      "kind": "privacy",
+      "chain_id": 9002,
+      "rpc_hint": ""
+    }
+  ],
+  "genesis_hash": "2c4217b5aa81e0626c4a08552f25a06c3f90374e7ae072e8f01eefdf9da2b314"
+}

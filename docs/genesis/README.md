@@ -1,31 +1,32 @@
 # Canonical genesis
 
-Agora freezes Block 0 per public network so every peer shares the same DAG root.
-Genesis artifacts are **version 2** documents: Bitcoin/Kaspa-style monetary +
-consensus + wallet identity fields, plus the three Agora marks (TLT / DRC / OVL).
+Agora freezes a genesis document **per layer** so peers share the same economic root:
 
-| Network | Artifact | Notes |
-| --- | --- | --- |
-| `testnet` | [`testnet.genesis.json`](testnet.genesis.json) | Frozen Block 0; HRP `agoratest` |
-| `mainnet` | [`mainnet.genesis.draft.json`](mainnet.genesis.draft.json) | Draft economics only — not bootable |
-| `dev` | *(none)* | Local / CI — premine & timestamp free via env |
+| Layer | Mark | Artifact (testnet) | Artifact (mainnet) |
+| --- | --- | --- | --- |
+| **L1** BlockDAG | **TLT** | [`testnet.genesis.json`](testnet.genesis.json) | [`mainnet.genesis.draft.json`](mainnet.genesis.draft.json) |
+| **L2** Ovolos rollup | **OVL** | [`ovolos.testnet.genesis.json`](ovolos.testnet.genesis.json) | [`ovolos.mainnet.genesis.draft.json`](ovolos.mainnet.genesis.draft.json) |
+| **L3** Drachma bridge | **DRC** | [`drachma.testnet.genesis.json`](drachma.testnet.genesis.json) | [`drachma.mainnet.genesis.draft.json`](drachma.mainnet.genesis.draft.json) |
+
+`dev` has no frozen L1 file (env-driven). Layer runtimes default to embedded testnet OVL/DRC genesis when no file is set.
 
 ## Token economy (whole units @ 8 decimals)
 
 | Ticker | Name | Layer | Max supply | Role |
 | --- | --- | --- | --- | --- |
 | **TLT** | Talanton | L1 | **100,000,000** | Native BlockDAG asset (`SupplyCaps.max_supply`) |
-| **DRC** | Drachma | L2+ | **6,000,000,000** | Medium of exchange / district & bridge (registry) |
-| **OVL** | Ovolos | L2 | **21,000,000,000** | Rollup gas / micro-unit brand (registry) |
+| **DRC** | Drachma | L3 | **6,000,000,000** | Medium of exchange / district & bridge ledger |
+| **OVL** | Ovolos | L2 | **21,000,000,000** | Rollup gas / micro-unit ledger |
 
-Only **TLT** is created by L1 consensus today (`cf_utxo` / emission). DRC and OVL
-caps are frozen in the genesis document for wallets, explorers, and future L2
-issuance — they are not separate L1 asset ids yet.
+Only **TLT** is created by L1 consensus (`cf_utxo` / emission). **OVL** and **DRC** each boot from their own layer genesis (caps, premine, parent L1 hash). They are **not** L1 UTXO asset ids.
 
 L1 emission mirrors Bitcoin-shaped policy: 50 TLT initial reward, halvings every
 210,000 blue-score, 10% premine.
 
-## Wallet identity
+Testnet layer premines (10% of mark cap) use the same treasury pubkey hash as L1
+testnet (`ff9ec96f…`).
+
+## Wallet identity (L1 addresses)
 
 | Network | Bech32m HRP | Example | BIP-44 coin type |
 | --- | --- | --- | --- |
@@ -33,10 +34,7 @@ L1 emission mirrors Bitcoin-shaped policy: 50 TLT initial reward, halvings every
 | testnet | `agoratest` | `agoratest1…` | `8888` (same until SLIP assign) |
 | dev | `agoradev` | `agoradev1…` | `8888` |
 
-Payload bytes are identical across HRPs; only the human-readable prefix changes.
-Hex (40-char) remains accepted everywhere.
-
-## Constants
+## L1 constants
 
 Embedded in `agora-state-machine`:
 
@@ -45,35 +43,38 @@ Embedded in `agora-state-machine`:
 - `TESTNET_GENESIS_TIMESTAMP_MS` = `1785715200000` (2026-08-03T00:00:00.000Z)
 - `TESTNET_GENESIS_BITS` = `0`
 
+## L2 / L3 constants (frozen in docs + Rust)
+
+| Mark | Testnet `genesis_hash` | Loader |
+| --- | --- | --- |
+| OVL | `440bb8eb…9e01` | `OvolosGenesis` / `AGORA_OVL_GENESIS_FILE` |
+| DRC | `2c4217b5…b314` | `DrachmaGenesis` / `AGORA_DRC_GENESIS_FILE` |
+
+Both documents pin `parent_l1_genesis_hash` to the L1 testnet Block 0 hash.
+
 ## CLI
 
 ```bash
-# Write / refresh the committed artifact (run from repo root)
+# L1
 cargo run -p agora-node -- genesis dump --network testnet
-
-# Check embedded constant + optional file
-cargo run -p agora-node -- genesis verify --network testnet
 cargo run -p agora-node -- genesis verify --network testnet --file docs/genesis/testnet.genesis.json
+
+# L2 / L3 runtime (loads layer genesis)
+AGORA_OVL_GENESIS_FILE=docs/genesis/ovolos.testnet.genesis.json \
+AGORA_DRC_GENESIS_FILE=docs/genesis/drachma.testnet.genesis.json \
+  cargo run -p agora-layers
 ```
 
-## Node boot
+## Node / layers boot
 
 | Env | Default | Meaning |
 | --- | --- | --- |
-| `AGORA_NETWORK` | `dev` | `dev` / `testnet` / `mainnet` |
-| `AGORA_GENESIS_FILE` | unset | Load & verify a genesis JSON artifact |
-| `AGORA_EXPECTED_GENESIS` | unset | Extra hex hash check after load/ignite |
-| `AGORA_PREMINE_ADDRESS` | `00…00` | **dev only** — ignored on frozen networks |
-| `AGORA_GENESIS_TIMESTAMP_MS` | `0` | **dev only** |
-| `AGORA_GENESIS_BITS` | `0` | **dev only** |
-
-`scripts/local_testnet.sh` sets `AGORA_NETWORK=testnet`. Wipe `AGORA_DATA*` after changing the frozen genesis hash fields.
+| `AGORA_NETWORK` | `dev` | L1 `dev` / `testnet` / `mainnet` |
+| `AGORA_GENESIS_FILE` | unset | Load L1 genesis JSON |
+| `AGORA_OVL_GENESIS_FILE` | embedded testnet | Load Ovolos L2 genesis JSON |
+| `AGORA_DRC_GENESIS_FILE` | embedded testnet | Load Drachma L3 genesis JSON |
 
 ## Mainnet freeze
 
-See [`docs/governance/MAINNET_GENESIS_FREEZE.md`](../governance/MAINNET_GENESIS_FREEZE.md) and
-[`docs/governance/SLIP0044.md`](../governance/SLIP0044.md). Prep helper:
-
-```bash
-./scripts/prepare_mainnet_genesis.sh
-```
+See [`docs/governance/MAINNET_GENESIS_FREEZE.md`](../governance/MAINNET_GENESIS_FREEZE.md).
+Freeze order: L1 Talanton → L2 Ovolos → L3 Drachma (each pins the parent L1 hash).

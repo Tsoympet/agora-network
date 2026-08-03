@@ -21,6 +21,13 @@ Optimistic L2 for EVM smart-contract scaling on Agora.
 
 `RevmExecutor` decodes compact transfers `to(20) || value(32) || calldata?`, runs them through mainnet `revm`, and hashes the resulting account cache into a post-state root. Use `encode_transfer` helpers in tests.
 
-## OVL ledger
+## OVL ledger + genesis
 
-`OvlLedger` tracks layered OVL balances under the genesis registry cap. It is **not** an L1 UTXO asset — TLT remains the only L1 money.
+`OvlLedger` tracks layered OVL balances under the **Ovolos L2 genesis** cap. It is **not** an L1 UTXO asset — TLT remains the only L1 money.
+
+| Artifact | Path |
+| --- | --- |
+| Testnet (frozen) | [`docs/genesis/ovolos.testnet.genesis.json`](../genesis/ovolos.testnet.genesis.json) |
+| Mainnet draft | [`docs/genesis/ovolos.mainnet.genesis.draft.json`](../genesis/ovolos.mainnet.genesis.draft.json) |
+
+`OvolosGenesis` / `OvolosRollup::from_genesis` load caps, `gas_per_tx`, challenge window, state root, and premine. `agora-layers` reads `AGORA_OVL_GENESIS_FILE` (default: embedded testnet).
