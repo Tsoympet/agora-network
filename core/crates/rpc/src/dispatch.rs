@@ -70,6 +70,13 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let info = self.backend.get_node_info()?;
                 Ok(node_info_to_json(&info))
             }
+            RpcMethod::EstimateFee => {
+                let fee = self.backend.estimate_fee()?;
+                Ok(json!({
+                    "min_relay_fee": fee.min_relay_fee,
+                    "suggested_fee": fee.suggested_fee,
+                }))
+            }
             RpcMethod::SubmitTransaction => {
                 let raw = tx_param(&req.params)?;
                 let tx: Transaction = serde_json::from_value(raw)
@@ -186,6 +193,7 @@ fn node_info_to_json(info: &crate::backend::NodeInfo) -> Value {
         "allow_fund": info.allow_fund,
         "miner_address": info.miner_address,
         "genesis_hash": info.genesis_hash,
+        "min_relay_fee": info.min_relay_fee,
     })
 }
 

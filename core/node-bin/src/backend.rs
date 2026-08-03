@@ -8,7 +8,7 @@ use agora_consensus::PowAlgorithm;
 use agora_p2p::{
     Mempool, NetworkHandle, NetworkMessage, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT,
 };
-use agora_rpc::{MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
+use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
     lookup_tx_location, outpoint_key, validate_mempool_tx, ColumnFamily, StateStore,
 };
@@ -226,6 +226,15 @@ impl RpcBackend for NodeBackend {
             allow_fund: self.allow_fund,
             miner_address: Some(self.miner_address.to_bech32()),
             genesis_hash: Some(self.genesis_hash.to_hex()),
+            min_relay_fee: min_relay_fee(),
+        })
+    }
+
+    fn estimate_fee(&self) -> Result<FeeEstimate, RpcError> {
+        let min = min_relay_fee();
+        Ok(FeeEstimate {
+            min_relay_fee: min,
+            suggested_fee: min,
         })
     }
 

@@ -1,5 +1,6 @@
 export {
   createLightClient,
+  type FeeEstimate,
   type LightBalance,
   type LightBlock,
   type LightClient,

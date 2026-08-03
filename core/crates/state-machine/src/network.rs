@@ -13,13 +13,16 @@ use serde::{Deserialize, Serialize};
 use crate::genesis::{GenesisBuilder, SupplyCaps};
 use crate::marks::{default_token_marks, TokenMark};
 
-/// Testnet / local DAA: 1s target, wide window, may start at bits=0.
+/// Public testnet DAA: 1s target, wide window.
+///
+/// Genesis `header.bits` stays `0` (frozen hash), but `min_level` floors
+/// post-genesis templates / retarget so public peers are not free-mined forever.
 pub fn daa_config_testnet() -> DaaConfig {
     DaaConfig {
         target_block_time_ms: 1_000,
         window_size: 90,
         max_adjustment_factor: 2.0,
-        min_level: 0,
+        min_level: 8,
     }
 }
 
@@ -524,7 +527,7 @@ mod tests {
     fn consensus_policy_locked_per_network() {
         let testnet = ChainParams::testnet();
         assert_eq!(testnet.bits, TESTNET_GENESIS_BITS);
-        assert_eq!(testnet.daa.min_level, 0);
+        assert_eq!(testnet.daa.min_level, 8);
         assert_eq!(testnet.ghostdag_k, DEFAULT_GHOSTDAG_K);
         assert_eq!(testnet.pow_algorithm, PowAlgorithm::RandomX);
 

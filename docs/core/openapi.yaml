@@ -1,0 +1,75 @@
+openapi: 3.0.3
+info:
+  title: Agora Node JSON-RPC
+  version: 0.1.0
+  description: |
+    HTTP JSON-RPC 2.0-style surface (`POST /rpc`). When `AGORA_RPC_TOKEN` is set,
+    wallet/mining methods require `Authorization: Bearer <token>`.
+servers:
+  - url: http://127.0.0.1:8545
+paths:
+  /health:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: ok
+  /rpc:
+    post:
+      summary: JSON-RPC
+      parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+          description: Bearer token when AGORA_RPC_TOKEN is configured
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                id:
+                  nullable: true
+                method:
+                  type: string
+                  enum:
+                    - agora_getDagTips
+                    - agora_getBlock
+                    - agora_getTransaction
+                    - agora_getMempool
+                    - agora_getNodeInfo
+                    - agora_estimateFee
+                    - agora_submitTransaction
+                    - agora_getBalance
+                    - agora_getUtxos
+                    - agora_fundAddress
+                    - agora_getBlockTemplate
+                    - agora_submitBlock
+                params:
+                  nullable: true
+      responses:
+        "200":
+          description: JSON-RPC result or error
+        "401":
+          description: Missing/invalid bearer token
+components:
+  schemas:
+    FeeEstimate:
+      type: object
+      properties:
+        min_relay_fee:
+          type: integer
+        suggested_fee:
+          type: integer
+    NodeInfo:
+      type: object
+      properties:
+        network: { type: string }
+        version: { type: string }
+        bits: { type: integer }
+        min_relay_fee: { type: integer }
+        pow_algorithm: { type: string }
+        genesis_hash: { type: string, nullable: true }

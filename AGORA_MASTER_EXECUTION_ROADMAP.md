@@ -232,6 +232,16 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Mobile:** Expo SecureStore adapter + same unlock flow
 - [x] **Finish-line doc:** [`docs/governance/PATH_TO_COMPLETE_CHAIN.md`](docs/governance/PATH_TO_COMPLETE_CHAIN.md)
 
+## Phase 38: Public testnet readiness — done
+
+- [x] **PoW floor:** testnet `daa_min_level = 8` + boot difficulty clamp (genesis hash unchanged)
+- [x] **Durable orphans:** Warm `orphan/*` persist / restore across restart
+- [x] **Docker + ops runbook:** `Dockerfile`, `docker-compose.yml`, `docs/ops/PUBLIC_TESTNET.md`
+- [x] **RandomX-only policy** documented for public testnet
+- [x] **Faucet cap:** `AGORA_FAUCET_MAX_TOTAL`
+- [x] **`agora_estimateFee`** + `min_relay_fee` on node info; BIP-44 change chain in light-client
+- [x] **OpenAPI sketch** `docs/core/openapi.yaml` + TLS termination notes
+
 ## Directory Structure Reference
 
 See [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md) for workspace boundaries.

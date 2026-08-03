@@ -6,7 +6,7 @@ mod error;
 mod methods;
 
 pub use backend::{
-    InMemoryBackend, MempoolEntry, NodeInfo, RpcBackend, TxLookup, TxStatus, UtxoEntry,
+    FeeEstimate, InMemoryBackend, MempoolEntry, NodeInfo, RpcBackend, TxLookup, TxStatus, UtxoEntry,
 };
 pub use dispatch::RpcDispatcher;
 pub use error::RpcError;

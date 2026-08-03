@@ -93,6 +93,13 @@ export type LightNodeInfo = {
   miner_address: string | null;
   /** Hex id of Block 0 when reported by the node. */
   genesis_hash: string | null;
+  /** Minimum mempool relay fee when reported. */
+  min_relay_fee?: number;
+};
+
+export type FeeEstimate = {
+  min_relay_fee: number;
+  suggested_fee: number;
 };
 
 export type RpcStatus = "idle" | "ok" | "error";
@@ -112,6 +119,7 @@ export type LightClient = {
   getTransaction: (txId: string) => Promise<LightTxLookup>;
   getMempool: (limit?: number) => Promise<LightMempool>;
   getNodeInfo: () => Promise<LightNodeInfo>;
+  estimateFee: () => Promise<FeeEstimate>;
   getBalance: (address: string) => Promise<LightBalance>;
   getUtxos: (address: string) => Promise<LightUtxoSet>;
   /** Submit a signed transaction JSON body (native serde / byte-array hashes). */
@@ -161,6 +169,7 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getMempool: (limit = 128) =>
       call<LightMempool>("agora_getMempool", { limit }),
     getNodeInfo: () => call<LightNodeInfo>("agora_getNodeInfo", []),
+    estimateFee: () => call<FeeEstimate>("agora_estimateFee", []),
     getBalance: (address: string) =>
       call<LightBalance>("agora_getBalance", { address }),
     getUtxos: (address: string) =>

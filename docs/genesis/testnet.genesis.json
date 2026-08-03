@@ -49,7 +49,7 @@
     "target_block_time_ms": 1000,
     "daa_window_size": 90,
     "daa_max_adjustment_factor": 2.0,
-    "daa_min_level": 0
+    "daa_min_level": 8
   },
   "wallet": {
     "address_hrp": "agoratest",

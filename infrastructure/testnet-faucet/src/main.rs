@@ -4,6 +4,7 @@
 //! - `AGORA_FAUCET_BIND` (default `127.0.0.1:18081`)
 //! - `AGORA_FAUCET_DRIP` base units per drip (default `1000000000` = 10 AGORA)
 //! - `AGORA_FAUCET_COOLDOWN_SECS` (default `60`)
+//! - `AGORA_FAUCET_MAX_TOTAL` optional hard cap on total base units dispensed
 //! - `AGORA_RPC_URL` (default `http://127.0.0.1:8545/rpc`) — live node with
 //!   `AGORA_RPC_ALLOW_FUND=1` so drips mint spendable `cf_utxo` outputs
 
@@ -31,14 +32,19 @@ async fn main() {
     let rpc_url =
         std::env::var("AGORA_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8545/rpc".into());
 
+    let max_total = std::env::var("AGORA_FAUCET_MAX_TOTAL")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Amount::from_base_units);
     let config = FaucetConfig {
         drip_amount: Amount::from_base_units(drip),
         cooldown: Duration::from_secs(cooldown),
-        max_total: None,
+        max_total,
     };
     info!(
         drip_base_units = drip,
         cooldown_secs = cooldown,
+        max_total = ?max_total.map(|a| a.as_base_units()),
         %rpc_url,
         "faucet policy → live node UTXO mints"
     );

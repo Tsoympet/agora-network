@@ -27,3 +27,11 @@ npm run dev
 | `VITE_AGORA_POLL_MS` | `2000` | Tip poll interval |
 
 Shared client: `apps/shared/light-client`.
+
+### Optional CPU mining (sidecar)
+
+Tauri does not bundle the miner yet. Run the RandomX sidecar against the same RPC:
+
+```bash
+AGORA_RPC_URL=http://127.0.0.1:8545/rpc cargo run -p agora-miner-sidecar
+```
