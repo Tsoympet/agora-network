@@ -33,6 +33,10 @@ impl NetworkTopics {
         format!("/agora/{}/getblock/{}", self.network, TOPIC_VERSION)
     }
 
+    pub fn getheaders_protocol_name(&self) -> String {
+        format!("/agora/{}/getheaders/{}", self.network, TOPIC_VERSION)
+    }
+
     pub fn blocks(&self) -> IdentTopic {
         IdentTopic::new(self.blocks_name())
     }
@@ -45,6 +49,11 @@ impl NetworkTopics {
         // StreamProtocol requires a 'static str; leak is fine for process lifetime.
         let name = self.getblock_protocol_name();
         StreamProtocol::try_from_owned(name).expect("getblock protocol")
+    }
+
+    pub fn getheaders_protocol(&self) -> StreamProtocol {
+        let name = self.getheaders_protocol_name();
+        StreamProtocol::try_from_owned(name).expect("getheaders protocol")
     }
 }
 
@@ -95,11 +104,16 @@ mod tests {
         assert_eq!(dev.blocks_name(), "agora/dev/blocks/1");
         assert_eq!(dev.transactions_name(), "agora/dev/txs/1");
         assert_eq!(dev.getblock_protocol_name(), "/agora/dev/getblock/1");
+        assert_eq!(dev.getheaders_protocol_name(), "/agora/dev/getheaders/1");
         assert_eq!(testnet.blocks_name(), "agora/testnet/blocks/1");
         assert_ne!(dev.blocks_name(), testnet.blocks_name());
         assert_ne!(
             dev.getblock_protocol_name(),
             testnet.getblock_protocol_name()
+        );
+        assert_ne!(
+            dev.getheaders_protocol_name(),
+            testnet.getheaders_protocol_name()
         );
     }
 

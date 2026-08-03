@@ -223,6 +223,109 @@ impl ChainState {
         borsh::from_slice(&bytes).map_err(|e| AdmitError::Storage(e.to_string()))
     }
 
+    /// Bitcoin-style block locator along the virtual selected-parent spine (newest → genesis).
+    pub fn block_locator(&self) -> Result<Vec<Hash>, AdmitError> {
+        use agora_p2p::MAX_LOCATOR_HASHES;
+
+        let tip = self.virtual_tip()?;
+        let mut hashes = Vec::with_capacity(MAX_LOCATOR_HASHES);
+        let mut hash = tip;
+        let mut step: u64 = 1;
+        let mut index: u64 = 0;
+        loop {
+            hashes.push(hash);
+            if hash == self.genesis || hashes.len() >= MAX_LOCATOR_HASHES.saturating_sub(1) {
+                break;
+            }
+            // Walk `step` selected parents toward genesis.
+            for _ in 0..step {
+                match self.ghostdag.selected_parent(&hash) {
+                    Some(parent) => hash = parent,
+                    None => {
+                        hash = self.genesis;
+                        break;
+                    }
+                }
+                if hash == self.genesis {
+                    break;
+                }
+            }
+            index = index.saturating_add(1);
+            if index >= 10 {
+                step = step.saturating_mul(2).max(1);
+            }
+        }
+        if hashes.last().copied() != Some(self.genesis) {
+            hashes.push(self.genesis);
+        }
+        Ok(hashes)
+    }
+
+    /// Headers on the selected-parent path from the first known locator hash toward virtual tip.
+    ///
+    /// Returns oldest → newest, excluding the common ancestor, capped by `limit`.
+    pub fn headers_after_locator(
+        &self,
+        locator: &[Hash],
+        limit: u32,
+        stop_hash: Option<Hash>,
+    ) -> Result<Vec<agora_types::BlockHeader>, AdmitError> {
+        use agora_p2p::{MAX_HEADERS_PER_RESPONSE, MAX_LOCATOR_HASHES};
+
+        let limit = (limit.max(1)).min(MAX_HEADERS_PER_RESPONSE) as usize;
+        let locator = if locator.len() > MAX_LOCATOR_HASHES {
+            &locator[..MAX_LOCATOR_HASHES]
+        } else {
+            locator
+        };
+
+        let mut ancestor = None;
+        for hash in locator {
+            if self.has_block(hash)? {
+                ancestor = Some(*hash);
+                break;
+            }
+        }
+        let ancestor = ancestor.unwrap_or(self.genesis);
+        if !self.has_block(&ancestor)? {
+            return Ok(Vec::new());
+        }
+
+        let tip = self.virtual_tip()?;
+        if tip == ancestor {
+            return Ok(Vec::new());
+        }
+
+        // Walk tip → ancestor (newest first), then reverse to oldest → newest.
+        let mut newest_first = Vec::new();
+        let mut cursor = tip;
+        loop {
+            if cursor == ancestor {
+                break;
+            }
+            let block = self
+                .load_block(&cursor)?
+                .ok_or_else(|| AdmitError::Storage(format!("missing body {}", cursor.to_hex())))?;
+            newest_first.push(block.header);
+            match self.ghostdag.selected_parent(&cursor) {
+                Some(parent) => cursor = parent,
+                None => return Ok(Vec::new()), // exhausted without shared ancestor
+            }
+            if newest_first.len() > 1_000_000 {
+                return Err(AdmitError::Storage("headers path too long".into()));
+            }
+        }
+
+        newest_first.reverse();
+        if let Some(stop) = stop_hash {
+            if let Some(pos) = newest_first.iter().position(|h| h.hash() == stop) {
+                newest_first.truncate(pos + 1);
+            }
+        }
+        newest_first.truncate(limit);
+        Ok(newest_first)
+    }
+
     pub fn load_block(&self, hash: &Hash) -> Result<Option<Block>, AdmitError> {
         for cf in [ColumnFamily::Hot, ColumnFamily::Warm, ColumnFamily::Archival] {
             if let Some(bytes) = self
@@ -1480,6 +1583,46 @@ mod tests {
             .verify(&block.header, &digest)
             .unwrap();
         block
+    }
+
+    #[test]
+    fn block_locator_and_headers_after_locator() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+
+        let mut tip = genesis;
+        for nonce in 1..=12u64 {
+            tip = mine_child(&mut chain, &[tip], Address::ZERO, nonce);
+        }
+
+        let locator = chain.block_locator().unwrap();
+        assert_eq!(locator.first().copied(), Some(tip));
+        assert_eq!(locator.last().copied(), Some(genesis));
+        assert!(locator.len() <= agora_p2p::MAX_LOCATOR_HASHES);
+
+        // Peer at genesis asks for headers toward tip.
+        let headers = chain
+            .headers_after_locator(&[genesis], 5, None)
+            .unwrap();
+        assert_eq!(headers.len(), 5);
+        assert!(headers[0].parents.contains(&genesis));
+        for window in headers.windows(2) {
+            assert!(window[1].parents.contains(&window[0].hash()));
+        }
+
+        // Already at tip → empty.
+        assert!(chain
+            .headers_after_locator(&[tip], 100, None)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
