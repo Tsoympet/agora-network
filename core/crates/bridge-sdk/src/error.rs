@@ -18,4 +18,8 @@ pub enum BridgeError {
     Transport(String),
     #[error("constraint: {0}")]
     Constraint(String),
+    #[error("unauthorized attestor")]
+    UnauthorizedAttestor,
+    #[error("message awaiting attestor quorum")]
+    AwaitingQuorum,
 }

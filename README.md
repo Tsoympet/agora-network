@@ -24,11 +24,11 @@
 
 Agora is a proof-of-work **BlockDAG**: blocks can reference multiple parents, ordered by **GHOSTDAG**, with a single-asset L1 UTXO ledger denominated in **TLT**. Peers sync with headers-first IBD over libp2p; wallets talk JSON-RPC.
 
-| Mark | Layer | Native PoW | Analog | Role |
+| Mark | Layer | Consensus | Analog | Role |
 | --- | --- | --- | --- | --- |
-| **TLT** (Talanton) | L1 | RandomX | Bitcoin | BlockDAG UTXO settlement |
-| **OVL** (Ovolos) | L2 | sha256_leading_zero | Ethereum | EVM gas + smart-contract money |
-| **DRC** (Drachma) | L3 | sha256_leading_zero | XRP | Payments / path payments / bridge rail |
+| **TLT** (Talanton) | L1 | Pure PoW (RandomX) | Bitcoin | BlockDAG UTXO settlement |
+| **OVL** (Ovolos) | L2 | Hybrid PoW mint + bonded sequencers | Ethereum | EVM gas + smart-contract money |
+| **DRC** (Drachma) | L3 | Hybrid PoW mint + bonded attestors | XRP | Payments / path payments / bridge rail |
 
 See [`docs/scaling/TOKEN_ROLES.md`](docs/scaling/TOKEN_ROLES.md).
 

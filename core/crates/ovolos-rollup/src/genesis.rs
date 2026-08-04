@@ -243,6 +243,7 @@ impl OvolosGenesis {
         RollupConfig {
             challenge_window_ms: self.challenge_window_ms,
             gas_payer,
+            sequencer_min_bond: crate::sequencer::DEFAULT_SEQUENCER_MIN_BOND,
         }
     }
 

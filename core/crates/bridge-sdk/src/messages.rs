@@ -42,6 +42,8 @@ pub enum MessageStatus {
     Locked,
     Claimed,
     Unlocked,
-    /// Same-district payment settled.
+    /// Same-district payment settled (ledger moved).
     Paid,
+    /// Attestor quorum reached (hybrid PoS finality).
+    Finalized,
 }
