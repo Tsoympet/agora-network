@@ -23,7 +23,8 @@ evicts lower-fee txs for higher-fee admissions.
 - Persistent `revm` account **+ contract storage** in the L2 state root.
 - Ethereum-class RPC: `eth_chainId`, `eth_blockNumber`, `eth_getBalance`,
   `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`, `eth_call`,
-  `eth_sendRawTransaction` (compact `to||value||data` mempool).
+  `eth_sendRawTransaction` (legacy RLP + secp256k1 recovery; compact fallback).
+- Durable checkpoint under `AGORA_LAYERS_DATA`.
 
 ### DRC — hybrid (PoW + PoS attestors) ≈ XRP
 - **PoW** still mints DRC coinbase to miners.
@@ -46,10 +47,11 @@ evicts lower-fee txs for higher-fee admissions.
 | CREATE + bytecode | **done** |
 | Contract storage in state root | **done** |
 | `eth_call` / `eth_getCode` / `eth_getStorageAt` | **done** |
-| L2 mempool (`eth_sendRawTransaction`) | **done** (compact encoding) |
+| L2 mempool (`eth_sendRawTransaction`) | **done** (legacy RLP + compact) |
 | Bonded sequencer set | **done** |
-| Full secp256k1 signed Ethereum txs / RLP | follow-up (compact encoding today) |
-| Durable L2 state DB / MPT roots | follow-up |
+| secp256k1 signed Ethereum txs / RLP | **done** (legacy + EIP-155) |
+| Durable L2 checkpoint | **done** (`AGORA_LAYERS_DATA`) |
+| Full Ethereum MPT state roots | deferred (SHA-256 digests today) |
 
 ## DRC ≈ XRP (L3) — in-tree completeness
 

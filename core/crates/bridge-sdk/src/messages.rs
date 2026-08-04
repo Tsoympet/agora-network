@@ -37,7 +37,7 @@ impl BridgeMessage {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum MessageStatus {
     Locked,
     Claimed,

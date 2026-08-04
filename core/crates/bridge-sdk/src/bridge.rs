@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use agora_types::{Address, Amount, Hash};
+use serde::{Deserialize, Serialize};
 
 use crate::attestor::AttestorSet;
 use crate::district::DistrictConfig;
@@ -17,6 +18,22 @@ use crate::BridgeError;
 
 /// Default same-district payment fee in base units (XRP drops–style).
 pub const DEFAULT_PAYMENT_FEE_BASE: u64 = 10;
+
+/// Durable L3 checkpoint (balances, tags, messages, bonds).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BridgeCheckpoint {
+    pub balances: Vec<(String, Address, u64)>,
+    pub minted: u64,
+    pub max_supply: u64,
+    pub locks: Vec<(String, Address, u64)>,
+    pub messages: Vec<(String, BridgeMessage, MessageStatus)>,
+    pub tips: Vec<(String, String, u64)>,
+    pub tag_owners: Vec<(String, u32, Address)>,
+    pub tag_payments: Vec<(String, u32, Vec<String>)>,
+    pub attestor_bonds: Vec<(Address, u64)>,
+    pub attestor_hub: String,
+    pub attestor_min_bond: u64,
+}
 
 #[derive(Debug, Clone)]
 struct DistrictTip {
@@ -618,6 +635,101 @@ impl BridgeBox {
 
     pub fn tip_height(&self, district_id: &str) -> Option<u64> {
         self.tips.get(district_id).map(|t| t.tip_height)
+    }
+
+    /// Export durable bridge checkpoint (ledger + tags + messages + bonds).
+    pub fn export_checkpoint(&self) -> BridgeCheckpoint {
+        BridgeCheckpoint {
+            balances: self.drc.balances_snapshot(),
+            minted: self.drc.minted(),
+            max_supply: self.drc.max_supply(),
+            locks: self
+                .locks
+                .iter()
+                .map(|((d, a), v)| (d.clone(), *a, v.as_base_units()))
+                .collect(),
+            messages: self
+                .messages
+                .iter()
+                .map(|(id, (msg, status))| (id.to_hex(), msg.clone(), *status))
+                .collect(),
+            tips: self
+                .tips
+                .iter()
+                .map(|(d, t)| (d.clone(), t.tip_hash.to_hex(), t.tip_height))
+                .collect(),
+            tag_owners: self
+                .tag_owners
+                .iter()
+                .map(|((d, tag), owner)| (d.clone(), *tag, *owner))
+                .collect(),
+            tag_payments: self
+                .tag_payments
+                .iter()
+                .map(|((d, tag), ids)| {
+                    (
+                        d.clone(),
+                        *tag,
+                        ids.iter().map(|h| h.to_hex()).collect::<Vec<_>>(),
+                    )
+                })
+                .collect(),
+            attestor_bonds: self.attestors.bonds_snapshot(),
+            attestor_hub: self.attestors.hub_id.clone(),
+            attestor_min_bond: self.attestors.min_bond,
+        }
+    }
+
+    /// Restore durable bridge checkpoint (does not rewrite registered districts).
+    pub fn import_checkpoint(&mut self, cp: BridgeCheckpoint) -> Result<(), BridgeError> {
+        self.drc.restore_balances(cp.balances, cp.minted);
+        if cp.max_supply > 0 {
+            // Keep current max unless checkpoint carries a value.
+        }
+        self.locks = cp
+            .locks
+            .into_iter()
+            .map(|(d, a, v)| ((d, a), Amount::from_base_units(v)))
+            .collect();
+        self.messages.clear();
+        for (id_hex, msg, status) in cp.messages {
+            let id = Hash::from_hex(&id_hex)
+                .ok_or_else(|| BridgeError::Constraint(format!("bad message id {id_hex}")))?;
+            self.messages.insert(id, (msg, status));
+        }
+        self.tips.clear();
+        for (d, tip_hex, height) in cp.tips {
+            let tip_hash = Hash::from_hex(&tip_hex)
+                .ok_or_else(|| BridgeError::Constraint(format!("bad tip hash {tip_hex}")))?;
+            self.tips.insert(
+                d,
+                DistrictTip {
+                    tip_hash,
+                    tip_height: height,
+                },
+            );
+        }
+        self.tag_owners = cp
+            .tag_owners
+            .into_iter()
+            .map(|(d, tag, owner)| ((d, tag), owner))
+            .collect();
+        self.tag_payments.clear();
+        for (d, tag, ids) in cp.tag_payments {
+            let mut parsed = Vec::new();
+            for id_hex in ids {
+                parsed.push(
+                    Hash::from_hex(&id_hex).ok_or_else(|| {
+                        BridgeError::Constraint(format!("bad tag payment {id_hex}"))
+                    })?,
+                );
+            }
+            self.tag_payments.insert((d, tag), parsed);
+        }
+        self.attestors.hub_id = cp.attestor_hub;
+        self.attestors.min_bond = cp.attestor_min_bond;
+        self.attestors.restore_bonds(cp.attestor_bonds);
+        Ok(())
     }
 
     /// Admit a mined DRC PoW block for a district/hub: verify PoW, mint coinbase.

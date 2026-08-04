@@ -41,9 +41,11 @@ on localhost or a private interface behind the proxy. P2P remains libp2p TCP.
 
 ## Faucet policy (A7)
 
-- Lab faucet still calls `agora_fundAddress` (mint). Cap with `AGORA_FAUCET_MAX_TOTAL`.
-- For a public testnet, fund a treasury UTXO from premine and replace mint with
-  signed spends (follow-up). Keep `agora_fundAddress` off on mainnet (already hard-disabled).
+- **Default:** `AGORA_FAUCET_MODE=treasury` — signed spends from BIP-44 external(0)
+  (`AGORA_FAUCET_MNEMONIC`, default = testnet premine `abandon … about`).
+- Lab opt-in mint: `AGORA_FAUCET_MODE=mint` + node `AGORA_RPC_ALLOW_FUND=1`.
+- Cap with `AGORA_FAUCET_MAX_TOTAL`. Keep `agora_fundAddress` off on mainnet
+  (already hard-disabled).
 
 ## Orphans
 

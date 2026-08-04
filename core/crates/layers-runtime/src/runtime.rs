@@ -8,12 +8,13 @@ use agora_intent_engine::{
     AmmSolver, CompositeSolver, ConstantProductPool, Intent, IntentEngine, IntentStatus, Solution,
 };
 use agora_ovolos_rollup::{
-    Batch, BatchCommitment, BatchStatus, EvmExecutor, EvmTx, FraudProof, OvlBlock, OvolosGenesis,
-    OvolosRollup, RevmExecutor, OVOLOS_POW_ALGORITHM,
+    decode_evm_tx, Batch, BatchCommitment, BatchStatus, EvmExecutor, EvmTx, FraudProof, OvlBlock,
+    OvolosGenesis, OvolosRollup, RevmExecutor, OVOLOS_POW_ALGORITHM,
 };
 use agora_types::{Address, Amount, Hash};
 use serde::Serialize;
 
+use crate::persist::{parse_hash, LayersCheckpoint};
 use crate::LayersError;
 
 #[derive(Debug, Clone)]
@@ -597,13 +598,10 @@ impl LayersRuntime {
             .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
-    /// Admit a compact EVM tx into the L2 mempool (`eth_sendRawTransaction`).
+    /// Admit a signed RLP or compact EVM tx into the L2 mempool (`eth_sendRawTransaction`).
     pub fn eth_send_raw_transaction(&mut self, raw: EvmTx) -> Result<Hash, LayersError> {
-        if raw.0.len() < 52 {
-            return Err(LayersError::Rollup(
-                "evm tx too short; expected to||value[||data]".into(),
-            ));
-        }
+        // Validate decode (recovers sender for RLP-signed txs).
+        let _decoded = decode_evm_tx(&raw).map_err(|e| LayersError::Rollup(e.to_string()))?;
         let id = Hash::hash_bytes(&raw.0);
         if self.l2_mempool.iter().any(|t| Hash::hash_bytes(&t.0) == id) {
             return Ok(id);
@@ -620,12 +618,120 @@ impl LayersRuntime {
     pub fn drain_l2_mempool(&mut self) -> Vec<EvmTx> {
         std::mem::take(&mut self.l2_mempool)
     }
+
+    /// Persist L2/L3 state under `dir/layers-checkpoint.json`.
+    pub fn save_checkpoint(&self, dir: impl AsRef<std::path::Path>) -> Result<(), LayersError> {
+        let snaps = self
+            .rollup
+            .executor()
+            .export_snapshots()
+            .map_err(|e| LayersError::Rollup(e.to_string()))?;
+        let revm_snapshots = snaps
+            .into_iter()
+            .map(|(root, accounts)| (root.to_hex(), accounts))
+            .collect();
+        let cp = LayersCheckpoint {
+            version: 1,
+            head_state_root: self.rollup.head_state_root().to_hex(),
+            next_sequence: self.rollup.next_sequence(),
+            ovl_tip_hash: self.rollup.tip_hash().to_hex(),
+            ovl_tip_height: self.rollup.tip_height(),
+            ovl_balances: self.rollup.ovl().balances_snapshot(),
+            ovl_minted: self.rollup.ovl().minted(),
+            sequencer_bonds: self.rollup.sequencers().bonds_snapshot(),
+            revm_snapshots,
+            bridge: self.intents.bridge().export_checkpoint(),
+            l2_mempool: self.l2_mempool.iter().map(|t| t.0.clone()).collect(),
+        };
+        cp.save(dir)
+    }
+
+    /// Load durable checkpoint if present and hydrate runtime state.
+    pub fn load_checkpoint(
+        &mut self,
+        dir: impl AsRef<std::path::Path>,
+    ) -> Result<bool, LayersError> {
+        let Some(cp) = LayersCheckpoint::load(dir)? else {
+            return Ok(false);
+        };
+        let head = parse_hash(&cp.head_state_root)?;
+        let tip = parse_hash(&cp.ovl_tip_hash)?;
+        self.rollup.restore_checkpoint(
+            head,
+            cp.next_sequence,
+            tip,
+            cp.ovl_tip_height,
+            cp.ovl_balances,
+            cp.ovl_minted,
+            cp.sequencer_bonds,
+        );
+        let snaps = cp
+            .revm_snapshots
+            .into_iter()
+            .map(|(root_hex, accounts)| Ok((parse_hash(&root_hex)?, accounts)))
+            .collect::<Result<Vec<_>, LayersError>>()?;
+        self.rollup
+            .executor()
+            .import_snapshots(snaps)
+            .map_err(|e| LayersError::Rollup(e.to_string()))?;
+        self.intents
+            .bridge_mut()
+            .import_checkpoint(cp.bridge)
+            .map_err(|e| LayersError::Bridge(e.to_string()))?;
+        self.l2_mempool = cp.l2_mempool.into_iter().map(EvmTx).collect();
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use agora_ovolos_rollup::encode_value_transfer;
+
+    #[test]
+    fn durable_checkpoint_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("agora-layers-cp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let payer = Address([0xA1; 20]);
+        let mut rt = LayersRuntime::new(LayersRuntimeConfig {
+            challenge_window_ms: Some(100),
+            gas_payer: Some(payer),
+            hub_id: None,
+            ovolos_genesis: OvolosGenesis::testnet(),
+            drachma_genesis: DrachmaGenesis::testnet(),
+        })
+        .unwrap();
+        rt.mint_ovl(payer, Amount::from_base_units(50_000)).unwrap();
+        let txs = vec![encode_value_transfer([0xB2; 20], 9)];
+        let post = rt.execute_evm_batch(&Hash::ZERO, &txs).unwrap();
+        let batch = Batch {
+            sequence: 0,
+            prev_state_root: Hash::ZERO,
+            post_state_root: post,
+            transactions: txs,
+            posted_at_ms: 0,
+        };
+        rt.submit_batch(batch).unwrap();
+        assert_eq!(rt.rollup.head_state_root(), post);
+        rt.save_checkpoint(&dir).unwrap();
+
+        let mut rt2 = LayersRuntime::new(LayersRuntimeConfig {
+            challenge_window_ms: Some(100),
+            gas_payer: Some(payer),
+            hub_id: None,
+            ovolos_genesis: OvolosGenesis::testnet(),
+            drachma_genesis: DrachmaGenesis::testnet(),
+        })
+        .unwrap();
+        assert!(rt2.load_checkpoint(&dir).unwrap());
+        assert_eq!(rt2.rollup.head_state_root(), post);
+        // Gas was charged on submit; restored ledger must match pre-save balance.
+        assert_eq!(
+            rt2.ovl_balance(payer).as_base_units(),
+            rt.ovl_balance(payer).as_base_units()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn end_to_end_layers_from_genesis() {

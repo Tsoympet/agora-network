@@ -19,7 +19,7 @@ pub use attestor::{
     AttestorSet, ATTESTOR_BOND_ESCROW, DEFAULT_ATTESTOR_MIN_BOND, DEFAULT_QUORUM_DENOMINATOR,
     DEFAULT_QUORUM_NUMERATOR,
 };
-pub use bridge::{BridgeBox, DEFAULT_PAYMENT_FEE_BASE};
+pub use bridge::{BridgeBox, BridgeCheckpoint, DEFAULT_PAYMENT_FEE_BASE};
 pub use district::{DistrictConfig, DistrictKind};
 pub use drc::{DrcLedger, DRC_MAX_SUPPLY_BASE};
 pub use error::BridgeError;

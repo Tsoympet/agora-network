@@ -57,6 +57,17 @@ impl OvlLedger {
         Amount::from_base_units(self.balances.get(&address).copied().unwrap_or(0))
     }
 
+    /// All known balances (for durable checkpoints).
+    pub fn balances_snapshot(&self) -> Vec<(Address, u64)> {
+        self.balances.iter().map(|(a, v)| (*a, *v)).collect()
+    }
+
+    /// Replace balances from a durable checkpoint (preserves caps / gas config).
+    pub fn restore_balances(&mut self, balances: Vec<(Address, u64)>, minted: u64) {
+        self.balances = balances.into_iter().collect();
+        self.minted = minted;
+    }
+
     /// Mint OVL under the registry cap (faucet / bridge deposit path).
     pub fn mint(&mut self, to: Address, amount: Amount) -> Result<(), RollupError> {
         let units = amount.as_base_units();

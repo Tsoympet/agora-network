@@ -40,7 +40,7 @@ pub async fn get_balance(rpc_url: &str, address: &Address) -> Result<Amount, Str
     Ok(Amount::from_base_units(units))
 }
 
-async fn rpc_call(
+pub async fn rpc_call(
     url: &str,
     method: &str,
     params: serde_json::Value,

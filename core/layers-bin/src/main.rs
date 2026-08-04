@@ -4,7 +4,9 @@
 //! Layer genesis:
 //! - `AGORA_OVL_GENESIS_FILE` — Ovolos L2 (default: embedded testnet)
 //! - `AGORA_DRC_GENESIS_FILE` — Drachma L3 (default: embedded testnet)
+//! - `AGORA_LAYERS_DATA` — durable checkpoint directory (optional)
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use agora_bridge_sdk::DrachmaGenesis;
@@ -49,7 +51,8 @@ async fn main() {
         "loading layer genesis"
     );
 
-    let runtime = LayersRuntime::new(LayersRuntimeConfig {
+    let data_dir = std::env::var("AGORA_LAYERS_DATA").ok().map(PathBuf::from);
+    let mut runtime = LayersRuntime::new(LayersRuntimeConfig {
         challenge_window_ms,
         gas_payer: None,
         hub_id: None,
@@ -57,11 +60,18 @@ async fn main() {
         drachma_genesis,
     })
     .expect("layers runtime boot");
+    if let Some(dir) = &data_dir {
+        match runtime.load_checkpoint(dir) {
+            Ok(true) => info!(path = %dir.display(), "loaded durable layers checkpoint"),
+            Ok(false) => info!(path = %dir.display(), "no layers checkpoint yet"),
+            Err(err) => warn!(error = %err, "failed to load layers checkpoint"),
+        }
+    }
     let state = Arc::new(Mutex::new(runtime));
-    serve(&bind, state).await;
+    serve(&bind, state, data_dir).await;
 }
 
-async fn serve(bind: &str, state: Arc<Mutex<LayersRuntime>>) {
+async fn serve(bind: &str, state: Arc<Mutex<LayersRuntime>>, data_dir: Option<PathBuf>) {
     let listener = TcpListener::bind(bind).await.expect("bind agora-layers");
     info!(%bind, "agora-layers listening (L2/L3/L4 JSON-RPC)");
     loop {
@@ -73,6 +83,7 @@ async fn serve(bind: &str, state: Arc<Mutex<LayersRuntime>>) {
             }
         };
         let state = state.clone();
+        let data_dir = data_dir.clone();
         tokio::spawn(async move {
             let mut buf = vec![0u8; 64 * 1024];
             let n = match socket.read(&mut buf).await {
@@ -80,7 +91,7 @@ async fn serve(bind: &str, state: Arc<Mutex<LayersRuntime>>) {
                 Ok(n) => n,
             };
             let req = String::from_utf8_lossy(&buf[..n]);
-            let response = handle_http(&req, &state).await;
+            let response = handle_http(&req, &state, data_dir.as_ref()).await;
             let _ = socket.write_all(response.as_bytes()).await;
             let _ = socket.shutdown().await;
             tracing::debug!(%peer, "served");
@@ -88,7 +99,30 @@ async fn serve(bind: &str, state: Arc<Mutex<LayersRuntime>>) {
     }
 }
 
-async fn handle_http(req: &str, state: &Arc<Mutex<LayersRuntime>>) -> String {
+fn is_mutating_method(method: &str) -> bool {
+    !matches!(
+        method,
+        "agora_layers_getInfo"
+            | "agora_layers_getOvlBalance"
+            | "agora_layers_getDrcBalance"
+            | "agora_layers_intentStatus"
+            | "agora_layers_messageStatus"
+            | "agora_layers_paymentsForTag"
+            | "eth_chainId"
+            | "eth_blockNumber"
+            | "eth_getBalance"
+            | "eth_getTransactionCount"
+            | "eth_getCode"
+            | "eth_getStorageAt"
+            | "eth_call"
+    )
+}
+
+async fn handle_http(
+    req: &str,
+    state: &Arc<Mutex<LayersRuntime>>,
+    data_dir: Option<&PathBuf>,
+) -> String {
     let first = req.lines().next().unwrap_or("");
     let mut parts = first.split_whitespace();
     let method = parts.next().unwrap_or("");
@@ -112,6 +146,16 @@ async fn handle_http(req: &str, state: &Arc<Mutex<LayersRuntime>>) -> String {
                 state,
             )
             .await;
+            if result.is_ok() {
+                if let Some(dir) = data_dir {
+                    if is_mutating_method(rpc.method.as_str()) {
+                        let rt = state.lock().await;
+                        if let Err(err) = rt.save_checkpoint(dir) {
+                            warn!(error = %err, "layers checkpoint save failed");
+                        }
+                    }
+                }
+            }
             match result {
                 Ok(value) => http_json(200, json!({"jsonrpc":"2.0","id": rpc.id, "result": value})),
                 Err(err) => http_json(

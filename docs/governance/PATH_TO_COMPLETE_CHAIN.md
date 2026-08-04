@@ -18,6 +18,7 @@ byte-for-byte protocol clones.
 - JSON-RPC Bearer auth + public-bind gate + per-IP rate limit
 - Docker / compose + [`docs/ops/PUBLIC_TESTNET.md`](../ops/PUBLIC_TESTNET.md)
 - Wallets: vault, BIP-44 change chain, fee estimate helper
+- **Non-mint faucet** via treasury signed spends (`AGORA_FAUCET_MODE=treasury`)
 
 ### L2 — OVL (Ethereum-class)
 
@@ -25,7 +26,8 @@ byte-for-byte protocol clones.
 - Hybrid bonded sequencers for batch submit/finalize
 - Persistent `revm` accounts, CREATE, **contract storage in state root**
 - `eth_*` subset including `eth_call`, `eth_getCode`, `eth_getStorageAt`,
-  `eth_sendRawTransaction` (compact mempool)
+  `eth_sendRawTransaction` (**legacy RLP + secp256k1 recovery**, compact fallback)
+- **Durable L2 checkpoint** via `AGORA_LAYERS_DATA`
 
 ### L3 — DRC (XRP-class)
 
@@ -34,6 +36,7 @@ byte-for-byte protocol clones.
 - Payment + destination-tag registry/index
 - Path payment + `deliverMin`
 - Intent settle with `AwaitingFinality` when quorum is required
+- **Durable L3 checkpoint** (same `AGORA_LAYERS_DATA` file)
 
 See [`docs/scaling/TOKEN_ROLES.md`](../scaling/TOKEN_ROLES.md).
 
@@ -49,7 +52,7 @@ See [`docs/scaling/TOKEN_ROLES.md`](../scaling/TOKEN_ROLES.md).
 | A4 | Docker / binaries + runbook | **done** |
 | A5 | CI live smoke-ibd | partial (unit catch-up + vault); full RandomX compose smoke is operator-run |
 | A6 | RandomX-only public testnet | **done** (documented + locked in ChainParams) |
-| A7 | Faucet cap | **done** (`AGORA_FAUCET_MAX_TOTAL`); treasury spends still follow-up |
+| A7 | Faucet (non-mint treasury spends) | **done** (`AGORA_FAUCET_MODE=treasury`; mint kept as lab opt-in) |
 
 ### B — Wallet / miner / layers
 
@@ -64,6 +67,8 @@ See [`docs/scaling/TOKEN_ROLES.md`](../scaling/TOKEN_ROLES.md).
 | B7 | Multi-OS desktop + iOS/Android packaging docs | **done** — see [`docs/apps/PLATFORMS.md`](../apps/PLATFORMS.md); store signing is ops |
 | B8 | OVL eth_* + L2 mempool + storage roots | **done** |
 | B9 | DRC tags / path deliverMin / intent finality | **done** |
+| B10 | Signed RLP Ethereum txs on OVL | **done** (legacy + EIP-155) |
+| B11 | Durable L2/L3 checkpoints | **done** (`AGORA_LAYERS_DATA`) |
 
 ### C — Mainnet freeze (needs humans)
 
@@ -77,12 +82,12 @@ See [`docs/scaling/TOKEN_ROLES.md`](../scaling/TOKEN_ROLES.md).
 
 Node already refuses `AGORA_NETWORK=mainnet` until genesis is frozen.
 
-## Follow-ups (not blockers for public testnet)
+## Deferred (explicitly out of scope / later)
 
-- Full RLP / secp256k1 signed Ethereum txs on OVL (compact `to\|\|value\|\|data` today)
-- Durable L2/L3 state databases and Ethereum MPT state roots
-- Non-mint faucet via treasury spends
-- XRPL trust lines / issued currencies / DEX (out of scope for native DRC)
+- Full Ethereum MPT state roots (SHA-256 account+storage digests today)
+- EIP-2718 typed txs beyond legacy (1559 / access-list) on OVL
+- XRPL trust lines / issued currencies / DEX order books (native DRC only)
+- Non-mint faucet via separate cold treasury ops runbook polish
 
 ## What you must decide / do outside the repo
 

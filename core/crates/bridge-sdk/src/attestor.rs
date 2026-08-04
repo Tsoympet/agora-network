@@ -59,6 +59,14 @@ impl AttestorSet {
         self.bonds.get(&addr).copied().unwrap_or(0)
     }
 
+    pub fn bonds_snapshot(&self) -> Vec<(Address, u64)> {
+        self.bonds.iter().map(|(a, v)| (*a, *v)).collect()
+    }
+
+    pub fn restore_bonds(&mut self, bonds: Vec<(Address, u64)>) {
+        self.bonds = bonds.into_iter().collect();
+    }
+
     pub fn is_active(&self, addr: Address) -> bool {
         self.bonded(addr) >= self.min_bond
     }
