@@ -120,16 +120,30 @@ See [`docs/ops/PUBLIC_TESTNET.md`](docs/ops/PUBLIC_TESTNET.md).
 AGORA_RPC_URL=http://127.0.0.1:8545/rpc cargo run -p agora-miner-sidecar
 ```
 
+### Install CLI (releases)
+
+After a `v*` tag is published:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Tsoympet/agora-network/main/scripts/install.sh | bash
+# → ~/.local/bin/{agora-node,agora-layers,agora-miner}
+```
+
+Or download `agora-cli-<os>-<arch>.tar.gz` / `.zip` from
+[GitHub Releases](https://github.com/Tsoympet/agora-network/releases).
+Local package: `./scripts/package-cli.sh`.
+
 ### Clients
 
 Apps show **Devnet / Testnet / Mainnet** from the connected node and use matching Bech32 HRPs.
 Desktop (Win/macOS/Linux) and mobile (iOS/Android) packaging: [`docs/apps/PLATFORMS.md`](docs/apps/PLATFORMS.md).
 
 ```bash
-cd apps/explorer && npm install && npm run dev   # BlockDAG explorer
-cd apps/desktop  && npm install && npm run dev   # wallet shell + vault
-cd apps/mobile   && npm install && npm start     # Expo light client
+cd apps/explorer && npm install && npm run dev        # BlockDAG explorer
+cd apps/desktop  && npm install && npm run tauri:dev  # wallet (Tauri) / npm run dev for browser
+cd apps/mobile   && npm install && npm start          # Expo light client
 ```
+
 
 ### L2 / L3 / L4 (operator runtime)
 

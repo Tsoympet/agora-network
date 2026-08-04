@@ -4,12 +4,15 @@
   "version": "0.1.0",
   "identifier": "network.agora.desktop",
   "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:5174"
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5174",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Agora Network",
         "width": 1280,
         "height": 800,
@@ -27,11 +30,21 @@
     "shortDescription": "Agora Network desktop wallet",
     "longDescription": "Agora Network light wallet: Bech32 receive, BIP-39 send, encrypted vault, and live DAG tip sync over JSON-RPC. Shows Devnet / Testnet / Mainnet from the connected node.",
     "icon": [
-      "icons/icon.png",
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/henry.w@example.net"
+      "icons/henry.w@example.net",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
     ],
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "10.15"
     },
@@ -39,6 +52,11 @@
       "nsis": {
         "installMode": "currentUser"
       }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
     }
   }
 }
