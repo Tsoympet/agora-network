@@ -1,1 +1,0 @@
-{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/DagField.tsx","./src/components/LiveDag.tsx","./src/components/MarkRow.tsx","./src/components/MempoolPanel.tsx","./src/components/NetworkBadge.tsx","./src/components/NodeStatus.tsx","./src/components/TxLookup.tsx","./src/lib/rpc.ts"],"errors":true,"version":"5.9.3"}
