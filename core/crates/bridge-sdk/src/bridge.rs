@@ -7,6 +7,9 @@ use crate::district::DistrictConfig;
 use crate::drc::{DrcLedger, DRC_MAX_SUPPLY_BASE};
 use crate::genesis::{DrachmaGenesis, DEFAULT_DRC_POW_BITS};
 use crate::messages::{BridgeDirection, BridgeMessage, MessageStatus};
+
+/// Default same-district payment fee in base units (XRP drops–style).
+pub const DEFAULT_PAYMENT_FEE_BASE: u64 = 10;
 use crate::pow::{
     messages_root, mine_drc_block, verify_pow, DrcBlock, DrcBlockHeader, DrcEmission,
 };
@@ -120,6 +123,10 @@ impl BridgeBox {
         &self.drc
     }
 
+    pub fn drc_mut(&mut self) -> &mut DrcLedger {
+        &mut self.drc
+    }
+
     /// Credit hub locked DRC so `lock_and_mint` can proceed (deposit / faucet).
     pub fn credit_hub_lock(
         &mut self,
@@ -149,6 +156,28 @@ impl BridgeBox {
         amount: Amount,
         nonce: u64,
     ) -> Result<Hash, BridgeError> {
+        self.lock_and_mint_tagged(
+            source_hub,
+            dest_district,
+            sender,
+            recipient,
+            amount,
+            nonce,
+            0,
+        )
+    }
+
+    /// Lock-and-mint with an XRPL-style destination tag for deposit routing.
+    pub fn lock_and_mint_tagged(
+        &mut self,
+        source_hub: impl Into<String>,
+        dest_district: impl Into<String>,
+        sender: Address,
+        recipient: Address,
+        amount: Amount,
+        nonce: u64,
+        destination_tag: u32,
+    ) -> Result<Hash, BridgeError> {
         let source_hub = source_hub.into();
         let dest_district = dest_district.into();
         if !self.districts.contains_key(&dest_district) {
@@ -172,6 +201,7 @@ impl BridgeBox {
             recipient,
             amount,
             nonce,
+            destination_tag,
         };
         let id = msg.id();
         if self.messages.contains_key(&id) {
@@ -233,6 +263,28 @@ impl BridgeBox {
         amount: Amount,
         nonce: u64,
     ) -> Result<Hash, BridgeError> {
+        self.burn_and_unlock_tagged(
+            source_district,
+            dest_hub,
+            sender,
+            recipient,
+            amount,
+            nonce,
+            0,
+        )
+    }
+
+    /// Burn-and-unlock with destination tag.
+    pub fn burn_and_unlock_tagged(
+        &mut self,
+        source_district: impl Into<String>,
+        dest_hub: impl Into<String>,
+        sender: Address,
+        recipient: Address,
+        amount: Amount,
+        nonce: u64,
+        destination_tag: u32,
+    ) -> Result<Hash, BridgeError> {
         let source_district = source_district.into();
         let dest_hub = dest_hub.into();
         if !self.districts.contains_key(&source_district) {
@@ -257,6 +309,7 @@ impl BridgeBox {
             recipient,
             amount,
             nonce,
+            destination_tag,
         };
         let id = msg.id();
         if self.messages.contains_key(&id) {
@@ -269,6 +322,96 @@ impl BridgeBox {
             transport.publish(&source_district, msg)?;
         }
         Ok(id)
+    }
+
+    /// Same-district DRC payment (XRP Payment–class): account transfer + fee + tag.
+    pub fn pay(
+        &mut self,
+        district: impl Into<String>,
+        sender: Address,
+        recipient: Address,
+        amount: Amount,
+        nonce: u64,
+        destination_tag: u32,
+    ) -> Result<Hash, BridgeError> {
+        let district = district.into();
+        if !self.districts.contains_key(&district) {
+            return Err(BridgeError::UnknownDistrict(district));
+        }
+        let fee = Amount::from_base_units(DEFAULT_PAYMENT_FEE_BASE);
+        self.drc
+            .transfer(&district, sender, recipient, amount, fee, None)?;
+
+        let msg = BridgeMessage {
+            direction: BridgeDirection::Payment,
+            source_district: district.clone(),
+            dest_district: district.clone(),
+            sender,
+            recipient,
+            amount,
+            nonce,
+            destination_tag,
+        };
+        let id = msg.id();
+        if self.messages.contains_key(&id) {
+            return Err(BridgeError::DuplicateMessage);
+        }
+        self.messages.insert(id, (msg.clone(), MessageStatus::Paid));
+        if let Some(transport) = &self.transport {
+            transport.publish(&district, msg)?;
+        }
+        Ok(id)
+    }
+
+    /// XRP-style path payment across districts via the hub:
+    /// `source → hub (burn/unlock) → dest (lock/mint + claim)`.
+    ///
+    /// Debits real balances on `source_district` (no faucet minting).
+    pub fn path_pay(
+        &mut self,
+        hub: impl Into<String>,
+        source_district: impl Into<String>,
+        dest_district: impl Into<String>,
+        sender: Address,
+        recipient: Address,
+        amount: Amount,
+        nonce: u64,
+        destination_tag: u32,
+    ) -> Result<(Hash, Hash), BridgeError> {
+        let hub = hub.into();
+        let source_district = source_district.into();
+        let dest_district = dest_district.into();
+        if source_district == dest_district {
+            let id = self.pay(
+                source_district,
+                sender,
+                recipient,
+                amount,
+                nonce,
+                destination_tag,
+            )?;
+            return Ok((id, id));
+        }
+        let unlock_id = self.burn_and_unlock_tagged(
+            source_district,
+            hub.clone(),
+            sender,
+            sender,
+            amount,
+            nonce,
+            0,
+        )?;
+        let mint_id = self.lock_and_mint_tagged(
+            hub,
+            dest_district,
+            sender,
+            recipient,
+            amount,
+            nonce.saturating_add(1),
+            destination_tag,
+        )?;
+        self.claim_mint(mint_id)?;
+        Ok((unlock_id, mint_id))
     }
 
     pub fn message_status(&self, id: &Hash) -> Option<MessageStatus> {
@@ -444,6 +587,58 @@ mod tests {
         );
         assert_eq!(bridge.drc().balance("arena", bob), Amount::ZERO);
         assert_eq!(bridge.locked_balance("agora", alice), amount);
+    }
+
+    #[test]
+    fn pay_same_district_with_tag_and_fee() {
+        let mut bridge = BridgeBox::new();
+        bridge.register_district(DistrictConfig::gaming("arena", 9001));
+        let alice = Address([1u8; 20]);
+        let bob = Address([2u8; 20]);
+        bridge
+            .drc
+            .mint("arena", alice, Amount::from_base_units(1_000))
+            .unwrap();
+        let id = bridge
+            .pay("arena", alice, bob, Amount::from_base_units(100), 1, 42)
+            .unwrap();
+        assert_eq!(bridge.message_status(&id), Some(MessageStatus::Paid));
+        assert_eq!(bridge.message(&id).unwrap().destination_tag, 42);
+        assert_eq!(bridge.drc().balance("arena", bob).as_base_units(), 100);
+        assert_eq!(
+            bridge.drc().balance("arena", alice).as_base_units(),
+            1_000 - 100 - DEFAULT_PAYMENT_FEE_BASE
+        );
+    }
+
+    #[test]
+    fn path_pay_moves_real_balances_via_hub() {
+        let mut bridge = BridgeBox::new();
+        bridge.register_district(DistrictConfig::general("agora-hub", 1));
+        bridge.register_district(DistrictConfig::gaming("arena", 9001));
+        bridge.register_district(DistrictConfig::privacy("veil", 9002));
+        let alice = Address([1u8; 20]);
+        bridge
+            .drc
+            .mint("arena", alice, Amount::from_whole(10).unwrap())
+            .unwrap();
+        let (_u, _m) = bridge
+            .path_pay(
+                "agora-hub",
+                "arena",
+                "veil",
+                alice,
+                alice,
+                Amount::from_whole(10).unwrap(),
+                7,
+                99,
+            )
+            .unwrap();
+        assert_eq!(bridge.drc().balance("arena", alice).as_base_units(), 0);
+        assert_eq!(
+            bridge.drc().balance("veil", alice).as_base_units(),
+            Amount::from_whole(10).unwrap().as_base_units()
+        );
     }
 
     #[test]

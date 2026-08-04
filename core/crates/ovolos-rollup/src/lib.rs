@@ -33,4 +33,4 @@ pub use rollup::{OvolosRollup, RollupConfig};
 pub use types::{Batch, BatchStatus, EvmTx, FraudProof};
 
 #[cfg(feature = "revm")]
-pub use revm_exec::{encode_transfer, RevmExecutor};
+pub use revm_exec::{encode_create, encode_transfer, encode_value_transfer, RevmExecutor};

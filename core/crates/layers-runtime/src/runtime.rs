@@ -8,8 +8,8 @@ use agora_intent_engine::{
     AmmSolver, CompositeSolver, ConstantProductPool, Intent, IntentEngine, IntentStatus, Solution,
 };
 use agora_ovolos_rollup::{
-    Batch, BatchCommitment, BatchStatus, FraudProof, OvlBlock, OvolosGenesis, OvolosRollup,
-    StubEvmExecutor, OVOLOS_POW_ALGORITHM,
+    Batch, BatchCommitment, BatchStatus, EvmExecutor, EvmTx, FraudProof, OvlBlock, OvolosGenesis,
+    OvolosRollup, RevmExecutor, OVOLOS_POW_ALGORITHM,
 };
 use agora_types::{Address, Amount, Hash};
 use serde::Serialize;
@@ -64,12 +64,16 @@ pub struct LayerInfo {
 }
 
 /// In-process L2 + L3 + L4 stack for operators and integration tests.
+///
+/// L2 uses `RevmExecutor` so OVL behaves as Ethereum-class gas + EVM state.
 pub struct LayersRuntime {
-    rollup: OvolosRollup<StubEvmExecutor>,
+    rollup: OvolosRollup<RevmExecutor>,
     intents: IntentEngine<CompositeSolver>,
     transport: Arc<InMemoryTransport>,
     ovl_genesis_hash: String,
     ovl_chain_id: String,
+    /// Numeric chain id for `eth_chainId` (derived from genesis string hash).
+    ovl_eth_chain_id: u64,
     drc_genesis_hash: String,
     drc_chain_id: String,
     hub_id: String,
@@ -85,7 +89,7 @@ impl LayersRuntime {
             .unwrap_or_else(|| drc_genesis.hub_id.clone());
 
         let mut rollup =
-            OvolosRollup::from_genesis(&ovl_genesis, StubEvmExecutor, config.gas_payer)
+            OvolosRollup::from_genesis(&ovl_genesis, RevmExecutor::default(), config.gas_payer)
                 .map_err(|e| LayersError::Rollup(e.to_string()))?;
         // Operator override for local soak tests — does not rewrite frozen genesis_hash.
         if let Some(ms) = config.challenge_window_ms {
@@ -104,9 +108,20 @@ impl LayersRuntime {
             .with_bridge(bridge)
             .with_amm_pool(shared);
 
+        // Stable numeric chain id for eth_* wallets (not L1 chain id).
+        let ovl_eth_chain_id = {
+            let bytes = ovl_genesis.genesis_hash.as_bytes();
+            let mut n = 888_802u64; // Agora L2 namespace prefix
+            for b in bytes.iter().take(8) {
+                n = n.wrapping_mul(31).wrapping_add(*b as u64);
+            }
+            n
+        };
+
         Ok(Self {
             ovl_genesis_hash: ovl_genesis.genesis_hash.clone(),
             ovl_chain_id: ovl_genesis.chain_id.clone(),
+            ovl_eth_chain_id,
             drc_genesis_hash: drc_genesis.genesis_hash.clone(),
             drc_chain_id: drc_genesis.chain_id.clone(),
             hub_id,
@@ -169,6 +184,18 @@ impl LayersRuntime {
     pub fn submit_batch(&mut self, batch: Batch) -> Result<Hash, LayersError> {
         self.rollup
             .submit_batch(batch)
+            .map_err(|e| LayersError::Rollup(e.to_string()))
+    }
+
+    /// Execute txs against the current rollup head and return the post-state root.
+    pub fn execute_evm_batch(
+        &self,
+        prev_state_root: &Hash,
+        txs: &[EvmTx],
+    ) -> Result<Hash, LayersError> {
+        self.rollup
+            .executor()
+            .apply_batch(prev_state_root, txs)
             .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
@@ -274,6 +301,49 @@ impl LayersRuntime {
         self.intents.bridge().drc().balance(district, address)
     }
 
+    /// Same-district DRC payment (XRP Payment–class) with destination tag.
+    pub fn pay_drc(
+        &mut self,
+        district: &str,
+        sender: Address,
+        recipient: Address,
+        amount: Amount,
+        nonce: u64,
+        destination_tag: u32,
+    ) -> Result<Hash, LayersError> {
+        self.intents
+            .bridge_mut()
+            .pay(district, sender, recipient, amount, nonce, destination_tag)
+            .map_err(|e| LayersError::Bridge(e.to_string()))
+    }
+
+    /// Cross-district path payment via hub (XRP path-payment class).
+    pub fn path_pay_drc(
+        &mut self,
+        hub: &str,
+        source_district: &str,
+        dest_district: &str,
+        sender: Address,
+        recipient: Address,
+        amount: Amount,
+        nonce: u64,
+        destination_tag: u32,
+    ) -> Result<(Hash, Hash), LayersError> {
+        self.intents
+            .bridge_mut()
+            .path_pay(
+                hub,
+                source_district,
+                dest_district,
+                sender,
+                recipient,
+                amount,
+                nonce,
+                destination_tag,
+            )
+            .map_err(|e| LayersError::Bridge(e.to_string()))
+    }
+
     /// Mine and admit a native DRC PoW block on a district/hub (coinbase to `miner`).
     pub fn mine_drc_block(
         &mut self,
@@ -312,12 +382,41 @@ impl LayersRuntime {
     pub fn intent_status(&self, id: &Hash) -> Option<IntentStatus> {
         self.intents.status(id)
     }
+
+    // --- Ethereum-class L2 helpers (`eth_*`) ---
+
+    pub fn eth_chain_id(&self) -> u64 {
+        self.ovl_eth_chain_id
+    }
+
+    pub fn eth_block_number(&self) -> u64 {
+        self.rollup.tip_height().max(self.rollup.next_sequence())
+    }
+
+    /// Prefer OVL ledger balance (native gas money); fall back to EVM account wei.
+    pub fn eth_get_balance(&self, address: Address) -> u128 {
+        let ovl = self.rollup.ovl().balance(address).as_base_units() as u128;
+        if ovl > 0 {
+            return ovl;
+        }
+        self.rollup
+            .executor()
+            .balance_of(&self.rollup.head_state_root(), address.0)
+            .unwrap_or(0)
+    }
+
+    pub fn eth_get_transaction_count(&self, address: Address) -> u64 {
+        self.rollup
+            .executor()
+            .nonce_of(&self.rollup.head_state_root(), address.0)
+            .unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agora_ovolos_rollup::{EvmExecutor, EvmTx, StubEvmExecutor};
+    use agora_ovolos_rollup::encode_value_transfer;
 
     #[test]
     fn end_to_end_layers_from_genesis() {
@@ -335,9 +434,9 @@ mod tests {
         rt.mint_ovl(payer, Amount::from_base_units(1_000_000))
             .unwrap();
 
-        let stub = StubEvmExecutor;
-        let txs = vec![EvmTx(vec![1, 2, 3])];
-        let post = stub.apply_batch(&Hash::ZERO, &txs).unwrap();
+        let to = [0xB2u8; 20];
+        let txs = vec![encode_value_transfer(to, 42)];
+        let post = rt.execute_evm_batch(&Hash::ZERO, &txs).unwrap();
         let batch = Batch {
             sequence: 0,
             prev_state_root: Hash::ZERO,
@@ -353,6 +452,10 @@ mod tests {
         let treasury = Address::from_hex("ff9ec96f09eb154d038a552ecae59c50204ea9a9").unwrap();
         assert!(rt.drc_balance("agora-hub", treasury).as_base_units() > 0);
         assert!(rt.ovl_balance(treasury).as_base_units() > 0);
+        assert!(rt.eth_chain_id() > 0);
+        // gas_payer was charged flat OVL gas for the batch.
+        assert!(rt.eth_get_balance(payer) < 1_000_000);
+        assert!(rt.eth_get_balance(payer) > 0);
 
         let info = rt.info();
         assert_eq!(info.ovl_chain_id, "agora-ovolos-testnet-1");
