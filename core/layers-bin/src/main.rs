@@ -233,16 +233,20 @@ async fn dispatch(
         "agora_layers_lockAndMint" => {
             let p: BridgeParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
             let id = rt
-                .lock_and_mint(
+                .lock_and_mint_tagged(
                     &p.source,
                     &p.dest,
                     parse_addr(&p.sender)?,
                     parse_addr(&p.recipient)?,
                     Amount::from_base_units(p.amount),
                     p.nonce,
+                    p.destination_tag.unwrap_or(0),
                 )
                 .map_err(|e| e.to_string())?;
-            Ok(json!({"message_id": id.to_hex()}))
+            Ok(json!({
+                "message_id": id.to_hex(),
+                "destination_tag": p.destination_tag.unwrap_or(0),
+            }))
         }
         "agora_layers_claimMint" => {
             let id = params
@@ -254,6 +258,10 @@ async fn dispatch(
         }
         "agora_layers_submitIntent" => {
             let p: IntentParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let recipient = match &p.recipient {
+                Some(r) => parse_addr(r)?,
+                None => Address::ZERO,
+            };
             let intent = Intent {
                 id_salt: p.id_salt,
                 user: parse_addr(&p.user)?,
@@ -263,6 +271,8 @@ async fn dispatch(
                 min_receive: Amount::from_base_units(p.min_receive),
                 deadline_ms: p.deadline_ms,
                 solver_hint: p.solver_hint.unwrap_or_default(),
+                recipient,
+                destination_tag: p.destination_tag.unwrap_or(0),
             };
             let id = rt
                 .submit_intent(intent, p.now_ms.unwrap_or(0))
@@ -275,14 +285,62 @@ async fn dispatch(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "intent_id required".to_string())?;
             let now_ms = params.get("now_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+            let intent_id = parse_hash(id)?;
             let sol = rt
-                .settle_intent(parse_hash(id)?, now_ms)
+                .settle_intent(intent_id, now_ms)
                 .map_err(|e| e.to_string())?;
+            let status = rt.intent_status(&intent_id);
             Ok(json!({
                 "receive_amount": sol.receive_amount.as_base_units(),
                 "route": sol.route,
                 "strategy": sol.strategy,
+                "status": format!("{status:?}"),
             }))
+        }
+        "agora_layers_finalizeIntent" => {
+            let id = params
+                .get("intent_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "intent_id required".to_string())?;
+            rt.finalize_intent(parse_hash(id)?)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"ok": true}))
+        }
+        "agora_layers_messageStatus" => {
+            let id = params
+                .get("message_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "message_id required".to_string())?;
+            let status = rt.message_status(&parse_hash(id)?);
+            Ok(json!({"status": format!("{status:?}")}))
+        }
+        "agora_layers_registerDestinationTag" => {
+            let p: TagParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            rt.register_destination_tag(&p.district, parse_addr(&p.owner)?, p.tag)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"ok": true}))
+        }
+        "agora_layers_paymentsForTag" => {
+            let p: TagQuery = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let ids = rt.payments_for_tag(&p.district, p.tag);
+            Ok(json!({
+                "payments": ids.iter().map(|h| h.to_hex()).collect::<Vec<_>>(),
+                "owner": rt.destination_tag_owner(&p.district, p.tag).map(|a| a.to_hex()),
+            }))
+        }
+        "agora_layers_unbondAttestor" => {
+            let p: AddrAmount = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let remaining = rt
+                .unbond_attestor(parse_addr(&p.address)?, Amount::from_base_units(p.amount))
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"remaining_bond": remaining}))
+        }
+        "agora_layers_unbondSequencer" => {
+            let p: AddrAmount = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let remaining = rt
+                .unbond_sequencer(parse_addr(&p.address)?, Amount::from_base_units(p.amount))
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"remaining_bond": remaining}))
         }
         "agora_layers_getOvlBalance" => {
             let addr = params
@@ -381,7 +439,7 @@ async fn dispatch(
         "agora_layers_pathPayDrc" => {
             let p: PathPayParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
             let (unlock_id, mint_id) = rt
-                .path_pay_drc(
+                .path_pay_drc_deliver(
                     &p.hub,
                     &p.source,
                     &p.dest,
@@ -390,12 +448,14 @@ async fn dispatch(
                     Amount::from_base_units(p.amount),
                     p.nonce,
                     p.destination_tag.unwrap_or(0),
+                    Amount::from_base_units(p.deliver_min.unwrap_or(0)),
                 )
                 .map_err(|e| e.to_string())?;
             Ok(json!({
                 "unlock_id": unlock_id.to_hex(),
                 "mint_id": mint_id.to_hex(),
                 "destination_tag": p.destination_tag.unwrap_or(0),
+                "deliver_min": p.deliver_min.unwrap_or(0),
             }))
         }
         "agora_layers_burnAndUnlock" => {
@@ -433,8 +493,90 @@ async fn dispatch(
             let n = rt.eth_get_transaction_count(parse_addr(addr)?);
             Ok(json!(format!("0x{:x}", n)))
         }
+        "eth_getCode" => {
+            let addr = params
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "eth_getCode(address, block) required".to_string())?;
+            let code = rt.eth_get_code(parse_addr(addr)?);
+            Ok(json!(format!("0x{}", hex::encode(code))))
+        }
+        "eth_getStorageAt" => {
+            let arr = params
+                .as_array()
+                .ok_or_else(|| "eth_getStorageAt(address, slot, block) required".to_string())?;
+            let addr = arr
+                .first()
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "address required".to_string())?;
+            let slot_hex = arr
+                .get(1)
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "slot required".to_string())?;
+            let slot_bytes =
+                hex::decode(slot_hex.trim_start_matches("0x")).map_err(|e| e.to_string())?;
+            if slot_bytes.len() > 32 {
+                return Err("slot too long".into());
+            }
+            let mut slot = [0u8; 32];
+            slot[32 - slot_bytes.len()..].copy_from_slice(&slot_bytes);
+            let value = rt.eth_get_storage_at(parse_addr(addr)?, slot);
+            Ok(json!(format!("0x{}", hex::encode(value))))
+        }
+        "eth_call" => {
+            let obj = params
+                .as_array()
+                .and_then(|a| a.first())
+                .cloned()
+                .ok_or_else(|| "eth_call(tx, block) required".to_string())?;
+            let to = obj
+                .get("to")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "to required".to_string())?;
+            let data = obj.get("data").and_then(|v| v.as_str()).unwrap_or("0x");
+            let value = obj
+                .get("value")
+                .and_then(|v| v.as_str())
+                .map(parse_hex_u128)
+                .transpose()?
+                .unwrap_or(0);
+            let data_bytes =
+                hex::decode(data.trim_start_matches("0x")).map_err(|e| e.to_string())?;
+            let out = rt
+                .eth_call(parse_addr(to)?, &data_bytes, value)
+                .map_err(|e| e.to_string())?;
+            Ok(json!(format!("0x{}", hex::encode(out))))
+        }
+        "eth_sendRawTransaction" => {
+            let raw_hex = params
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "eth_sendRawTransaction(raw) required".to_string())?;
+            let raw = hex::decode(raw_hex.trim_start_matches("0x")).map_err(|e| e.to_string())?;
+            let id = rt
+                .eth_send_raw_transaction(EvmTx(raw))
+                .map_err(|e| e.to_string())?;
+            Ok(json!(format!("0x{}", id.to_hex())))
+        }
+        "agora_layers_drainL2Mempool" => {
+            let txs = rt.drain_l2_mempool();
+            Ok(json!({
+                "transactions": txs.iter().map(|t| format!("0x{}", hex::encode(&t.0))).collect::<Vec<_>>(),
+                "count": txs.len(),
+            }))
+        }
         _ => Err(format!("unknown method {method}")),
     }
+}
+
+fn parse_hex_u128(s: &str) -> Result<u128, String> {
+    let s = s.trim_start_matches("0x");
+    if s.is_empty() {
+        return Ok(0);
+    }
+    u128::from_str_radix(s, 16).map_err(|e| e.to_string())
 }
 
 fn batch_from_params(p: &BatchParams) -> Result<Batch, String> {
@@ -536,6 +678,7 @@ struct BridgeParams {
     recipient: String,
     amount: u64,
     nonce: u64,
+    destination_tag: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -549,6 +692,21 @@ struct IntentParams {
     deadline_ms: u64,
     solver_hint: Option<String>,
     now_ms: Option<u64>,
+    recipient: Option<String>,
+    destination_tag: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TagParams {
+    district: String,
+    owner: String,
+    tag: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct TagQuery {
+    district: String,
+    tag: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -592,4 +750,5 @@ struct PathPayParams {
     amount: u64,
     nonce: u64,
     destination_tag: Option<u32>,
+    deliver_min: Option<u64>,
 }

@@ -76,7 +76,8 @@ pub struct NodeInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeeEstimate {
     pub min_relay_fee: u64,
-    /// Suggested fee for a typical single-input transfer (currently = min relay).
+    /// Suggested fee for a typical single-input transfer.
+    /// Live nodes use mempool median + congestion premium (Bitcoin-class fee market).
     pub suggested_fee: u64,
 }
 

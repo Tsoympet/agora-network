@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use agora_bridge_sdk::{BridgeBox, DistrictConfig};
+use agora_bridge_sdk::{BridgeBox, BridgeError, DistrictConfig};
 use agora_types::Hash;
 
 use crate::amm::ConstantProductPool;
@@ -125,6 +125,8 @@ pub struct IntentEngine<S: IntentSolver> {
     solver: S,
     bridge: BridgeBox,
     intents: HashMap<Hash, (Intent, IntentStatus)>,
+    /// Cross-district path payments awaiting attestor quorum / claim.
+    pending_claims: HashMap<Hash, Hash>,
     amm_pool: Option<Arc<Mutex<ConstantProductPool>>>,
 }
 
@@ -134,6 +136,7 @@ impl<S: IntentSolver> IntentEngine<S> {
             solver,
             bridge: BridgeBox::new(),
             intents: HashMap::new(),
+            pending_claims: HashMap::new(),
             amm_pool: None,
         }
     }
@@ -182,6 +185,9 @@ impl<S: IntentSolver> IntentEngine<S> {
                 entry.1 = IntentStatus::Cancelled;
                 Ok(())
             }
+            IntentStatus::AwaitingFinality => Err(IntentError::Constraint(
+                "cannot cancel while awaiting finality".into(),
+            )),
             IntentStatus::Settled => Err(IntentError::AlreadySettled),
             IntentStatus::Cancelled => Err(IntentError::Cancelled),
             IntentStatus::Failed => Err(IntentError::Constraint("intent failed".into())),
@@ -209,6 +215,11 @@ impl<S: IntentSolver> IntentEngine<S> {
             .ok_or(IntentError::Unknown)?;
         match status {
             IntentStatus::Settled => return Err(IntentError::AlreadySettled),
+            IntentStatus::AwaitingFinality => {
+                return Err(IntentError::Constraint(
+                    "awaiting attestor finality; call finalize_intent".into(),
+                ));
+            }
             IntentStatus::Cancelled => return Err(IntentError::Cancelled),
             IntentStatus::Failed => {
                 return Err(IntentError::Constraint("intent failed".into()));
@@ -274,29 +285,72 @@ impl<S: IntentSolver> IntentEngine<S> {
         } else {
             // Balance-backed path payment via hub (XRP path-payment class).
             // Debits real source-district DRC — does not faucet-mint.
+            // `min_receive` is the XRPL deliverMin floor.
             let hub = solution
                 .route
                 .get(1)
                 .cloned()
                 .unwrap_or_else(|| "agora-hub".into());
-            self.bridge
-                .path_pay(
+            let recipient = intent.credit_to();
+            let (_unlock_id, mint_id) = self
+                .bridge
+                .path_pay_deliver(
                     hub,
                     intent.give_asset_district.clone(),
                     intent.want_asset_district.clone(),
                     intent.user,
-                    intent.user,
+                    recipient,
                     intent.give_amount,
                     intent.id_salt,
-                    0,
+                    intent.destination_tag,
+                    intent.min_receive,
                 )
                 .map_err(|e| IntentError::Constraint(e.to_string()))?;
+            if self.bridge.attestors().finality_required() {
+                match self.bridge.claim_mint(mint_id) {
+                    Ok(()) => {}
+                    Err(BridgeError::AwaitingQuorum) => {
+                        self.pending_claims.insert(intent_id, mint_id);
+                        if let Some(entry) = self.intents.get_mut(&intent_id) {
+                            entry.1 = IntentStatus::AwaitingFinality;
+                        }
+                        return Ok(solution);
+                    }
+                    Err(e) => return Err(IntentError::Constraint(e.to_string())),
+                }
+            }
         }
 
         if let Some(entry) = self.intents.get_mut(&intent_id) {
             entry.1 = IntentStatus::Settled;
         }
         Ok(solution)
+    }
+
+    /// Complete an intent left in `AwaitingFinality` after attestor quorum.
+    pub fn finalize_intent(&mut self, intent_id: Hash) -> Result<(), IntentError> {
+        let status = self.status(&intent_id).ok_or(IntentError::Unknown)?;
+        if status != IntentStatus::AwaitingFinality {
+            return Err(IntentError::Constraint(
+                "intent is not awaiting finality".into(),
+            ));
+        }
+        let mint_id = *self
+            .pending_claims
+            .get(&intent_id)
+            .ok_or_else(|| IntentError::Constraint("missing pending claim".into()))?;
+        self.bridge
+            .claim_mint(mint_id)
+            .map_err(|e| IntentError::Constraint(e.to_string()))?;
+        self.pending_claims.remove(&intent_id);
+        if let Some(entry) = self.intents.get_mut(&intent_id) {
+            entry.1 = IntentStatus::Settled;
+        }
+        Ok(())
+    }
+
+    pub fn pending_claim(&self, intent_id: &Hash) -> Option<Hash> {
+        self.pending_claims.get(intent_id).copied()
     }
 }
 
@@ -327,6 +381,8 @@ mod tests {
             min_receive: Amount::from_whole(5).unwrap(),
             deadline_ms: 10_000,
             solver_hint: "naive".into(),
+            recipient: Address::ZERO,
+            destination_tag: 0,
         };
         let id = engine.submit(intent, 0).unwrap();
         let solution = engine.route_and_settle(id, 100).unwrap();
@@ -372,6 +428,8 @@ mod tests {
             min_receive: Amount::from_base_units(1),
             deadline_ms: 10_000,
             solver_hint: "amm".into(),
+            recipient: Address::ZERO,
+            destination_tag: 0,
         };
         let id = engine.submit(intent, 0).unwrap();
         let sol = engine.route_and_settle(id, 1).unwrap();
@@ -396,6 +454,8 @@ mod tests {
             min_receive: Amount::from_base_units(1),
             deadline_ms: 100,
             solver_hint: String::new(),
+            recipient: Address::ZERO,
+            destination_tag: 0,
         };
         let id = engine.submit(intent, 0).unwrap();
         engine.cancel(id).unwrap();

@@ -62,6 +62,10 @@ impl Mempool {
     }
 
     /// Admit with an explicit fee used for mining-template ordering.
+    ///
+    /// When the pool is full, lower-fee transactions are evicted (Bitcoin-class
+    /// fee market) so a higher-fee tx can enter. Admission fails only if every
+    /// resident pays at least as much as the newcomer.
     pub fn admit_priced(&mut self, tx: Transaction, fee: u64) -> Result<Hash, P2pError> {
         if tx.inputs.is_empty() {
             return Err(P2pError::MempoolRejected(
@@ -73,8 +77,10 @@ impl Mempool {
         if self.txs.contains_key(&id) {
             return Ok(id);
         }
-        if self.txs.len() >= self.max_size {
-            return Err(P2pError::MempoolRejected("mempool full".into()));
+        if self.txs.len() >= self.max_size && !self.evict_lowest_below(fee) {
+            return Err(P2pError::MempoolRejected(
+                "mempool full; fee too low to evict".into(),
+            ));
         }
 
         let mut claimed = HashSet::new();
@@ -94,6 +100,38 @@ impl Mempool {
         self.fees.insert(id, fee);
         self.txs.insert(id, tx);
         Ok(id)
+    }
+
+    /// Drop the lowest-fee resident if its fee is strictly below `fee`.
+    /// Returns true when space was made.
+    fn evict_lowest_below(&mut self, fee: u64) -> bool {
+        let victim = self
+            .fees
+            .iter()
+            .min_by(|(a, fa), (b, fb)| fa.cmp(fb).then_with(|| a.as_bytes().cmp(b.as_bytes())))
+            .map(|(id, f)| (*id, *f));
+        match victim {
+            Some((id, low)) if low < fee => {
+                let _ = self.remove(&id);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Minimum fee currently in the pool (None if empty).
+    pub fn min_fee(&self) -> Option<u64> {
+        self.fees.values().copied().min()
+    }
+
+    /// Median fee of pending txs (None if empty). Used by fee estimation.
+    pub fn median_fee(&self) -> Option<u64> {
+        if self.fees.is_empty() {
+            return None;
+        }
+        let mut vals: Vec<u64> = self.fees.values().copied().collect();
+        vals.sort_unstable();
+        Some(vals[vals.len() / 2])
     }
 
     pub fn get(&self, tx_id: &Hash) -> Option<&Transaction> {
@@ -297,6 +335,26 @@ mod tests {
         let capped = pool.select_transfers(2);
         assert_eq!(capped.len(), 2);
         assert_eq!(capped[0].tx_id(), high.tx_id());
+    }
+
+    #[test]
+    fn full_pool_evicts_lower_fee_for_higher() {
+        let mut pool = Mempool::new(2);
+        let low = signed_spend(0, 1);
+        let mid = signed_spend(1, 2);
+        let high = signed_spend(2, 3);
+        pool.admit_priced(low.clone(), 1).unwrap();
+        pool.admit_priced(mid.clone(), 5).unwrap();
+        assert_eq!(pool.len(), 2);
+        // Fee not strictly above the lowest resident cannot enter a full pool.
+        assert!(pool.admit_priced(high.clone(), 1).is_err());
+        // Strictly higher fee evicts the lowest resident.
+        let id = pool.admit_priced(high.clone(), 10).unwrap();
+        assert_eq!(id, high.tx_id());
+        assert!(!pool.contains(&low.tx_id()));
+        assert!(pool.contains(&mid.tx_id()));
+        assert!(pool.contains(&high.tx_id()));
+        assert_eq!(pool.median_fee(), Some(10));
     }
 
     #[test]
