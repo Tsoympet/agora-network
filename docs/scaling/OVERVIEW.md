@@ -24,8 +24,10 @@ Intent-Engine (L4) ──solvers──► Bridge-in-a-Box (L3) ──► Distric
 | L2 sequencer / challenge / finalize / revert | **implemented** (in-process) |
 | L2 `BatchCommitment` DA blob | **implemented** (operator posts to L1 separately) |
 | L2 OVL native PoW money (`sha256_leading_zero`, not L1 UTXO) | **implemented** |
-| L2 `revm` executor | **implemented** (default feature) |
+| L2 `revm` executor (persistent state, CREATE, wired into runtime) | **implemented** |
+| L2 `eth_*` subset on `agora-layers` | **implemented** (chainId / blockNumber / getBalance / getTransactionCount) |
 | L3 lock/mint, burn/unlock, merkle proofs, transport | **implemented** |
+| L3 DRC payments (`pay` + destination tag + path_pay) | **implemented** |
 | L3 DRC district ledger | **implemented** |
 | L4 naive + AMM + composite solvers, cancel, settle | **implemented** |
 | `agora-layers` JSON-RPC binary | **implemented** (local operator runtime) |
@@ -45,6 +47,7 @@ Each mark has its own genesis: OVL on L2, DRC on L3 (TLT remains L1-only).
 
 See also:
 
+- [`TOKEN_ROLES.md`](TOKEN_ROLES.md) — TLT≈Bitcoin, OVL≈Ethereum, DRC≈XRP
 - [`docs/core/ovolos-rollup.md`](../core/ovolos-rollup.md)
 - [`docs/core/bridge-sdk.md`](../core/bridge-sdk.md)
 - [`docs/core/intent-engine.md`](../core/intent-engine.md)

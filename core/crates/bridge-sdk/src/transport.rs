@@ -114,6 +114,7 @@ mod tests {
             recipient: Address([2u8; 20]),
             amount: Amount::from_base_units(10),
             nonce: 1,
+            destination_tag: 0,
         };
         let id = transport.publish("arena", msg.clone()).unwrap();
         assert_eq!(transport.poll("arena").unwrap().unwrap().id(), id);

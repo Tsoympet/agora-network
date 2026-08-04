@@ -339,6 +339,77 @@ async fn dispatch(
                 "reward": block.header.reward,
             }))
         }
+        "agora_layers_payDrc" => {
+            let p: PayParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let id = rt
+                .pay_drc(
+                    &p.district,
+                    parse_addr(&p.sender)?,
+                    parse_addr(&p.recipient)?,
+                    Amount::from_base_units(p.amount),
+                    p.nonce,
+                    p.destination_tag.unwrap_or(0),
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(
+                json!({"payment_id": id.to_hex(), "destination_tag": p.destination_tag.unwrap_or(0)}),
+            )
+        }
+        "agora_layers_pathPayDrc" => {
+            let p: PathPayParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let (unlock_id, mint_id) = rt
+                .path_pay_drc(
+                    &p.hub,
+                    &p.source,
+                    &p.dest,
+                    parse_addr(&p.sender)?,
+                    parse_addr(&p.recipient)?,
+                    Amount::from_base_units(p.amount),
+                    p.nonce,
+                    p.destination_tag.unwrap_or(0),
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(json!({
+                "unlock_id": unlock_id.to_hex(),
+                "mint_id": mint_id.to_hex(),
+                "destination_tag": p.destination_tag.unwrap_or(0),
+            }))
+        }
+        "agora_layers_burnAndUnlock" => {
+            let p: BridgeParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let id = rt
+                .burn_and_unlock(
+                    &p.source,
+                    &p.dest,
+                    parse_addr(&p.sender)?,
+                    parse_addr(&p.recipient)?,
+                    Amount::from_base_units(p.amount),
+                    p.nonce,
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"message_id": id.to_hex()}))
+        }
+        // Ethereum-class L2 surface (OVL = ETH role on Ovolos).
+        "eth_chainId" => Ok(json!(format!("0x{:x}", rt.eth_chain_id()))),
+        "eth_blockNumber" => Ok(json!(format!("0x{:x}", rt.eth_block_number()))),
+        "eth_getBalance" => {
+            let addr = params
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "eth_getBalance(address, block) required".to_string())?;
+            let bal = rt.eth_get_balance(parse_addr(addr)?);
+            Ok(json!(format!("0x{:x}", bal)))
+        }
+        "eth_getTransactionCount" => {
+            let addr = params
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "eth_getTransactionCount(address, block) required".to_string())?;
+            let n = rt.eth_get_transaction_count(parse_addr(addr)?);
+            Ok(json!(format!("0x{:x}", n)))
+        }
         _ => Err(format!("unknown method {method}")),
     }
 }
@@ -442,4 +513,26 @@ struct MineDrcParams {
     miner: String,
     timestamp_ms: u64,
     max_nonces: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PayParams {
+    district: String,
+    sender: String,
+    recipient: String,
+    amount: u64,
+    nonce: u64,
+    destination_tag: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PathPayParams {
+    hub: String,
+    source: String,
+    dest: String,
+    sender: String,
+    recipient: String,
+    amount: u64,
+    nonce: u64,
+    destination_tag: Option<u32>,
 }

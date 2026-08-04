@@ -237,35 +237,59 @@ impl<S: IntentSolver> IntentEngine<S> {
                 .amm_pool
                 .as_ref()
                 .ok_or_else(|| IntentError::Constraint("no AMM pool configured".into()))?;
-            let mut guard = pool
-                .lock()
-                .map_err(|_| IntentError::Constraint("amm lock poisoned".into()))?;
-            let out = guard.apply_swap(intent.give_amount)?;
-            if out.as_base_units() < intent.min_receive.as_base_units() {
-                return Err(IntentError::Constraint("amm slip below min_receive".into()));
-            }
-        } else {
-            // Credit hub lane, lock toward want district, then claim mint.
+            let out = {
+                let mut guard = pool
+                    .lock()
+                    .map_err(|_| IntentError::Constraint("amm lock poisoned".into()))?;
+                let out = guard.apply_swap(intent.give_amount)?;
+                if out.as_base_units() < intent.min_receive.as_base_units() {
+                    return Err(IntentError::Constraint("amm slip below min_receive".into()));
+                }
+                out
+            };
+            // Bind AMM reserves to the DRC account ledger (pool = zero address).
+            let pool_addr = agora_types::Address::ZERO;
             self.bridge
-                .credit_hub_lock(
-                    intent.give_asset_district.clone(),
+                .drc_mut()
+                .transfer(
+                    &intent.give_asset_district,
                     intent.user,
+                    pool_addr,
                     intent.give_amount,
+                    agora_types::Amount::ZERO,
+                    None,
                 )
                 .map_err(|e| IntentError::Constraint(e.to_string()))?;
-            let msg_id = self
-                .bridge
-                .lock_and_mint(
+            self.bridge
+                .drc_mut()
+                .transfer(
+                    &intent.want_asset_district,
+                    pool_addr,
+                    intent.user,
+                    out,
+                    agora_types::Amount::ZERO,
+                    None,
+                )
+                .map_err(|e| IntentError::Constraint(e.to_string()))?;
+        } else {
+            // Balance-backed path payment via hub (XRP path-payment class).
+            // Debits real source-district DRC — does not faucet-mint.
+            let hub = solution
+                .route
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| "agora-hub".into());
+            self.bridge
+                .path_pay(
+                    hub,
                     intent.give_asset_district.clone(),
                     intent.want_asset_district.clone(),
                     intent.user,
                     intent.user,
                     intent.give_amount,
                     intent.id_salt,
+                    0,
                 )
-                .map_err(|e| IntentError::Constraint(e.to_string()))?;
-            self.bridge
-                .claim_mint(msg_id)
                 .map_err(|e| IntentError::Constraint(e.to_string()))?;
         }
 
@@ -284,12 +308,19 @@ mod tests {
     #[test]
     fn routes_cross_district_intent() {
         let mut engine = IntentEngine::new(CompositeSolver::new(None));
+        engine.register_district(DistrictConfig::general("agora-hub", 1));
         engine.register_district(DistrictConfig::gaming("arena", 1));
         engine.register_district(DistrictConfig::privacy("veil", 2));
+        let user = Address([9u8; 20]);
+        engine
+            .bridge_mut()
+            .drc_mut()
+            .mint("arena", user, Amount::from_whole(5).unwrap())
+            .unwrap();
 
         let intent = Intent {
             id_salt: 7,
-            user: Address([9u8; 20]),
+            user,
             give_asset_district: "arena".into(),
             give_amount: Amount::from_whole(5).unwrap(),
             want_asset_district: "veil".into(),
@@ -302,12 +333,12 @@ mod tests {
         assert_eq!(solution.route.len(), 3);
         assert_eq!(engine.status(&id), Some(IntentStatus::Settled));
         assert_eq!(
-            engine
-                .bridge()
-                .drc()
-                .balance("veil", Address([9u8; 20]))
-                .as_base_units(),
+            engine.bridge().drc().balance("veil", user).as_base_units(),
             Amount::from_whole(5).unwrap().as_base_units()
+        );
+        assert_eq!(
+            engine.bridge().drc().balance("arena", user).as_base_units(),
+            0
         );
     }
 
@@ -318,10 +349,23 @@ mod tests {
         let mut engine =
             IntentEngine::new(CompositeSolver::new(Some(amm))).with_amm_pool(pool_handle);
         engine.register_district(DistrictConfig::gaming("arena", 1));
+        let user = Address([3u8; 20]);
+        let pool_addr = Address::ZERO;
+        // Fund user + pool liquidity on the DRC ledger.
+        engine
+            .bridge_mut()
+            .drc_mut()
+            .mint("arena", user, Amount::from_base_units(10_000))
+            .unwrap();
+        engine
+            .bridge_mut()
+            .drc_mut()
+            .mint("arena", pool_addr, Amount::from_base_units(1_000_000))
+            .unwrap();
 
         let intent = Intent {
             id_salt: 1,
-            user: Address([3u8; 20]),
+            user,
             give_asset_district: "arena".into(),
             give_amount: Amount::from_base_units(10_000),
             want_asset_district: "arena".into(),
@@ -334,6 +378,10 @@ mod tests {
         assert_eq!(sol.strategy, "amm");
         assert!(sol.receive_amount.as_base_units() > 0);
         assert_eq!(engine.status(&id), Some(IntentStatus::Settled));
+        assert_eq!(
+            engine.bridge().drc().balance("arena", user).as_base_units(),
+            sol.receive_amount.as_base_units()
+        );
     }
 
     #[test]

@@ -123,6 +123,7 @@ mod tests {
             recipient: Address([2u8; 20]),
             amount: Amount::from_base_units(nonce + 1),
             nonce,
+            destination_tag: 0,
         }
     }
 

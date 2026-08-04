@@ -21,3 +21,4 @@ apps/**/.turbo/
 *.db
 /data/
 data/
+*.tsbuildinfo

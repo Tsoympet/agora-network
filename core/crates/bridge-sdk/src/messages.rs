@@ -6,13 +6,17 @@ use serde::{Deserialize, Serialize};
     Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
 )]
 pub enum BridgeDirection {
-    /// Lock on Agora / L2, mint on District.
+    /// Lock on hub, mint on District.
     LockAndMint,
-    /// Burn on District, unlock on Agora / L2.
+    /// Burn on District, unlock on hub.
     BurnAndUnlock,
+    /// Same-district account payment (XRP Payment–class).
+    Payment,
 }
 
-/// Canonical cross-domain bridge message.
+/// Canonical cross-domain / payment message.
+///
+/// `destination_tag` mirrors XRPL destination tags for exchange deposit routing.
 #[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct BridgeMessage {
     pub direction: BridgeDirection,
@@ -22,6 +26,9 @@ pub struct BridgeMessage {
     pub recipient: Address,
     pub amount: Amount,
     pub nonce: u64,
+    /// Exchange / memo routing tag (0 = unused).
+    #[serde(default)]
+    pub destination_tag: u32,
 }
 
 impl BridgeMessage {
@@ -35,4 +42,6 @@ pub enum MessageStatus {
     Locked,
     Claimed,
     Unlocked,
+    /// Same-district payment settled.
+    Paid,
 }

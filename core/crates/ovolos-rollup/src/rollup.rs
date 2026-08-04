@@ -109,6 +109,10 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         &mut self.config
     }
 
+    pub fn executor(&self) -> &E {
+        &self.executor
+    }
+
     pub fn head_state_root(&self) -> Hash {
         self.head_state_root
     }

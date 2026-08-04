@@ -82,4 +82,56 @@ impl DrcLedger {
         self.minted = self.minted.saturating_sub(units);
         Ok(())
     }
+
+    /// Same-district account payment (XRP Payment–class primitive).
+    ///
+    /// Moves `amount` from `from` to `to` and optionally charges `fee` to `fee_sink`
+    /// (burned from `from` without increasing `to`).
+    pub fn transfer(
+        &mut self,
+        district: &str,
+        from: Address,
+        to: Address,
+        amount: Amount,
+        fee: Amount,
+        fee_sink: Option<Address>,
+    ) -> Result<(), BridgeError> {
+        let pay = amount.as_base_units();
+        let fee_u = fee.as_base_units();
+        let total = pay
+            .checked_add(fee_u)
+            .ok_or_else(|| BridgeError::Constraint("DRC payment overflow".into()))?;
+        let from_key = (district.to_string(), from);
+        let from_bal = self.balances.get(&from_key).copied().unwrap_or(0);
+        if from_bal < total {
+            return Err(BridgeError::InsufficientDistrict);
+        }
+        self.balances.insert(from_key, from_bal - total);
+
+        let to_key = (district.to_string(), to);
+        let to_bal = self.balances.get(&to_key).copied().unwrap_or(0);
+        self.balances.insert(
+            to_key,
+            to_bal
+                .checked_add(pay)
+                .ok_or_else(|| BridgeError::Constraint("DRC balance overflow".into()))?,
+        );
+
+        if fee_u > 0 {
+            if let Some(sink) = fee_sink {
+                let sink_key = (district.to_string(), sink);
+                let sink_bal = self.balances.get(&sink_key).copied().unwrap_or(0);
+                self.balances.insert(
+                    sink_key,
+                    sink_bal
+                        .checked_add(fee_u)
+                        .ok_or_else(|| BridgeError::Constraint("DRC fee sink overflow".into()))?,
+                );
+            } else {
+                // Fee burned (removed from circulating minted supply).
+                self.minted = self.minted.saturating_sub(fee_u);
+            }
+        }
+        Ok(())
+    }
 }

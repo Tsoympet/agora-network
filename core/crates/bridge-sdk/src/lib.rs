@@ -15,7 +15,7 @@ mod pow;
 mod proof;
 mod transport;
 
-pub use bridge::BridgeBox;
+pub use bridge::{BridgeBox, DEFAULT_PAYMENT_FEE_BASE};
 pub use district::{DistrictConfig, DistrictKind};
 pub use drc::{DrcLedger, DRC_MAX_SUPPLY_BASE};
 pub use error::BridgeError;

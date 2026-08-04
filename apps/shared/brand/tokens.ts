@@ -18,17 +18,17 @@ export const agoraTokenSupplies = {
     layer: "L3",
     maxSupplyWhole: 6_000_000_000,
     decimals: 8,
-    role: "native L3 PoW money / district & bridge settlements",
+    role: "XRP-class payments rail / district path payments / bridge liquidity",
     native: true,
     powAlgorithm: "sha256_leading_zero",
   },
-  /** L2 native PoW — Ovolos rollup money (sha256_leading_zero). */
+  /** L2 native PoW — Ethereum-class EVM gas money (sha256_leading_zero). */
   OVL: {
     name: "Ovolos",
     layer: "L2",
     maxSupplyWhole: 21_000_000_000,
     decimals: 8,
-    role: "native L2 PoW money / Ovolos rollup gas",
+    role: "Ethereum-class L2 gas + EVM execution money",
     native: true,
     powAlgorithm: "sha256_leading_zero",
   },

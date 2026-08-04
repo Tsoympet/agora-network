@@ -53,7 +53,7 @@ impl TokenMark {
             // 6_000_000_000 * 10^8
             max_supply: 600_000_000_000_000_000,
             decimals: 8,
-            role: "native L3 PoW money / district & bridge settlements".into(),
+            role: "XRP-class payments rail / district path payments / bridge liquidity".into(),
             native: true,
             pow_algorithm: "sha256_leading_zero".into(),
         }
@@ -68,7 +68,7 @@ impl TokenMark {
             // 21_000_000_000 * 10^8
             max_supply: 2_100_000_000_000_000_000,
             decimals: 8,
-            role: "native L2 PoW money / Ovolos rollup gas".into(),
+            role: "Ethereum-class L2 gas + EVM execution money".into(),
             native: true,
             pow_algorithm: "sha256_leading_zero".into(),
         }
