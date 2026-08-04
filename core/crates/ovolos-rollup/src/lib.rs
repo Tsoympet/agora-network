@@ -1,9 +1,9 @@
 //! Ovolos — Agora's optimistic rollup (L2) for EVM smart-contract scaling.
 //!
-//! **OVL is native PoW money on L2** (`sha256_leading_zero` block seals + coinbase
-//! emission). It is not an L1 UTXO asset. Batches are sequenced optimistically,
-//! open to fraud proofs during a challenge window, then finalized. Operators post
-//! [`BatchCommitment`] blobs to L1 / Agora DA.
+//! **OVL is native hybrid money on L2**: PoW coinbase issuance + bonded sequencers
+//! (PoS-style) for batch submit/finalize. It is not an L1 UTXO asset. Batches are
+//! sequenced optimistically, open to fraud proofs during a challenge window, then
+//! finalized. Operators post [`BatchCommitment`] blobs to L1 / Agora DA.
 
 mod da;
 mod error;
@@ -12,6 +12,7 @@ mod genesis;
 mod ovl;
 mod pow;
 mod rollup;
+mod sequencer;
 mod types;
 
 #[cfg(feature = "revm")]
@@ -30,6 +31,7 @@ pub use pow::{
     OVOLOS_POW_ALGORITHM,
 };
 pub use rollup::{OvolosRollup, RollupConfig};
+pub use sequencer::{SequencerSet, DEFAULT_SEQUENCER_MIN_BOND, SEQUENCER_BOND_ESCROW};
 pub use types::{Batch, BatchStatus, EvmTx, FraudProof};
 
 #[cfg(feature = "revm")]

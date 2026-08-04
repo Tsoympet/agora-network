@@ -3,19 +3,20 @@ use std::sync::Arc;
 
 use agora_types::{Address, Amount, Hash};
 
+use crate::attestor::AttestorSet;
 use crate::district::DistrictConfig;
 use crate::drc::{DrcLedger, DRC_MAX_SUPPLY_BASE};
 use crate::genesis::{DrachmaGenesis, DEFAULT_DRC_POW_BITS};
 use crate::messages::{BridgeDirection, BridgeMessage, MessageStatus};
-
-/// Default same-district payment fee in base units (XRP drops–style).
-pub const DEFAULT_PAYMENT_FEE_BASE: u64 = 10;
 use crate::pow::{
     messages_root, mine_drc_block, verify_pow, DrcBlock, DrcBlockHeader, DrcEmission,
 };
 use crate::proof::{verify_inclusion, LightClientProof};
 use crate::transport::MessageTransport;
 use crate::BridgeError;
+
+/// Default same-district payment fee in base units (XRP drops–style).
+pub const DEFAULT_PAYMENT_FEE_BASE: u64 = 10;
 
 #[derive(Debug, Clone)]
 struct DistrictTip {
@@ -35,6 +36,8 @@ pub struct BridgeBox {
     pow_bits: u32,
     emission: DrcEmission,
     pow_blocks: HashMap<(String, u64), Hash>,
+    /// Bonded attestors (hybrid PoS finality). Empty ⇒ instant finality.
+    attestors: AttestorSet,
 }
 
 impl Default for BridgeBox {
@@ -49,6 +52,7 @@ impl Default for BridgeBox {
             pow_bits: DEFAULT_DRC_POW_BITS,
             emission: DrcEmission::default(),
             pow_blocks: HashMap::new(),
+            attestors: AttestorSet::default(),
         }
     }
 }
@@ -72,6 +76,10 @@ impl BridgeBox {
             pow_bits: genesis.pow_bits,
             emission: genesis.emission(),
             pow_blocks: HashMap::new(),
+            attestors: AttestorSet::new(
+                &genesis.hub_id,
+                crate::attestor::DEFAULT_ATTESTOR_MIN_BOND,
+            ),
         };
         for cfg in genesis.district_configs()? {
             bridge.register_district(cfg);
@@ -125,6 +133,48 @@ impl BridgeBox {
 
     pub fn drc_mut(&mut self) -> &mut DrcLedger {
         &mut self.drc
+    }
+
+    pub fn attestors(&self) -> &AttestorSet {
+        &self.attestors
+    }
+
+    pub fn set_attestor_quorum(&mut self, numerator: u32, denominator: u32) {
+        self.attestors.quorum_numerator = numerator.max(1);
+        self.attestors.quorum_denominator = denominator.max(1);
+    }
+
+    /// Bond DRC on the hub as a hybrid attestor (PoS finality).
+    pub fn bond_attestor(&mut self, attestor: Address, amount: Amount) -> Result<u64, BridgeError> {
+        self.attestors.bond(&mut self.drc, attestor, amount)
+    }
+
+    pub fn unbond_attestor(
+        &mut self,
+        attestor: Address,
+        amount: Amount,
+    ) -> Result<u64, BridgeError> {
+        self.attestors.unbond(&mut self.drc, attestor, amount)
+    }
+
+    /// Attest a message; on quorum, `Paid` messages become `Finalized`.
+    pub fn attest_message(
+        &mut self,
+        attestor: Address,
+        message_id: Hash,
+    ) -> Result<bool, BridgeError> {
+        if !self.messages.contains_key(&message_id) {
+            return Err(BridgeError::NotClaimable("unknown message".into()));
+        }
+        let reached = self.attestors.attest(attestor, message_id)?;
+        if reached {
+            if let Some(entry) = self.messages.get_mut(&message_id) {
+                if entry.1 == MessageStatus::Paid {
+                    entry.1 = MessageStatus::Finalized;
+                }
+            }
+        }
+        Ok(reached)
     }
 
     /// Credit hub locked DRC so `lock_and_mint` can proceed (deposit / faucet).
@@ -217,7 +267,12 @@ impl BridgeBox {
     }
 
     /// District acknowledges mint / claim of a LockAndMint message.
+    ///
+    /// When attestors are bonded, claim requires quorum attestations first.
     pub fn claim_mint(&mut self, message_id: Hash) -> Result<(), BridgeError> {
+        if self.attestors.finality_required() && !self.attestors.has_quorum(&message_id) {
+            return Err(BridgeError::AwaitingQuorum);
+        }
         let (dest, recipient, amount) = {
             let entry = self
                 .messages
@@ -356,7 +411,13 @@ impl BridgeBox {
         if self.messages.contains_key(&id) {
             return Err(BridgeError::DuplicateMessage);
         }
-        self.messages.insert(id, (msg.clone(), MessageStatus::Paid));
+        // Instant finality when no attestors bonded; otherwise await quorum.
+        let status = if self.attestors.finality_required() {
+            MessageStatus::Paid
+        } else {
+            MessageStatus::Finalized
+        };
+        self.messages.insert(id, (msg.clone(), status));
         if let Some(transport) = &self.transport {
             transport.publish(&district, msg)?;
         }
@@ -410,7 +471,10 @@ impl BridgeBox {
             nonce.saturating_add(1),
             destination_tag,
         )?;
-        self.claim_mint(mint_id)?;
+        // With bonded attestors, claim waits for quorum (`attest_message` then `claim_mint`).
+        if !self.attestors.finality_required() {
+            self.claim_mint(mint_id)?;
+        }
         Ok((unlock_id, mint_id))
     }
 
@@ -602,7 +666,7 @@ mod tests {
         let id = bridge
             .pay("arena", alice, bob, Amount::from_base_units(100), 1, 42)
             .unwrap();
-        assert_eq!(bridge.message_status(&id), Some(MessageStatus::Paid));
+        assert_eq!(bridge.message_status(&id), Some(MessageStatus::Finalized));
         assert_eq!(bridge.message(&id).unwrap().destination_tag, 42);
         assert_eq!(bridge.drc().balance("arena", bob).as_base_units(), 100);
         assert_eq!(
@@ -639,6 +703,57 @@ mod tests {
             bridge.drc().balance("veil", alice).as_base_units(),
             Amount::from_whole(10).unwrap().as_base_units()
         );
+    }
+
+    #[test]
+    fn attestor_quorum_finalizes_payment_and_gates_claim() {
+        let mut bridge = BridgeBox::new();
+        bridge.register_district(DistrictConfig::general("agora-hub", 1));
+        bridge.register_district(DistrictConfig::gaming("arena", 9001));
+        let a = Address([0xA1; 20]);
+        let alice = Address([1u8; 20]);
+        let bob = Address([2u8; 20]);
+        bridge
+            .drc
+            .mint("agora-hub", a, Amount::from_base_units(10_000_000_000))
+            .unwrap();
+        bridge
+            .bond_attestor(a, Amount::from_base_units(1_000_000_000))
+            .unwrap();
+        bridge.set_attestor_quorum(1, 1);
+        bridge
+            .drc
+            .mint("arena", alice, Amount::from_base_units(1_000))
+            .unwrap();
+        let pay_id = bridge
+            .pay("arena", alice, bob, Amount::from_base_units(100), 1, 7)
+            .unwrap();
+        assert_eq!(bridge.message_status(&pay_id), Some(MessageStatus::Paid));
+        assert!(bridge.attest_message(a, pay_id).unwrap());
+        assert_eq!(
+            bridge.message_status(&pay_id),
+            Some(MessageStatus::Finalized)
+        );
+
+        bridge
+            .credit_hub_lock("agora-hub", alice, Amount::from_base_units(50))
+            .unwrap();
+        let mint_id = bridge
+            .lock_and_mint(
+                "agora-hub",
+                "arena",
+                alice,
+                bob,
+                Amount::from_base_units(50),
+                2,
+            )
+            .unwrap();
+        assert!(matches!(
+            bridge.claim_mint(mint_id),
+            Err(BridgeError::AwaitingQuorum)
+        ));
+        bridge.attest_message(a, mint_id).unwrap();
+        bridge.claim_mint(mint_id).unwrap();
     }
 
     #[test]

@@ -7,6 +7,7 @@ use crate::executor::{reexecute_batch, EvmExecutor};
 use crate::genesis::OvolosGenesis;
 use crate::ovl::OvlLedger;
 use crate::pow::{mine_ovl_block, verify_pow, OvlBlock, OvlBlockHeader, OvlEmission};
+use crate::sequencer::SequencerSet;
 use crate::types::{Batch, BatchStatus, FraudProof};
 use crate::RollupError;
 
@@ -17,6 +18,8 @@ pub struct RollupConfig {
     pub challenge_window_ms: u64,
     /// When set, `submit_batch` charges OVL gas from this payer.
     pub gas_payer: Option<Address>,
+    /// Minimum OVL bond for sequencers (hybrid PoS gate).
+    pub sequencer_min_bond: u64,
 }
 
 impl Default for RollupConfig {
@@ -25,6 +28,7 @@ impl Default for RollupConfig {
             // 7 days — classic optimistic default; tune per network params.
             challenge_window_ms: 7 * 24 * 60 * 60 * 1000,
             gas_payer: None,
+            sequencer_min_bond: crate::sequencer::DEFAULT_SEQUENCER_MIN_BOND,
         }
     }
 }
@@ -56,10 +60,13 @@ pub struct OvolosRollup<E: EvmExecutor> {
     emission: OvlEmission,
     /// Admitted PoW block ids by height.
     pow_blocks: HashMap<u64, Hash>,
+    /// Bonded sequencers (hybrid PoS). Empty ⇒ permissionless submit/finalize.
+    sequencers: SequencerSet,
 }
 
 impl<E: EvmExecutor> OvolosRollup<E> {
     pub fn new(config: RollupConfig, executor: E, genesis_state_root: Hash) -> Self {
+        let sequencers = SequencerSet::new(config.sequencer_min_bond);
         Self {
             config,
             executor,
@@ -74,6 +81,7 @@ impl<E: EvmExecutor> OvolosRollup<E> {
             pow_bits: crate::genesis::DEFAULT_OVL_POW_BITS,
             emission: OvlEmission::default(),
             pow_blocks: HashMap::new(),
+            sequencers,
         }
     }
 
@@ -84,8 +92,10 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         gas_payer: Option<Address>,
     ) -> Result<Self, RollupError> {
         genesis.validate()?;
+        let config = genesis.rollup_config(gas_payer);
+        let sequencers = SequencerSet::new(config.sequencer_min_bond);
         Ok(Self {
-            config: genesis.rollup_config(gas_payer),
+            config,
             executor,
             next_sequence: 0,
             head_state_root: genesis.genesis_state_root_hash()?,
@@ -98,6 +108,7 @@ impl<E: EvmExecutor> OvolosRollup<E> {
             pow_bits: genesis.pow_bits,
             emission: genesis.emission(),
             pow_blocks: HashMap::new(),
+            sequencers,
         })
     }
 
@@ -127,6 +138,27 @@ impl<E: EvmExecutor> OvolosRollup<E> {
 
     pub fn ovl_mut(&mut self) -> &mut OvlLedger {
         &mut self.ovl
+    }
+
+    pub fn sequencers(&self) -> &SequencerSet {
+        &self.sequencers
+    }
+
+    /// Bond OVL as a hybrid sequencer (PoS gate for batch submit/finalize).
+    pub fn bond_sequencer(
+        &mut self,
+        sequencer: Address,
+        amount: Amount,
+    ) -> Result<u64, RollupError> {
+        self.sequencers.bond(&mut self.ovl, sequencer, amount)
+    }
+
+    pub fn unbond_sequencer(
+        &mut self,
+        sequencer: Address,
+        amount: Amount,
+    ) -> Result<u64, RollupError> {
+        self.sequencers.unbond(&mut self.ovl, sequencer, amount)
     }
 
     pub fn tip_hash(&self) -> Hash {
@@ -171,8 +203,25 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         out
     }
 
-    /// Sequence a batch after local execution validates the claimed post-root.
+    /// Sequence a batch (permissionless while no sequencers are bonded).
     pub fn submit_batch(&mut self, batch: Batch) -> Result<Hash, RollupError> {
+        if self.sequencers.authorization_required() {
+            return Err(RollupError::UnauthorizedSequencer);
+        }
+        self.submit_batch_inner(batch)
+    }
+
+    /// Sequence a batch as a bonded sequencer (hybrid PoS authorization).
+    pub fn submit_batch_as(
+        &mut self,
+        sequencer: Address,
+        batch: Batch,
+    ) -> Result<Hash, RollupError> {
+        self.sequencers.authorize(sequencer)?;
+        self.submit_batch_inner(batch)
+    }
+
+    fn submit_batch_inner(&mut self, batch: Batch) -> Result<Hash, RollupError> {
         if batch.sequence != self.next_sequence {
             return Err(RollupError::SequenceGap {
                 expected: self.next_sequence,
@@ -292,8 +341,25 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         Ok(())
     }
 
-    /// Finalize batches whose challenge window has elapsed.
+    /// Finalize batches whose challenge window has elapsed (permissionless if no bonds).
     pub fn finalize_due(&mut self, now_ms: u64) -> Result<Vec<Hash>, RollupError> {
+        if self.sequencers.authorization_required() {
+            return Err(RollupError::UnauthorizedSequencer);
+        }
+        self.finalize_due_inner(now_ms)
+    }
+
+    /// Finalize due batches as a bonded sequencer.
+    pub fn finalize_due_as(
+        &mut self,
+        sequencer: Address,
+        now_ms: u64,
+    ) -> Result<Vec<Hash>, RollupError> {
+        self.sequencers.authorize(sequencer)?;
+        self.finalize_due_inner(now_ms)
+    }
+
+    fn finalize_due_inner(&mut self, now_ms: u64) -> Result<Vec<Hash>, RollupError> {
         let mut finalized = Vec::new();
         for (id, tracked) in self.batches.iter_mut() {
             if tracked.status != BatchStatus::Pending {
@@ -346,9 +412,10 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         }
 
         // Ensure the sealed batch is already sequenced (or sequence it now).
+        // PoW miners are not sequencers — admission uses the inner path.
         let batch_id = block.batch.id();
         if !self.batches.contains_key(&batch_id) {
-            self.submit_batch(block.batch.clone())?;
+            self.submit_batch_inner(block.batch.clone())?;
         } else if self
             .batches
             .get(&batch_id)
@@ -380,7 +447,7 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         timestamp_ms: u64,
         max_nonces: u64,
     ) -> Result<OvlBlock, RollupError> {
-        let batch_id = self.submit_batch(batch.clone())?;
+        let batch_id = self.submit_batch_inner(batch.clone())?;
         let height = self.tip_height;
         let reward = self.emission.reward_at_height(height);
         let header = OvlBlockHeader {
@@ -426,6 +493,7 @@ mod tests {
             RollupConfig {
                 challenge_window_ms: 1000,
                 gas_payer: None,
+                sequencer_min_bond: 0,
             },
             exec,
             genesis,
@@ -462,6 +530,7 @@ mod tests {
             RollupConfig {
                 challenge_window_ms: 10_000,
                 gas_payer: None,
+                sequencer_min_bond: 0,
             },
             exec,
             genesis,
@@ -520,6 +589,7 @@ mod tests {
             RollupConfig {
                 challenge_window_ms: 1000,
                 gas_payer: Some(payer),
+                sequencer_min_bond: 0,
             },
             StubEvmExecutor,
             Hash::ZERO,
@@ -548,5 +618,42 @@ mod tests {
         assert_eq!(rollup.tip_hash(), block.id());
         let after = rollup.ovl().balance(miner).as_base_units();
         assert_eq!(after - before, rollup.emission().reward_at_height(0));
+    }
+
+    #[test]
+    fn bonded_sequencer_required_once_set_nonempty() {
+        let seq = Address([0x51; 20]);
+        let mut rollup = OvolosRollup::new(
+            RollupConfig {
+                challenge_window_ms: 1000,
+                gas_payer: None,
+                sequencer_min_bond: 100,
+            },
+            StubEvmExecutor,
+            Hash::ZERO,
+        );
+        rollup
+            .ovl_mut()
+            .mint(seq, Amount::from_base_units(500))
+            .unwrap();
+        let batch = sample_batch(0, Hash::ZERO, &StubEvmExecutor, 0);
+        // Still permissionless before any bond.
+        rollup.submit_batch(batch.clone()).unwrap();
+        rollup
+            .bond_sequencer(seq, Amount::from_base_units(100))
+            .unwrap();
+        let batch1 = sample_batch(1, rollup.head_state_root(), &StubEvmExecutor, 1);
+        assert!(matches!(
+            rollup.submit_batch(batch1.clone()),
+            Err(RollupError::UnauthorizedSequencer)
+        ));
+        let id = rollup.submit_batch_as(seq, batch1).unwrap();
+        assert_eq!(rollup.batch_status(&id), Some(BatchStatus::Pending));
+        assert!(matches!(
+            rollup.finalize_due(10_000),
+            Err(RollupError::UnauthorizedSequencer)
+        ));
+        let done = rollup.finalize_due_as(seq, 10_000).unwrap();
+        assert!(done.contains(&id));
     }
 }

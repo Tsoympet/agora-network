@@ -61,6 +61,13 @@ pub struct LayerInfo {
     pub drc_max_supply: u64,
     pub districts: Vec<String>,
     pub open_intents: usize,
+    /// Hybrid: bonded sequencers gate OVL batch submit/finalize.
+    pub ovl_hybrid: bool,
+    pub ovl_active_sequencers: usize,
+    /// Hybrid: bonded attestors quorum-finalize DRC messages.
+    pub drc_hybrid: bool,
+    pub drc_active_attestors: usize,
+    pub drc_quorum_threshold: usize,
 }
 
 /// In-process L2 + L3 + L4 stack for operators and integration tests.
@@ -169,6 +176,11 @@ impl LayersRuntime {
             drc_max_supply: self.intents.bridge().drc().max_supply(),
             districts,
             open_intents: 0,
+            ovl_hybrid: self.rollup.sequencers().authorization_required(),
+            ovl_active_sequencers: self.rollup.sequencers().active_sequencers().len(),
+            drc_hybrid: self.intents.bridge().attestors().finality_required(),
+            drc_active_attestors: self.intents.bridge().attestors().active_attestors().len(),
+            drc_quorum_threshold: self.intents.bridge().attestors().quorum_threshold(),
         }
     }
 
@@ -184,6 +196,36 @@ impl LayersRuntime {
     pub fn submit_batch(&mut self, batch: Batch) -> Result<Hash, LayersError> {
         self.rollup
             .submit_batch(batch)
+            .map_err(|e| LayersError::Rollup(e.to_string()))
+    }
+
+    pub fn submit_batch_as(
+        &mut self,
+        sequencer: Address,
+        batch: Batch,
+    ) -> Result<Hash, LayersError> {
+        self.rollup
+            .submit_batch_as(sequencer, batch)
+            .map_err(|e| LayersError::Rollup(e.to_string()))
+    }
+
+    pub fn bond_sequencer(
+        &mut self,
+        sequencer: Address,
+        amount: Amount,
+    ) -> Result<u64, LayersError> {
+        self.rollup
+            .bond_sequencer(sequencer, amount)
+            .map_err(|e| LayersError::Rollup(e.to_string()))
+    }
+
+    pub fn finalize_due_as(
+        &mut self,
+        sequencer: Address,
+        now_ms: u64,
+    ) -> Result<Vec<Hash>, LayersError> {
+        self.rollup
+            .finalize_due_as(sequencer, now_ms)
             .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
@@ -215,6 +257,24 @@ impl LayersRuntime {
         self.rollup
             .finalize_due(now_ms)
             .map_err(|e| LayersError::Rollup(e.to_string()))
+    }
+
+    pub fn bond_attestor(&mut self, attestor: Address, amount: Amount) -> Result<u64, LayersError> {
+        self.intents
+            .bridge_mut()
+            .bond_attestor(attestor, amount)
+            .map_err(|e| LayersError::Bridge(e.to_string()))
+    }
+
+    pub fn attest_message(
+        &mut self,
+        attestor: Address,
+        message_id: Hash,
+    ) -> Result<bool, LayersError> {
+        self.intents
+            .bridge_mut()
+            .attest_message(attestor, message_id)
+            .map_err(|e| LayersError::Bridge(e.to_string()))
     }
 
     pub fn batch_status(&self, id: &Hash) -> Option<BatchStatus> {

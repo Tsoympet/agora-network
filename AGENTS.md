@@ -9,7 +9,7 @@ deployed public multi-chain network until ops publish seeds and DA wiring.
 - **Core:** Rust (Consensus, P2P, State Machine)
 - **Clients:** Tauri (Desktop), React Native/Expo (Mobile), Web (Explorer)
 - **Branding:** Obsidian & Gold — Agora Obsidian `#101218`, Burnished Gold `#C59835`, Aegean Cyan `#06BBDF`
-- **Three native PoW marks (one per layer):** TLT≈Bitcoin L1 UTXO (RandomX); OVL≈Ethereum L2 EVM gas (`sha256_leading_zero`); DRC≈XRP L3 payments rail (`sha256_leading_zero`). OVL/DRC are not L1 UTXO asset ids — see `docs/scaling/TOKEN_ROLES.md`
+- **Three native marks (one per layer):** TLT≈Bitcoin pure PoW L1 UTXO; OVL≈Ethereum hybrid (PoW mint + bonded sequencers); DRC≈XRP hybrid (PoW mint + bonded attestor quorum). OVL/DRC are not L1 UTXO asset ids — see `docs/scaling/TOKEN_ROLES.md`
 
 ## Technical Stack Rules
 - Rust: idiomatic, thread-safe, async (Tokio). Serialization via `borsh`; state via `rocksdb`.

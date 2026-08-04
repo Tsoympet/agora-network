@@ -24,10 +24,12 @@ Intent-Engine (L4) ──solvers──► Bridge-in-a-Box (L3) ──► Distric
 | L2 sequencer / challenge / finalize / revert | **implemented** (in-process) |
 | L2 `BatchCommitment` DA blob | **implemented** (operator posts to L1 separately) |
 | L2 OVL native PoW money (`sha256_leading_zero`, not L1 UTXO) | **implemented** |
+| L2 hybrid bonded sequencers (PoS gate + PoW mint) | **implemented** |
 | L2 `revm` executor (persistent state, CREATE, wired into runtime) | **implemented** |
 | L2 `eth_*` subset on `agora-layers` | **implemented** (chainId / blockNumber / getBalance / getTransactionCount) |
 | L3 lock/mint, burn/unlock, merkle proofs, transport | **implemented** |
 | L3 DRC payments (`pay` + destination tag + path_pay) | **implemented** |
+| L3 hybrid bonded attestors (quorum finality + PoW mint) | **implemented** |
 | L3 DRC district ledger | **implemented** |
 | L4 naive + AMM + composite solvers, cancel, settle | **implemented** |
 | `agora-layers` JSON-RPC binary | **implemented** (local operator runtime) |

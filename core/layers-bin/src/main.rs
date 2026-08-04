@@ -149,22 +149,16 @@ async fn dispatch(
         }
         "agora_layers_submitBatch" => {
             let p: BatchParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
-            let batch = Batch {
-                sequence: p.sequence,
-                prev_state_root: parse_hash(&p.prev_state_root)?,
-                post_state_root: parse_hash(&p.post_state_root)?,
-                transactions: {
-                    let mut txs = Vec::with_capacity(p.transactions.len());
-                    for t in p.transactions {
-                        let raw =
-                            hex::decode(t.trim_start_matches("0x")).map_err(|e| e.to_string())?;
-                        txs.push(EvmTx(raw));
-                    }
-                    txs
-                },
-                posted_at_ms: p.posted_at_ms,
-            };
+            let batch = batch_from_params(&p)?;
             let id = rt.submit_batch(batch).map_err(|e| e.to_string())?;
+            Ok(json!({"batch_id": id.to_hex()}))
+        }
+        "agora_layers_submitBatchAs" => {
+            let p: BatchAsParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let batch = batch_from_params(&p.batch)?;
+            let id = rt
+                .submit_batch_as(parse_addr(&p.sequencer)?, batch)
+                .map_err(|e| e.to_string())?;
             Ok(json!({"batch_id": id.to_hex()}))
         }
         "agora_layers_recordDa" => {
@@ -199,6 +193,35 @@ async fn dispatch(
                 .ok_or_else(|| "now_ms required".to_string())?;
             let ids = rt.finalize_due(now_ms).map_err(|e| e.to_string())?;
             Ok(json!({"finalized": ids.iter().map(|h| h.to_hex()).collect::<Vec<_>>()}))
+        }
+        "agora_layers_finalizeDueAs" => {
+            let p: SequencerNowParams =
+                serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let ids = rt
+                .finalize_due_as(parse_addr(&p.sequencer)?, p.now_ms)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"finalized": ids.iter().map(|h| h.to_hex()).collect::<Vec<_>>()}))
+        }
+        "agora_layers_bondSequencer" => {
+            let p: AddrAmount = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let bonded = rt
+                .bond_sequencer(parse_addr(&p.address)?, Amount::from_base_units(p.amount))
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"bonded": bonded}))
+        }
+        "agora_layers_bondAttestor" => {
+            let p: AddrAmount = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let bonded = rt
+                .bond_attestor(parse_addr(&p.address)?, Amount::from_base_units(p.amount))
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"bonded": bonded}))
+        }
+        "agora_layers_attestMessage" => {
+            let p: AttestParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
+            let quorum = rt
+                .attest_message(parse_addr(&p.attestor)?, parse_hash(&p.message_id)?)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"quorum_reached": quorum}))
         }
         "agora_layers_creditDrc" => {
             let p: CreditParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
@@ -414,6 +437,21 @@ async fn dispatch(
     }
 }
 
+fn batch_from_params(p: &BatchParams) -> Result<Batch, String> {
+    let mut txs = Vec::with_capacity(p.transactions.len());
+    for t in &p.transactions {
+        let raw = hex::decode(t.trim_start_matches("0x")).map_err(|e| e.to_string())?;
+        txs.push(EvmTx(raw));
+    }
+    Ok(Batch {
+        sequence: p.sequence,
+        prev_state_root: parse_hash(&p.prev_state_root)?,
+        post_state_root: parse_hash(&p.post_state_root)?,
+        transactions: txs,
+        posted_at_ms: p.posted_at_ms,
+    })
+}
+
 fn parse_addr(s: &str) -> Result<Address, String> {
     Address::parse(s).ok_or_else(|| format!("invalid address {s}"))
 }
@@ -443,6 +481,25 @@ struct BatchParams {
     post_state_root: String,
     transactions: Vec<String>,
     posted_at_ms: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct BatchAsParams {
+    sequencer: String,
+    #[serde(flatten)]
+    batch: BatchParams,
+}
+
+#[derive(Debug, Deserialize)]
+struct SequencerNowParams {
+    sequencer: String,
+    now_ms: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct AttestParams {
+    attestor: String,
+    message_id: String,
 }
 
 #[derive(Debug, Deserialize)]

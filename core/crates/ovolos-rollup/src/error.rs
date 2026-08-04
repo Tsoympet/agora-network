@@ -16,4 +16,6 @@ pub enum RollupError {
     InvalidFraudProof(String),
     #[error("execution error: {0}")]
     Execution(String),
+    #[error("unauthorized sequencer")]
+    UnauthorizedSequencer,
 }
