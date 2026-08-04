@@ -12,7 +12,7 @@ COPY .cargo ./.cargo
 COPY core ./core
 COPY infrastructure ./infrastructure
 ENV LIBCLANG_PATH=/usr/lib/llvm-18/lib
-RUN cargo build --release -p agora-node -p agora-dns-seeder -p agora-miner-sidecar -p agora-testnet-faucet
+RUN cargo build --release -p agora-node -p agora-layers -p agora-dns-seeder -p agora-miner-sidecar -p agora-testnet-faucet
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /agora
 COPY --from=builder /src/target/release/agora-node /usr/local/bin/
+COPY --from=builder /src/target/release/agora-layers /usr/local/bin/
 COPY --from=builder /src/target/release/agora-dns-seeder /usr/local/bin/
 COPY --from=builder /src/target/release/agora-miner /usr/local/bin/
 COPY --from=builder /src/target/release/agora-testnet-faucet /usr/local/bin/

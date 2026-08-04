@@ -49,22 +49,23 @@ function requireSubtle(): SubtleCrypto {
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(bytes).toString("base64");
-  }
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin);
 }
 
 function base64ToBytes(b64: string): Uint8Array {
-  if (typeof Buffer !== "undefined") {
-    return new Uint8Array(Buffer.from(b64, "base64"));
-  }
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+/** Copy into a fresh ArrayBuffer so Web Crypto typings accept it under strict TS. */
+function asBufferSource(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy;
 }
 
 async function deriveAesKey(
@@ -83,7 +84,7 @@ async function deriveAesKey(
   return subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt,
+      salt: asBufferSource(salt),
       iterations,
       hash: "SHA-256",
     },
@@ -119,7 +120,7 @@ export async function sealVault(
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const key = await deriveAesKey(pw, salt, PBKDF2_ITERATIONS);
   const ciphertext = await requireSubtle().encrypt(
-    { name: "AES-GCM", iv },
+    { name: "AES-GCM", iv: asBufferSource(iv) },
     key,
     new TextEncoder().encode(phrase),
   );
@@ -149,9 +150,9 @@ export async function openVault(
   let plain: ArrayBuffer;
   try {
     plain = await requireSubtle().decrypt(
-      { name: "AES-GCM", iv: base64ToBytes(sealed.iv) },
+      { name: "AES-GCM", iv: asBufferSource(base64ToBytes(sealed.iv)) },
       key,
-      base64ToBytes(sealed.ciphertext),
+      asBufferSource(base64ToBytes(sealed.ciphertext)),
     );
   } catch {
     throw new Error("wrong password or corrupt vault");

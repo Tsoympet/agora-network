@@ -1,7 +1,7 @@
 # Agora Desktop
 
-Vite wallet shell (Obsidian & Gold) with HTTP JSON-RPC tip sync. Tauri packaging
-hooks live under `src-tauri/`; day-to-day development uses `npm run dev`.
+Tauri 2 + Vite wallet shell with HTTP JSON-RPC tip sync.
+Native crate: `apps/desktop/src-tauri` (`agora-desktop`).
 
 ## Features
 
@@ -19,11 +19,14 @@ AGORA_TEMPLATE_BITS=0 cargo run -p agora-node
 # Terminal B
 cd apps/desktop
 npm install
-npm run dev
-# native installers (host OS): npm run tauri:build
+npm run tauri:dev      # Vite + native shell
+# or browser-only: npm run dev
+npm run tauri:build    # host-OS installers (.deb / AppImage / NSIS / .dmg)
 ```
 
-Multi-OS targets: [`docs/apps/PLATFORMS.md`](../../docs/apps/PLATFORMS.md).
+Prebuilt installers ship on GitHub Releases (`v*` tags). See
+[`docs/apps/PLATFORMS.md`](../../docs/apps/PLATFORMS.md).
+
 
 | Env | Default | Meaning |
 | --- | --- | --- |

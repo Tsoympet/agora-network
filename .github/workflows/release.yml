@@ -1,0 +1,236 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create/upload (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cli:
+    name: CLI (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: agora-cli-linux-x86_64
+            archive: tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset: agora-cli-linux-aarch64
+            archive: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            asset: agora-cli-macos-x86_64
+            archive: tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            asset: agora-cli-macos-aarch64
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: agora-cli-windows-x86_64
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake clang pkg-config libclang-dev
+
+      - name: Install macOS build deps
+        if: runner.os == 'macOS'
+        run: brew install cmake || true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-cli-${{ matrix.target }}
+
+      - name: Set LIBCLANG_PATH (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "LIBCLANG_PATH=$(dirname "$(find /usr/lib -name 'libclang.so*' 2>/dev/null | head -1)")" >> "$GITHUB_ENV"
+
+      - name: Build release binaries
+        shell: bash
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            -p agora-node \
+            -p agora-layers \
+            -p agora-miner-sidecar
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          # Flat archive layout expected by scripts/install.sh
+          mkdir -p dist/pkg
+          for bin in agora-node agora-layers agora-miner; do
+            cp "target/${{ matrix.target }}/release/${bin}" "dist/pkg/"
+          done
+          tar -C dist/pkg -czf "dist/${{ matrix.asset }}.tar.gz" agora-node agora-layers agora-miner
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/pkg | Out-Null
+          foreach ($bin in @('agora-node','agora-layers','agora-miner')) {
+            Copy-Item "target/${{ matrix.target }}/release/$bin.exe" "dist/pkg/"
+          }
+          Compress-Archive -Path dist/pkg/*.exe -DestinationPath "dist/${{ matrix.asset }}.zip" -Force
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            dist/${{ matrix.asset }}.tar.gz
+            dist/${{ matrix.asset }}.zip
+          if-no-files-found: error
+
+  desktop:
+    name: Desktop (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            args: --bundles deb,appimage
+          - platform: windows-latest
+            args: --bundles nsis
+          - platform: macos-14
+            args: --bundles dmg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux desktop deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            build-essential cmake clang pkg-config libclang-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Build Tauri installers
+        working-directory: apps/desktop
+        run: npm run tauri -- build ${{ matrix.args }}
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/**/*.deb
+            apps/desktop/src-tauri/target/release/bundle/**/*.AppImage
+            apps/desktop/src-tauri/target/release/bundle/**/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/**/*.exe
+            apps/desktop/src-tauri/target/release/bundle/**/*.msi
+          if-no-files-found: warn
+
+
+  publish:
+    name: Publish GitHub Release
+    needs: [cli, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Flatten release assets
+        shell: bash
+        run: |
+          mkdir -p out
+          # CLI archives
+          find release-assets -type f \( -name 'agora-cli-*.tar.gz' -o -name 'agora-cli-*.zip' \) \
+            -exec cp -v {} out/ \;
+          # Desktop installers
+          find release-assets -type f \( \
+            -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \
+            -o -name '*.exe' -o -name '*.msi' \
+          \) -exec cp -v {} out/ \;
+          # Install script (always from this tag/commit)
+          cp scripts/install.sh out/install.sh
+          chmod +x out/install.sh
+          ls -lah out
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Agora Network ${{ steps.tag.outputs.name }}
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.name, '-') }}
+          generate_release_notes: true
+          files: out/*
+          body: |
+            ## Install CLI
+
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/Tsoympet/agora-network/${{ steps.tag.outputs.name }}/scripts/install.sh | bash
+            ```
+
+            Or download `agora-cli-<os>-<arch>.tar.gz` / `.zip` from the assets below.
+
+            ## Desktop wallet
+
+            Installers (unsigned): `.deb` / AppImage (Linux), NSIS (Windows), `.dmg` (macOS).
+            Code signing for Gatekeeper / SmartScreen is operator-owned.
+
+            Binaries included in CLI archives: `agora-node`, `agora-layers`, `agora-miner`.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
