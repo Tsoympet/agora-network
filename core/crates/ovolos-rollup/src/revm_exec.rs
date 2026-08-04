@@ -1,8 +1,9 @@
 //! Production EVM binding via the audited `revm` crate.
 //!
-//! OVL plays the Ethereum role on L2: persistent account/contract state, value
-//! transfers, CREATE, and gas-metered execution. State roots are deterministic
-//! SHA-256 digests over the account cache (not full Ethereum MPT roots yet).
+//! OVL plays the Ethereum role on L2: persistent account/contract state (including
+//! storage), value transfers, CREATE, and gas-metered execution. State roots are
+//! deterministic SHA-256 digests over the account + storage cache (not full
+//! Ethereum MPT roots yet).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -12,7 +13,7 @@ use revm::context::TxEnv;
 use revm::database::{CacheDB, EmptyDB};
 use revm::primitives::{Address, Bytes, TxKind, B256, KECCAK_EMPTY, U256};
 use revm::state::{AccountInfo, Bytecode};
-use revm::{Context, ExecuteCommitEvm, MainBuilder, MainContext};
+use revm::{Context, ExecuteCommitEvm, ExecuteEvm, MainBuilder, MainContext};
 use sha2::{Digest, Sha256};
 
 use crate::executor::EvmExecutor;
@@ -54,13 +55,15 @@ fn decode_tx(tx: &EvmTx) -> Result<(Address, U256, Bytes), RollupError> {
     Ok((Address::new(to), value, data))
 }
 
-/// Snapshot of account info for cloning between batches / fraud re-exec.
+/// Snapshot of account info + storage for cloning between batches / fraud re-exec.
 #[derive(Clone, Debug, Default)]
 struct AccountSnap {
     balance: U256,
     nonce: u64,
     code_hash: B256,
     code: Bytecode,
+    /// Non-zero storage slots (sorted when hashed into the state root).
+    storage: BTreeMap<U256, U256>,
 }
 
 /// `revm`-backed executor with **persistent** state snapshots keyed by state root.
@@ -111,6 +114,19 @@ impl RevmExecutor {
         );
     }
 
+    fn resolve_code(db: &CacheDB<EmptyDB>, info: &AccountInfo) -> Bytecode {
+        if let Some(code) = &info.code {
+            if !code.is_empty() || info.code_hash == KECCAK_EMPTY {
+                return code.clone();
+            }
+        }
+        db.cache
+            .contracts
+            .get(&info.code_hash)
+            .cloned()
+            .unwrap_or_else(Bytecode::default)
+    }
+
     fn db_from_prev(&self, prev_state_root: &Hash) -> Result<CacheDB<EmptyDB>, RollupError> {
         let mut db = CacheDB::new(EmptyDB::default());
         if prev_state_root == &Hash::ZERO {
@@ -151,6 +167,10 @@ impl RevmExecutor {
                     code: Some(snap.code.clone()),
                 },
             );
+            for (slot, value) in &snap.storage {
+                db.insert_account_storage(*addr, *slot, *value)
+                    .map_err(|e| RollupError::Execution(format!("restore storage: {e:?}")))?;
+            }
         }
         Ok(db)
     }
@@ -158,13 +178,20 @@ impl RevmExecutor {
     fn capture_snapshot(db: &CacheDB<EmptyDB>) -> HashMap<Address, AccountSnap> {
         let mut out = HashMap::new();
         for (addr, acc) in db.cache.accounts.iter() {
+            let mut storage = BTreeMap::new();
+            for (k, v) in acc.storage.iter() {
+                if !v.is_zero() {
+                    storage.insert(*k, *v);
+                }
+            }
             out.insert(
                 *addr,
                 AccountSnap {
                     balance: acc.info.balance,
                     nonce: acc.info.nonce,
                     code_hash: acc.info.code_hash,
-                    code: acc.info.code.clone().unwrap_or_else(Bytecode::default),
+                    code: Self::resolve_code(db, &acc.info),
+                    storage,
                 },
             );
         }
@@ -172,24 +199,77 @@ impl RevmExecutor {
     }
 
     fn state_root(db: &CacheDB<EmptyDB>) -> Hash {
-        let mut accounts: BTreeMap<Address, (U256, u64, B256)> = BTreeMap::new();
+        let mut accounts: BTreeMap<Address, (U256, u64, B256, BTreeMap<U256, U256>)> =
+            BTreeMap::new();
         for (addr, acc) in db.cache.accounts.iter() {
+            let mut storage = BTreeMap::new();
+            for (k, v) in acc.storage.iter() {
+                if !v.is_zero() {
+                    storage.insert(*k, *v);
+                }
+            }
             accounts.insert(
                 *addr,
-                (acc.info.balance, acc.info.nonce, acc.info.code_hash),
+                (
+                    acc.info.balance,
+                    acc.info.nonce,
+                    acc.info.code_hash,
+                    storage,
+                ),
             );
         }
         let mut hasher = Sha256::new();
-        for (addr, (bal, nonce, code_hash)) in accounts {
+        for (addr, (bal, nonce, code_hash, storage)) in accounts {
             hasher.update(addr.as_slice());
             hasher.update(bal.to_be_bytes::<32>());
             hasher.update(nonce.to_le_bytes());
             hasher.update(code_hash.as_slice());
+            for (slot, value) in storage {
+                hasher.update(slot.to_be_bytes::<32>());
+                hasher.update(value.to_be_bytes::<32>());
+            }
         }
         let digest = hasher.finalize();
         let mut out = [0u8; 32];
         out.copy_from_slice(&digest);
         Hash(out)
+    }
+
+    fn build_tx_env(
+        &self,
+        db: &CacheDB<EmptyDB>,
+        to: Address,
+        value: U256,
+        data: Bytes,
+    ) -> Result<TxEnv, RollupError> {
+        let is_create = to == Address::ZERO;
+        let gas_limit = if is_create {
+            1_500_000
+        } else if data.is_empty() {
+            21_000
+        } else {
+            300_000
+        };
+        let kind = if is_create {
+            TxKind::Create
+        } else {
+            TxKind::Call(to)
+        };
+        let caller_nonce = db
+            .cache
+            .accounts
+            .get(&self.caller)
+            .map(|a| a.info.nonce)
+            .unwrap_or(0);
+        TxEnv::builder()
+            .caller(self.caller)
+            .kind(kind)
+            .value(value)
+            .data(data)
+            .gas_limit(gas_limit)
+            .nonce(caller_nonce)
+            .build()
+            .map_err(|e| RollupError::Execution(format!("tx env: {e:?}")))
     }
 
     /// Native OVL/EVM balance for `eth_getBalance`-class queries (base units as wei-like).
@@ -205,6 +285,77 @@ impl RevmExecutor {
         let accounts = snaps.get(state_root.as_bytes())?;
         Some(accounts.get(&Address::new(address))?.nonce)
     }
+
+    /// Contract bytecode for `eth_getCode` (empty vec for EOAs / unknown).
+    pub fn code_of(&self, state_root: &Hash, address: [u8; 20]) -> Vec<u8> {
+        let Ok(snaps) = self.snapshots.lock() else {
+            return Vec::new();
+        };
+        let Some(accounts) = snaps.get(state_root.as_bytes()) else {
+            return Vec::new();
+        };
+        let Some(snap) = accounts.get(&Address::new(address)) else {
+            return Vec::new();
+        };
+        snap.code.bytes().to_vec()
+    }
+
+    /// Storage slot for `eth_getStorageAt` (32-byte BE slot → 32-byte BE value).
+    pub fn storage_at_bytes(
+        &self,
+        state_root: &Hash,
+        address: [u8; 20],
+        slot: [u8; 32],
+    ) -> [u8; 32] {
+        let Ok(snaps) = self.snapshots.lock() else {
+            return [0u8; 32];
+        };
+        let Some(accounts) = snaps.get(state_root.as_bytes()) else {
+            return [0u8; 32];
+        };
+        let Some(snap) = accounts.get(&Address::new(address)) else {
+            return [0u8; 32];
+        };
+        let key = U256::from_be_slice(&slot);
+        let value = snap.storage.get(&key).copied().unwrap_or(U256::ZERO);
+        value.to_be_bytes::<32>()
+    }
+
+    /// Eth-class `eth_call`: execute without committing state.
+    pub fn eth_call(
+        &self,
+        state_root: &Hash,
+        to: [u8; 20],
+        data: &[u8],
+        value: u128,
+    ) -> Result<Vec<u8>, RollupError> {
+        let db = self.db_from_prev(state_root)?;
+        let caller_nonce = db
+            .cache
+            .accounts
+            .get(&self.caller)
+            .map(|a| a.info.nonce)
+            .unwrap_or(0);
+        let tx = TxEnv::builder()
+            .caller(self.caller)
+            .kind(TxKind::Call(Address::new(to)))
+            .value(U256::from(value))
+            .data(Bytes::copy_from_slice(data))
+            // eth_call is read-only simulation — give ample gas even with empty calldata.
+            .gas_limit(1_000_000)
+            .nonce(caller_nonce)
+            .build()
+            .map_err(|e| RollupError::Execution(format!("eth_call tx env: {e:?}")))?;
+        let mut evm = Context::mainnet().with_db(db).build_mainnet();
+        let result = evm
+            .transact(tx)
+            .map_err(|e| RollupError::Execution(format!("eth_call failed: {e:?}")))?;
+        Ok(result
+            .result
+            .output()
+            .map(|b| b.to_vec())
+            .unwrap_or_default())
+    }
 }
 
 impl EvmExecutor for RevmExecutor {
@@ -214,38 +365,7 @@ impl EvmExecutor for RevmExecutor {
 
         for (idx, raw) in txs.iter().enumerate() {
             let (to, value, data) = decode_tx(raw)?;
-            let is_create = to == Address::ZERO;
-            let gas_limit = if is_create {
-                1_500_000
-            } else if data.is_empty() {
-                21_000
-            } else {
-                300_000
-            };
-            let kind = if is_create {
-                TxKind::Create
-            } else {
-                TxKind::Call(to)
-            };
-            let caller_nonce = evm
-                .ctx
-                .journaled_state
-                .database
-                .cache
-                .accounts
-                .get(&self.caller)
-                .map(|a| a.info.nonce)
-                .unwrap_or(0);
-            let tx = TxEnv::builder()
-                .caller(self.caller)
-                .kind(kind)
-                .value(value)
-                .data(data)
-                .gas_limit(gas_limit)
-                .nonce(caller_nonce)
-                .build()
-                .map_err(|e| RollupError::Execution(format!("tx env: {e:?}")))?;
-
+            let tx = self.build_tx_env(&evm.ctx.journaled_state.database, to, value, data)?;
             evm.transact_commit(tx)
                 .map_err(|e| RollupError::Execution(format!("revm tx {idx} failed: {e:?}")))?;
         }
@@ -295,5 +415,92 @@ mod tests {
         assert_ne!(root0, root1);
         let bal = exec.balance_of(&root1, to.into_array()).unwrap();
         assert_eq!(bal, 150);
+    }
+
+    #[test]
+    fn storage_included_in_state_root_and_persists() {
+        let exec = RevmExecutor::default();
+        // Init code: SSTORE(0, 42); RETURN empty runtime.
+        // PUSH1 0x2a PUSH1 0x00 SSTORE PUSH1 0x00 PUSH1 0x00 RETURN
+        let init = hex_literal(&[0x60, 0x2a, 0x60, 0x00, 0x55, 0x60, 0x00, 0x60, 0x00, 0xf3]);
+        let root = exec
+            .apply_batch(&Hash::ZERO, &[encode_create(U256::ZERO, &init)])
+            .unwrap();
+        // CREATE address = keccak(rlp([sender, nonce])) — use storage scan via snapshots.
+        let snaps = exec.snapshots.lock().unwrap();
+        let accounts = snaps.get(root.as_bytes()).unwrap();
+        let contract = accounts
+            .iter()
+            .find(|(addr, snap)| **addr != exec.caller && snap.storage.contains_key(&U256::ZERO))
+            .map(|(a, _)| *a)
+            .expect("contract with storage");
+        drop(snaps);
+        assert_eq!(
+            U256::from_be_slice(&exec.storage_at_bytes(&root, contract.into_array(), [0u8; 32])),
+            U256::from(42)
+        );
+
+        // Empty follow-on batch from same root must reload storage and keep root stable
+        // when no txs change state — apply_batch with no txs still re-hashes.
+        let root2 = exec.apply_batch(&root, &[]).unwrap();
+        assert_eq!(
+            U256::from_be_slice(&exec.storage_at_bytes(&root2, contract.into_array(), [0u8; 32])),
+            U256::from(42)
+        );
+    }
+
+    #[test]
+    fn eth_get_code_and_eth_call() {
+        let exec = RevmExecutor::default();
+        // Init returns runtime PUSH1 0x7b PUSH1 0x00 MSTORE PUSH1 0x20 PUSH1 0x00 RETURN
+        // runtime bytes: 60 7b 60 00 52 60 20 60 00 f3
+        let runtime = [0x60u8, 0x7b, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3];
+        let mut init = Vec::new();
+        // PUSH1 len, PUSH1 offset-of-code, PUSH1 0, CODECOPY, PUSH1 len, PUSH1 0, RETURN
+        // Simpler: embed runtime after a short prefix using CODECOPY from init itself.
+        // PUSH1 <len> PUSH1 <code_offset> PUSH1 0 CODECOPY PUSH1 <len> PUSH1 0 RETURN + runtime
+        init.extend_from_slice(&[
+            0x60,
+            runtime.len() as u8,
+            0x60,
+            0x0c, // code starts at byte 12
+            0x60,
+            0x00,
+            0x39, // CODECOPY
+            0x60,
+            runtime.len() as u8,
+            0x60,
+            0x00,
+            0xf3, // RETURN
+        ]);
+        init.extend_from_slice(&runtime);
+        let root = exec
+            .apply_batch(&Hash::ZERO, &[encode_create(U256::ZERO, &init)])
+            .unwrap();
+        let snaps = exec.snapshots.lock().unwrap();
+        let accounts = snaps.get(root.as_bytes()).unwrap();
+        let contract = accounts
+            .iter()
+            .find(|(addr, snap)| {
+                **addr != exec.caller && !snap.code.is_empty() && snap.code_hash != KECCAK_EMPTY
+            })
+            .map(|(a, _)| *a)
+            .expect("deployed contract");
+        drop(snaps);
+
+        let code = exec.code_of(&root, contract.into_array());
+        // revm may pad bytecode with a trailing zero byte; compare the runtime prefix.
+        assert!(
+            code.starts_with(&runtime),
+            "code={code:?} runtime={runtime:?}"
+        );
+
+        let out = exec.eth_call(&root, contract.into_array(), &[], 0).unwrap();
+        assert_eq!(out.len(), 32);
+        assert_eq!(out[31], 0x7b);
+    }
+
+    fn hex_literal(bytes: &[u8]) -> Vec<u8> {
+        bytes.to_vec()
     }
 }

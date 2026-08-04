@@ -232,9 +232,17 @@ impl RpcBackend for NodeBackend {
 
     fn estimate_fee(&self) -> Result<FeeEstimate, RpcError> {
         let min = min_relay_fee();
+        let pool = self
+            .mempool
+            .lock()
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        // Bitcoin-class guidance: max(min_relay, mempool median) + mild congestion premium.
+        let median = pool.median_fee().unwrap_or(min);
+        let congestion = (pool.len() as u64).saturating_mul(100);
+        let suggested = median.max(min).saturating_add(congestion);
         Ok(FeeEstimate {
             min_relay_fee: min,
-            suggested_fee: min,
+            suggested_fee: suggested,
         })
     }
 

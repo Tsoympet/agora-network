@@ -132,6 +132,8 @@ impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
 }
 
 impl ChainState {
+    /// Convenience bootstrap used by integration tests and RPC backends.
+    #[allow(dead_code)]
     pub fn bootstrap(
         store: Arc<StateStore>,
         genesis: Hash,
@@ -181,6 +183,7 @@ impl ChainState {
         Ok(chain)
     }
 
+    #[allow(dead_code)]
     pub fn genesis(&self) -> Hash {
         self.genesis
     }

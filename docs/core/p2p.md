@@ -45,7 +45,7 @@ Receivers try `reconstruct_compact_block` against the local mempool. On miss (or
 
 ### Orphan pool (multi-hop IBD)
 
-When a full body arrives but parents are unknown, `agora-node` **parks** it in an in-memory `OrphanPool` (TTL + max size) and issues GetBlock for each missing parent — without penalizing the peer. After a parent admits, `drain_orphans_after` re-tries waiting children (re-parking if other parents are still missing). Orphans are not persisted across restart.
+When a full body arrives but parents are unknown, `agora-node` **parks** it in an in-memory `OrphanPool` (TTL + max size) and issues GetBlock for each missing parent — without penalizing the peer. After a parent admits, `drain_orphans_after` re-tries waiting children (re-parking if other parents are still missing).
 
 ### Headers-first / locator IBD
 

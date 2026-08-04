@@ -77,6 +77,8 @@ pub struct LayersRuntime {
     rollup: OvolosRollup<RevmExecutor>,
     intents: IntentEngine<CompositeSolver>,
     transport: Arc<InMemoryTransport>,
+    /// Pending compact EVM txs (`to||value||data`) for Ethereum-class mempool.
+    l2_mempool: Vec<EvmTx>,
     ovl_genesis_hash: String,
     ovl_chain_id: String,
     /// Numeric chain id for `eth_chainId` (derived from genesis string hash).
@@ -135,6 +137,7 @@ impl LayersRuntime {
             rollup,
             intents,
             transport,
+            l2_mempool: Vec::new(),
         })
     }
 
@@ -325,9 +328,38 @@ impl LayersRuntime {
         amount: Amount,
         nonce: u64,
     ) -> Result<Hash, LayersError> {
+        self.lock_and_mint_tagged(
+            source_hub,
+            dest_district,
+            sender,
+            recipient,
+            amount,
+            nonce,
+            0,
+        )
+    }
+
+    pub fn lock_and_mint_tagged(
+        &mut self,
+        source_hub: &str,
+        dest_district: &str,
+        sender: Address,
+        recipient: Address,
+        amount: Amount,
+        nonce: u64,
+        destination_tag: u32,
+    ) -> Result<Hash, LayersError> {
         self.intents
             .bridge_mut()
-            .lock_and_mint(source_hub, dest_district, sender, recipient, amount, nonce)
+            .lock_and_mint_tagged(
+                source_hub,
+                dest_district,
+                sender,
+                recipient,
+                amount,
+                nonce,
+                destination_tag,
+            )
             .map_err(|e| LayersError::Bridge(e.to_string()))
     }
 
@@ -389,9 +421,35 @@ impl LayersRuntime {
         nonce: u64,
         destination_tag: u32,
     ) -> Result<(Hash, Hash), LayersError> {
+        self.path_pay_drc_deliver(
+            hub,
+            source_district,
+            dest_district,
+            sender,
+            recipient,
+            amount,
+            nonce,
+            destination_tag,
+            Amount::ZERO,
+        )
+    }
+
+    /// Path payment with XRPL-class deliverMin.
+    pub fn path_pay_drc_deliver(
+        &mut self,
+        hub: &str,
+        source_district: &str,
+        dest_district: &str,
+        sender: Address,
+        recipient: Address,
+        amount: Amount,
+        nonce: u64,
+        destination_tag: u32,
+        deliver_min: Amount,
+    ) -> Result<(Hash, Hash), LayersError> {
         self.intents
             .bridge_mut()
-            .path_pay(
+            .path_pay_deliver(
                 hub,
                 source_district,
                 dest_district,
@@ -400,6 +458,7 @@ impl LayersRuntime {
                 amount,
                 nonce,
                 destination_tag,
+                deliver_min,
             )
             .map_err(|e| LayersError::Bridge(e.to_string()))
     }
@@ -439,8 +498,55 @@ impl LayersRuntime {
             .map_err(|e| LayersError::Intent(e.to_string()))
     }
 
+    pub fn finalize_intent(&mut self, id: Hash) -> Result<(), LayersError> {
+        self.intents
+            .finalize_intent(id)
+            .map_err(|e| LayersError::Intent(e.to_string()))
+    }
+
     pub fn intent_status(&self, id: &Hash) -> Option<IntentStatus> {
         self.intents.status(id)
+    }
+
+    pub fn register_destination_tag(
+        &mut self,
+        district: &str,
+        owner: Address,
+        tag: u32,
+    ) -> Result<(), LayersError> {
+        self.intents
+            .bridge_mut()
+            .register_destination_tag(district, owner, tag)
+            .map_err(|e| LayersError::Bridge(e.to_string()))
+    }
+
+    pub fn payments_for_tag(&self, district: &str, tag: u32) -> Vec<Hash> {
+        self.intents.bridge().payments_for_tag(district, tag)
+    }
+
+    pub fn destination_tag_owner(&self, district: &str, tag: u32) -> Option<Address> {
+        self.intents.bridge().destination_tag_owner(district, tag)
+    }
+
+    pub fn unbond_attestor(
+        &mut self,
+        attestor: Address,
+        amount: Amount,
+    ) -> Result<u64, LayersError> {
+        self.intents
+            .bridge_mut()
+            .unbond_attestor(attestor, amount)
+            .map_err(|e| LayersError::Bridge(e.to_string()))
+    }
+
+    pub fn unbond_sequencer(
+        &mut self,
+        sequencer: Address,
+        amount: Amount,
+    ) -> Result<u64, LayersError> {
+        self.rollup
+            .unbond_sequencer(sequencer, amount)
+            .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
     // --- Ethereum-class L2 helpers (`eth_*`) ---
@@ -470,6 +576,49 @@ impl LayersRuntime {
             .executor()
             .nonce_of(&self.rollup.head_state_root(), address.0)
             .unwrap_or(0)
+    }
+
+    pub fn eth_get_code(&self, address: Address) -> Vec<u8> {
+        self.rollup
+            .executor()
+            .code_of(&self.rollup.head_state_root(), address.0)
+    }
+
+    pub fn eth_get_storage_at(&self, address: Address, slot: [u8; 32]) -> [u8; 32] {
+        self.rollup
+            .executor()
+            .storage_at_bytes(&self.rollup.head_state_root(), address.0, slot)
+    }
+
+    pub fn eth_call(&self, to: Address, data: &[u8], value: u128) -> Result<Vec<u8>, LayersError> {
+        self.rollup
+            .executor()
+            .eth_call(&self.rollup.head_state_root(), to.0, data, value)
+            .map_err(|e| LayersError::Rollup(e.to_string()))
+    }
+
+    /// Admit a compact EVM tx into the L2 mempool (`eth_sendRawTransaction`).
+    pub fn eth_send_raw_transaction(&mut self, raw: EvmTx) -> Result<Hash, LayersError> {
+        if raw.0.len() < 52 {
+            return Err(LayersError::Rollup(
+                "evm tx too short; expected to||value[||data]".into(),
+            ));
+        }
+        let id = Hash::hash_bytes(&raw.0);
+        if self.l2_mempool.iter().any(|t| Hash::hash_bytes(&t.0) == id) {
+            return Ok(id);
+        }
+        self.l2_mempool.push(raw);
+        Ok(id)
+    }
+
+    pub fn l2_mempool_len(&self) -> usize {
+        self.l2_mempool.len()
+    }
+
+    /// Drain pending L2 txs (for sequencer batch building).
+    pub fn drain_l2_mempool(&mut self) -> Vec<EvmTx> {
+        std::mem::take(&mut self.l2_mempool)
     }
 }
 

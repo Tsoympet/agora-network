@@ -38,6 +38,10 @@ pub struct BridgeBox {
     pow_blocks: HashMap<(String, u64), Hash>,
     /// Bonded attestors (hybrid PoS finality). Empty ⇒ instant finality.
     attestors: AttestorSet,
+    /// XRPL-class destination tag registry: (district, tag) → owner address.
+    tag_owners: HashMap<(String, u32), Address>,
+    /// Payments / mints indexed by (district, tag) for exchange deposit routing.
+    tag_payments: HashMap<(String, u32), Vec<Hash>>,
 }
 
 impl Default for BridgeBox {
@@ -53,6 +57,8 @@ impl Default for BridgeBox {
             emission: DrcEmission::default(),
             pow_blocks: HashMap::new(),
             attestors: AttestorSet::default(),
+            tag_owners: HashMap::new(),
+            tag_payments: HashMap::new(),
         }
     }
 }
@@ -80,6 +86,8 @@ impl BridgeBox {
                 &genesis.hub_id,
                 crate::attestor::DEFAULT_ATTESTOR_MIN_BOND,
             ),
+            tag_owners: HashMap::new(),
+            tag_payments: HashMap::new(),
         };
         for cfg in genesis.district_configs()? {
             bridge.register_district(cfg);
@@ -155,6 +163,74 @@ impl BridgeBox {
         amount: Amount,
     ) -> Result<u64, BridgeError> {
         self.attestors.unbond(&mut self.drc, attestor, amount)
+    }
+
+    /// Register an XRPL-class destination tag for deposit routing on `district`.
+    ///
+    /// Tag `0` is reserved (untagged). Once registered, payments using the tag
+    /// must target the registered owner address.
+    pub fn register_destination_tag(
+        &mut self,
+        district: impl Into<String>,
+        owner: Address,
+        tag: u32,
+    ) -> Result<(), BridgeError> {
+        let district = district.into();
+        if tag == 0 {
+            return Err(BridgeError::Constraint(
+                "destination tag 0 is reserved".into(),
+            ));
+        }
+        if !self.districts.contains_key(&district) {
+            return Err(BridgeError::UnknownDistrict(district));
+        }
+        let key = (district, tag);
+        if let Some(existing) = self.tag_owners.get(&key) {
+            if *existing != owner {
+                return Err(BridgeError::Constraint(
+                    "destination tag already registered to another owner".into(),
+                ));
+            }
+            return Ok(());
+        }
+        self.tag_owners.insert(key, owner);
+        Ok(())
+    }
+
+    pub fn destination_tag_owner(&self, district: &str, tag: u32) -> Option<Address> {
+        self.tag_owners.get(&(district.to_string(), tag)).copied()
+    }
+
+    /// Message ids that used `(district, tag)` (payments / tagged mints).
+    pub fn payments_for_tag(&self, district: &str, tag: u32) -> Vec<Hash> {
+        self.tag_payments
+            .get(&(district.to_string(), tag))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn enforce_tag(&self, district: &str, recipient: Address, tag: u32) -> Result<(), BridgeError> {
+        if tag == 0 {
+            return Ok(());
+        }
+        if let Some(owner) = self.tag_owners.get(&(district.to_string(), tag)) {
+            if *owner != recipient {
+                return Err(BridgeError::Constraint(
+                    "destination_tag recipient mismatch".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn index_tag(&mut self, district: &str, tag: u32, message_id: Hash) {
+        if tag == 0 {
+            return;
+        }
+        self.tag_payments
+            .entry((district.to_string(), tag))
+            .or_default()
+            .push(message_id);
     }
 
     /// Attest a message; on quorum, `Paid` messages become `Finalized`.
@@ -233,6 +309,7 @@ impl BridgeBox {
         if !self.districts.contains_key(&dest_district) {
             return Err(BridgeError::UnknownDistrict(dest_district));
         }
+        self.enforce_tag(&dest_district, recipient, destination_tag)?;
 
         let key = (source_hub.clone(), sender);
         let locked = self.locks.get(&key).copied().unwrap_or(Amount::ZERO);
@@ -259,6 +336,7 @@ impl BridgeBox {
         }
         self.messages
             .insert(id, (msg.clone(), MessageStatus::Locked));
+        self.index_tag(&dest_district, destination_tag, id);
 
         if let Some(transport) = &self.transport {
             transport.publish(&dest_district, msg)?;
@@ -393,6 +471,7 @@ impl BridgeBox {
         if !self.districts.contains_key(&district) {
             return Err(BridgeError::UnknownDistrict(district));
         }
+        self.enforce_tag(&district, recipient, destination_tag)?;
         let fee = Amount::from_base_units(DEFAULT_PAYMENT_FEE_BASE);
         self.drc
             .transfer(&district, sender, recipient, amount, fee, None)?;
@@ -418,6 +497,7 @@ impl BridgeBox {
             MessageStatus::Finalized
         };
         self.messages.insert(id, (msg.clone(), status));
+        self.index_tag(&district, destination_tag, id);
         if let Some(transport) = &self.transport {
             transport.publish(&district, msg)?;
         }
@@ -428,6 +508,8 @@ impl BridgeBox {
     /// `source → hub (burn/unlock) → dest (lock/mint + claim)`.
     ///
     /// Debits real balances on `source_district` (no faucet minting).
+    /// `deliver_min == 0` disables the XRPL deliverMin check; otherwise
+    /// `amount` must be ≥ `deliver_min` (full delivery in this 1:1 path model).
     pub fn path_pay(
         &mut self,
         hub: impl Into<String>,
@@ -439,6 +521,35 @@ impl BridgeBox {
         nonce: u64,
         destination_tag: u32,
     ) -> Result<(Hash, Hash), BridgeError> {
+        self.path_pay_deliver(
+            hub,
+            source_district,
+            dest_district,
+            sender,
+            recipient,
+            amount,
+            nonce,
+            destination_tag,
+            Amount::ZERO,
+        )
+    }
+
+    /// Path payment with XRPL-class `deliverMin` floor.
+    pub fn path_pay_deliver(
+        &mut self,
+        hub: impl Into<String>,
+        source_district: impl Into<String>,
+        dest_district: impl Into<String>,
+        sender: Address,
+        recipient: Address,
+        amount: Amount,
+        nonce: u64,
+        destination_tag: u32,
+        deliver_min: Amount,
+    ) -> Result<(Hash, Hash), BridgeError> {
+        if deliver_min.as_base_units() > 0 && amount.as_base_units() < deliver_min.as_base_units() {
+            return Err(BridgeError::Constraint("deliver_min not met".into()));
+        }
         let hub = hub.into();
         let source_district = source_district.into();
         let dest_district = dest_district.into();
@@ -673,6 +784,58 @@ mod tests {
             bridge.drc().balance("arena", alice).as_base_units(),
             1_000 - 100 - DEFAULT_PAYMENT_FEE_BASE
         );
+        assert_eq!(bridge.payments_for_tag("arena", 42), vec![id]);
+    }
+
+    #[test]
+    fn destination_tag_registry_enforces_owner() {
+        let mut bridge = BridgeBox::new();
+        bridge.register_district(DistrictConfig::gaming("arena", 9001));
+        let exchange = Address([2u8; 20]);
+        let alice = Address([1u8; 20]);
+        let stranger = Address([3u8; 20]);
+        bridge
+            .register_destination_tag("arena", exchange, 99)
+            .unwrap();
+        bridge
+            .drc
+            .mint("arena", alice, Amount::from_base_units(1_000))
+            .unwrap();
+        assert!(bridge
+            .pay("arena", alice, stranger, Amount::from_base_units(10), 1, 99)
+            .is_err());
+        let id = bridge
+            .pay("arena", alice, exchange, Amount::from_base_units(10), 2, 99)
+            .unwrap();
+        assert_eq!(bridge.destination_tag_owner("arena", 99), Some(exchange));
+        assert_eq!(bridge.payments_for_tag("arena", 99), vec![id]);
+    }
+
+    #[test]
+    fn path_pay_deliver_min_rejects_shortfall() {
+        let mut bridge = BridgeBox::new();
+        bridge.register_district(DistrictConfig::general("agora-hub", 1));
+        bridge.register_district(DistrictConfig::gaming("arena", 9001));
+        bridge.register_district(DistrictConfig::privacy("veil", 9002));
+        let alice = Address([1u8; 20]);
+        bridge
+            .drc
+            .mint("arena", alice, Amount::from_whole(10).unwrap())
+            .unwrap();
+        let err = bridge
+            .path_pay_deliver(
+                "agora-hub",
+                "arena",
+                "veil",
+                alice,
+                alice,
+                Amount::from_whole(5).unwrap(),
+                1,
+                0,
+                Amount::from_whole(10).unwrap(),
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("deliver_min"), "{err}");
     }
 
     #[test]

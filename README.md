@@ -32,7 +32,7 @@ Agora is a proof-of-work **BlockDAG**: blocks can reference multiple parents, or
 
 See [`docs/scaling/TOKEN_ROLES.md`](docs/scaling/TOKEN_ROLES.md).
 
-> **Status:** Testnet genesis is **frozen in-repo** and the full node stack runs locally / via Docker. **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot. L2–L4 run in-process via `agora-layers` (native OVL/DRC PoW + intents); they are **not** a publicly deployed multi-chain network until ops wire DA to L1.
+> **Status:** Testnet genesis is **frozen in-repo** and the three-mark stack is **role-complete in-tree** (TLT≈Bitcoin fee market, OVL≈Ethereum EVM+eth_*, DRC≈XRP payments/tags). **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot. L2–L4 run in-process via `agora-layers`; public multi-node deploy is still ops.
 
 ## Features
 
