@@ -8,8 +8,8 @@ repository.workspace = true
 
 [features]
 default = ["revm"]
-# Bind the audited revm EVM behind EvmExecutor.
-revm = ["dep:revm"]
+# Bind the audited revm EVM behind EvmExecutor (+ signed Eth txs).
+revm = ["dep:revm", "dep:k256", "dep:alloy-rlp", "dep:alloy-primitives"]
 
 [dependencies]
 agora-types = { workspace = true }
@@ -20,3 +20,6 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 revm = { workspace = true, optional = true }
+k256 = { version = "0.13", features = ["ecdsa"], optional = true }
+alloy-rlp = { version = "0.3", optional = true }
+alloy-primitives = { version = "1.6", default-features = false, features = ["std", "rlp"], optional = true }

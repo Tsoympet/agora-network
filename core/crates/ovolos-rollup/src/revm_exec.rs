@@ -17,6 +17,7 @@ use revm::{Context, ExecuteCommitEvm, ExecuteEvm, MainBuilder, MainContext};
 use sha2::{Digest, Sha256};
 
 use crate::executor::EvmExecutor;
+use crate::signed_tx::{decode_evm_tx, DecodedEvmTx};
 use crate::types::EvmTx;
 use crate::RollupError;
 
@@ -42,28 +43,57 @@ pub fn encode_value_transfer(to: [u8; 20], value: u64) -> EvmTx {
     encode_transfer(to, U256::from(value), &[])
 }
 
-fn decode_tx(tx: &EvmTx) -> Result<(Address, U256, Bytes), RollupError> {
-    if tx.0.len() < 52 {
-        return Err(RollupError::Execution(
-            "evm tx too short; expected to||value[||data]".into(),
-        ));
-    }
-    let mut to = [0u8; 20];
-    to.copy_from_slice(&tx.0[..20]);
-    let value = U256::from_be_slice(&tx.0[20..52]);
-    let data = Bytes::copy_from_slice(&tx.0[52..]);
-    Ok((Address::new(to), value, data))
-}
-
 /// Snapshot of account info + storage for cloning between batches / fraud re-exec.
 #[derive(Clone, Debug, Default)]
-struct AccountSnap {
+pub struct AccountSnap {
     balance: U256,
     nonce: u64,
     code_hash: B256,
     code: Bytecode,
     /// Non-zero storage slots (sorted when hashed into the state root).
     storage: BTreeMap<U256, U256>,
+}
+
+/// Portable account snapshot for durable layers checkpoints.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct AccountSnapDto {
+    pub address: [u8; 20],
+    pub balance: [u8; 32],
+    pub nonce: u64,
+    pub code_hash: [u8; 32],
+    pub code: Vec<u8>,
+    pub storage: Vec<([u8; 32], [u8; 32])>,
+}
+
+impl AccountSnap {
+    fn to_dto(&self, address: [u8; 20]) -> AccountSnapDto {
+        AccountSnapDto {
+            address,
+            balance: self.balance.to_be_bytes::<32>(),
+            nonce: self.nonce,
+            code_hash: self.code_hash.into(),
+            code: self.code.bytes().to_vec(),
+            storage: self
+                .storage
+                .iter()
+                .map(|(k, v)| (k.to_be_bytes::<32>(), v.to_be_bytes::<32>()))
+                .collect(),
+        }
+    }
+
+    fn from_dto(dto: &AccountSnapDto) -> Self {
+        let mut storage = BTreeMap::new();
+        for (k, v) in &dto.storage {
+            storage.insert(U256::from_be_slice(k), U256::from_be_slice(v));
+        }
+        Self {
+            balance: U256::from_be_slice(&dto.balance),
+            nonce: dto.nonce,
+            code_hash: B256::from(dto.code_hash),
+            code: Bytecode::new_raw(Bytes::from(dto.code.clone())),
+            storage,
+        }
+    }
 }
 
 /// `revm`-backed executor with **persistent** state snapshots keyed by state root.
@@ -238,38 +268,76 @@ impl RevmExecutor {
     fn build_tx_env(
         &self,
         db: &CacheDB<EmptyDB>,
-        to: Address,
-        value: U256,
-        data: Bytes,
+        decoded: &DecodedEvmTx,
     ) -> Result<TxEnv, RollupError> {
-        let is_create = to == Address::ZERO;
-        let gas_limit = if is_create {
+        let is_create = decoded.to == Address::ZERO;
+        let gas_limit = decoded.gas_limit.unwrap_or(if is_create {
             1_500_000
-        } else if data.is_empty() {
+        } else if decoded.data.is_empty() {
             21_000
         } else {
             300_000
-        };
+        });
         let kind = if is_create {
             TxKind::Create
         } else {
-            TxKind::Call(to)
+            TxKind::Call(decoded.to)
         };
-        let caller_nonce = db
-            .cache
-            .accounts
-            .get(&self.caller)
-            .map(|a| a.info.nonce)
-            .unwrap_or(0);
+        let caller_nonce = decoded.nonce.unwrap_or_else(|| {
+            db.cache
+                .accounts
+                .get(&decoded.caller)
+                .map(|a| a.info.nonce)
+                .unwrap_or(0)
+        });
         TxEnv::builder()
-            .caller(self.caller)
+            .caller(decoded.caller)
             .kind(kind)
-            .value(value)
-            .data(data)
+            .value(decoded.value)
+            .data(decoded.data.clone())
             .gas_limit(gas_limit)
             .nonce(caller_nonce)
             .build()
             .map_err(|e| RollupError::Execution(format!("tx env: {e:?}")))
+    }
+
+    /// Export all state-root snapshots for durable persistence.
+    pub fn export_snapshots(&self) -> Result<Vec<(Hash, Vec<AccountSnapDto>)>, RollupError> {
+        let snaps = self
+            .snapshots
+            .lock()
+            .map_err(|_| RollupError::Execution("revm snapshot lock poisoned".into()))?;
+        let mut out = Vec::with_capacity(snaps.len());
+        for (root, accounts) in snaps.iter() {
+            let entries: Vec<_> = accounts
+                .iter()
+                .map(|(addr, snap)| snap.to_dto(addr.into_array()))
+                .collect();
+            out.push((Hash(*root), entries));
+        }
+        Ok(out)
+    }
+
+    /// Replace in-memory snapshots (used on boot from durable checkpoint).
+    pub fn import_snapshots(
+        &self,
+        snaps: Vec<(Hash, Vec<AccountSnapDto>)>,
+    ) -> Result<(), RollupError> {
+        let mut guard = self
+            .snapshots
+            .lock()
+            .map_err(|_| RollupError::Execution("revm snapshot lock poisoned".into()))?;
+        guard.clear();
+        for (root, accounts) in snaps {
+            let mut map = HashMap::new();
+            for dto in accounts {
+                map.insert(Address::new(dto.address), AccountSnap::from_dto(&dto));
+            }
+            let mut key = [0u8; 32];
+            key.copy_from_slice(root.as_bytes());
+            guard.insert(key, map);
+        }
+        Ok(())
     }
 
     /// Native OVL/EVM balance for `eth_getBalance`-class queries (base units as wei-like).
@@ -364,8 +432,8 @@ impl EvmExecutor for RevmExecutor {
         let mut evm = Context::mainnet().with_db(db).build_mainnet();
 
         for (idx, raw) in txs.iter().enumerate() {
-            let (to, value, data) = decode_tx(raw)?;
-            let tx = self.build_tx_env(&evm.ctx.journaled_state.database, to, value, data)?;
+            let decoded = decode_evm_tx(raw)?;
+            let tx = self.build_tx_env(&evm.ctx.journaled_state.database, &decoded)?;
             evm.transact_commit(tx)
                 .map_err(|e| RollupError::Execution(format!("revm tx {idx} failed: {e:?}")))?;
         }

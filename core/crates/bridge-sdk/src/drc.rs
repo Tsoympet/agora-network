@@ -6,13 +6,14 @@
 use std::collections::HashMap;
 
 use agora_types::{Address, Amount};
+use serde::{Deserialize, Serialize};
 
 use crate::BridgeError;
 
 /// Default DRC max supply in base units (6B whole @ 8 decimals).
 pub const DRC_MAX_SUPPLY_BASE: u64 = 600_000_000_000_000_000;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DrcLedger {
     /// (district_id, address) → balance
     balances: HashMap<(String, Address), u64>,
@@ -44,6 +45,18 @@ impl DrcLedger {
                 .copied()
                 .unwrap_or(0),
         )
+    }
+
+    pub fn balances_snapshot(&self) -> Vec<(String, Address, u64)> {
+        self.balances
+            .iter()
+            .map(|((d, a), v)| (d.clone(), *a, *v))
+            .collect()
+    }
+
+    pub fn restore_balances(&mut self, balances: Vec<(String, Address, u64)>, minted: u64) {
+        self.balances = balances.into_iter().map(|(d, a, v)| ((d, a), v)).collect();
+        self.minted = minted;
     }
 
     pub fn mint(&mut self, district: &str, to: Address, amount: Amount) -> Result<(), BridgeError> {

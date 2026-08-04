@@ -6,6 +6,11 @@ use agora_types::{Address, Amount};
 
 use crate::error::{FaucetError, Result};
 use crate::node_rpc;
+use crate::treasury;
+
+/// Well-known BIP-39 phrase matching the frozen testnet premine / smoke-tx wallet.
+pub const TESTNET_TREASURY_MNEMONIC: &str =
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 /// Faucet drip policy.
 #[derive(Debug, Clone)]
@@ -33,11 +38,13 @@ impl Default for FaucetConfig {
 pub enum FundingTarget {
     /// Unit-test / offline ledger (not spendable on a live node).
     Memory(InMemoryBackend),
-    /// Live `agora-node` via `agora_fundAddress` (mints spendable `cf_utxo`).
+    /// Live `agora-node` via `agora_fundAddress` (lab mint — not for public testnet).
     Node { rpc_url: String },
+    /// Live node via signed spends from a treasury UTXO (public-testnet path).
+    Treasury { rpc_url: String, mnemonic: String },
 }
 
-/// Rate-limited faucet that credits either memory or a live node.
+/// Rate-limited faucet that credits memory, mints, or treasury spends.
 #[derive(Debug)]
 pub struct FaucetService {
     config: FaucetConfig,
@@ -67,6 +74,23 @@ impl FaucetService {
         }
     }
 
+    /// Public-testnet constructor: signed spends from BIP-44 external(0).
+    pub fn treasury(
+        config: FaucetConfig,
+        rpc_url: impl Into<String>,
+        mnemonic: impl Into<String>,
+    ) -> Self {
+        Self {
+            config,
+            target: FundingTarget::Treasury {
+                rpc_url: rpc_url.into(),
+                mnemonic: mnemonic.into(),
+            },
+            last_drip: HashMap::new(),
+            total_dispensed: Amount::ZERO,
+        }
+    }
+
     /// Backward-compatible constructor (in-memory ledger).
     pub fn new(config: FaucetConfig) -> Self {
         Self::memory(config)
@@ -81,12 +105,18 @@ impl FaucetService {
         }
     }
 
+    pub fn is_treasury(&self) -> bool {
+        matches!(self.target, FundingTarget::Treasury { .. })
+    }
+
     pub async fn balance(&self, address: &Address) -> Result<Amount> {
         match &self.target {
             FundingTarget::Memory(backend) => Ok(backend.get_balance(address)),
-            FundingTarget::Node { rpc_url } => node_rpc::get_balance(rpc_url, address)
-                .await
-                .map_err(FaucetError::Backend),
+            FundingTarget::Node { rpc_url } | FundingTarget::Treasury { rpc_url, .. } => {
+                node_rpc::get_balance(rpc_url, address)
+                    .await
+                    .map_err(FaucetError::Backend)
+            }
         }
     }
 
@@ -118,6 +148,11 @@ impl FaucetService {
                     .await
                     .map_err(FaucetError::Backend)?
             }
+            FundingTarget::Treasury { rpc_url, mnemonic } => {
+                treasury::drip_from_treasury(rpc_url, mnemonic, address, self.config.drip_amount)
+                    .await
+                    .map_err(FaucetError::Backend)?
+            }
         };
 
         self.last_drip.insert(address, Instant::now());
@@ -146,5 +181,15 @@ mod tests {
             faucet.drip(addr).await,
             Err(FaucetError::RateLimited(_))
         ));
+    }
+
+    #[test]
+    fn treasury_constructor_flags_mode() {
+        let f = FaucetService::treasury(
+            FaucetConfig::default(),
+            "http://127.0.0.1:8545/rpc",
+            TESTNET_TREASURY_MNEMONIC,
+        );
+        assert!(f.is_treasury());
     }
 }

@@ -169,6 +169,25 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         self.tip_height
     }
 
+    /// Restore rollup tip / sequence / ledger / sequencer bonds from a durable checkpoint.
+    pub fn restore_checkpoint(
+        &mut self,
+        head_state_root: Hash,
+        next_sequence: u64,
+        tip_hash: Hash,
+        tip_height: u64,
+        ovl_balances: Vec<(Address, u64)>,
+        ovl_minted: u64,
+        sequencer_bonds: Vec<(Address, u64)>,
+    ) {
+        self.head_state_root = head_state_root;
+        self.next_sequence = next_sequence;
+        self.tip_hash = tip_hash;
+        self.tip_height = tip_height;
+        self.ovl.restore_balances(ovl_balances, ovl_minted);
+        self.sequencers.restore_bonds(sequencer_bonds);
+    }
+
     pub fn pow_bits(&self) -> u32 {
         self.pow_bits
     }

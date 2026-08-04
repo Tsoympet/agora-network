@@ -17,6 +17,8 @@ mod types;
 
 #[cfg(feature = "revm")]
 mod revm_exec;
+#[cfg(feature = "revm")]
+mod signed_tx;
 
 pub use da::{tx_merkle_root, BatchCommitment};
 pub use error::RollupError;
@@ -35,4 +37,8 @@ pub use sequencer::{SequencerSet, DEFAULT_SEQUENCER_MIN_BOND, SEQUENCER_BOND_ESC
 pub use types::{Batch, BatchStatus, EvmTx, FraudProof};
 
 #[cfg(feature = "revm")]
-pub use revm_exec::{encode_create, encode_transfer, encode_value_transfer, RevmExecutor};
+pub use revm_exec::{
+    encode_create, encode_transfer, encode_value_transfer, AccountSnapDto, RevmExecutor,
+};
+#[cfg(feature = "revm")]
+pub use signed_tx::{decode_evm_tx, DecodedEvmTx};
