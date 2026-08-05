@@ -19,9 +19,10 @@ mod utxo_diff;
 mod zones;
 
 pub use apply::{
-    apply_block, apply_block_batched, apply_block_batched_with_auth, apply_block_with_auth,
-    balance_of, revert_journal, revert_journal_batched, sum_transfer_fees, transfer_fee,
-    validate_mempool_tx, validate_mempool_tx_with_auth, TxAuthContext, UtxoJournal,
+    apply_block, apply_block_batched, apply_block_batched_virtual, apply_block_batched_with_auth,
+    apply_block_with_auth, balance_of, revert_journal, revert_journal_batched, sum_transfer_fees,
+    transfer_fee, validate_mempool_tx, validate_mempool_tx_with_auth, ApplyMode, TxAuthContext,
+    UtxoJournal,
 };
 pub use columns::{meta_keys, ColumnFamily};
 pub use error::StateError;

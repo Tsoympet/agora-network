@@ -124,17 +124,31 @@ fn cached_context(key: &[u8; 32]) -> std::sync::Arc<rust_randomx::Context> {
 
     // Keep several recent epoch contexts. Context construction is done **outside** the
     // mutex so concurrent verifies of a cold epoch do not serialize on dataset init.
-    // Admission also rejects ancient parents (`max_parent_blue_score_lag`) to bound
-    // how far back an attacker can force epoch rotation.
-    const CACHE_CAP: usize = 4;
+    // Parent age is relay-only (not consensus); announce→getblock paths soft-drop stale
+    // parents in the node to bound how far back gossip can force epoch rotation.
+    // Cold builds are also paced so a burst of distinct epochs cannot pin the CPU.
+    const CACHE_CAP: usize = 16;
+    const MIN_COLD_BUILD_GAP_MS: u64 = 50;
     type EpochCache = Vec<([u8; 32], Arc<Context>)>;
     static CACHE: OnceLock<Mutex<EpochCache>> = OnceLock::new();
+    static LAST_COLD_BUILD: OnceLock<Mutex<std::time::Instant>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(Vec::new()));
     {
         let guard = cache.lock().expect("randomx context cache poisoned");
         if let Some((_, ctx)) = guard.iter().find(|(k, _)| k == key) {
             return ctx.clone();
         }
+    }
+    {
+        let slot =
+            LAST_COLD_BUILD.get_or_init(|| Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(1)));
+        let mut last = slot.lock().expect("randomx cold-build pace poisoned");
+        let elapsed = last.elapsed();
+        let min_gap = std::time::Duration::from_millis(MIN_COLD_BUILD_GAP_MS);
+        if elapsed < min_gap {
+            std::thread::sleep(min_gap - elapsed);
+        }
+        *last = std::time::Instant::now();
     }
     // Light mode (fast=false): lower memory, suitable for verify + sidecar smoke.
     let ctx = Arc::new(Context::new(key, false));

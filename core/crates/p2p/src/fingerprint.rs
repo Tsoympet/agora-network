@@ -1,0 +1,48 @@
+//! Network fingerprint for P2P mesh isolation.
+//!
+//! Peers that share a textual network label (`testnet`) but disagree on genesis
+//! or consensus policy must not share gossip topics / request protocols.
+
+use agora_types::Hash;
+
+/// Wire versions included in the fingerprint so signing / state-transition
+/// upgrades force a new mesh.
+pub const TX_SIGNING_VERSION: &str = "agora-tx-v1";
+pub const STATE_TRANSITION_VERSION: &str = "agora-utxo-virtual-v1";
+pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Canonical network fingerprint hash.
+pub fn network_fingerprint(
+    chain_id: &str,
+    genesis: &Hash,
+    consensus_policy_hash: &Hash,
+) -> Hash {
+    Hash::hash_borsh(&(
+        b"agora-net-fp-v1",
+        PROTOCOL_VERSION,
+        chain_id,
+        genesis.as_bytes(),
+        consensus_policy_hash.as_bytes(),
+        TX_SIGNING_VERSION,
+        STATE_TRANSITION_VERSION,
+    ))
+}
+
+/// Short hex prefix used in gossip topic / protocol names (16 hex chars).
+pub fn fingerprint_topic_tag(fp: &Hash) -> String {
+    fp.to_hex()[..16].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_changes_with_policy() {
+        let genesis = Hash::hash_borsh(&"genesis");
+        let a = network_fingerprint("agora-testnet-1", &genesis, &Hash::hash_borsh(&1u64));
+        let b = network_fingerprint("agora-testnet-1", &genesis, &Hash::hash_borsh(&2u64));
+        assert_ne!(a, b);
+        assert_eq!(fingerprint_topic_tag(&a).len(), 16);
+    }
+}

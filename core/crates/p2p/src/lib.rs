@@ -5,6 +5,7 @@
 
 mod config;
 mod error;
+mod fingerprint;
 mod getblock;
 mod getheaders;
 mod ibd;
@@ -18,6 +19,10 @@ mod seeder;
 mod topics;
 
 pub use config::NetworkConfig;
+pub use fingerprint::{
+    fingerprint_topic_tag, network_fingerprint, PROTOCOL_VERSION, STATE_TRANSITION_VERSION,
+    TX_SIGNING_VERSION,
+};
 pub use error::P2pError;
 pub use getblock::{getblock_protocol, GetBlockRequest, GetBlockResponse, GETBLOCK_PROTOCOL};
 pub use getheaders::{
@@ -25,8 +30,8 @@ pub use getheaders::{
     GETHEADERS_PROTOCOL, MAX_HEADERS_PER_RESPONSE, MAX_LOCATOR_HASHES,
 };
 pub use ibd::{
-    drain_orphans_after, reconstruct_compact_block, short_ids_for_block, tx_short_id, OrphanEntry,
-    OrphanPool, PendingFetches, ReconstructError,
+    drain_orphans_after, reconstruct_compact_block, short_ids_for_block, tx_short_id, FetchReason,
+    OrphanEntry, OrphanPool, PendingFetches, ReconstructError,
 };
 pub use identity::{load_or_generate_identity, save_identity};
 pub use libp2p::PeerId;

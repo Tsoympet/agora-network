@@ -105,22 +105,32 @@ Addressing static architecture/security reviews of `main`:
 | 13 | CI gaps for consensus readiness | **partial** — fmt/portable/selected tests; full node suite, arrival-order, crash-injection, epoch-thrash, Docker smoke still follow-up |
 | 14 | Multi-parent UTXO checked only at SP | **fixed** — pre-persist proof of full `blue_order(candidate)` including mergeset blues |
 | 15 | Journal fee reconstruction on unapply | **fixed** — persist `fees`/`subsidy`/`coinbase_total` in `UtxoJournal` |
-| 16 | Duplicate coinbase outpoints | **fixed** — reject existing outpoints; coinbase nonce = header timestamp |
+| 16 | Duplicate coinbase outpoints | **fixed** — reject existing outpoints; coinbase nonce commits to parent-set + timestamp + miner entropy |
 | 17 | DAA used `f64`/`log2` | **fixed** — integer doubling thresholds only |
 | 18 | No-coinbase passed dry-run | **fixed** — require exactly one coinbase |
 | 19 | RPC `confirmations.unwrap_or(1)` | **fixed** — return `orphaned` when not virtual-blue |
 | 20 | Parent-recency as consensus reject | **fixed** — relay-only soft drop; IBD still admits |
 | 21 | Failed reorg cleared pending early | **fixed** — clear marker only after verified restore |
-| 22 | Consensus policy not in network identity | **fixed** — `consensus_policy_hash` on genesis artifact (p2p hello still follow-up) |
+| 22 | Consensus policy not in network identity | **fixed** — `consensus_policy_hash` on genesis artifact + P2P topic fingerprint (genesis ‖ policy ‖ versions) |
+| 23 | Conflicting/duplicate sibling txs stalled DAG | **fixed** — virtual apply: first blue-order spend wins; duplicates/conflicts skipped; merge stays live |
+| 24 | Bound signing missing in wallet/faucet | **fixed** — TS wallet + treasury faucet use `signing_bytes_bound`; cross-lang vector gated in CI |
+| 25 | Overlay issued-supply ignored reverted subsidies | **fixed** — subtract journal.subsidy when unapplying overlay suffix |
+| 26 | Full UTXO clone per admit | **mitigated** — copy-on-write overlay (delta map over live store); RocksDB snapshot still follow-up |
+| 27 | Template score/work mismatches | **fixed** — simulate candidate GHOSTDAG for subsidy/epoch; tip parents ranked by blue work |
+| 28 | Coinbase maturity via primary tx index | **fixed** — resolve creator from journal that created the live outpoint |
+| 29 | Legacy journal subsidy=0 after upgrade | **fixed** — bootstrap migrates journals from block bodies |
+| 30 | Announce→getblock RandomX thrash | **mitigated** — announce fetches soft age-filter; larger epoch cache + cold-build pacing |
 
 ### Remaining hardening follow-ups (tracked)
 
 - Collapse UTXO reorg into the same WriteBatch as body/tips (true single-commit admit).
 - Production GHOSTDAG: bounded reachability, pruning points, incremental anticone (drop full in-memory blues).
-- Finalized pruning point + state snapshots so pruned nodes cannot accept parents they cannot validate.
+- Finalized pruning point + state snapshots so pruned nodes cannot accept parents they cannot validate (non-archival nodes are not full consensus validators until then).
 - Header-committed UTXO/state root (optional hardening beyond blue_order pre-proof).
-- Multi-node arrival-order / partition soak, RandomX epoch-thrash, crash injection, whole-workspace clippy `-D warnings`, required Docker public-testnet smoke.
-- Peer handshake must exchange `consensus_policy_hash` (artifact field now present; wire it in p2p hello).
+- Multi-node arrival-order / partition soak, crash injection, whole-workspace clippy `-D warnings`, required Docker public-testnet smoke.
+- Explicit P2P hello exchange of the network fingerprint (topic scoping is live; identify/hello still follow-up).
+- True RocksDB snapshot CoW + bounded branch replay for mainnet-scale UTXO admission.
+- **Testnet datadir reset recommended** after journal/coinbase-commitment upgrades if migration cannot repair a corrupted issued-supply.
 
 ## Deferred (explicitly out of scope / later)
 

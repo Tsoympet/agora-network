@@ -64,10 +64,20 @@ pub fn reconstruct_compact_block(
     })
 }
 
+/// Why a block body was requested — announce fetches may apply soft age filters;
+/// IBD / orphan-sync fetches must not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchReason {
+    /// Unsolicited tip announce / compact miss from gossip.
+    Announce,
+    /// Headers-first IBD, orphan parent walk, or other sync paths.
+    Sync,
+}
+
 /// Dedupes in-flight `GetBlock` requests with a simple TTL.
 #[derive(Debug, Default)]
 pub struct PendingFetches {
-    pending: HashMap<Hash, Instant>,
+    pending: HashMap<Hash, (Instant, FetchReason)>,
     ttl: Duration,
 }
 
@@ -81,22 +91,35 @@ impl PendingFetches {
 
     fn purge_expired(&mut self, now: Instant) {
         self.pending
-            .retain(|_, at| now.duration_since(*at) < self.ttl);
+            .retain(|_, (at, _)| now.duration_since(*at) < self.ttl);
     }
 
     /// Returns `true` when a new fetch should be issued for `hash`.
     pub fn request(&mut self, hash: Hash) -> bool {
+        self.request_with_reason(hash, FetchReason::Sync)
+    }
+
+    /// Returns `true` when a new fetch should be issued for `hash`.
+    pub fn request_with_reason(&mut self, hash: Hash, reason: FetchReason) -> bool {
         let now = Instant::now();
         self.purge_expired(now);
         if self.pending.contains_key(&hash) {
             return false;
         }
-        self.pending.insert(hash, now);
+        self.pending.insert(hash, (now, reason));
         true
     }
 
     pub fn complete(&mut self, hash: &Hash) {
         self.pending.remove(hash);
+    }
+
+    /// Remove and return the fetch reason (defaults to Sync when unknown).
+    pub fn take_reason(&mut self, hash: &Hash) -> FetchReason {
+        self.pending
+            .remove(hash)
+            .map(|(_, reason)| reason)
+            .unwrap_or(FetchReason::Sync)
     }
 
     pub fn contains(&self, hash: &Hash) -> bool {

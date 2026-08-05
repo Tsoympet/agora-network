@@ -287,6 +287,7 @@ impl RpcBackend for NodeBackend {
             allow_fund: self.allow_fund,
             miner_address: Some(self.miner_address.to_bech32()),
             genesis_hash: Some(self.genesis_hash.to_hex()),
+            chain_id: Some(self.tx_auth().chain_id),
             min_relay_fee: min_relay_fee(),
         })
     }

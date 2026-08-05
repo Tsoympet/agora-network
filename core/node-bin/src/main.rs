@@ -19,7 +19,7 @@ use agora_p2p::{
     dial_addr, drain_orphans_after, fetch_seeder_peers_best_effort, load_or_generate_identity,
     merge_bootstrap_peers, reconstruct_compact_block, validate_header_chain, GetHeadersRequest,
     Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage, NetworkNode, OrphanPool,
-    PeerId, PendingFetches, ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
+    FetchReason, PeerId, PendingFetches, ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{
@@ -290,6 +290,17 @@ fn request_block_if_missing(
     peer: PeerId,
     hash: Hash,
 ) {
+    request_block_if_missing_with_reason(chain, pending, net, peer, hash, FetchReason::Sync)
+}
+
+fn request_block_if_missing_with_reason(
+    chain: &Arc<Mutex<ChainState>>,
+    pending: &mut PendingFetches,
+    net: &NetworkHandle,
+    peer: PeerId,
+    hash: Hash,
+    reason: FetchReason,
+) {
     let have = chain
         .lock()
         .ok()
@@ -299,7 +310,7 @@ fn request_block_if_missing(
         pending.complete(&hash);
         return;
     }
-    if pending.request(hash) {
+    if pending.request_with_reason(hash, reason) {
         // Prefer direct request-response to the announcing peer (no mesh flood).
         if let Err(err) = net.request_block(peer, hash) {
             warn!(
@@ -498,10 +509,24 @@ async fn main() {
             eprintln!("agora-node: genesis error: {e}");
             std::process::exit(1);
         });
+    let artifact = agora_state_machine::GenesisArtifact::from_params(&chain_params);
+    let policy_hash = artifact
+        .consensus
+        .as_ref()
+        .map(|c| c.canonical_hash())
+        .or_else(|| Hash::from_hex(&artifact.consensus_policy_hash))
+        .unwrap_or(Hash::ZERO);
+    let net_fp = agora_p2p::network_fingerprint(
+        chain_params.network.chain_id(),
+        &genesis_hash,
+        &policy_hash,
+    );
+    net_cfg = net_cfg.with_fingerprint(agora_p2p::fingerprint_topic_tag(&net_fp));
     info!(
         network = %chain_params.network,
         premine = %premine_address,
         genesis = %genesis_hash.to_hex(),
+        fingerprint = %agora_p2p::fingerprint_topic_tag(&net_fp),
         "genesis ready"
     );
 
@@ -768,7 +793,16 @@ async fn main() {
                 }
                 NetworkEvent::GetBlockResponse { peer, hash, block } => match block {
                     Some(block) => {
-                        pending.complete(&hash);
+                        let reason = pending.take_reason(&hash);
+                        // Announce-triggered fetches apply the same parent-age soft
+                        // filter as unsolicited gossip so peers cannot thrash RandomX
+                        // epochs via announce→getblock of ancient low-difficulty tips.
+                        // IBD / orphan Sync fetches skip this filter.
+                        if reason == FetchReason::Announce
+                            && relay_drop_stale_parents(&chain, &block)
+                        {
+                            continue;
+                        }
                         handle_incoming_block(
                             &chain,
                             &mempool,
@@ -843,6 +877,10 @@ async fn main() {
                         match reconstruct_compact_block(header, &short_ids, lookup) {
                             Ok(block) => {
                                 pending.complete(&hash);
+                                if relay_drop_stale_parents(&chain, &block) {
+                                    let _ = topic;
+                                    continue;
+                                }
                                 handle_incoming_block(
                                     &chain,
                                     &mempool,
@@ -863,7 +901,14 @@ async fn main() {
                                     hash = %hash.to_hex(),
                                     "compact miss — requesting full block"
                                 );
-                                request_block_if_missing(&chain, &mut pending, &net, peer, hash);
+                                request_block_if_missing_with_reason(
+                                    &chain,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    hash,
+                                    FetchReason::Announce,
+                                );
                             }
                             Err(ReconstructError::TxRootMismatch) => {
                                 warn!(
@@ -872,13 +917,27 @@ async fn main() {
                                     hash = %hash.to_hex(),
                                     "compact tx_root mismatch — requesting full block"
                                 );
-                                request_block_if_missing(&chain, &mut pending, &net, peer, hash);
+                                request_block_if_missing_with_reason(
+                                    &chain,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    hash,
+                                    FetchReason::Announce,
+                                );
                             }
                         }
                     }
                     NetworkMessage::BlockAnnounce { hash } => {
                         info!(%peer, %topic, announce = %hash.to_hex(), "block announce");
-                        request_block_if_missing(&chain, &mut pending, &net, peer, hash);
+                        request_block_if_missing_with_reason(
+                            &chain,
+                            &mut pending,
+                            &net,
+                            peer,
+                            hash,
+                            FetchReason::Announce,
+                        );
                     }
                     NetworkMessage::GetBlock { hash } => {
                         // Legacy / RR-fallback path: still answer over gossip when asked.

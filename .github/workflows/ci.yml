@@ -135,3 +135,15 @@ jobs:
           cargo test -p agora-node --bin agora-node http::
           cargo test -p agora-node --bin agora-node multiblock_headers_first_catchup
           cargo test -p agora-consensus --features randomx --lib
+
+      - name: Full node admission suite (merge liveness + UTXO)
+        run: |
+          export LIBCLANG_PATH="$(dirname "$(find /usr/lib -name 'libclang.so*' 2>/dev/null | head -1)")"
+          cargo test -p agora-node --bin agora-node admit::
+
+      - name: Bound signing vectors (Rust + TypeScript)
+        run: |
+          cargo test -p agora-crypto bound_signing_vector
+          cd apps/shared
+          npm ci
+          node light-client/signing-vector.test.mjs

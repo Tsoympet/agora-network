@@ -5,6 +5,12 @@
 /// - Meta, UTXO, and Warm tx-index are never pruned by this policy.
 /// - When `archival` is false, block bodies older than `hot_window` tip-distance
 ///   are deleted from Hot and are not written to Archival (pruned node).
+///
+/// **Consensus caveat:** full `blue_order` UTXO validation needs the bodies of
+/// every newly accepted merge-set blue. Until finalized pruning points and state
+/// snapshots exist, non-archival nodes can reject merges that archival peers
+/// accept when a side-block body has aged out of `hot_window`. Default remains
+/// archival; pruned mode is best-effort only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StoragePolicy {
     /// Persist full block bodies in `cf_archival`.

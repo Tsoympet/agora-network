@@ -75,7 +75,7 @@ struct BlockColoring {
 }
 
 /// GHOSTDAG engine: greedy blue-set inheritance over an in-memory DAG.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Ghostdag {
     config: GhostdagConfig,
     coloring: HashMap<Hash, BlockColoring>,

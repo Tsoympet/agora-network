@@ -24,6 +24,10 @@ pub struct NetworkConfig {
     pub identity: Option<Keypair>,
     /// Network label (`dev` / `testnet` / …) — scopes gossip topics + getblock protocol.
     pub network: String,
+    /// Short hex network fingerprint (genesis ‖ consensus policy ‖ versions).
+    /// When set, topics become `agora/<network>/<fingerprint>/…` so incompatible
+    /// artifacts cannot share a mesh.
+    pub fingerprint: String,
 }
 
 impl std::fmt::Debug for NetworkConfig {
@@ -37,6 +41,7 @@ impl std::fmt::Debug for NetworkConfig {
             .field("gossip", &self.gossip)
             .field("identity", &self.identity.as_ref().map(|_| "<keypair>"))
             .field("network", &self.network)
+            .field("fingerprint", &self.fingerprint)
             .finish()
     }
 }
@@ -52,6 +57,7 @@ impl Default for NetworkConfig {
             gossip: GossipTuning::default(),
             identity: None,
             network: "dev".into(),
+            fingerprint: String::new(),
         }
     }
 }
@@ -103,7 +109,22 @@ impl NetworkConfig {
         self
     }
 
-    pub fn topics(&self) -> NetworkTopics {
-        NetworkTopics::new(&self.network)
+    /// Bind topics to a network fingerprint (genesis + consensus-policy hash tag).
+    pub fn with_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
+        let tag = fingerprint.into();
+        self.fingerprint = sanitize_fingerprint(tag);
+        self
     }
+
+    pub fn topics(&self) -> NetworkTopics {
+        NetworkTopics::with_fingerprint(&self.network, &self.fingerprint)
+    }
+}
+
+fn sanitize_fingerprint(raw: String) -> String {
+    let s = raw.trim().to_ascii_lowercase();
+    s.chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .take(16)
+        .collect()
 }

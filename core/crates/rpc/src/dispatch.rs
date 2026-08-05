@@ -281,6 +281,7 @@ fn node_info_to_json(info: &crate::backend::NodeInfo) -> Value {
         "allow_fund": info.allow_fund,
         "miner_address": info.miner_address,
         "genesis_hash": info.genesis_hash,
+        "chain_id": info.chain_id,
         "min_relay_fee": info.min_relay_fee,
     })
 }
