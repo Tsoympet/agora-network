@@ -17,21 +17,23 @@ impl Default for StoragePolicy {
     fn default() -> Self {
         Self {
             archival: true,
-            hot_window: 64,
+            // Keep enough bodies for merge-set validation / reorgs within the
+            // relay parent-age window (see ConsensusLimits::max_parent_blue_score_lag).
+            hot_window: 4_096,
         }
     }
 }
 
 impl StoragePolicy {
     pub fn from_env() -> Self {
-        let archival = match std::env::var("AGORA_ARCHIVAL").as_deref() {
-            Ok("0") | Ok("false") | Ok("FALSE") | Ok("no") | Ok("off") => false,
-            _ => true,
-        };
+        let archival = !matches!(
+            std::env::var("AGORA_ARCHIVAL").as_deref(),
+            Ok("0") | Ok("false") | Ok("FALSE") | Ok("no") | Ok("off")
+        );
         let hot_window = std::env::var("AGORA_HOT_WINDOW")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(64);
+            .unwrap_or(4_096);
         Self {
             archival,
             hot_window,

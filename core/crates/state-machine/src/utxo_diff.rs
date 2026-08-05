@@ -1,7 +1,6 @@
 //! Durable per-block UTXO journals for virtual-chain reorg.
 
 use agora_types::Hash;
-use borsh::BorshDeserialize;
 
 use crate::apply::UtxoJournal;
 use crate::columns::ColumnFamily;
@@ -32,9 +31,7 @@ pub fn load_utxo_journal(
     let Some(bytes) = store.get_cf(ColumnFamily::Warm, &utxo_diff_key(hash))? else {
         return Ok(None);
     };
-    let journal =
-        UtxoJournal::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))?;
-    Ok(Some(journal))
+    Ok(Some(UtxoJournal::from_bytes(&bytes)?))
 }
 
 pub fn delete_utxo_journal(store: &StateStore, hash: &Hash) -> Result<(), StateError> {
@@ -67,6 +64,9 @@ mod tests {
                 tx_id: hash,
                 index: 0,
             }],
+            fees: 1,
+            subsidy: 6,
+            coinbase_total: 7,
         };
         store_utxo_journal(&store, &hash, &journal).unwrap();
         let loaded = load_utxo_journal(&store, &hash).unwrap().unwrap();

@@ -166,6 +166,24 @@ fn admit_gossip_block(
     Ok(id)
 }
 
+/// Soft relay filter for unsolicited gossip only (not IBD / getblock responses).
+fn relay_drop_stale_parents(chain: &Arc<Mutex<ChainState>>, block: &Block) -> bool {
+    let Ok(guard) = chain.lock() else {
+        return false;
+    };
+    if guard.has_block(&block.id()).unwrap_or(false) {
+        return false;
+    }
+    if guard.parent_age_ok_for_relay(block) {
+        return false;
+    }
+    warn!(
+        block = %block.id().to_hex(),
+        "relay drop: parents lag virtual tip (consensus admit still allowed via IBD)"
+    );
+    true
+}
+
 fn missing_parents(chain: &Arc<Mutex<ChainState>>, block: &Block) -> Result<Vec<Hash>, AdmitError> {
     let guard = chain
         .lock()
@@ -599,6 +617,10 @@ async fn main() {
     let net = handle.clone();
     let local_peer = handle.peer_id();
     let orphan_store = store.clone();
+    let tx_auth = agora_state_machine::TxAuthContext {
+        chain_id: chain_params.network.chain_id().into(),
+        genesis: genesis_hash,
+    };
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));
         let mut orphans = OrphanPool::new(Duration::from_secs(120), 1_024);
@@ -785,6 +807,10 @@ async fn main() {
                     NetworkMessage::Block(block) => {
                         let id = block.id();
                         pending.complete(&id);
+                        if relay_drop_stale_parents(&chain, &block) {
+                            let _ = topic;
+                            continue;
+                        }
                         handle_incoming_block(
                             &chain,
                             &mempool,
@@ -885,7 +911,7 @@ async fn main() {
                         }
                     }
                     NetworkMessage::Transaction(tx) => {
-                        match admit_transaction(store.as_ref(), &mempool, tx) {
+                        match admit_transaction(store.as_ref(), &mempool, tx, &tx_auth) {
                             Ok(id) => {
                                 info!(
                                     %peer,

@@ -20,4 +20,6 @@ pub enum StateError {
     SupplyCapExceeded,
     #[error("block/tx limit: {0}")]
     BlockLimit(String),
+    #[error("duplicate outpoint: {0}")]
+    DuplicateOutpoint(String),
 }

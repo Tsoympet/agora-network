@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use agora_crypto::verify_transaction;
 use agora_types::{Block, Hash, OutPoint, Transaction};
 
 use crate::P2pError;
@@ -72,7 +71,13 @@ impl Mempool {
                 "coinbase not allowed in mempool".into(),
             ));
         }
-        verify_transaction(&tx).map_err(|e| P2pError::MempoolRejected(e.to_string()))?;
+        // Callers must verify signatures (preferably network-bound) before admit.
+        // Structural auth presence only — domain verify belongs to the UTXO layer.
+        if tx.public_key.len() != 33 || tx.signature.len() != 64 {
+            return Err(P2pError::MempoolRejected(
+                "transaction missing secp256k1 auth".into(),
+            ));
+        }
         let id = tx.tx_id();
         if self.txs.contains_key(&id) {
             return Ok(id);

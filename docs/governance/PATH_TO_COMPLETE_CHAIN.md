@@ -100,16 +100,27 @@ Addressing static architecture/security reviews of `main`:
 | 8 | Full blues `HashSet` persisted per block | **mitigated** — durable compact `mergeset_blues` (+ hydrate); in-memory blues still used for anticone (bounded reachability / prune still follow-up) |
 | 9 | Tx index last-writer-wins / confirmations ignore virtual | **fixed** — multi-inclusion `txi/` keys; primary pointer refreshed on reorg; confirmations require blue-in-virtual + UTXO journal |
 | 10 | Admit ignored configured `PowAlgorithm` | **fixed** — RandomX vs kHeavyHash branch in `verify_pow` |
-| 11 | Tx signing lacked network domain | **fixed** — `TX_SIGNING_DOMAIN` + `signing_bytes_bound(chain_id, genesis)` |
+| 11 | Tx signing lacked network domain | **fixed** — bound verify enforced in admit/mempool when `chain_id` is configured |
 | 12 | Governance described as on-chain | **docs** — classified as **admin RPC prototype** (see Deferred) |
 | 13 | CI gaps for consensus readiness | **partial** — fmt/portable/selected tests; full node suite, arrival-order, crash-injection, epoch-thrash, Docker smoke still follow-up |
+| 14 | Multi-parent UTXO checked only at SP | **fixed** — pre-persist proof of full `blue_order(candidate)` including mergeset blues |
+| 15 | Journal fee reconstruction on unapply | **fixed** — persist `fees`/`subsidy`/`coinbase_total` in `UtxoJournal` |
+| 16 | Duplicate coinbase outpoints | **fixed** — reject existing outpoints; coinbase nonce = header timestamp |
+| 17 | DAA used `f64`/`log2` | **fixed** — integer doubling thresholds only |
+| 18 | No-coinbase passed dry-run | **fixed** — require exactly one coinbase |
+| 19 | RPC `confirmations.unwrap_or(1)` | **fixed** — return `orphaned` when not virtual-blue |
+| 20 | Parent-recency as consensus reject | **fixed** — relay-only soft drop; IBD still admits |
+| 21 | Failed reorg cleared pending early | **fixed** — clear marker only after verified restore |
+| 22 | Consensus policy not in network identity | **fixed** — `consensus_policy_hash` on genesis artifact (p2p hello still follow-up) |
 
 ### Remaining hardening follow-ups (tracked)
 
 - Collapse UTXO reorg into the same WriteBatch as body/tips (true single-commit admit).
 - Production GHOSTDAG: bounded reachability, pruning points, incremental anticone (drop full in-memory blues).
-- Require `verify_transaction_bound` in admission once wallets migrate to network-bound signatures.
+- Finalized pruning point + state snapshots so pruned nodes cannot accept parents they cannot validate.
+- Header-committed UTXO/state root (optional hardening beyond blue_order pre-proof).
 - Multi-node arrival-order / partition soak, RandomX epoch-thrash, crash injection, whole-workspace clippy `-D warnings`, required Docker public-testnet smoke.
+- Peer handshake must exchange `consensus_policy_hash` (artifact field now present; wire it in p2p hello).
 
 ## Deferred (explicitly out of scope / later)
 

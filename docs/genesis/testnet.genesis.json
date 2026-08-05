@@ -52,8 +52,10 @@
     "target_block_time_ms": 1000,
     "daa_window_size": 90,
     "daa_max_adjustment_factor": 2.0,
-    "daa_min_level": 8
+    "daa_min_level": 8,
+    "daa_max_level": 128
   },
+  "consensus_policy_hash": "2a11eb8a333ccfc8722a7003068deee8e8f94eee3dfe000689ea13290d9b6940",
   "wallet": {
     "address_hrp": "agoratest",
     "coin_type": 8888,
