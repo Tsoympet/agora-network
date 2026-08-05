@@ -2,11 +2,20 @@
 
 Agora keeps **three native marks on three layers**. Product roles map as:
 
-| Mark | Layer | Analog | Consensus | Meaning in Agora |
+| Mark | Layer | Design analog | Consensus | Meaning in Agora |
 | --- | --- | --- | --- | --- |
 | **TLT** | L1 | **Bitcoin** | **Pure PoW** (RandomX) | Scarce UTXO settlement money |
 | **OVL** | L2 | **Ethereum** | **Hybrid** PoW mint + bonded sequencers | EVM gas + smart-contract money |
 | **DRC** | L3 | **XRP** | **Hybrid** PoW mint + bonded attestors | Payments / path payments / bridge rail |
+
+> **Terminology.** "Analog", "-style" and "role-modeled" describe the *product role*
+> each mark plays — not protocol equivalence. Agora is **not** Bitcoin, Ethereum, or
+> XRPL/Ripple and does not implement their wire formats or full state models. Concretely,
+> OVL is **not** Ethereum-equivalent (no Merkle Patricia Trie state roots, no EIP-2718
+> typed / EIP-1559 transactions) and DRC is **not** XRPL-equivalent (no trust lines, no
+> issued currencies, no on-ledger DEX). "Role-complete" means the in-tree role is
+> implemented and tested, not that the layer is a drop-in clone. See the per-layer
+> completeness tables and *"What we deliberately do not do"* below for exact scope.
 
 ## Consensus model
 
@@ -20,8 +29,10 @@ evicts lower-fee txs for higher-fee admissions.
 - **Bonded sequencers** lock OVL (`bond_sequencer`). Once any sequencer is active:
   - `submit_batch` / `finalize_due` require a bonded sequencer (`submit_batch_as` / `finalize_due_as`).
 - Empty sequencer set ⇒ permissionless (bootstrap / tests).
-- Persistent `revm` account **+ contract storage** in the L2 state root.
-- Ethereum-class RPC: `eth_chainId`, `eth_blockNumber`, `eth_getBalance`,
+- Persistent `revm` account **+ contract storage** in the L2 state root
+  (SHA-256 account/storage digests, **not** an Ethereum Merkle Patricia Trie).
+- Ethereum-**style** RPC subset (not the full Ethereum JSON-RPC): `eth_chainId`,
+  `eth_blockNumber`, `eth_getBalance`,
   `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`, `eth_call`,
   `eth_sendRawTransaction` (legacy RLP + secp256k1 recovery; compact fallback).
 - Durable checkpoint under `AGORA_LAYERS_DATA`.
@@ -34,7 +45,7 @@ evicts lower-fee txs for higher-fee admissions.
 - Empty attestor set ⇒ instant finality (bootstrap / tests).
 - Default quorum: 2-of-3 of active attestors.
 - Same-district **Payment** + destination tag + fee.
-- Hub **path payment** with XRPL-class `deliverMin`.
+- Hub **path payment** with an XRPL-**style** `deliverMin` floor (not XRPL pathfinding).
 - Destination-tag **registry** + payment index for exchange deposit routing.
 - Intent settle uses real path payments; when attestors are bonded, intents enter
   `AwaitingFinality` until `finalize_intent` after quorum.

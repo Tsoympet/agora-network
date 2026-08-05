@@ -48,7 +48,19 @@ jobs:
           (cd apps/shared && npm ci --ignore-scripts)
           node scripts/test_vault.mjs
 
-      - name: Clippy (portable)
+      - name: Clippy (consensus core — blocking)
+        run: >
+          cargo clippy
+          -p agora-types
+          -p agora-crypto
+          -p agora-consensus
+          -p agora-state-machine
+          -p agora-rpc
+          -p agora-governance
+          --all-targets --no-default-features
+          -- -D warnings
+
+      - name: Clippy (rest of workspace — advisory)
         run: >
           cargo clippy --workspace
           --exclude agora-node
@@ -59,6 +71,39 @@ jobs:
           --exclude agora-testnet-faucet
           -- -D warnings
         continue-on-error: true
+
+  deny:
+    name: Dependency audit + licenses (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources
+
+  apps:
+    name: Build web/desktop apps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Explorer build
+        working-directory: apps/explorer
+        run: |
+          npm ci
+          npm run build
+
+      - name: Desktop frontend build
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run build
 
   node:
     name: Node + RandomX (slow)

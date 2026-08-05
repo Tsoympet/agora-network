@@ -37,21 +37,61 @@ impl PowHasher for Sha256PowHasher {
     }
 }
 
+/// Length of a RandomX seed epoch in milliseconds (~35 min).
+///
+/// The RandomX key (which selects the multi-hundred-MB dataset) is derived from the
+/// header timestamp bucketed into epochs, so it is **stable within an epoch**. Both the
+/// miner and verifiers compute the same key from the header, letting the expensive
+/// [`rust_randomx::Context`] be built once per epoch and reused (see `cached_context`).
+pub const RANDOMX_EPOCH_MS: u64 = 1 << 21;
+
+/// Domain separator for the RandomX epoch seed.
+const RANDOMX_SEED_DOMAIN: &[u8] = b"agora-randomx-epoch-v1";
+
 /// Official RandomX digest over an Agora header (feature `randomx`).
 ///
-/// - Key = `SHA-256(borsh(header))` with `nonce = 0`
+/// - Key (seed) = `SHA-256(domain ‖ epoch)` where `epoch = timestamp_ms / RANDOMX_EPOCH_MS`
 /// - Input = full `borsh(header)` including the candidate nonce
+///
+/// The epoch seed keeps the RandomX key stable across a mining window so the dataset is
+/// built once and cached, instead of once per candidate header (which was both wasteful
+/// for miners and a CPU/memory DoS vector for verifiers).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RandomXPowHasher;
 
 impl RandomXPowHasher {
-    pub fn key_hash(header: &BlockHeader) -> Hash {
-        let keyed = BlockHeader {
-            nonce: 0,
-            ..header.clone()
-        };
-        Hash::hash_borsh(&keyed)
+    /// Epoch index for a header timestamp.
+    pub fn epoch(header: &BlockHeader) -> u64 {
+        header.timestamp_ms / RANDOMX_EPOCH_MS
     }
+
+    /// Stable per-epoch RandomX key/seed (independent of nonce and other header fields).
+    pub fn key_hash(header: &BlockHeader) -> Hash {
+        Hash::hash_borsh(&(RANDOMX_SEED_DOMAIN, Self::epoch(header)))
+    }
+}
+
+#[cfg(feature = "randomx")]
+fn cached_context(key: &[u8; 32]) -> std::sync::Arc<rust_randomx::Context> {
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    use rust_randomx::Context;
+
+    // Keep the current + previous epoch contexts so verification near an epoch boundary
+    // does not thrash. Bounded to 2 entries to cap memory.
+    static CACHE: OnceLock<Mutex<Vec<([u8; 32], Arc<Context>)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(Vec::new()));
+    let mut guard = cache.lock().expect("randomx context cache poisoned");
+    if let Some((_, ctx)) = guard.iter().find(|(k, _)| k == key) {
+        return ctx.clone();
+    }
+    // Light mode (fast=false): lower memory, suitable for verify + sidecar smoke.
+    let ctx = Arc::new(Context::new(key, false));
+    guard.push((*key, ctx.clone()));
+    if guard.len() > 2 {
+        guard.remove(0);
+    }
+    ctx
 }
 
 #[cfg(feature = "randomx")]
@@ -61,14 +101,11 @@ impl PowHasher for RandomXPowHasher {
     }
 
     fn pow_hash(&self, header: &BlockHeader) -> Hash {
-        use std::sync::Arc;
-
-        use rust_randomx::{Context, Hasher};
+        use rust_randomx::Hasher;
 
         let key = Self::key_hash(header);
         let input = borsh::to_vec(header).expect("borsh header is infallible");
-        // Light mode (fast=false): lower memory, suitable for verify + sidecar smoke.
-        let ctx = Arc::new(Context::new(key.as_bytes(), false));
+        let ctx = cached_context(key.as_bytes());
         let hasher = Hasher::new(ctx);
         let out = hasher.hash(&input);
         let mut digest = [0u8; 32];
@@ -262,6 +299,38 @@ mod tests {
         let verifier = LeadingZeroPow::new(PowAlgorithm::KHeavyHash);
         assert!(verifier.verify(&header, &hash).is_ok());
         assert!(verifier.verify(&header, &Hash::ZERO).is_err());
+    }
+
+    #[test]
+    fn randomx_key_is_epoch_stable_across_nonce() {
+        // Same epoch + different nonce => same RandomX key (enables dataset caching and
+        // removes the per-header context-init DoS vector).
+        let base = BlockHeader {
+            version: 1,
+            parents: vec![Hash::ZERO],
+            timestamp_ms: 5,
+            bits: 0,
+            nonce: 1,
+            tx_root: Hash::ZERO,
+        };
+        let other_nonce = BlockHeader {
+            nonce: 999,
+            ..base.clone()
+        };
+        assert_eq!(
+            RandomXPowHasher::key_hash(&base),
+            RandomXPowHasher::key_hash(&other_nonce)
+        );
+
+        // A timestamp in a later epoch rotates the key.
+        let next_epoch = BlockHeader {
+            timestamp_ms: base.timestamp_ms + RANDOMX_EPOCH_MS,
+            ..base.clone()
+        };
+        assert_ne!(
+            RandomXPowHasher::key_hash(&base),
+            RandomXPowHasher::key_hash(&next_epoch)
+        );
     }
 
     #[cfg(feature = "randomx")]

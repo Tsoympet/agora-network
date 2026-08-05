@@ -5,7 +5,12 @@ pub struct DaaConfig {
     pub target_block_time_ms: u64,
     /// Sliding window length in samples (timestamps), not including the newest alone.
     pub window_size: u64,
-    /// Clamp ratio when adjusting difficulty (e.g. 2.0 => at most 2x / 0.5x per window).
+    /// Clamp on the per-window **work** change (e.g. 2.0 => at most 2x / 0.5x work).
+    ///
+    /// `bits` encode leading-zero difficulty, so work scales as `2^bits`. The adjustment
+    /// is applied in target/work space and then mapped back to a bit delta of at most
+    /// `log2(max_adjustment_factor)` per window (±1 bit at the default 2.0). This keeps
+    /// difficulty from jumping by many bits (hundreds/thousands× work) and oscillating.
     pub max_adjustment_factor: f64,
     /// Floor for `Difficulty.level` / `header.bits` (use `0` for unrestricted testnets).
     pub min_level: u32,
@@ -88,19 +93,26 @@ pub fn next_difficulty_weighted(
     }
 
     let observed = weighted_dt / total_work;
-    let intervals = (samples.len() as f64 - 1.0).max(1.0);
-    // Compare mean observed spacing to target (work-normalized mean ≈ raw mean when work is uniform).
+    // Compare mean observed spacing to target (work-normalized by work weights).
     let expected = config.target_block_time_ms as f64;
-    let _ = intervals; // spacing already averaged by work weights
+    if observed <= 0.0 {
+        return current;
+    }
+
+    // Adjust in work/target space: desired work multiplier = expected / observed
+    // (blocks too fast => observed < expected => factor > 1 => raise work). Clamp the
+    // work change, then map to a bit delta via log2 so the encoded leading-zero `bits`
+    // move by at most log2(max) per window instead of `level * factor`.
+    let max = config.max_adjustment_factor.max(1.0);
     let mut factor = expected / observed;
-    let max = config.max_adjustment_factor;
     if factor > max {
         factor = max;
     } else if factor < 1.0 / max {
         factor = 1.0 / max;
     }
 
-    let next = (current.level as f64 * factor).round() as i64;
+    let delta_bits = factor.log2();
+    let next = (current.level as f64 + delta_bits).round() as i64;
     let floored = next.max(config.min_level as i64) as u32;
     Difficulty { level: floored }
 }
@@ -155,14 +167,51 @@ mod tests {
 
     #[test]
     fn respects_min_level_zero() {
+        // Very slow blocks push difficulty down; it must floor at min_level (0), not go
+        // negative. (Additive/log space means level can reach the floor from level 1.)
+        let config = DaaConfig {
+            min_level: 0,
+            ..DaaConfig::default()
+        };
+        let current = Difficulty { level: 1 };
+        let ts: Vec<u64> = (0..91)
+            .map(|i| i * (config.target_block_time_ms * 8))
+            .collect();
+        let next = next_difficulty(&config, current, &ts);
+        assert_eq!(next.level, 0);
+    }
+
+    #[test]
+    fn difficulty_change_is_bounded_to_one_bit_per_window() {
+        // Blocks arriving ~100x too fast must NOT jump bits by many (no 256x work spike).
+        let config = DaaConfig::default(); // max_adjustment_factor = 2.0 => ±1 bit
+        let current = Difficulty { level: 8 };
+        let ts: Vec<u64> = (0..91)
+            .map(|i| i * (config.target_block_time_ms / 100).max(1))
+            .collect();
+        let next = next_difficulty(&config, current, &ts);
+        assert!(
+            next.level <= current.level + 1,
+            "difficulty jumped from {} to {} (>1 bit)",
+            current.level,
+            next.level
+        );
+        assert!(next.level >= current.level, "should not ease when too fast");
+    }
+
+    #[test]
+    fn can_rise_from_zero_when_too_fast() {
+        // Additive mapping lets difficulty leave 0 (multiplicative `level*factor` could not).
         let config = DaaConfig {
             min_level: 0,
             ..DaaConfig::default()
         };
         let current = Difficulty { level: 0 };
-        let ts = vec![0, 1];
+        let ts: Vec<u64> = (0..91)
+            .map(|i| i * (config.target_block_time_ms / 4).max(1))
+            .collect();
         let next = next_difficulty(&config, current, &ts);
-        assert_eq!(next.level, 0);
+        assert!(next.level >= 1, "difficulty stuck at 0: {}", next.level);
     }
 
     #[test]

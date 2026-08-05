@@ -7,6 +7,7 @@ use agora_types::{Amount, Block, OutPoint, Transaction, TxOut};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::columns::ColumnFamily;
+use crate::store::WriteBatch;
 use crate::utxo::outpoint_key;
 use crate::{StateError, StateStore};
 
@@ -46,14 +47,66 @@ pub fn transfer_fee(store: &StateStore, tx: &Transaction) -> Result<u64, StateEr
 }
 
 /// Sum of transfer fees in `txs` (coinbase-shaped entries contribute 0).
+///
+/// Package-aware: an input that spends an output created by an **earlier** transaction in
+/// the same `txs` list is valued from that in-block output, so parent→child transaction
+/// packages are priced consistently with [`apply_block`] (which spends same-block outputs
+/// via `created_in_block`). Falls back to the live UTXO set for pre-existing inputs.
 pub fn sum_transfer_fees(store: &StateStore, txs: &[Transaction]) -> Result<u64, StateError> {
     let mut total = 0u64;
+    let mut created: HashMap<OutPoint, TxOut> = HashMap::new();
     for tx in txs {
-        total = total
-            .checked_add(transfer_fee(store, tx)?)
-            .ok_or_else(|| StateError::InvalidTx("fee overflow".into()))?;
+        if !tx.inputs.is_empty() {
+            total = total
+                .checked_add(transfer_fee_in_context(store, tx, &created)?)
+                .ok_or_else(|| StateError::InvalidTx("fee overflow".into()))?;
+        }
+        let tx_id = tx.tx_id();
+        for (index, out) in tx.outputs.iter().enumerate() {
+            created.insert(
+                OutPoint {
+                    tx_id,
+                    index: index as u32,
+                },
+                out.clone(),
+            );
+        }
     }
     Ok(total)
+}
+
+/// Implicit fee of a transfer, resolving inputs against `created` (same-block outputs)
+/// first, then the live UTXO set.
+fn transfer_fee_in_context(
+    store: &StateStore,
+    tx: &Transaction,
+    created: &HashMap<OutPoint, TxOut>,
+) -> Result<u64, StateError> {
+    if tx.inputs.is_empty() {
+        return Ok(0);
+    }
+    let mut input_value = 0u64;
+    for input in &tx.inputs {
+        let out = match created.get(&input.previous_outpoint) {
+            Some(out) => out.clone(),
+            None => load_utxo(store, &input.previous_outpoint)?,
+        };
+        input_value = input_value
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("input value overflow".into()))?;
+    }
+    let mut output_value = 0u64;
+    for out in &tx.outputs {
+        output_value = output_value
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("output value overflow".into()))?;
+    }
+    if input_value < output_value {
+        return Err(StateError::InvalidTx(format!(
+            "insufficient funds: in={input_value} out={output_value}"
+        )));
+    }
+    Ok(input_value - output_value)
 }
 
 /// Apply all transactions in `block` to `cf_utxo`.
@@ -69,11 +122,29 @@ pub fn apply_block(
     block: &Block,
     emission_reward: u64,
 ) -> Result<UtxoJournal, StateError> {
+    // Compute the full UTXO transition into a batch, then commit atomically so a crash
+    // cannot leave `cf_utxo` half-applied.
+    let (journal, batch) = apply_block_batched(store, block, emission_reward)?;
+    store.write_batch(batch)?;
+    Ok(journal)
+}
+
+/// Compute a block's UTXO transition without mutating the store.
+///
+/// Returns the revert [`UtxoJournal`] and an uncommitted [`WriteBatch`] of the UTXO
+/// changes. Callers can extend the batch (e.g. with the journal record and issued-supply
+/// update) and commit everything atomically via [`StateStore::write_batch`].
+pub fn apply_block_batched(
+    store: &StateStore,
+    block: &Block,
+    emission_reward: u64,
+) -> Result<(UtxoJournal, WriteBatch), StateError> {
     let fees = sum_transfer_fees(store, &block.transactions)?;
     let coinbase_budget = emission_reward
         .checked_add(fees)
         .ok_or_else(|| StateError::Coinbase("reward overflow".into()))?;
 
+    let mut batch = WriteBatch::new();
     let mut journal = UtxoJournal::default();
     let mut spent_in_block: HashSet<OutPoint> = HashSet::new();
     let mut created_in_block: HashMap<OutPoint, TxOut> = HashMap::new();
@@ -87,9 +158,9 @@ pub fn apply_block(
                 return Err(StateError::Coinbase("multiple coinbase txs".into()));
             }
             apply_coinbase(
-                store,
                 tx,
                 coinbase_budget,
+                &mut batch,
                 &mut journal,
                 &mut created_in_block,
                 &mut coinbase_created,
@@ -98,6 +169,7 @@ pub fn apply_block(
             apply_transfer(
                 store,
                 tx,
+                &mut batch,
                 &mut journal,
                 &mut spent_in_block,
                 &mut created_in_block,
@@ -106,13 +178,13 @@ pub fn apply_block(
         }
     }
 
-    Ok(journal)
+    Ok((journal, batch))
 }
 
 fn apply_coinbase(
-    store: &StateStore,
     tx: &Transaction,
     coinbase_reward: u64,
+    batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
     created_in_block: &mut HashMap<OutPoint, TxOut>,
     coinbase_created: &mut HashSet<OutPoint>,
@@ -131,12 +203,14 @@ fn apply_coinbase(
             "coinbase {total} exceeds reward {coinbase_reward}"
         )));
     }
-    create_outputs(store, tx, journal, created_in_block, Some(coinbase_created))
+    create_outputs(batch, tx, journal, created_in_block, Some(coinbase_created))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_transfer(
     store: &StateStore,
     tx: &Transaction,
+    batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
     spent_in_block: &mut HashSet<OutPoint>,
     created_in_block: &mut HashMap<OutPoint, TxOut>,
@@ -195,9 +269,9 @@ fn apply_transfer(
     }
 
     for (op, out) in pending_spends {
-        spend_utxo(store, &op, &out, journal, spent_in_block, created_in_block)?;
+        spend_utxo(batch, &op, &out, journal, spent_in_block, created_in_block);
     }
-    create_outputs(store, tx, journal, created_in_block, None)
+    create_outputs(batch, tx, journal, created_in_block, None)
 }
 
 fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
@@ -209,15 +283,15 @@ fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
 }
 
 fn spend_utxo(
-    store: &StateStore,
+    batch: &mut WriteBatch,
     op: &OutPoint,
     out: &TxOut,
     journal: &mut UtxoJournal,
     spent_in_block: &mut HashSet<OutPoint>,
     created_in_block: &mut HashMap<OutPoint, TxOut>,
-) -> Result<(), StateError> {
+) {
     let key = outpoint_key(op);
-    store.delete_cf(ColumnFamily::Utxo, &key)?;
+    batch.delete_cf(ColumnFamily::Utxo, &key);
     if created_in_block.remove(op).is_some() {
         // Created earlier in this same block — drop from journal so revert is a no-op.
         journal.created.retain(|c| c != op);
@@ -225,11 +299,10 @@ fn spend_utxo(
         journal.spent.push((*op, out.clone()));
     }
     spent_in_block.insert(*op);
-    Ok(())
 }
 
 fn create_outputs(
-    store: &StateStore,
+    batch: &mut WriteBatch,
     tx: &Transaction,
     journal: &mut UtxoJournal,
     created_in_block: &mut HashMap<OutPoint, TxOut>,
@@ -243,7 +316,7 @@ fn create_outputs(
         };
         let key = outpoint_key(&op);
         let bytes = borsh::to_vec(out).map_err(|e| StateError::Storage(e.to_string()))?;
-        store.put_cf(ColumnFamily::Utxo, &key, &bytes)?;
+        batch.put_cf(ColumnFamily::Utxo, &key, &bytes);
         journal.created.push(op);
         created_in_block.insert(op, out.clone());
         if let Some(set) = coinbase_created.as_deref_mut() {
@@ -625,6 +698,129 @@ mod tests {
             emission + fee
         );
         assert_eq!(balance_of(&store, &to).unwrap().as_base_units(), pay);
+    }
+
+    #[test]
+    fn package_fees_account_for_same_block_child() {
+        // Parent tx spends premine; child tx spends the parent's change output in the SAME
+        // block. Fee pre-calc must value the child's input from the in-block output, not
+        // error with MissingUtxo.
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let genesis_hash = GenesisBuilder::default()
+            .with_premine_address(from.address())
+            .ignite(&store)
+            .unwrap();
+        let genesis = {
+            let bytes = store
+                .get_cf(ColumnFamily::Hot, genesis_hash.as_bytes())
+                .unwrap()
+                .unwrap();
+            Block::try_from_slice(&bytes).unwrap()
+        };
+        let premine_txid = genesis.transactions[0].tx_id();
+        let premine = Amount::from_whole(10_000_000).unwrap().as_base_units();
+
+        // Parent: spend premine, pay 2 back to self (change), fee = premine - 2.
+        let parent_change = 200u64;
+        let mut parent = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: premine_txid,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_base_units(parent_change),
+                address: from.address(),
+            }],
+            1,
+        );
+        sign_transaction(&mut parent, &from).unwrap();
+        let parent_id = parent.tx_id();
+
+        // Child: spend parent's output 0 (same block), pay 50 to self, fee = 150.
+        let mut child = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: parent_id,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_base_units(50),
+                address: from.address(),
+            }],
+            2,
+        );
+        sign_transaction(&mut child, &from).unwrap();
+
+        let txs = vec![parent, child];
+        // Package-aware fee sum: parent fee (premine-200) + child fee (150).
+        let fees = sum_transfer_fees(&store, &txs).unwrap();
+        assert_eq!(fees, (premine - parent_change) + (parent_change - 50));
+
+        // And the block applies end-to-end with a coinbase claiming those fees.
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(fees),
+                address: Address([7u8; 20]),
+            }],
+            0,
+        );
+        let mut all = vec![coinbase];
+        all.extend(txs);
+        let block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![genesis_hash],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Block::compute_tx_root(&all),
+            },
+            transactions: all,
+        };
+        apply_block(&store, &block, 0).unwrap();
+        assert_eq!(
+            balance_of(&store, &Address([7u8; 20]))
+                .unwrap()
+                .as_base_units(),
+            fees
+        );
+    }
+
+    #[test]
+    fn write_batch_is_atomic() {
+        let store = StateStore::open_in_memory();
+        let mut batch = crate::WriteBatch::new();
+        batch.put_cf(ColumnFamily::Meta, b"a", b"1");
+        batch.put_cf(ColumnFamily::Meta, b"b", b"2");
+        assert_eq!(batch.len(), 2);
+        store.write_batch(batch).unwrap();
+        assert_eq!(
+            store.get_cf(ColumnFamily::Meta, b"a").unwrap(),
+            Some(b"1".to_vec())
+        );
+        assert_eq!(
+            store.get_cf(ColumnFamily::Meta, b"b").unwrap(),
+            Some(b"2".to_vec())
+        );
+
+        let mut batch = crate::WriteBatch::new();
+        batch.delete_cf(ColumnFamily::Meta, b"a");
+        batch.put_cf(ColumnFamily::Meta, b"b", b"3");
+        store.write_batch(batch).unwrap();
+        assert_eq!(store.get_cf(ColumnFamily::Meta, b"a").unwrap(), None);
+        assert_eq!(
+            store.get_cf(ColumnFamily::Meta, b"b").unwrap(),
+            Some(b"3".to_vec())
+        );
     }
 
     #[test]
