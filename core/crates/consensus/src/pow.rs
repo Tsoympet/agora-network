@@ -122,18 +122,28 @@ fn cached_context(key: &[u8; 32]) -> std::sync::Arc<rust_randomx::Context> {
 
     use rust_randomx::Context;
 
-    // Keep the current + previous epoch contexts so verification near an epoch boundary
-    // does not thrash. Bounded to 2 entries to cap memory.
-    static CACHE: OnceLock<Mutex<Vec<([u8; 32], Arc<Context>)>>> = OnceLock::new();
+    // Keep several recent epoch contexts. Context construction is done **outside** the
+    // mutex so concurrent verifies of a cold epoch do not serialize on dataset init.
+    // Admission also rejects ancient parents (`max_parent_blue_score_lag`) to bound
+    // how far back an attacker can force epoch rotation.
+    const CACHE_CAP: usize = 4;
+    type EpochCache = Vec<([u8; 32], Arc<Context>)>;
+    static CACHE: OnceLock<Mutex<EpochCache>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(Vec::new()));
-    let mut guard = cache.lock().expect("randomx context cache poisoned");
-    if let Some((_, ctx)) = guard.iter().find(|(k, _)| k == key) {
-        return ctx.clone();
+    {
+        let guard = cache.lock().expect("randomx context cache poisoned");
+        if let Some((_, ctx)) = guard.iter().find(|(k, _)| k == key) {
+            return ctx.clone();
+        }
     }
     // Light mode (fast=false): lower memory, suitable for verify + sidecar smoke.
     let ctx = Arc::new(Context::new(key, false));
+    let mut guard = cache.lock().expect("randomx context cache poisoned");
+    if let Some((_, existing)) = guard.iter().find(|(k, _)| k == key) {
+        return existing.clone();
+    }
     guard.push((*key, ctx.clone()));
-    if guard.len() > 2 {
+    while guard.len() > CACHE_CAP {
         guard.remove(0);
     }
     ctx

@@ -23,6 +23,7 @@ pub fn daa_config_testnet() -> DaaConfig {
         window_size: 90,
         max_adjustment_factor: 2.0,
         min_level: 8,
+        max_level: 128,
     }
 }
 
@@ -33,6 +34,7 @@ pub fn daa_config_mainnet() -> DaaConfig {
         window_size: 90,
         max_adjustment_factor: 2.0,
         min_level: 8,
+        max_level: 128,
     }
 }
 
@@ -257,6 +259,12 @@ pub struct GenesisConsensusPolicy {
     pub daa_window_size: u64,
     pub daa_max_adjustment_factor: f64,
     pub daa_min_level: u32,
+    #[serde(default = "default_daa_max_level")]
+    pub daa_max_level: u32,
+}
+
+fn default_daa_max_level() -> u32 {
+    128
 }
 
 /// Wallet identity snapshot (HRP + BIP-44 / provisional SLIP-0044).
@@ -357,6 +365,7 @@ impl GenesisArtifact {
                 daa_window_size: params.daa.window_size,
                 daa_max_adjustment_factor: params.daa.max_adjustment_factor,
                 daa_min_level: params.daa.min_level,
+                daa_max_level: params.daa.max_level,
             }),
             wallet: Some(GenesisWalletPolicy {
                 address_hrp: hrp.into(),
@@ -400,6 +409,7 @@ impl GenesisArtifact {
                     window_size: c.daa_window_size,
                     max_adjustment_factor: c.daa_max_adjustment_factor,
                     min_level: c.daa_min_level,
+                    max_level: c.daa_max_level,
                 },
                 c.ghostdag_k,
                 pow,

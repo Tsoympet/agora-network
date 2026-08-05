@@ -1,3 +1,8 @@
+//! Difficulty Adjustment Algorithm for BlockDAG selected-parent spines.
+//!
+//! Expected bits for a candidate are derived from its **canonical selected parent**
+//! context, never from whichever tip the local node retargeted most recently.
+
 /// Difficulty Adjustment Algorithm parameters for sub-second BlockDAG tips.
 #[derive(Debug, Clone)]
 pub struct DaaConfig {
@@ -7,13 +12,13 @@ pub struct DaaConfig {
     pub window_size: u64,
     /// Clamp on the per-window **work** change (e.g. 2.0 => at most 2x / 0.5x work).
     ///
-    /// `bits` encode leading-zero difficulty, so work scales as `2^bits`. The adjustment
-    /// is applied in target/work space and then mapped back to a bit delta of at most
-    /// `log2(max_adjustment_factor)` per window (±1 bit at the default 2.0). This keeps
-    /// difficulty from jumping by many bits (hundreds/thousands× work) and oscillating.
+    /// Mapped to a bit delta of at most `log2(max_adjustment_factor)` per window
+    /// (±1 bit at the default 2.0).
     pub max_adjustment_factor: f64,
     /// Floor for `Difficulty.level` / `header.bits` (use `0` for unrestricted testnets).
     pub min_level: u32,
+    /// Ceiling for `Difficulty.level` / `header.bits` (hard cap against runaway retargets).
+    pub max_level: u32,
 }
 
 impl Default for DaaConfig {
@@ -23,6 +28,7 @@ impl Default for DaaConfig {
             window_size: 90,
             max_adjustment_factor: 2.0,
             min_level: 1,
+            max_level: 128,
         }
     }
 }
@@ -47,64 +53,98 @@ impl Difficulty {
     pub const fn as_bits(self) -> u32 {
         self.level
     }
+
+    pub fn clamp(self, config: &DaaConfig) -> Self {
+        Self {
+            level: self.level.clamp(config.min_level, config.max_level),
+        }
+    }
 }
 
-/// One sample on the selected-parent spine for work-weighted DAA.
+/// One sample on the selected-parent spine for hashrate DAA.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DaaSample {
     pub timestamp_ms: u64,
-    /// Cumulative blue work at this block (monotonic along the spine).
+    /// Cumulative accepted blue work at this block (monotonic along the spine).
     pub blue_work: u128,
+    /// This block's own PoW contribution (`work_from_bits(header.bits)`).
+    pub block_work: u128,
 }
 
 /// Approximate work contributed by a block with the given leading-zero `bits`.
+///
+/// Uses saturating shifts so bits above 127 still contribute maximal `u128` work
+/// instead of wrapping or stalling at bit 63.
 pub fn work_from_bits(bits: u32) -> u128 {
-    1u128 << bits.min(63)
+    if bits == 0 {
+        return 1;
+    }
+    if bits >= 128 {
+        return u128::MAX;
+    }
+    1u128 << bits
 }
 
-/// Compute next difficulty from window samples ordered oldest → newest.
+/// Median of up to the last 11 timestamps (Bitcoin-style MTP), or `0` if empty.
+pub fn median_time_past(timestamps_newest_first: &[u64]) -> u64 {
+    let n = timestamps_newest_first.len().min(11);
+    if n == 0 {
+        return 0;
+    }
+    let mut window: Vec<u64> = timestamps_newest_first[..n].to_vec();
+    window.sort_unstable();
+    window[n / 2]
+}
+
+/// Next difficulty from selected-parent spine samples (oldest → newest).
 ///
-/// Intervals are weighted by blue-work deltas so harder (higher-work) blocks
-/// pull the observed spacing more than soft tips.
+/// Uses `observed_hashrate = total_window_work / robust_elapsed` and
+/// `next_target_work ≈ observed_hashrate × target_block_time`, then maps the
+/// work ratio onto a bounded bit delta. Equal / non-increasing timestamps are
+/// replaced with a 1 ms floor so they cannot zero the denominator or skip work.
 pub fn next_difficulty_weighted(
     config: &DaaConfig,
-    current: Difficulty,
+    parent_bits: Difficulty,
     samples: &[DaaSample],
 ) -> Difficulty {
+    let parent = parent_bits.clamp(config);
     if samples.len() < 2 {
-        return current;
+        return parent;
     }
 
-    let mut weighted_dt = 0f64;
-    let mut total_work = 0f64;
+    let mut total_work = 0u128;
+    let mut elapsed_ms = 0u64;
     for window in samples.windows(2) {
         let older = window[0];
         let newer = window[1];
-        if newer.timestamp_ms <= older.timestamp_ms {
-            continue;
-        }
-        let work_delta = newer.blue_work.saturating_sub(older.blue_work).max(1) as f64;
-        let dt = (newer.timestamp_ms - older.timestamp_ms) as f64;
-        weighted_dt += dt * work_delta;
-        total_work += work_delta;
+        let work_delta = newer
+            .block_work
+            .max(newer.blue_work.saturating_sub(older.blue_work))
+            .max(1);
+        total_work = total_work.saturating_add(work_delta);
+        let dt = newer.timestamp_ms.saturating_sub(older.timestamp_ms).max(1);
+        elapsed_ms = elapsed_ms.saturating_add(dt);
     }
-    if total_work <= 0.0 || weighted_dt <= 0.0 {
-        return current;
-    }
-
-    let observed = weighted_dt / total_work;
-    // Compare mean observed spacing to target (work-normalized by work weights).
-    let expected = config.target_block_time_ms as f64;
-    if observed <= 0.0 {
-        return current;
+    if total_work == 0 || elapsed_ms == 0 {
+        return parent;
     }
 
-    // Adjust in work/target space: desired work multiplier = expected / observed
-    // (blocks too fast => observed < expected => factor > 1 => raise work). Clamp the
-    // work change, then map to a bit delta via log2 so the encoded leading-zero `bits`
-    // move by at most log2(max) per window instead of `level * factor`.
+    // observed_hashrate = total_window_work / robust_elapsed
+    // next_target_work  = observed_hashrate × target_block_time
+    // Map onto bits relative to the selected parent's own work contribution.
+    let parent_work = work_from_bits(parent.level) as f64;
+    if parent_work <= 0.0 {
+        return parent;
+    }
+    let observed_hashrate = (total_work as f64) / (elapsed_ms as f64);
+    let target = config.target_block_time_ms as f64;
+    let next_target_work = observed_hashrate * target;
+    let mut factor = next_target_work / parent_work;
+    if !factor.is_finite() || factor <= 0.0 {
+        return parent;
+    }
+
     let max = config.max_adjustment_factor.max(1.0);
-    let mut factor = expected / observed;
     if factor > max {
         factor = max;
     } else if factor < 1.0 / max {
@@ -112,25 +152,29 @@ pub fn next_difficulty_weighted(
     }
 
     let delta_bits = factor.log2();
-    let next = (current.level as f64 + delta_bits).round() as i64;
-    let floored = next.max(config.min_level as i64) as u32;
-    Difficulty { level: floored }
+    let next = (parent.level as f64 + delta_bits).round() as i64;
+    Difficulty {
+        level: next.clamp(config.min_level as i64, config.max_level as i64) as u32,
+    }
 }
 
-/// Compute next difficulty from window timestamps (ms) ordered oldest → newest.
+/// Uniform-work helper — prefer [`next_difficulty_weighted`] with real block work.
 ///
-/// Uniform work per sample — prefer [`next_difficulty_weighted`] with blue-work samples.
+/// Synthesizes samples whose per-block work matches `work_from_bits(current)` so the
+/// hashrate ratio is driven by timestamps alone.
 pub fn next_difficulty(
     config: &DaaConfig,
     current: Difficulty,
     window_timestamps_ms: &[u64],
 ) -> Difficulty {
+    let w = work_from_bits(current.clamp(config).as_bits());
     let samples: Vec<DaaSample> = window_timestamps_ms
         .iter()
         .enumerate()
         .map(|(i, &timestamp_ms)| DaaSample {
             timestamp_ms,
-            blue_work: (i as u128) + 1,
+            blue_work: w.saturating_mul((i as u128).saturating_add(1)),
+            block_work: w,
         })
         .collect();
     next_difficulty_weighted(config, current, &samples)
@@ -144,7 +188,6 @@ mod tests {
     fn slows_when_blocks_arrive_too_fast() {
         let config = DaaConfig::default();
         let current = Difficulty { level: 10 };
-        // 90 intervals in half the expected time => raise difficulty.
         let mut ts = Vec::new();
         for i in 0..91 {
             ts.push(i * (config.target_block_time_ms / 2));
@@ -167,8 +210,6 @@ mod tests {
 
     #[test]
     fn respects_min_level_zero() {
-        // Very slow blocks push difficulty down; it must floor at min_level (0), not go
-        // negative. (Additive/log space means level can reach the floor from level 1.)
         let config = DaaConfig {
             min_level: 0,
             ..DaaConfig::default()
@@ -183,8 +224,7 @@ mod tests {
 
     #[test]
     fn difficulty_change_is_bounded_to_one_bit_per_window() {
-        // Blocks arriving ~100x too fast must NOT jump bits by many (no 256x work spike).
-        let config = DaaConfig::default(); // max_adjustment_factor = 2.0 => ±1 bit
+        let config = DaaConfig::default();
         let current = Difficulty { level: 8 };
         let ts: Vec<u64> = (0..91)
             .map(|i| i * (config.target_block_time_ms / 100).max(1))
@@ -192,16 +232,30 @@ mod tests {
         let next = next_difficulty(&config, current, &ts);
         assert!(
             next.level <= current.level + 1,
-            "difficulty jumped from {} to {} (>1 bit)",
+            "difficulty jumped from {} to {}",
             current.level,
             next.level
         );
-        assert!(next.level >= current.level, "should not ease when too fast");
+        assert!(next.level >= current.level);
+    }
+
+    #[test]
+    fn respects_max_level() {
+        let config = DaaConfig {
+            max_level: 12,
+            max_adjustment_factor: 2.0,
+            ..DaaConfig::default()
+        };
+        let current = Difficulty { level: 12 };
+        let ts: Vec<u64> = (0..91)
+            .map(|i| i * (config.target_block_time_ms / 100).max(1))
+            .collect();
+        let next = next_difficulty(&config, current, &ts);
+        assert_eq!(next.level, 12);
     }
 
     #[test]
     fn can_rise_from_zero_when_too_fast() {
-        // Additive mapping lets difficulty leave 0 (multiplicative `level*factor` could not).
         let config = DaaConfig {
             min_level: 0,
             ..DaaConfig::default()
@@ -215,32 +269,79 @@ mod tests {
     }
 
     #[test]
-    fn higher_work_tips_weight_spacing_more() {
+    fn work_from_bits_keeps_growing_past_63() {
+        assert!(work_from_bits(64) > work_from_bits(63));
+        assert_eq!(work_from_bits(127), 1u128 << 127);
+        assert_eq!(work_from_bits(200), u128::MAX);
+    }
+
+    #[test]
+    fn equal_timestamps_do_not_skip_work() {
+        let config = DaaConfig {
+            target_block_time_ms: 1_000,
+            window_size: 2,
+            max_adjustment_factor: 2.0,
+            min_level: 1,
+            max_level: 128,
+        };
+        let current = Difficulty { level: 10 };
+        // Zero elapsed would previously skip the interval; 1 ms floor still counts work.
+        let samples = vec![
+            DaaSample {
+                timestamp_ms: 1_000,
+                blue_work: 100,
+                block_work: 100,
+            },
+            DaaSample {
+                timestamp_ms: 1_000,
+                blue_work: 200,
+                block_work: 100,
+            },
+            DaaSample {
+                timestamp_ms: 1_000,
+                blue_work: 300,
+                block_work: 100,
+            },
+        ];
+        let next = next_difficulty_weighted(&config, current, &samples);
+        assert!(next.level >= current.level);
+    }
+
+    #[test]
+    fn median_time_past_picks_middle() {
+        let ts = [50, 10, 30, 20, 40];
+        assert_eq!(median_time_past(&ts), 30);
+    }
+
+    #[test]
+    fn fast_high_work_window_raises_difficulty() {
         let config = DaaConfig {
             target_block_time_ms: 1_000,
             window_size: 2,
             max_adjustment_factor: 4.0,
             min_level: 1,
+            max_level: 128,
         };
         let current = Difficulty { level: 10 };
-        // Two slow soft blocks then one fast hard block: without work weighting the
-        // mean is dominated by the long early gap; with high work on the last tip
-        // the short interval pulls difficulty up.
-        let soft = vec![
+        let w = work_from_bits(20);
+        let fast = vec![
             DaaSample {
                 timestamp_ms: 0,
-                blue_work: 1,
+                blue_work: w,
+                block_work: w,
             },
             DaaSample {
-                timestamp_ms: 10_000,
-                blue_work: 2,
+                timestamp_ms: 200,
+                blue_work: 2 * w,
+                block_work: w,
             },
             DaaSample {
-                timestamp_ms: 10_500,
-                blue_work: 2 + work_from_bits(20),
+                timestamp_ms: 400,
+                blue_work: 3 * w,
+                block_work: w,
             },
         ];
-        let next = next_difficulty_weighted(&config, current, &soft);
+        let next = next_difficulty_weighted(&config, current, &fast);
         assert!(next.level > current.level, "got {}", next.level);
     }
 }

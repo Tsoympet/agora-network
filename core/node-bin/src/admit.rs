@@ -1,23 +1,26 @@
-//! Block admission: PoW → persist DAG → GHOSTDAG → reorg virtual UTXO.
+//! Block admission: parent-contextual DAA + PoW → UTXO overlay → atomic DAG
+//! persist → virtual UTXO reorg.
 //!
-//! Live `cf_utxo` follows blues of `order_past(virtual_tip)` (selected tip by
-//! blue_score). Non-selected tips are stored but do not spend until they join
-//! the virtual blue set. Difficulty (`header.bits`) uses [`DaaConfig`].
+//! Live `cf_utxo` follows blues of `order_past(virtual_tip)` (tip by cumulative
+//! blue work). Non-selected tips are stored but do not spend until they join
+//! the virtual blue set. Consensus `header.bits` come from the selected-parent
+//! DAA window — never from a node-local arrival-order cache.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agora_consensus::{
-    next_difficulty_weighted, work_from_bits, ConsensusLimits, DaaConfig, DaaSample, Dag,
-    Difficulty, EmissionSchedule, Ghostdag, GhostdagConfig, GhostdagSnapshot, LeadingZeroPow,
-    PowAlgorithm, PowVerifier, RandomXPowHasher,
+    median_time_past, next_difficulty_weighted, work_from_bits, ConsensusLimits, DaaConfig,
+    DaaSample, Dag, Difficulty, EmissionSchedule, Ghostdag, GhostdagConfig, GhostdagSnapshot,
+    KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher,
 };
+use agora_crypto::verify_transaction;
 use agora_state_machine::{
-    apply_block_batched, index_block_transactions, load_ghostdag_record, load_header,
-    load_utxo_journal, lookup_tx_location, meta_keys, revert_journal_batched,
-    store_ghostdag_record, store_header, sum_transfer_fees, utxo_diff_key, ColumnFamily,
-    GhostdagRecord, StateStore, WriteBatch,
+    apply_block_batched, ghostdag_key, index_block_transactions_into, load_ghostdag_record,
+    load_header, load_utxo_journal, lookup_tx_location, meta_keys, revert_journal_batched,
+    set_primary_tx_location, store_ghostdag_record, store_header, store_header_into,
+    sum_transfer_fees, utxo_diff_key, ColumnFamily, GhostdagRecord, StateStore, WriteBatch,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -207,10 +210,25 @@ impl ChainState {
         self.storage
     }
 
-    /// Confirmations for a block: `virtual_blue_score − block_blue_score + 1`.
+    /// Confirmations for a block that is **blue in the current virtual tip**.
+    ///
+    /// Returns `None` when the block is unknown, red/non-accepted in the virtual view,
+    /// or has no UTXO journal (never applied). Depth is
+    /// `virtual_blue_score − block_blue_score + 1`.
     pub fn confirmations(&self, block_id: &Hash) -> Option<u64> {
-        let block_score = self.ghostdag.blue_score(block_id)?;
         let tip = self.virtual_tip().ok()?;
+        if !self.ghostdag.is_blue_in_view(&tip, block_id) {
+            return None;
+        }
+        if *block_id != self.genesis
+            && load_utxo_journal(self.store.as_ref(), block_id)
+                .ok()
+                .flatten()
+                .is_none()
+        {
+            return None;
+        }
+        let block_score = self.ghostdag.blue_score(block_id)?;
         let tip_score = self.ghostdag.blue_score(&tip).unwrap_or(block_score);
         Some(tip_score.saturating_sub(block_score).saturating_add(1))
     }
@@ -406,12 +424,14 @@ impl ChainState {
         transactions.push(coinbase);
         transactions.extend(transfers.iter().take(max_transfers).cloned());
         let tx_root = Block::compute_tx_root(&transactions);
+        // Parent-contextual bits — not the node-wide cache.
+        let bits = self.expected_bits_for_parents(&parents)?;
         Ok(Block {
             header: BlockHeader {
                 version: 1,
                 parents,
                 timestamp_ms,
-                bits: self.difficulty.as_bits(),
+                bits,
                 nonce: 0,
                 tx_root,
             },
@@ -449,33 +469,46 @@ impl ChainState {
             .saturating_add(1)
     }
 
-    /// Walk the selected-parent spine collecting work-weighted DAA samples (oldest → newest).
+    /// Walk the selected-parent spine collecting DAA samples (oldest → newest).
+    ///
+    /// Prefers durable headers so pruned bodies still retarget correctly.
     fn daa_window(&self, tip: Hash) -> Result<Vec<DaaSample>, AdmitError> {
         let want = (self.daa.window_size as usize).saturating_add(1);
         let mut newest_first = Vec::with_capacity(want.min(64));
         let mut cursor = Some(tip);
-        let mut cumulative = 0u128;
         while let Some(hash) = cursor {
             if newest_first.len() >= want {
                 break;
             }
-            if let Some(block) = self.load_block(&hash)? {
-                let work = work_from_bits(block.header.bits);
-                // Accumulate from tip backward, then reverse and rebuild cumulative oldest→newest.
-                newest_first.push((block.header.timestamp_ms, work));
+            if let Some(header) = self.load_header(&hash)? {
+                let block_work = work_from_bits(header.bits);
+                let blue_work = self.ghostdag.blue_work(&hash).unwrap_or(block_work);
+                newest_first.push(DaaSample {
+                    timestamp_ms: header.timestamp_ms,
+                    blue_work,
+                    block_work,
+                });
             }
             cursor = self.ghostdag.selected_parent(&hash);
         }
         newest_first.reverse();
-        let mut samples = Vec::with_capacity(newest_first.len());
-        for (timestamp_ms, work) in newest_first {
-            cumulative = cumulative.saturating_add(work);
-            samples.push(DaaSample {
-                timestamp_ms,
-                blue_work: cumulative,
-            });
-        }
-        Ok(samples)
+        Ok(newest_first)
+    }
+
+    /// Expected `header.bits` for a candidate parented at `parents`.
+    ///
+    /// Derived solely from the canonical selected parent's DAA window — never from the
+    /// node-local cached difficulty (which is only a mining-tip hint).
+    pub fn expected_bits_for_parents(&self, parents: &[Hash]) -> Result<u32, AdmitError> {
+        let Some(sp) = self.ghostdag.select_parent_among(parents) else {
+            return Ok(self.daa.min_level);
+        };
+        let parent_bits = self
+            .load_header(&sp)?
+            .map(|h| Difficulty::new(h.bits))
+            .unwrap_or_else(|| Difficulty::new(self.daa.min_level));
+        let window = self.daa_window(sp)?;
+        Ok(next_difficulty_weighted(&self.daa, parent_bits, &window).as_bits())
     }
 
     fn persist_difficulty(&self) -> Result<(), AdmitError> {
@@ -488,7 +521,8 @@ impl ChainState {
             .map_err(|e| AdmitError::Storage(e.to_string()))
     }
 
-    /// Verify PoW + DAA bits, persist body, color with GHOSTDAG, reorg virtual UTXO.
+    /// Verify PoW + parent-contextual DAA, validate txs against a non-mutating UTXO
+    /// overlay, then atomically persist DAG state and reorg virtual UTXO.
     pub fn admit_block(&mut self, block: Block) -> Result<Hash, AdmitError> {
         let id = block.id();
         if self.dag.contains(&id) {
@@ -496,11 +530,12 @@ impl ChainState {
         }
 
         self.check_parents(&block)?;
+        self.check_parent_recency(&block)?;
         self.check_size_limits(&block)?;
         self.check_timestamps(&block)?;
         self.check_coinbase_maturity(&block)?;
 
-        let expected = self.difficulty.as_bits();
+        let expected = self.expected_bits_for_parents(&block.header.parents)?;
         if block.header.bits != expected {
             return Err(AdmitError::WrongDifficulty {
                 expected,
@@ -512,40 +547,195 @@ impl ChainState {
             return Err(AdmitError::BadTxRoot);
         }
 
-        // Height-anchored RandomX: epoch from parent blue-score, not wall-clock.
-        let epoch = self.randomx_epoch_for_parents(&block.header.parents);
-        let pow_hash = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
-        if LeadingZeroPow::leading_zero_bits(&pow_hash) < block.header.bits {
-            return Err(AdmitError::InvalidPow);
-        }
+        self.verify_pow(&block)?;
+        // Full tx/UTXO validation against a simulated selected-parent UTXO view — before
+        // any durable DAG mutation — so invalid blocks cannot contaminate tips/index.
+        self.validate_block_utxo_overlay(&block)?;
 
-        // Persist + color first — UTXO follows virtual tip after GHOSTDAG.
-        self.persist_block(&block, id)?;
+        // Color in-memory first; durable writes are batched below.
         self.dag
             .insert(id, block.header.parents.clone())
             .map_err(|e| AdmitError::Consensus(e.to_string()))?;
-        self.ghostdag
-            .add_block_with_work(&self.dag, id, work_from_bits(block.header.bits))
-            .map_err(|e| AdmitError::Consensus(e.to_string()))?;
-        self.persist_ghostdag_coloring(&id)?;
+        if let Err(e) =
+            self.ghostdag
+                .add_block_with_work(&self.dag, id, work_from_bits(block.header.bits))
+        {
+            let _ = self.dag.remove_tip(&id);
+            return Err(AdmitError::Consensus(e.to_string()));
+        }
 
         let old_virtual = self.virtual_tip()?;
-        let new_virtual = self
-            .select_virtual_tip()?
-            .ok_or_else(|| AdmitError::Consensus("no virtual tip".into()))?;
+        let new_virtual = match self.select_virtual_tip()? {
+            Some(tip) => tip,
+            None => {
+                self.ghostdag.remove(&id);
+                let _ = self.dag.remove_tip(&id);
+                return Err(AdmitError::Consensus("no virtual tip".into()));
+            }
+        };
 
-        // On failure, `reorg_utxo_to_virtual` restores UTXO to `old_virtual` blues.
+        // Single batch: body/header/tx-index/tips/ghostdag (+ pending marker).
+        if let Err(err) = self.persist_block_atomic(&block, id, new_virtual) {
+            self.ghostdag.remove(&id);
+            let _ = self.dag.remove_tip(&id);
+            return Err(err);
+        }
+
+        // UTXO reorg (own crash-recovery via pending_virtual).
         self.reorg_utxo_to_virtual(old_virtual, new_virtual)?;
 
-        let window = self.daa_window(new_virtual)?;
-        self.difficulty = next_difficulty_weighted(&self.daa, self.difficulty, &window);
-        self.persist_difficulty()?;
+        // Cached mining difficulty tracks the virtual tip only — never a side-block path.
+        if new_virtual != old_virtual {
+            if let Some(sp) = self.ghostdag.selected_parent(&new_virtual) {
+                let parent_bits = self
+                    .load_header(&sp)?
+                    .map(|h| Difficulty::new(h.bits))
+                    .unwrap_or(self.difficulty);
+                let window = self.daa_window(sp)?;
+                self.difficulty = next_difficulty_weighted(&self.daa, parent_bits, &window);
+            } else {
+                let bits = self
+                    .load_header(&new_virtual)?
+                    .map(|h| h.bits)
+                    .unwrap_or(self.difficulty.as_bits());
+                self.difficulty = Difficulty::new(bits).clamp(&self.daa);
+            }
+            self.persist_difficulty()?;
+        }
 
         if let Err(err) = self.prune_hot_window() {
             debug!(error = %err, "hot prune skipped");
         }
 
         Ok(id)
+    }
+
+    fn verify_pow(&self, block: &Block) -> Result<(), AdmitError> {
+        let digest = match self.pow.algorithm() {
+            PowAlgorithm::RandomX => {
+                let epoch = self.randomx_epoch_for_parents(&block.header.parents);
+                RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch)
+            }
+            PowAlgorithm::KHeavyHash => KHeavyHashPowHasher.pow_hash(&block.header),
+        };
+        if LeadingZeroPow::leading_zero_bits(&digest) < block.header.bits {
+            return Err(AdmitError::InvalidPow);
+        }
+        Ok(())
+    }
+
+    /// Reject ancient parents that would thrash the RandomX epoch cache.
+    fn check_parent_recency(&self, block: &Block) -> Result<(), AdmitError> {
+        let tip = self.virtual_tip()?;
+        let tip_score = self.ghostdag.blue_score(&tip).unwrap_or(0);
+        let lag = self.limits.max_parent_blue_score_lag;
+        for parent in &block.header.parents {
+            let score = self.ghostdag.blue_score(parent).unwrap_or(0);
+            if tip_score.saturating_sub(score) > lag {
+                return Err(AdmitError::Consensus(format!(
+                    "parent {} blue_score {score} lags virtual {tip_score} by more than {lag}",
+                    parent.to_hex()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Validate signatures + UTXO/coinbase rules against a non-mutating overlay at the
+    /// candidate's selected parent (then apply this block's txs dry-run).
+    fn validate_block_utxo_overlay(&self, block: &Block) -> Result<(), AdmitError> {
+        for tx in &block.transactions {
+            if tx.inputs.is_empty() {
+                continue;
+            }
+            verify_transaction(tx).map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        }
+
+        let parents = &block.header.parents;
+        let sp = self
+            .ghostdag
+            .select_parent_among(parents)
+            .ok_or_else(|| AdmitError::Consensus("no selected parent for utxo check".into()))?;
+
+        let overlay = self.materialize_utxo_at(sp)?;
+        let blue_score = self.estimate_blue_score(parents);
+        let scheduled = self.emission.reward_at_blue_score(blue_score);
+        let emission = {
+            // Clamp against live issued supply (overlay starts from same premine baseline).
+            let max = self.load_max_supply()?;
+            let issued = self.load_issued_supply()?;
+            // Adjust issued for overlay tip vs virtual: approximate with journals along path.
+            scheduled.min(max.saturating_sub(issued.min(max)))
+        };
+        apply_block_batched(&overlay, block, emission)
+            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Copy live UTXO and reorg the copy from the current virtual tip to `target`.
+    fn materialize_utxo_at(&self, target: Hash) -> Result<StateStore, AdmitError> {
+        let mem = StateStore::open_in_memory();
+        self.store
+            .for_each_cf(ColumnFamily::Utxo, |key, value| {
+                mem.put_cf(ColumnFamily::Utxo, key, value)?;
+                Ok(())
+            })
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        // Copy journals needed for unapply/apply along the reorg path.
+        self.store
+            .for_each_cf(ColumnFamily::Warm, |key, value| {
+                if key.starts_with(b"utxo_diff/") {
+                    mem.put_cf(ColumnFamily::Warm, key, value)?;
+                }
+                Ok(())
+            })
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+
+        let current = self.virtual_tip()?;
+        if current == target {
+            return Ok(mem);
+        }
+        let applied = self.applied_blues(current)?;
+        let dest = self.applied_blues(target)?;
+        let prefix = common_prefix_len(&applied, &dest);
+        for hash in applied[prefix..].iter().rev() {
+            if *hash == self.genesis {
+                continue;
+            }
+            if let Some(journal) =
+                load_utxo_journal(&mem, hash).map_err(|e| AdmitError::Storage(e.to_string()))?
+            {
+                let batch = revert_journal_batched(&journal)
+                    .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+                mem.write_batch(batch)
+                    .map_err(|e| AdmitError::Storage(e.to_string()))?;
+                mem.delete_cf(ColumnFamily::Warm, &utxo_diff_key(hash))
+                    .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            }
+        }
+        for hash in &dest[prefix..] {
+            if *hash == self.genesis {
+                continue;
+            }
+            if load_utxo_journal(&mem, hash)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?
+                .is_some()
+            {
+                continue;
+            }
+            let block = self
+                .load_block(hash)?
+                .ok_or_else(|| AdmitError::Storage(format!("missing block {}", hash.to_hex())))?;
+            let blue_score = self.ghostdag.blue_score(hash).unwrap_or(1);
+            let emission = self.emission.reward_at_blue_score(blue_score);
+            let (journal, mut batch) = apply_block_batched(&mem, &block, emission)
+                .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+            let bytes = borsh::to_vec(&journal).map_err(|e| AdmitError::Storage(e.to_string()))?;
+            batch.put_cf(ColumnFamily::Warm, &utxo_diff_key(hash), &bytes);
+            mem.write_batch(batch)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        }
+        Ok(mem)
     }
 
     fn check_parents(&self, block: &Block) -> Result<(), AdmitError> {
@@ -613,18 +803,43 @@ impl ChainState {
     }
 
     fn check_timestamps(&self, block: &Block) -> Result<(), AdmitError> {
+        let mut parent_ts: Vec<u64> = Vec::new();
         let mut parent_max = 0u64;
         for parent in &block.header.parents {
-            if let Some(p) = self.load_block(parent)? {
-                parent_max = parent_max.max(p.header.timestamp_ms);
+            if let Some(header) = self.load_header(parent)? {
+                parent_max = parent_max.max(header.timestamp_ms);
+                parent_ts.push(header.timestamp_ms);
             }
         }
-        if block.header.timestamp_ms < parent_max {
+        // Strictly after max parent timestamp (equal stamps rejected).
+        if block.header.timestamp_ms <= parent_max {
             return Err(AdmitError::TimestampBeforeParent {
                 ts: block.header.timestamp_ms,
                 parent_ts: parent_max,
             });
         }
+        // Median-time-past over selected-parent spine (up to 11).
+        if let Some(sp) = self.ghostdag.select_parent_among(&block.header.parents) {
+            let mut spine_ts = Vec::new();
+            let mut cursor = Some(sp);
+            while let Some(hash) = cursor {
+                if spine_ts.len() >= 11 {
+                    break;
+                }
+                if let Some(header) = self.load_header(&hash)? {
+                    spine_ts.push(header.timestamp_ms);
+                }
+                cursor = self.ghostdag.selected_parent(&hash);
+            }
+            let mtp = median_time_past(&spine_ts);
+            if block.header.timestamp_ms <= mtp {
+                return Err(AdmitError::TimestampBeforeParent {
+                    ts: block.header.timestamp_ms,
+                    parent_ts: mtp,
+                });
+            }
+        }
+        let _ = parent_ts;
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -743,7 +958,13 @@ impl ChainState {
     }
 
     fn select_virtual_tip(&self) -> Result<Option<Hash>, AdmitError> {
-        let tips = self.tips()?;
+        // Use in-memory DAG tips so a just-inserted (not yet persisted) block can win.
+        // Durable `meta/tips` lags until `persist_block_atomic` commits.
+        let tips = self.dag.tips();
+        if tips.is_empty() {
+            let tips = self.tips()?;
+            return Ok(self.ghostdag.select_virtual_tip(&tips));
+        }
         Ok(self.ghostdag.select_virtual_tip(&tips))
     }
 
@@ -831,10 +1052,21 @@ impl ChainState {
             }
         }
 
-        // Final tip meta + clear pending — one atomic commit.
+        // Final tip meta + clear pending + refresh primary tx pointers for newly
+        // accepted blues so RPC lookups prefer virtual-consensus inclusions.
         let mut tip_batch = WriteBatch::new();
         tip_batch.put_cf(ColumnFamily::Meta, meta_keys::VIRTUAL_TIP, new.as_bytes());
         tip_batch.delete_cf(ColumnFamily::Meta, meta_keys::PENDING_VIRTUAL);
+        for hash in &target[prefix..] {
+            if *hash == self.genesis {
+                continue;
+            }
+            if let Some(block) = self.load_block(hash)? {
+                for (index, tx) in block.transactions.iter().enumerate() {
+                    set_primary_tx_location(&mut tip_batch, &tx.tx_id(), hash, index as u32);
+                }
+            }
+        }
         self.store
             .write_batch(tip_batch)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -866,20 +1098,6 @@ impl ChainState {
             "recovering pending virtual reorg"
         );
         self.reorg_utxo_to_virtual(current, pending)
-    }
-
-    fn persist_ghostdag_coloring(&self, hash: &Hash) -> Result<(), AdmitError> {
-        let Some(snap) = self.ghostdag.snapshot(hash) else {
-            return Ok(());
-        };
-        let record = GhostdagRecord {
-            selected_parent: snap.selected_parent,
-            blue_score: snap.blue_score,
-            blue_work: snap.blue_work,
-            blues: snap.blues,
-        };
-        store_ghostdag_record(self.store.as_ref(), hash, &record)
-            .map_err(|e| AdmitError::Storage(e.to_string()))
     }
 
     fn apply_block_to_virtual(&self, hash: Hash) -> Result<(), AdmitError> {
@@ -998,20 +1216,22 @@ impl ChainState {
         Ok(total)
     }
 
-    fn persist_block(&self, block: &Block, id: Hash) -> Result<(), AdmitError> {
+    /// Persist body/header/tx-index/tips/ghostdag (+ pending virtual) in one WriteBatch.
+    fn persist_block_atomic(
+        &self,
+        block: &Block,
+        id: Hash,
+        pending_virtual: Hash,
+    ) -> Result<(), AdmitError> {
         let block_bytes = borsh::to_vec(block).map_err(|e| AdmitError::Storage(e.to_string()))?;
-        self.store
-            .put_cf(ColumnFamily::Hot, id.as_bytes(), &block_bytes)
-            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        let mut batch = WriteBatch::new();
+        batch.put_cf(ColumnFamily::Hot, id.as_bytes(), &block_bytes);
         if self.storage.archival {
-            self.store
-                .put_cf(ColumnFamily::Archival, id.as_bytes(), &block_bytes)
-                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            batch.put_cf(ColumnFamily::Archival, id.as_bytes(), &block_bytes);
         }
-        store_header(self.store.as_ref(), &id, &block.header)
+        store_header_into(&mut batch, &id, &block.header)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
-        index_block_transactions(self.store.as_ref(), block)
-            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        index_block_transactions_into(&mut batch, block);
 
         let mut tips = self.tips()?;
         tips.retain(|t| !block.header.parents.iter().any(|p| p == t));
@@ -1019,8 +1239,28 @@ impl ChainState {
             tips.push(id);
         }
         let tips_bytes = borsh::to_vec(&tips).map_err(|e| AdmitError::Storage(e.to_string()))?;
+        batch.put_cf(ColumnFamily::Meta, meta_keys::TIPS, &tips_bytes);
+
+        if let Some(snap) = self.ghostdag.snapshot(&id) {
+            let record = GhostdagRecord {
+                selected_parent: snap.selected_parent,
+                blue_score: snap.blue_score,
+                blue_work: snap.blue_work,
+                block_work: snap.block_work,
+                mergeset_blues: snap.mergeset_blues,
+            };
+            let bytes = borsh::to_vec(&record).map_err(|e| AdmitError::Storage(e.to_string()))?;
+            batch.put_cf(ColumnFamily::Warm, &ghostdag_key(&id), &bytes);
+        }
+
+        batch.put_cf(
+            ColumnFamily::Meta,
+            meta_keys::PENDING_VIRTUAL,
+            pending_virtual.as_bytes(),
+        );
+
         self.store
-            .put_cf(ColumnFamily::Meta, meta_keys::TIPS, &tips_bytes)
+            .write_batch(batch)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
         Ok(())
     }
@@ -1225,7 +1465,8 @@ fn hydrate_or_recolor(
                 selected_parent: record.selected_parent,
                 blue_score: record.blue_score,
                 blue_work: record.blue_work,
-                blues: record.blues,
+                block_work: record.block_work,
+                mergeset_blues: record.mergeset_blues,
             },
         );
         return Ok(());
@@ -1238,7 +1479,8 @@ fn hydrate_or_recolor(
             selected_parent: snap.selected_parent,
             blue_score: snap.blue_score,
             blue_work: snap.blue_work,
-            blues: snap.blues,
+            block_work: snap.block_work,
+            mergeset_blues: snap.mergeset_blues,
         };
         store_ghostdag_record(store, &hash, &record)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -1362,14 +1604,25 @@ mod tests {
             StoragePolicy::default(),
         )
         .unwrap();
+        // Cached mining difficulty is a tip hint that survives restart.
         assert_eq!(reloaded.difficulty().as_bits(), next.level);
+        // Template bits are parent-contextual consensus values, not the cache.
+        let expected = reloaded
+            .expected_bits_for_parents(
+                &reloaded
+                    .block_template(Address::ZERO, &[])
+                    .unwrap()
+                    .header
+                    .parents,
+            )
+            .unwrap();
         assert_eq!(
             reloaded
                 .block_template(Address::ZERO, &[])
                 .unwrap()
                 .header
                 .bits,
-            next.level
+            expected
         );
     }
 
@@ -1532,14 +1785,9 @@ mod tests {
             archival: false,
             hot_window: 1,
         };
-        let mut chain = ChainState::bootstrap(
-            store.clone(),
-            genesis,
-            PowAlgorithm::RandomX,
-            0,
-            policy.clone(),
-        )
-        .unwrap();
+        let mut chain =
+            ChainState::bootstrap(store.clone(), genesis, PowAlgorithm::RandomX, 0, policy)
+                .unwrap();
         let mut tip = genesis;
         for nonce in 20..=24u64 {
             tip = mine_child(&mut chain, &[tip], Address::ZERO, nonce);
@@ -1569,6 +1817,17 @@ mod tests {
         .unwrap();
         assert_eq!(chain.confirmations(&genesis), Some(1));
         let b1 = mine_one(&mut chain, 21);
+        let tip = chain.virtual_tip().unwrap();
+        eprintln!(
+            "b1={} tip={} blue_in={} journal={:?} score={:?}",
+            b1.to_hex(),
+            tip.to_hex(),
+            chain.ghostdag.is_blue_in_view(&tip, &b1),
+            load_utxo_journal(chain.store.as_ref(), &b1)
+                .unwrap()
+                .map(|_| "yes"),
+            chain.ghostdag.blue_score(&b1)
+        );
         assert_eq!(chain.confirmations(&b1), Some(1));
         assert!(chain.confirmations(&genesis).unwrap() >= 2);
         let b2 = mine_one(&mut chain, 22);
@@ -1580,9 +1839,11 @@ mod tests {
     fn mine_child(chain: &mut ChainState, parents: &[Hash], payout: Address, nonce: u64) -> Hash {
         let mut block = chain.block_template(payout, &[]).unwrap();
         block.header.parents = parents.to_vec();
+        block.header.bits = chain.expected_bits_for_parents(parents).unwrap();
         block.header.nonce = nonce;
         // Target-spaced timestamps keep the DAA at the difficulty floor (see mine_one).
-        block.header.timestamp_ms = nonce.saturating_mul(1_000);
+        // Strictly greater than parent max / MTP — use a monotone clock from nonce.
+        block.header.timestamp_ms = nonce.saturating_mul(1_000).max(1);
         // Recompute coinbase for emission estimate from these parents.
         let emission = chain
             .emission
@@ -2060,6 +2321,91 @@ mod tests {
         assert_eq!(reloaded.ghostdag.snapshot(&b).unwrap(), live_b);
         assert_eq!(reloaded.virtual_tip().unwrap(), tip);
         assert_eq!(reloaded.ghostdag.blue_work(&tip).unwrap(), tip_work);
+    }
+
+    #[test]
+    fn parallel_siblings_share_expected_bits() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        let bits_a = chain.expected_bits_for_parents(&[genesis]).unwrap();
+        let a = mine_child(&mut chain, &[genesis], Address([0x11; 20]), 30);
+        let bits_b = chain.expected_bits_for_parents(&[genesis]).unwrap();
+        assert_eq!(
+            bits_a, bits_b,
+            "sibling from same parents must see identical expected bits"
+        );
+        let b = mine_child(&mut chain, &[genesis], Address([0x22; 20]), 31);
+        assert_ne!(a, b);
+        let tips = chain.tips().unwrap();
+        assert!(tips.contains(&a) && tips.contains(&b));
+    }
+
+    #[test]
+    fn invalid_signature_rejected_before_tips() {
+        use agora_types::{OutPoint, TxIn};
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store.clone(),
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        let parent = mine_one(&mut chain, 40);
+        let tips_before = chain.tips().unwrap();
+
+        let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
+        block.header.parents = vec![parent];
+        block.header.bits = chain.expected_bits_for_parents(&[parent]).unwrap();
+        block.header.timestamp_ms = 50_000;
+        // Fabricate a transfer with garbage auth so overlay validation fails.
+        let fake_tx = Transaction {
+            version: 1,
+            inputs: vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: Hash([9u8; 32]),
+                    index: 0,
+                },
+            }],
+            outputs: vec![TxOut {
+                value: Amount::from_base_units(1),
+                address: Address::ZERO,
+            }],
+            nonce: 1,
+            public_key: vec![1; 33],
+            signature: vec![2; 64],
+        };
+        block.transactions.push(fake_tx);
+        block.header.tx_root = Block::compute_tx_root(&block.transactions);
+        let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
+        // Mine a valid PoW so we reach UTXO/auth checks.
+        for nonce in 0..10_000u64 {
+            block.header.nonce = nonce;
+            let digest = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
+            if LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits {
+                break;
+            }
+        }
+        let rejected_id = block.id();
+        let err = chain.admit_block(block).unwrap_err();
+        assert!(
+            matches!(err, AdmitError::Utxo(_)),
+            "expected UTXO/auth rejection, got {err:?}"
+        );
+        assert_eq!(chain.tips().unwrap(), tips_before);
+        assert!(!chain.dag.contains(&rejected_id));
+        assert!(!chain.has_block(&rejected_id).unwrap());
     }
 
     #[test]

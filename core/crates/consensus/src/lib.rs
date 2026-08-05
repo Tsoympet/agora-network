@@ -11,7 +11,8 @@ mod limits;
 mod pow;
 
 pub use daa::{
-    next_difficulty, next_difficulty_weighted, work_from_bits, DaaConfig, DaaSample, Difficulty,
+    median_time_past, next_difficulty, next_difficulty_weighted, work_from_bits, DaaConfig,
+    DaaSample, Difficulty,
 };
 pub use dag::Dag;
 pub use emission::EmissionSchedule;

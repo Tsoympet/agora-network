@@ -4,6 +4,7 @@ use agora_types::{BlockHeader, Hash};
 use borsh::BorshDeserialize;
 
 use crate::columns::ColumnFamily;
+use crate::store::WriteBatch;
 use crate::{StateError, StateStore};
 
 const HEADER_PREFIX: &[u8] = b"header/";
@@ -20,8 +21,19 @@ pub fn store_header(
     hash: &Hash,
     header: &BlockHeader,
 ) -> Result<(), StateError> {
+    let mut batch = WriteBatch::new();
+    store_header_into(&mut batch, hash, header)?;
+    store.write_batch(batch)
+}
+
+pub fn store_header_into(
+    batch: &mut WriteBatch,
+    hash: &Hash,
+    header: &BlockHeader,
+) -> Result<(), StateError> {
     let bytes = borsh::to_vec(header).map_err(|e| StateError::Storage(e.to_string()))?;
-    store.put_cf(ColumnFamily::Warm, &header_key(hash), &bytes)
+    batch.put_cf(ColumnFamily::Warm, &header_key(hash), &bytes);
+    Ok(())
 }
 
 pub fn load_header(store: &StateStore, hash: &Hash) -> Result<Option<BlockHeader>, StateError> {

@@ -1,4 +1,4 @@
-use agora_types::Transaction;
+use agora_types::{Hash, Transaction};
 
 use crate::address::address_from_pubkey;
 use crate::{CryptoError, KeyPair, PublicKeyBytes, SignatureBytes};
@@ -12,8 +12,36 @@ pub fn sign_transaction(tx: &mut Transaction, keypair: &KeyPair) -> Result<(), C
     Ok(())
 }
 
-/// Verify secp256k1 auth on a transaction and that the signer address matches an expected payer.
+/// Sign with network binding (`chain_id` + genesis) so the signature cannot be
+/// replayed on another Agora network.
+pub fn sign_transaction_bound(
+    tx: &mut Transaction,
+    keypair: &KeyPair,
+    chain_id: &str,
+    genesis: &Hash,
+) -> Result<(), CryptoError> {
+    let signing = tx.signing_bytes_bound(chain_id, genesis);
+    let signature = keypair.sign(&signing)?;
+    tx.public_key = keypair.public_key_bytes().to_vec();
+    tx.signature = signature.to_vec();
+    Ok(())
+}
+
+/// Verify secp256k1 auth on a transaction (domain-separated body).
 pub fn verify_transaction(tx: &Transaction) -> Result<(), CryptoError> {
+    verify_signing(tx, &tx.signing_bytes())
+}
+
+/// Verify a network-bound transaction signature.
+pub fn verify_transaction_bound(
+    tx: &Transaction,
+    chain_id: &str,
+    genesis: &Hash,
+) -> Result<(), CryptoError> {
+    verify_signing(tx, &tx.signing_bytes_bound(chain_id, genesis))
+}
+
+fn verify_signing(tx: &Transaction, signing: &[u8]) -> Result<(), CryptoError> {
     if tx.public_key.len() != 33 || tx.signature.len() != 64 {
         return Err(CryptoError::InvalidTransactionAuth);
     }
@@ -21,7 +49,7 @@ pub fn verify_transaction(tx: &Transaction) -> Result<(), CryptoError> {
     pubkey.copy_from_slice(&tx.public_key);
     let mut signature = [0u8; 64];
     signature.copy_from_slice(&tx.signature);
-    KeyPair::verify(&pubkey, &tx.signing_bytes(), &signature)
+    KeyPair::verify(&pubkey, signing, &signature)
 }
 
 /// Convenience: verify auth and return the derived signer address.
@@ -83,6 +111,34 @@ mod tests {
 
         // Tamper with an output — signature must fail.
         tx.outputs[0].value = Amount::from_base_units(1);
+        assert!(verify_transaction(&tx).is_err());
+    }
+
+    #[test]
+    fn network_bound_signature_rejects_cross_chain() {
+        let seed = seed_from_mnemonic(PHRASE, "").expect("seed");
+        let kp = derive_bip44(&seed, &Bip44Path::external(0)).expect("derive");
+        let genesis_a = Hash::hash_bytes(b"genesis-a");
+        let genesis_b = Hash::hash_bytes(b"genesis-b");
+        let mut tx = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: Hash::ZERO,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_whole(1).unwrap(),
+                address: kp.address(),
+            }],
+            1,
+        );
+        sign_transaction_bound(&mut tx, &kp, "testnet", &genesis_a).unwrap();
+        assert!(verify_transaction_bound(&tx, "testnet", &genesis_a).is_ok());
+        assert!(verify_transaction_bound(&tx, "testnet", &genesis_b).is_err());
+        assert!(verify_transaction_bound(&tx, "mainnet", &genesis_a).is_err());
+        // Unbound verify must not accept a bound signature.
         assert!(verify_transaction(&tx).is_err());
     }
 }

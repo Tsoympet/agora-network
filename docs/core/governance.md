@@ -1,8 +1,18 @@
 # Civic governance (`agora-governance`)
 
-Agora’s on-chain civic model — **Constitution**, **elected ranks**, **voting
-chambers**, and **proposal lifecycle** — plus launch-security vote math
-(quadratic + whale cap).
+> **Status: administrative prototype.** The engine + JSON-RPC surface today are
+> **local node Meta-CF state**, not secured blockchain governance. RPC callers
+> supply voter address, claimed balances/supply, and slots; votes are not signed,
+> deposits are not locked UTXOs, tallies can run before deadlines, and most
+> “executed” proposals have no protocol side effects. Different nodes can diverge.
+> Before calling this on-chain governance it needs signed governance txs, consensus
+> balance snapshots, locked deposits, height deadlines, deterministic execution,
+> governance state roots, and block-replicated state. See the deferred list in
+> [`PATH_TO_COMPLETE_CHAIN.md`](../governance/PATH_TO_COMPLETE_CHAIN.md).
+
+Agora’s civic model — **Constitution**, **elected ranks**, **voting chambers**,
+and **proposal lifecycle** — plus launch-security vote math (quadratic + whale
+cap). The crate is the intended protocol shape; node wiring is still soft-auth.
 
 Human-readable charter: [`docs/governance/CONSTITUTION.md`](../governance/CONSTITUTION.md).
 
@@ -81,10 +91,11 @@ effective = isqrt(capped)
 
 | Layer | Status |
 | --- | --- |
-| Constitution text + hash | yes |
-| Ranks / chambers / proposal engine | yes |
-| Community board (forum + acks) | yes |
-| Node Meta CF persistence (`meta/governance`) | yes |
-| JSON-RPC civic methods | yes |
-| Explorer ballot panel + desktop vote UI | yes |
+| Constitution text + hash | yes (document) |
+| Ranks / chambers / proposal engine | yes (in-process) |
+| Community board (forum + acks) | yes (local) |
+| Node Meta CF persistence (`meta/governance`) | yes — **local**, not consensus-derived |
+| JSON-RPC civic methods | yes — **trusted caller** prototype |
+| Explorer ballot panel + desktop vote UI | yes (drives local RPC) |
+| Signed votes / UTXO deposits / state roots | **not yet** |
 | L2/L3 operator sets as Ecclesia ranks | out of scope |

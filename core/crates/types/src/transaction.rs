@@ -131,6 +131,9 @@ pub struct TxOut {
     pub address: Address,
 }
 
+/// Domain separator for transaction signatures (prevents cross-protocol reuse).
+pub const TX_SIGNING_DOMAIN: &[u8] = b"agora-tx-v1";
+
 /// Fields covered by the secp256k1 signature (excludes auth material).
 #[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize)]
 pub struct TransactionBody {
@@ -167,8 +170,18 @@ impl Transaction {
     }
 
     /// Canonical bytes that wallets sign / verifiers check.
+    ///
+    /// Includes [`TX_SIGNING_DOMAIN`]. Prefer [`Self::signing_bytes_bound`] when the
+    /// network genesis is known so signatures cannot be replayed across chains.
     pub fn signing_bytes(&self) -> Vec<u8> {
-        borsh::to_vec(&self.body()).expect("borsh serialize is infallible for TransactionBody")
+        borsh::to_vec(&(TX_SIGNING_DOMAIN, self.body()))
+            .expect("borsh serialize is infallible for TransactionBody")
+    }
+
+    /// Network-bound signing bytes (`domain ‖ chain_id ‖ genesis ‖ body`).
+    pub fn signing_bytes_bound(&self, chain_id: &str, genesis: &Hash) -> Vec<u8> {
+        borsh::to_vec(&(TX_SIGNING_DOMAIN, chain_id, genesis.as_bytes(), self.body()))
+            .expect("borsh serialize is infallible for bound TransactionBody")
     }
 
     /// Transaction ID is the hash of the full signed (or unsigned) encoding.

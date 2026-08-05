@@ -84,7 +84,7 @@ impl StateStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StateError> {
         #[cfg(feature = "rocksdb")]
         {
-            return Self::open_rocks(path);
+            Self::open_rocks(path)
         }
         #[cfg(not(feature = "rocksdb"))]
         {
