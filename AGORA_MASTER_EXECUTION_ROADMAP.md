@@ -40,9 +40,11 @@ This document is the definitive command center. It bridges architectural theory 
 
 ## Phase 3: Launch Security (Anti-Whale & Governance)
 
-- [x] **Governance:** Quadratic voting — `EffectiveVotes = floor(sqrt(RawBalance))` (`agora-governance`)
+- [x] **Governance math:** Quadratic voting — `EffectiveVotes = floor(sqrt(RawBalance))` (`agora-governance`)
 - [x] **Whale protection:** 5% hard cap on countable balance vs total supply
 - [x] **Testing:** `ghostdag_fuzzer` + partition fuzz tests for GHOSTDAG merge scenarios
+- [x] **Constitution v1 + civic model:** ranks (Archons / Bouleutai / Tamiai), chambers (Ecclesia / Boule / Archon Collegium), proposal lifecycle — see [`docs/governance/CONSTITUTION.md`](docs/governance/CONSTITUTION.md)
+- [ ] **Node wiring:** persist governance state + JSON-RPC + wallet/explorer ballot UI
 
 ## Phase 4: Scaling (Day 2 Growth)
 

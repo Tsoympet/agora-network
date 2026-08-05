@@ -18,7 +18,7 @@ agora-network/
 │   │   ├── p2p/            # Gossipsub, Mempool, Compact Blocks
 │   │   ├── rpc/            # HTTP JSON-RPC methods + dispatcher
 │   │   ├── crypto/         # BIP-39/44 Wallet, secp256k1 Signatures
-│   │   ├── governance/     # Quadratic voting + anti-whale caps
+│   │   ├── governance/     # Constitution, ranks, chambers, proposals, √ voting
 │   │   ├── ovolos-rollup/  # L2 optimistic rollup (EVM batches + OVL)
 │   │   ├── bridge-sdk/     # L3 Bridge-in-a-Box for District Chains + DRC
 │   │   ├── intent-engine/  # L4 intent orchestration (bridge + AMM)
