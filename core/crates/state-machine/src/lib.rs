@@ -18,9 +18,10 @@ pub use columns::{acceptance_keys, meta_keys, utxo_key, utxo_key_outpoint, Colum
 pub use error::StateError;
 pub use genesis::{GenesisBuilder, SupplyCaps};
 pub use journal::{
-    acceptance_status, acceptance_store_ops, assert_datadir_fingerprint, commit_acceptance,
-    is_tx_accepted_in_block, load_acceptance_bitmap, load_accepted_fees, load_network_fingerprint,
-    tx_confirmation, write_network_fingerprint, AcceptedTxRecord, StoreUtxoView,
+    acceptance_status, acceptance_store_ops, assert_datadir_fingerprint, balance_of,
+    commit_acceptance, is_tx_accepted_in_block, load_acceptance_bitmap, load_acceptance_summary,
+    load_accepted_fees, load_network_fingerprint, tx_confirmation, write_network_fingerprint,
+    AcceptedTxRecord, StoreUtxoView, StoredUtxo,
 };
 pub use store::{StateStore, StoreOp};
 pub use zones::StateZone;

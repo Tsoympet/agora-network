@@ -6,4 +6,6 @@ pub enum RpcError {
     MethodNotFound(String),
     #[error("invalid params: {0}")]
     InvalidParams(String),
+    #[error("internal error: {0}")]
+    Internal(String),
 }

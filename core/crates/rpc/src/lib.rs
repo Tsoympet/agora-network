@@ -3,8 +3,10 @@
 //! Confirmation and inclusion status are defined by the transaction acceptance
 //! layer — never by block color alone. The explorer consumes these RPC views.
 
+mod dispatch;
 mod error;
 mod methods;
 
+pub use dispatch::{dispatch, RpcBackend};
 pub use error::RpcError;
 pub use methods::{BlockAcceptanceView, RpcMethod, RpcRequest, RpcResponse, TxAcceptanceView};

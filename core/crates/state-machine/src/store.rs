@@ -19,6 +19,8 @@ pub enum StoreOp {
     },
 }
 
+type MemoryMap = HashMap<(u8, Vec<u8>), Vec<u8>>;
+
 /// State backend used by the node.
 ///
 /// Default build keeps an in-memory map so the workspace compiles without a C++
@@ -28,24 +30,30 @@ pub struct StateStore {
 }
 
 enum Inner {
-    Memory(Arc<Mutex<HashMap<(u8, Vec<u8>), Vec<u8>>>>),
+    Memory(Arc<Mutex<MemoryMap>>),
     #[cfg(feature = "rocksdb")]
     Rocks(Arc<rocksdb::DB>),
 }
 
 impl StateStore {
+    /// Open durable RocksDB when the `rocksdb` feature is enabled; otherwise in-memory.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StateError> {
         #[cfg(feature = "rocksdb")]
         {
-            return Self::open_rocks(path);
+            Self::open_rocks(path)
         }
         #[cfg(not(feature = "rocksdb"))]
         {
             let _ = path;
-            Ok(Self {
-                inner: Inner::Memory(Arc::new(Mutex::new(HashMap::new()))),
-            })
+            Self::open_in_memory()
         }
+    }
+
+    /// Explicit in-memory backend (tests / `AGORA_STORE=memory`).
+    pub fn open_in_memory() -> Result<Self, StateError> {
+        Ok(Self {
+            inner: Inner::Memory(Arc::new(Mutex::new(HashMap::new()))),
+        })
     }
 
     #[cfg(feature = "rocksdb")]
@@ -146,6 +154,37 @@ impl StateStore {
 
     pub fn get(&self, zone: StateZone, key: &[u8]) -> Result<Option<Vec<u8>>, StateError> {
         self.get_cf(zone.column_family(), key)
+    }
+
+    /// Iterate all keys in a column family (used for balance scans).
+    pub fn for_each_cf<F>(&self, cf: ColumnFamily, mut f: F) -> Result<(), StateError>
+    where
+        F: FnMut(&[u8], &[u8]),
+    {
+        match &self.inner {
+            Inner::Memory(map) => {
+                let guard = map
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                for ((cf_id, key), value) in guard.iter() {
+                    if *cf_id == cf as u8 {
+                        f(key.as_slice(), value.as_slice());
+                    }
+                }
+                Ok(())
+            }
+            #[cfg(feature = "rocksdb")]
+            Inner::Rocks(db) => {
+                let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                let iter = db.iterator_cf(handle, rocksdb::IteratorMode::Start);
+                for item in iter {
+                    let (key, value) =
+                        item.map_err(|e| StateError::Storage(e.to_string()))?;
+                    f(key.as_ref(), value.as_ref());
+                }
+                Ok(())
+            }
+        }
     }
 }
 

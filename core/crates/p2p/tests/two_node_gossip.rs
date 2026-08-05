@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use agora_consensus::{MemoryUtxoView, UtxoEntry};
 use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
 use agora_p2p::{dial_addr, Mempool, NetworkConfig, NetworkEvent, NetworkMessage, NetworkNode};
 use agora_types::{Amount, Hash, NetworkFingerprint, OutPoint, Transaction, TxIn, TxOut};
@@ -54,23 +55,36 @@ async fn two_nodes_exchange_signed_transaction() {
 
     let seed = seed_from_mnemonic(PHRASE, "").unwrap();
     let kp = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+    let outpoint = OutPoint {
+        tx_id: Hash::ZERO,
+        index: 0,
+    };
+    let mut view = MemoryUtxoView::new();
+    view.insert(
+        outpoint,
+        UtxoEntry::new(
+            TxOut {
+                value: Amount::from_base_units(100),
+                address: kp.address(),
+            },
+            0,
+            false,
+        ),
+    );
     let mut tx = Transaction::unsigned(
         1,
         vec![TxIn {
-            previous_outpoint: OutPoint {
-                tx_id: Hash::ZERO,
-                index: 0,
-            },
+            previous_outpoint: outpoint,
         }],
         vec![TxOut {
-            value: Amount::from_base_units(5),
+            value: Amount::from_base_units(95),
             address: kp.address(),
         }],
         9,
     );
     sign_transaction(&mut tx, &kp, &fingerprint).unwrap();
     let mut pool = Mempool::new(32);
-    pool.admit(tx.clone(), &fingerprint).unwrap();
+    pool.admit(tx.clone(), &fingerprint, &view, 0).unwrap();
 
     handle_b
         .publish_message(NetworkMessage::Transaction(tx))
@@ -94,7 +108,7 @@ async fn two_nodes_exchange_signed_transaction() {
     assert_eq!(received.nonce, 9);
     let mut remote_pool = Mempool::new(32);
     remote_pool
-        .admit(received, &fingerprint)
+        .admit(received, &fingerprint, &view, 0)
         .expect("remote admission");
 
     handle_a.shutdown();
@@ -102,7 +116,7 @@ async fn two_nodes_exchange_signed_transaction() {
 }
 
 async fn wait_listening(
-    events: &mut tokio::sync::mpsc::UnboundedReceiver<NetworkEvent>,
+    events: &mut tokio::sync::mpsc::Receiver<NetworkEvent>,
 ) -> libp2p::Multiaddr {
     timeout(Duration::from_secs(5), async {
         loop {
@@ -117,7 +131,7 @@ async fn wait_listening(
     .expect("listen timeout")
 }
 
-async fn wait_connected(events: &mut tokio::sync::mpsc::UnboundedReceiver<NetworkEvent>) {
+async fn wait_connected(events: &mut tokio::sync::mpsc::Receiver<NetworkEvent>) {
     timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {

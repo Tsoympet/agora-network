@@ -14,9 +14,12 @@ path = "src/main.rs"
 agora-types = { workspace = true }
 agora-crypto = { workspace = true }
 agora-consensus = { workspace = true }
-agora-state-machine = { workspace = true }
+agora-state-machine = { workspace = true, features = ["rocksdb"] }
 agora-p2p = { workspace = true }
 agora-rpc = { workspace = true }
+borsh = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = "0.3"

@@ -6,12 +6,15 @@ The **transaction acceptance layer** is the single authority for which transacti
 
 For each **blue** block in GHOSTDAG blue order:
 
-1. **Validate every transaction fully**, independent of conflict outcome (structure, fingerprint-bound signature, **UTXO ownership** (`signer == utxo.address`), value conservation, coinbase shape).
+1. **Validate every transaction fully**, independent of conflict outcome (structure, fingerprint-bound signature, **UTXO ownership** (`signer == utxo.address`), value conservation, coinbase shape, size/input caps).
 2. **Require** `header.tx_root` commits to the body, and index-0 is always coinbase (hard-fail otherwise).
-3. **Resolve conflicts by blue order** — first accepted exact `tx_id` wins; first accepted spend of an outpoint wins. Later duplicates / conflicts are rejected even when structurally valid.
-4. **Emit a deterministic `AcceptanceBitmap`** aligned to `block.transactions` indices.
-5. **Sum fees only from accepted non-coinbase transactions**.
-6. **Accept coinbase iff** `sum(outputs) == subsidy + accepted_fees`, where subsidy is derived from `NetworkFingerprint` (premine for genesis, emission otherwise).
+3. **Enforce maturity / fees on regular txs** — coinbase/premine UTXOs need `COINBASE_MATURITY` blue-score depth; fee must be ≥ `MIN_RELAY_FEE`.
+4. **Resolve conflicts by blue order** — first accepted exact `tx_id` wins; first accepted spend of an outpoint wins. Later duplicates / conflicts are rejected even when structurally valid.
+5. **Emit a deterministic `AcceptanceBitmap`** aligned to `block.transactions` indices.
+6. **Sum fees only from accepted non-coinbase transactions**.
+7. **Accept coinbase iff** `sum(outputs) == subsidy + accepted_fees`, where subsidy is derived from `NetworkFingerprint` (premine for genesis, emission otherwise).
+
+Shared precheck for mempool + acceptance: `precheck_regular_tx` (size, fee, signature, ownership, maturity).
 
 ## Outputs
 

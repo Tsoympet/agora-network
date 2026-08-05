@@ -43,6 +43,8 @@ pub struct GenesisBuilder {
     pub network_id: u32,
     pub bits: u32,
     pub timestamp_ms: u64,
+    /// When false (default), ignite refuses `Address::ZERO` premine (locked forever).
+    pub allow_zero_premine: bool,
 }
 
 impl Default for GenesisBuilder {
@@ -55,6 +57,7 @@ impl Default for GenesisBuilder {
             network_id: 1,
             bits: 0,
             timestamp_ms: 0,
+            allow_zero_premine: false,
         }
     }
 }
@@ -62,6 +65,11 @@ impl Default for GenesisBuilder {
 impl GenesisBuilder {
     pub fn with_premine_address(mut self, address: Address) -> Self {
         self.supply.premine_address = address;
+        self
+    }
+
+    pub fn allow_zero_premine(mut self) -> Self {
+        self.allow_zero_premine = true;
         self
     }
 
@@ -117,6 +125,11 @@ impl GenesisBuilder {
     pub fn ignite(&self, store: &StateStore) -> Result<(Hash, NetworkFingerprint), StateError> {
         if self.supply.premine.as_base_units() > self.supply.max_supply.as_base_units() {
             return Err(StateError::Storage("premine exceeds max supply".into()));
+        }
+        if self.supply.premine_address == Address::ZERO && !self.allow_zero_premine {
+            return Err(StateError::Storage(
+                "premine address must be set (Address::ZERO would lock premine forever)".into(),
+            ));
         }
 
         // Datadir must not already belong to another network.
@@ -266,8 +279,22 @@ mod tests {
     #[test]
     fn datadir_rejects_second_ignition() {
         let store = StateStore::open("/tmp/agora-genesis-fp-twice").unwrap();
-        GenesisBuilder::default().ignite(&store).unwrap();
-        let err = GenesisBuilder::default().ignite(&store).unwrap_err();
+        let addr = Address([1u8; 20]);
+        GenesisBuilder::default()
+            .with_premine_address(addr)
+            .ignite(&store)
+            .unwrap();
+        let err = GenesisBuilder::default()
+            .with_premine_address(addr)
+            .ignite(&store)
+            .unwrap_err();
         assert!(matches!(err, StateError::FingerprintMismatch(_)));
+    }
+
+    #[test]
+    fn rejects_zero_premine_address_by_default() {
+        let store = StateStore::open("/tmp/agora-genesis-zero-premine").unwrap();
+        let err = GenesisBuilder::default().ignite(&store).unwrap_err();
+        assert!(matches!(err, StateError::Storage(_)));
     }
 }

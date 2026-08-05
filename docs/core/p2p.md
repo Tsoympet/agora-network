@@ -20,12 +20,14 @@ Legacy constants `TOPIC_BLOCKS` / `TOPIC_TRANSACTIONS` remain for reference only
 
 ## Mempool
 
-- `Mempool::admit(tx, fingerprint)` verifies secp256k1 signatures in the fingerprint domain.
+- `Mempool::admit(tx, fingerprint, utxo, tip_blue_score)` runs `precheck_regular_tx` (fingerprint signature, ownership, maturity, min fee, size/input caps) and tracks claimed outpoints (first admit wins).
 - `Mempool::evict_by_acceptance(result)` removes accepted tx ids and any mempool txs that spend outpoints spent by the acceptance journal. Eviction is driven by **acceptance**, not block color.
 
 ## Runtime
 
-`NetworkConfig` carries the fingerprint. `NetworkNode::build` subscribes/publishes on fingerprint-scoped topics.
+`NetworkConfig` carries fingerprint, `max_peers`, bounded event/command channel capacities, and optional `identity_path` (persistent ed25519 key via `load_or_create_identity`).
+
+`NetworkNode::build` composes gossipsub with `libp2p::connection_limits` (`max_peers`), uses SHA-256 message IDs, and drops oversized / topic-mismatched gossip.
 
 Integration test `two_node_gossip` dials two local nodes on the same fingerprint and exchanges a signed transaction.
 

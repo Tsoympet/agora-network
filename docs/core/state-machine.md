@@ -24,7 +24,8 @@ Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
 against an empty in-memory UTXO view and commits **block + caps + tips + fingerprint +
 acceptance bitmap + premine UTXO in a single `write_batch`** (crash-safe; no half-bound datadir).
 
-Default caps: max supply 100,000,000 AGORA; premine 10,000,000 AGORA.
+Default caps: max supply 100,000,000 AGORA; premine 10,000,000 AGORA.  
+By default `ignite` **rejects `Address::ZERO` premine** (would lock funds forever); tests may call `.allow_zero_premine()`, and nodes set a non-zero treasury via `AGORA_PREMINE_ADDRESS` or the built-in default.
 
 ## Acceptance + UTXO journals
 
@@ -40,5 +41,6 @@ All ops go through a single `StateStore::write_batch`.
 
 ## Storage backends
 
-- Default/dev: in-memory map (portable CI)
+- Default crate build: in-memory map (portable CI / unit tests)
 - `--features rocksdb`: durable RocksDB (requires C++ toolchain; use `CXX=g++` when clang’s libstdc++ headers mismatch)
+- **`agora-node` enables `rocksdb` by default** and persists under `AGORA_DATA`. Set `AGORA_STORE=memory` only for ephemeral smoke tests.

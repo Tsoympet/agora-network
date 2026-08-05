@@ -3,10 +3,10 @@
 //! Acceptance status and UTXO mutations for a blue block are committed in a
 //! single [`StateStore::write_batch`] — never piecemeal.
 
-use agora_consensus::{AcceptanceResult, BlockAcceptance, UtxoJournalOp, UtxoView};
+use agora_consensus::{AcceptanceResult, BlockAcceptance, UtxoEntry, UtxoJournalOp, UtxoView};
 use agora_types::{
     AcceptanceBitmap, Amount, Hash, NetworkFingerprint, OutPoint, TxAcceptanceStatus,
-    TxConfirmation, TxOut,
+    TxConfirmation,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -21,6 +21,40 @@ pub struct AcceptedTxRecord {
     pub blue_score: u64,
     pub index: u32,
     pub accepted: bool,
+}
+
+/// On-disk UTXO value: output + maturity metadata.
+#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct StoredUtxo {
+    pub value: u64,
+    pub address: [u8; 20],
+    pub created_blue_score: u64,
+    pub is_coinbase: bool,
+}
+
+impl From<&UtxoEntry> for StoredUtxo {
+    fn from(entry: &UtxoEntry) -> Self {
+        Self {
+            value: entry.output.value.as_base_units(),
+            address: entry.output.address.0,
+            created_blue_score: entry.created_blue_score,
+            is_coinbase: entry.is_coinbase,
+        }
+    }
+}
+
+impl From<StoredUtxo> for UtxoEntry {
+    fn from(stored: StoredUtxo) -> Self {
+        use agora_types::{Address, Amount, TxOut};
+        UtxoEntry::new(
+            TxOut {
+                value: Amount::from_base_units(stored.value),
+                address: Address(stored.address),
+            },
+            stored.created_blue_score,
+            stored.is_coinbase,
+        )
+    }
 }
 
 /// Build store ops for a full acceptance result (bitmaps + accepted-tx index + UTXO journal).
@@ -42,9 +76,10 @@ pub fn acceptance_store_ops(result: &AcceptanceResult) -> Result<Vec<StoreOp>, S
                     key: utxo_key_outpoint(outpoint),
                 });
             }
-            UtxoJournalOp::Create { outpoint, output } => {
+            UtxoJournalOp::Create { outpoint, entry } => {
+                let stored = StoredUtxo::from(entry);
                 let value =
-                    borsh::to_vec(output).map_err(|e| StateError::Storage(e.to_string()))?;
+                    borsh::to_vec(&stored).map_err(|e| StateError::Storage(e.to_string()))?;
                 ops.push(StoreOp::Put {
                     cf: ColumnFamily::Utxo,
                     key: utxo_key_outpoint(outpoint),
@@ -169,10 +204,11 @@ impl<'a> StoreUtxoView<'a> {
 }
 
 impl UtxoView for StoreUtxoView<'_> {
-    fn get(&self, outpoint: &OutPoint) -> Option<TxOut> {
+    fn get(&self, outpoint: &OutPoint) -> Option<UtxoEntry> {
         let key = utxo_key_outpoint(outpoint);
         let bytes = self.store.get_cf(ColumnFamily::Utxo, &key).ok()??;
-        TxOut::try_from_slice(&bytes).ok()
+        let stored = StoredUtxo::try_from_slice(&bytes).ok()?;
+        Some(stored.into())
     }
 }
 
@@ -244,4 +280,40 @@ pub fn load_accepted_fees(
     let summary = AcceptanceSummary::try_from_slice(&bytes)
         .map_err(|e| StateError::Storage(e.to_string()))?;
     Ok(Some(Amount::from_base_units(summary.accepted_fees)))
+}
+
+/// Sum accepted UTXO values for `address` (RPC `agora_getBalance`).
+pub fn balance_of(
+    store: &StateStore,
+    address: &agora_types::Address,
+) -> Result<Amount, StateError> {
+    let mut total = Amount::ZERO;
+    store.for_each_cf(ColumnFamily::Utxo, |_key, value| {
+        if let Ok(stored) = StoredUtxo::try_from_slice(value) {
+            if stored.address == address.0 {
+                if let Some(sum) = total.checked_add(Amount::from_base_units(stored.value)) {
+                    total = sum;
+                }
+            }
+        }
+    })?;
+    Ok(total)
+}
+
+/// Load acceptance summary (fees + coinbase reward) for a block.
+pub fn load_acceptance_summary(
+    store: &StateStore,
+    block_hash: &Hash,
+) -> Result<Option<(Amount, Amount)>, StateError> {
+    let mut key = b"accept/summary/".to_vec();
+    key.extend_from_slice(block_hash.as_bytes());
+    let Some(bytes) = store.get_cf(ColumnFamily::Warm, &key)? else {
+        return Ok(None);
+    };
+    let summary = AcceptanceSummary::try_from_slice(&bytes)
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    Ok(Some((
+        Amount::from_base_units(summary.accepted_fees),
+        Amount::from_base_units(summary.coinbase_reward),
+    )))
 }

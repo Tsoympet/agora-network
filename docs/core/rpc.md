@@ -24,4 +24,7 @@ Transaction status and confirmations are **acceptance-aware**. Inclusion in a bl
 
 `apps/explorer` should consume these views (via generated `agora-types` bindings) rather than inferring finality from GHOSTDAG color.
 
-Transport (HTTP JSON-RPC / REST) is wired inside `node-bin` as the node surface expands.
+## Dispatch / transport
+
+- `dispatch(req, &mut dyn RpcBackend)` maps method names → acceptance-aware handlers.
+- `agora-node` exposes a **JSON line protocol** on `AGORA_RPC_BIND` (default `127.0.0.1:18545`): one JSON `RpcRequest` per line → one JSON response per line.
