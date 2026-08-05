@@ -328,14 +328,24 @@ fn create_outputs(
 
 /// Reverse a successful [`apply_block`] journal (best-effort atomicity for scaffolds).
 pub fn revert_journal(store: &StateStore, journal: &UtxoJournal) -> Result<(), StateError> {
+    let batch = revert_journal_batched(journal)?;
+    store.write_batch(batch)
+}
+
+/// Build an uncommitted [`WriteBatch`] that reverses `journal`.
+///
+/// Callers can fold multiple unapply/apply journals into one batch with supply and
+/// tip meta for a crash-safe multi-block reorg.
+pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, StateError> {
+    let mut batch = WriteBatch::new();
     for op in journal.created.iter().rev() {
-        store.delete_cf(ColumnFamily::Utxo, &outpoint_key(op))?;
+        batch.delete_cf(ColumnFamily::Utxo, &outpoint_key(op));
     }
     for (op, out) in journal.spent.iter().rev() {
         let bytes = borsh::to_vec(out).map_err(|e| StateError::Storage(e.to_string()))?;
-        store.put_cf(ColumnFamily::Utxo, &outpoint_key(op), &bytes)?;
+        batch.put_cf(ColumnFamily::Utxo, &outpoint_key(op), &bytes);
     }
-    Ok(())
+    Ok(batch)
 }
 
 /// Read-only UTXO checks for mempool / gossip admission (does not mutate `cf_utxo`).

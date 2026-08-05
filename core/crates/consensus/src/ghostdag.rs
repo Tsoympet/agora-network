@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use agora_types::Hash;
+use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::dag::Dag;
 use crate::ConsensusError;
@@ -28,6 +29,16 @@ pub struct GhostdagData {
     /// pure-topology tests use unit work via [`Ghostdag::add_block`].
     pub blue_work: u128,
     pub is_blue_in_tip_view: bool,
+}
+
+/// Durable coloring snapshot (selected parent, scores, blue set).
+#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct GhostdagSnapshot {
+    pub selected_parent: Option<Hash>,
+    pub blue_score: u64,
+    pub blue_work: u128,
+    /// Blue hashes in this block's view (caller should keep sorted for encoding stability).
+    pub blues: Vec<Hash>,
 }
 
 /// Block after GHOSTDAG has assigned relative order / color.
@@ -76,6 +87,41 @@ impl Ghostdag {
 
     pub fn selected_parent(&self, hash: &Hash) -> Option<Hash> {
         self.coloring.get(hash).and_then(|c| c.selected_parent)
+    }
+
+    /// Export a durable coloring snapshot for `hash` (blues sorted by hash bytes).
+    pub fn snapshot(&self, hash: &Hash) -> Option<GhostdagSnapshot> {
+        let c = self.coloring.get(hash)?;
+        let mut blues: Vec<Hash> = c.blues.iter().copied().collect();
+        blues.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+        Some(GhostdagSnapshot {
+            selected_parent: c.selected_parent,
+            blue_score: c.blue_score,
+            blue_work: c.blue_work,
+            blues,
+        })
+    }
+
+    /// Hydrate coloring from a durable snapshot without recomputing GHOSTDAG.
+    pub fn import_snapshot(&mut self, hash: Hash, snap: GhostdagSnapshot) -> GhostdagData {
+        let blues: HashSet<Hash> = snap.blues.into_iter().collect();
+        let is_blue = blues.contains(&hash);
+        let data = GhostdagData {
+            selected_parent: snap.selected_parent,
+            blue_score: snap.blue_score,
+            blue_work: snap.blue_work,
+            is_blue_in_tip_view: is_blue,
+        };
+        self.coloring.insert(
+            hash,
+            BlockColoring {
+                selected_parent: snap.selected_parent,
+                blues,
+                blue_score: snap.blue_score,
+                blue_work: snap.blue_work,
+            },
+        );
+        data
     }
 
     /// Color `block` with unit work (1 per block).

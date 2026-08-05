@@ -1,5 +1,6 @@
 [package]
 name = "agora-node"
+publish = false
 description = "Agora Network full node entrypoint"
 version.workspace = true
 edition.workspace = true

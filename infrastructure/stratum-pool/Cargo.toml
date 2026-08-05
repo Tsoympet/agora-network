@@ -1,5 +1,6 @@
 [package]
 name = "agora-stratum-pool"
+publish = false
 description = "kHeavyHash ASIC stratum pool for Agora Network"
 version.workspace = true
 edition.workspace = true

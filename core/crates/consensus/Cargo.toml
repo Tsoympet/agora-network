@@ -1,5 +1,6 @@
 [package]
 name = "agora-consensus"
+publish = false
 description = "GHOSTDAG consensus, DAA, PoW verification, and emission for Agora Network"
 version.workspace = true
 edition.workspace = true

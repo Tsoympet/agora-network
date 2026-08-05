@@ -4,6 +4,11 @@
 //! (PoS-style quorum) for payment / bridge finality. It is not an L1 UTXO asset.
 //! Districts connect to the hub via lock-mint and burn-unlock messages.
 
+// Tagged payment / path-pay APIs take hub, district, parties, amounts, tags, and
+// nonces as distinct parameters; bundling them into option-structs would obscure
+// the XRPL-style call surface without improving safety.
+#![allow(clippy::too_many_arguments)]
+
 mod attestor;
 mod bridge;
 mod district;

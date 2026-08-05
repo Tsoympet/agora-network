@@ -162,7 +162,7 @@ impl CommunityBoard {
 
     pub fn list_topics(&self, limit: usize) -> Vec<&ForumTopic> {
         let mut refs: Vec<_> = self.topics.iter().collect();
-        refs.sort_by(|a, b| b.id.cmp(&a.id));
+        refs.sort_by_key(|b| std::cmp::Reverse(b.id));
         refs.into_iter().take(limit.max(1)).collect()
     }
 }
@@ -188,12 +188,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(id, 1);
-        board.acknowledge_constitution(
-            addr(1),
-            CONSTITUTION_V1_ID,
-            constitution_v1_hash_hex(),
-            11,
-        );
+        board.acknowledge_constitution(addr(1), CONSTITUTION_V1_ID, constitution_v1_hash_hex(), 11);
         assert!(board.has_acked_current_v1(addr(1)));
         assert!(!board.has_acked_current_v1(addr(2)));
     }

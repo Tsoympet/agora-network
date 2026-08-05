@@ -115,8 +115,15 @@ impl<B: RpcBackend> RpcDispatcher<B> {
             }
             RpcMethod::GetBlockTemplate => {
                 let block = self.backend.get_block_template()?;
-                // Keep native serde shape (`Hash` as byte arrays) for miner-sidecar.
-                Ok(serde_json::to_value(block).map_err(|e| RpcError::Internal(e.to_string()))?)
+                let randomx_epoch = self.backend.randomx_epoch(&block.header.parents);
+                // Wrap the block so miners receive the blue-score–anchored RandomX epoch.
+                // Native serde shape (`Hash` as byte arrays) is preserved under `block`.
+                let block_value =
+                    serde_json::to_value(&block).map_err(|e| RpcError::Internal(e.to_string()))?;
+                Ok(json!({
+                    "block": block_value,
+                    "randomx_epoch": randomx_epoch,
+                }))
             }
             RpcMethod::SubmitBlock => {
                 let raw = block_param(&req.params)?;
@@ -456,9 +463,7 @@ fn param_string(params: &Value, key: &str) -> Result<String, RpcError> {
         .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be string")))
 }
 
-fn param_proposal_kind(
-    params: &Value,
-) -> Result<agora_governance::ProposalKind, RpcError> {
+fn param_proposal_kind(params: &Value) -> Result<agora_governance::ProposalKind, RpcError> {
     let raw = if let Some(obj) = params.as_object() {
         obj.get("kind")
             .cloned()
@@ -737,10 +742,6 @@ mod tests {
             method: "agora_listOffices".into(),
             params: json!([]),
         });
-        assert!(offices.result.unwrap()["offices"]
-            .as_array()
-            .unwrap()
-            .len()
-            >= 27);
+        assert!(offices.result.unwrap()["offices"].as_array().unwrap().len() >= 27);
     }
 }

@@ -1,5 +1,6 @@
 [package]
 name = "agora-testnet-faucet"
+publish = false
 description = "Rate-limited Agora testnet faucet service"
 version.workspace = true
 edition.workspace = true

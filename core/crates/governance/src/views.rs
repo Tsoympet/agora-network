@@ -86,6 +86,10 @@ pub fn topic_json(t: &ForumTopic) -> Value {
 }
 
 pub fn list_topics_json(board: &CommunityBoard, limit: usize) -> Value {
-    let topics: Vec<Value> = board.list_topics(limit).into_iter().map(topic_json).collect();
+    let topics: Vec<Value> = board
+        .list_topics(limit)
+        .into_iter()
+        .map(topic_json)
+        .collect();
     json!({ "count": topics.len(), "topics": topics })
 }

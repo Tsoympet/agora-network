@@ -58,6 +58,11 @@ impl WriteBatch {
         self.ops.push(WriteOp::Delete(cf, key.to_vec()));
     }
 
+    /// Append all ops from `other` after this batch's ops (preserves order).
+    pub fn append(&mut self, mut other: WriteBatch) {
+        self.ops.append(&mut other.ops);
+    }
+
     pub fn len(&self) -> usize {
         self.ops.len()
     }
@@ -165,11 +170,7 @@ impl StateStore {
     }
 
     /// Scan keys in `cf` that start with `prefix` (inclusive).
-    pub fn scan_prefix(
-        &self,
-        cf: ColumnFamily,
-        prefix: &[u8],
-    ) -> Result<Vec<KvPair>, StateError> {
+    pub fn scan_prefix(&self, cf: ColumnFamily, prefix: &[u8]) -> Result<Vec<KvPair>, StateError> {
         match &self.inner {
             Inner::Memory(map) => {
                 let guard = map

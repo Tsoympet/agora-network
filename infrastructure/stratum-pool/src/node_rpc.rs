@@ -9,7 +9,12 @@ pub async fn fetch_block_template(rpc_url: &str) -> Result<Block, String> {
     let value = resp
         .result
         .ok_or_else(|| format!("template error: {:?}", resp.error))?;
-    serde_json::from_value(value).map_err(|e| e.to_string())
+    // Prefer `{ block, randomx_epoch }` wrapper; fall back to a bare Block for older nodes.
+    if let Some(block) = value.get("block") {
+        serde_json::from_value(block.clone()).map_err(|e| e.to_string())
+    } else {
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
 }
 
 pub async fn submit_block(rpc_url: &str, block: &Block) -> Result<Hash, String> {

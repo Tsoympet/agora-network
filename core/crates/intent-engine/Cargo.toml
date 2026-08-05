@@ -1,5 +1,6 @@
 [package]
 name = "agora-intent-engine"
+publish = false
 description = "Intent-Engine for AI-driven asset orchestration (L4)"
 version.workspace = true
 edition.workspace = true

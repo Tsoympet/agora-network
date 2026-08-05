@@ -1,5 +1,6 @@
 [package]
 name = "agora-layers-runtime"
+publish = false
 description = "Composable L2/L3/L4 runtime (Ovolos + Bridge + Intents)"
 version.workspace = true
 edition.workspace = true
