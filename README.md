@@ -184,6 +184,8 @@ Full workspace map: [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md)
 | --- | --- |
 | [Public testnet ops](docs/ops/PUBLIC_TESTNET.md) | Docker, seeds, PoW policy, TLS |
 | [Path to complete chain](docs/governance/PATH_TO_COMPLETE_CHAIN.md) | What’s done vs mainnet gates |
+| [Constitution](docs/governance/CONSTITUTION.md) | Civic higher law, ranks, voting chambers |
+| [Civic model](docs/governance/CIVIC_MODEL.md) | On-chain governance overview |
 | [Genesis](docs/genesis/README.md) | Frozen testnet / mainnet draft |
 | [RPC](docs/core/rpc.md) · [OpenAPI](docs/core/openapi.yaml) | JSON-RPC surface |
 | [P2P](docs/core/p2p.md) · [Consensus](docs/core/consensus.md) | Protocol notes |

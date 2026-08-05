@@ -69,6 +69,7 @@ See [`docs/scaling/TOKEN_ROLES.md`](../scaling/TOKEN_ROLES.md).
 | B9 | DRC tags / path deliverMin / intent finality | **done** |
 | B10 | Signed RLP Ethereum txs on OVL | **done** (legacy + EIP-155) |
 | B11 | Durable L2/L3 checkpoints | **done** (`AGORA_LAYERS_DATA`) |
+| B12 | Civic constitution + ranks + chambers + proposal engine | **done** (crate + docs; node RPC wiring follow-up) |
 
 ### C — Mainnet freeze (needs humans)
 
@@ -87,6 +88,7 @@ Node already refuses `AGORA_NETWORK=mainnet` until genesis is frozen.
 - Full Ethereum MPT state roots (SHA-256 account+storage digests today)
 - EIP-2718 typed txs beyond legacy (1559 / access-list) on OVL
 - XRPL trust lines / issued currencies / DEX order books (native DRC only)
+- Governance JSON-RPC + RocksDB persistence + explorer ballot UI (engine + constitution are in-tree)
 - Non-mint faucet via separate cold treasury ops runbook polish
 
 ## What you must decide / do outside the repo
