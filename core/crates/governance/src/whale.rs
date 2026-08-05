@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::GovernanceError;
 
 /// Hard cap on a single voter's countable balance before quadratic transform.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WhaleCapConfig {
     /// Maximum share of total supply countable toward votes, in basis points.
     /// Default: 500 = 5%.

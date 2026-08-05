@@ -4,6 +4,7 @@
 
 mod admit;
 mod backend;
+mod civic;
 mod genesis_cli;
 mod http;
 mod storage_policy;

@@ -171,6 +171,7 @@ version = "0.1.0"
 dependencies = [
  "agora-consensus",
  "agora-crypto",
+ "agora-governance",
  "agora-p2p",
  "agora-rpc",
  "agora-state-machine",
@@ -221,6 +222,7 @@ dependencies = [
 name = "agora-rpc"
 version = "0.1.0"
 dependencies = [
+ "agora-governance",
  "agora-types",
  "serde",
  "serde_json",

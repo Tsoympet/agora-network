@@ -5,6 +5,13 @@ export {
   type LightBlock,
   type LightClient,
   type LightClientConfig,
+  type LightConstitution,
+  type LightForumTopic,
+  type LightGovernance,
+  type LightOffice,
+  type LightProposal,
+  type LightProposalList,
+  type LightProposalTally,
   type LightTx,
   type LightTxIn,
   type LightMempool,
@@ -17,6 +24,7 @@ export {
   type LightUtxoSet,
   type RpcStatus,
   type SubmitTxResult,
+  type VoteChoice,
 } from "./rpc";
 export {
   shortHash,

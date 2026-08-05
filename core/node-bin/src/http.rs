@@ -155,6 +155,12 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getMempool"
             | "agora_getNodeInfo"
             | "agora_estimateFee"
+            | "agora_getConstitution"
+            | "agora_getGovernance"
+            | "agora_listProposals"
+            | "agora_getProposal"
+            | "agora_listOffices"
+            | "agora_listForumTopics"
     )
 }
 
@@ -304,12 +310,17 @@ mod tests {
         assert!(!method_requires_token("agora_getMempool"));
         assert!(!method_requires_token("agora_getNodeInfo"));
         assert!(!method_requires_token("agora_estimateFee"));
+        assert!(!method_requires_token("agora_getConstitution"));
+        assert!(!method_requires_token("agora_listProposals"));
+        assert!(!method_requires_token("agora_listOffices"));
         assert!(method_requires_token("agora_submitTransaction"));
         assert!(method_requires_token("agora_submitBlock"));
         assert!(method_requires_token("agora_getBlockTemplate"));
         assert!(method_requires_token("agora_fundAddress"));
         assert!(method_requires_token("agora_getBalance"));
         assert!(method_requires_token("agora_getUtxos"));
+        assert!(method_requires_token("agora_castGovVote"));
+        assert!(method_requires_token("agora_submitProposal"));
     }
 
     #[test]

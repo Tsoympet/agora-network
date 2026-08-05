@@ -1,6 +1,7 @@
 //! Versioned Agora Constitution (higher law).
 
 use sha2::{Digest, Sha256};
+use serde::{Deserialize, Serialize};
 
 /// In-protocol constitution identifier for v1.
 pub const CONSTITUTION_V1_ID: &str = "constitution-v1";
@@ -56,11 +57,37 @@ pub fn hash_constitution_body(body: &str) -> [u8; 32] {
     Sha256::digest(body.as_bytes()).into()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnactedConstitution {
     pub id: String,
     pub body_markdown: String,
+    #[serde(with = "hash32_hex")]
     pub content_hash: [u8; 32],
+}
+
+mod hash32_hex {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(bytes: &[u8; 32], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&hex::encode(bytes))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 32], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let raw = hex::decode(&s).map_err(serde::de::Error::custom)?;
+        if raw.len() != 32 {
+            return Err(serde::de::Error::custom("content_hash must be 32 bytes"));
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&raw);
+        Ok(out)
+    }
 }
 
 impl EnactedConstitution {

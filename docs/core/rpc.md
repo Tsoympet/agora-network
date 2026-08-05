@@ -18,6 +18,20 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
 | `agora_getBlockTemplate` | Mining template block (tips as parents + coinbase) |
 | `agora_submitBlock` | Admit a mined block (PoW verify + store + gossip) |
+| `agora_getConstitution` | Enacted constitution id, content hash, body |
+| `agora_getGovernance` | Civic overview (params, offices, counts) |
+| `agora_listProposals` / `agora_getProposal` | Proposal ballot board |
+| `agora_listOffices` | Archon / Bouleutes / Tamias seats |
+| `agora_listForumTopics` | Community board topics |
+| `agora_submitProposal` | Open a proposal (deposit phase) |
+| `agora_depositProposal` | Add deposit toward `min_deposit` |
+| `agora_openProposalVoting` | Move deposit → voting |
+| `agora_castGovVote` | Cast Yes/No/Abstain/NoWithVeto (quadratic in Ecclesia) |
+| `agora_tallyProposal` / `agora_enterProposalTimelock` / `agora_executeProposal` | Lifecycle |
+| `agora_sponsorProposal` / `agora_assentProposal` | Tamias sponsor / Archon assent |
+| `agora_postForumTopic` / `agora_ackConstitution` | Community board + constitution ack |
+
+Civic state is persisted under RocksDB Meta key `meta/governance` (`CivicSnapshot`).
 
 ## Dispatch
 
@@ -61,7 +75,10 @@ When unset, JSON-RPC stays open (safe with the default loopback bind). When set:
 | --- | --- |
 | `GET /health` | `agora_submitTransaction` / `agora_submitBlock` |
 | `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` | `agora_getBlockTemplate` / `agora_fundAddress` |
-| `agora_getMempool` / `agora_getNodeInfo` | `agora_getBalance` / `agora_getUtxos` |
+| `agora_getMempool` / `agora_getNodeInfo` / `agora_estimateFee` | `agora_getBalance` / `agora_getUtxos` |
+| `agora_getConstitution` / `agora_getGovernance` | `agora_submitProposal` / `agora_castGovVote` / … |
+| `agora_listProposals` / `agora_getProposal` / `agora_listOffices` | `agora_depositProposal` / tally / execute / forum post |
+| `agora_listForumTopics` | `agora_ackConstitution` / sponsor / assent |
 
 Clients (`agora-miner-sidecar`, stratum, faucet) forward `AGORA_RPC_TOKEN` as `Authorization: Bearer …`. Light clients accept optional `rpcToken` in `createLightClient`. Unauthorized calls return HTTP **401** with JSON-RPC error code `-32001`.
 

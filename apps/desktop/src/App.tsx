@@ -24,6 +24,7 @@ import {
   type LightUtxo,
   type TipSyncSnapshot,
 } from "../../shared/light-client";
+import { GovernancePanel } from "./components/GovernancePanel";
 
 const vaultStorage = localStorageVault();
 
@@ -32,6 +33,11 @@ function resolveRpcUrl(): string {
     (import.meta.env.VITE_AGORA_RPC_URL as string | undefined) ||
     "http://127.0.0.1:8545/rpc"
   );
+}
+
+function resolveRpcToken(): string | undefined {
+  const t = (import.meta.env.VITE_AGORA_RPC_TOKEN as string | undefined)?.trim();
+  return t || undefined;
 }
 
 const pollMs = Number(import.meta.env.VITE_AGORA_POLL_MS) || 2000;
@@ -47,7 +53,11 @@ async function copyText(text: string): Promise<boolean> {
 
 export function App() {
   const client = useMemo(
-    () => createLightClient({ rpcUrl: resolveRpcUrl() }),
+    () =>
+      createLightClient({
+        rpcUrl: resolveRpcUrl(),
+        rpcToken: resolveRpcToken(),
+      }),
     [],
   );
   const [snap, setSnap] = useState<TipSyncSnapshot>({
@@ -807,6 +817,12 @@ export function App() {
           </p>
         ) : null}
       </section>
+
+      <GovernancePanel
+        client={client}
+        voterAddress={receiveBech32 || (address ? address : null)}
+        balance={balance}
+      />
     </main>
   );
 }

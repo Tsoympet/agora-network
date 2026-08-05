@@ -125,6 +125,87 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let id = self.backend.submit_block(block)?;
                 Ok(json!({ "block_id": id.to_hex() }))
             }
+            RpcMethod::GetConstitution => self.backend.get_constitution(),
+            RpcMethod::GetGovernance => self.backend.get_governance(),
+            RpcMethod::ListProposals => {
+                let limit = optional_limit(&req.params, 64)?;
+                self.backend.list_proposals(limit)
+            }
+            RpcMethod::GetProposal => {
+                let id = param_u64(&req.params, "id")?;
+                self.backend.get_proposal(id)
+            }
+            RpcMethod::ListOffices => self.backend.list_offices(),
+            RpcMethod::ListForumTopics => {
+                let limit = optional_limit(&req.params, 64)?;
+                self.backend.list_forum_topics(limit)
+            }
+            RpcMethod::SubmitProposal => {
+                let author = param_address(&req.params, "author")?;
+                let title = param_string(&req.params, "title")?;
+                let summary = param_string(&req.params, "summary")?;
+                let kind = param_proposal_kind(&req.params)?;
+                let slot = optional_u64(&req.params, "slot", 0)?;
+                self.backend
+                    .submit_proposal(author, title, summary, kind, slot)
+            }
+            RpcMethod::DepositProposal => {
+                let id = param_u64(&req.params, "id")?;
+                let amount = param_u64(&req.params, "amount")?;
+                self.backend.deposit_proposal(id, amount)
+            }
+            RpcMethod::OpenProposalVoting => {
+                let id = param_u64(&req.params, "id")?;
+                let slot = optional_u64(&req.params, "slot", 0)?;
+                self.backend.open_proposal_voting(id, slot)
+            }
+            RpcMethod::CastGovVote => {
+                let id = param_u64(&req.params, "id")?;
+                let voter = param_address(&req.params, "voter")?;
+                let choice = param_vote_choice(&req.params)?;
+                let raw_balance = optional_u64(&req.params, "raw_balance", 0)?;
+                let total_supply = optional_u64(&req.params, "total_supply", 1)?;
+                self.backend
+                    .cast_gov_vote(id, voter, choice, raw_balance, total_supply)
+            }
+            RpcMethod::TallyProposal => {
+                let id = param_u64(&req.params, "id")?;
+                self.backend.tally_proposal(id)
+            }
+            RpcMethod::EnterProposalTimelock => {
+                let id = param_u64(&req.params, "id")?;
+                let slot = optional_u64(&req.params, "slot", 0)?;
+                self.backend.enter_proposal_timelock(id, slot)
+            }
+            RpcMethod::ExecuteProposal => {
+                let id = param_u64(&req.params, "id")?;
+                let slot = optional_u64(&req.params, "slot", 0)?;
+                self.backend.execute_proposal(id, slot)
+            }
+            RpcMethod::PostForumTopic => {
+                let author = param_address(&req.params, "author")?;
+                let title = param_string(&req.params, "title")?;
+                let body = param_string(&req.params, "body")?;
+                let category = param_topic_category(&req.params)?;
+                let slot = optional_u64(&req.params, "slot", 0)?;
+                self.backend
+                    .post_forum_topic(author, title, body, category, slot)
+            }
+            RpcMethod::AckConstitution => {
+                let address = param_address(&req.params, "address")?;
+                let slot = optional_u64(&req.params, "slot", 0)?;
+                self.backend.ack_constitution(address, slot)
+            }
+            RpcMethod::SponsorProposal => {
+                let id = param_u64(&req.params, "id")?;
+                let who = param_address(&req.params, "who")?;
+                self.backend.sponsor_proposal(id, who)
+            }
+            RpcMethod::AssentProposal => {
+                let id = param_u64(&req.params, "id")?;
+                let who = param_address(&req.params, "who")?;
+                self.backend.assent_proposal(id, who)
+            }
         }
     }
 }
@@ -336,6 +417,80 @@ fn param_amount(params: &Value, key: &str) -> Result<Amount, RpcError> {
     Ok(Amount::from_base_units(units))
 }
 
+fn param_u64(params: &Value, key: &str) -> Result<u64, RpcError> {
+    let v = if let Some(obj) = params.as_object() {
+        obj.get(key)
+            .cloned()
+            .ok_or_else(|| RpcError::InvalidParams(format!("missing `{key}`")))?
+    } else {
+        single_or_named(params, key)?
+    };
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be u64")))
+}
+
+fn optional_u64(params: &Value, key: &str, default: u64) -> Result<u64, RpcError> {
+    let Some(obj) = params.as_object() else {
+        return Ok(default);
+    };
+    match obj.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(v) => v
+            .as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be u64"))),
+    }
+}
+
+fn param_string(params: &Value, key: &str) -> Result<String, RpcError> {
+    let v = if let Some(obj) = params.as_object() {
+        obj.get(key)
+            .cloned()
+            .ok_or_else(|| RpcError::InvalidParams(format!("missing `{key}`")))?
+    } else {
+        return Err(RpcError::InvalidParams(format!("missing `{key}`")));
+    };
+    v.as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be string")))
+}
+
+fn param_proposal_kind(
+    params: &Value,
+) -> Result<agora_governance::ProposalKind, RpcError> {
+    let raw = if let Some(obj) = params.as_object() {
+        obj.get("kind")
+            .cloned()
+            .ok_or_else(|| RpcError::InvalidParams("missing `kind`".into()))?
+    } else {
+        return Err(RpcError::InvalidParams("missing `kind`".into()));
+    };
+    serde_json::from_value(raw).map_err(|e| RpcError::InvalidParams(format!("kind: {e}")))
+}
+
+fn param_vote_choice(params: &Value) -> Result<agora_governance::VoteChoice, RpcError> {
+    let raw = if let Some(obj) = params.as_object() {
+        obj.get("choice")
+            .cloned()
+            .ok_or_else(|| RpcError::InvalidParams("missing `choice`".into()))?
+    } else {
+        return Err(RpcError::InvalidParams("missing `choice`".into()));
+    };
+    serde_json::from_value(raw).map_err(|e| RpcError::InvalidParams(format!("choice: {e}")))
+}
+
+fn param_topic_category(params: &Value) -> Result<agora_governance::TopicCategory, RpcError> {
+    let raw = if let Some(obj) = params.as_object() {
+        obj.get("category")
+            .cloned()
+            .unwrap_or_else(|| json!("discussion"))
+    } else {
+        json!("discussion")
+    };
+    serde_json::from_value(raw).map_err(|e| RpcError::InvalidParams(format!("category: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,5 +662,85 @@ mod tests {
         assert!(result["header"]["parents"].as_array().unwrap().is_empty());
         assert_eq!(result["tx_count"], json!(0));
         assert!(result["transactions"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn civic_constitution_and_text_proposal() {
+        let mut rpc = RpcDispatcher::new(InMemoryBackend::new());
+        let constitution = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getConstitution".into(),
+            params: json!([]),
+        });
+        let c = constitution.result.unwrap();
+        assert_eq!(c["id"], json!("constitution-v1"));
+        assert!(c["content_hash"].as_str().unwrap().len() == 64);
+
+        let author = Address::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let submitted = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_submitProposal".into(),
+            params: json!({
+                "author": author.to_bech32(),
+                "title": "Signal",
+                "summary": "hello ecclesia",
+                "kind": { "type": "text_signal" },
+                "slot": 1u64,
+            }),
+        });
+        let pid = submitted.result.unwrap()["proposal_id"].as_u64().unwrap();
+        assert_eq!(pid, 1);
+
+        let min_deposit = rpc
+            .handle(RpcRequest {
+                id: Some(json!(3)),
+                method: "agora_getGovernance".into(),
+                params: json!([]),
+            })
+            .result
+            .unwrap()["params"]["min_deposit"]
+            .as_u64()
+            .unwrap();
+        rpc.handle(RpcRequest {
+            id: Some(json!(4)),
+            method: "agora_depositProposal".into(),
+            params: json!({ "id": pid, "amount": min_deposit }),
+        });
+        rpc.handle(RpcRequest {
+            id: Some(json!(5)),
+            method: "agora_openProposalVoting".into(),
+            params: json!({ "id": pid, "slot": 2u64 }),
+        });
+        let voter = Address::from_hex("11223344556677889900aabbccddeeff00112233").unwrap();
+        let voted = rpc.handle(RpcRequest {
+            id: Some(json!(6)),
+            method: "agora_castGovVote".into(),
+            params: json!({
+                "id": pid,
+                "voter": voter.to_bech32(),
+                "choice": "yes",
+                "raw_balance": 10_000u64,
+                "total_supply": 10_000u64,
+            }),
+        });
+        assert_eq!(voted.result.unwrap()["voted"], json!(true));
+
+        let listed = rpc.handle(RpcRequest {
+            id: Some(json!(7)),
+            method: "agora_listProposals".into(),
+            params: json!({ "limit": 8 }),
+        });
+        assert_eq!(listed.result.unwrap()["count"], json!(1));
+
+        let offices = rpc.handle(RpcRequest {
+            id: Some(json!(8)),
+            method: "agora_listOffices".into(),
+            params: json!([]),
+        });
+        assert!(offices.result.unwrap()["offices"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 27);
     }
 }
