@@ -8,17 +8,23 @@ use crate::P2pError;
 
 /// Local mempool with fingerprint-bound signature admission and
 /// acceptance-driven eviction.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Mempool {
     txs: HashMap<Hash, Transaction>,
     max_size: usize,
+}
+
+impl Default for Mempool {
+    fn default() -> Self {
+        Self::new(10_000)
+    }
 }
 
 impl Mempool {
     pub fn new(max_size: usize) -> Self {
         Self {
             txs: HashMap::new(),
-            max_size,
+            max_size: max_size.max(1),
         }
     }
 

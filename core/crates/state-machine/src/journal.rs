@@ -23,18 +23,17 @@ pub struct AcceptedTxRecord {
     pub accepted: bool,
 }
 
-/// Apply a full acceptance result: UTXO journal + bitmaps + tx index, atomically.
-pub fn commit_acceptance(
-    store: &StateStore,
-    result: &AcceptanceResult,
-) -> Result<(), StateError> {
+/// Build store ops for a full acceptance result (bitmaps + accepted-tx index + UTXO journal).
+///
+/// Only **accepted** txs are indexed under `accept/tx/<txid>` so a later duplicate/reject
+/// cannot clobber a prior Accepted confirmation record.
+pub fn acceptance_store_ops(result: &AcceptanceResult) -> Result<Vec<StoreOp>, StateError> {
     let mut ops = Vec::new();
 
     for block in &result.blocks {
         append_block_acceptance_ops(&mut ops, block)?;
     }
 
-    // Apply UTXO journal ops (spends/creates) from the acceptance run.
     for journal_op in &result.journal {
         match journal_op {
             UtxoJournalOp::Spend { outpoint } => {
@@ -44,8 +43,8 @@ pub fn commit_acceptance(
                 });
             }
             UtxoJournalOp::Create { outpoint, output } => {
-                let value = borsh::to_vec(output)
-                    .map_err(|e| StateError::Storage(e.to_string()))?;
+                let value =
+                    borsh::to_vec(output).map_err(|e| StateError::Storage(e.to_string()))?;
                 ops.push(StoreOp::Put {
                     cf: ColumnFamily::Utxo,
                     key: utxo_key_outpoint(outpoint),
@@ -55,15 +54,20 @@ pub fn commit_acceptance(
         }
     }
 
-    store.write_batch(ops)
+    Ok(ops)
+}
+
+/// Apply a full acceptance result: UTXO journal + bitmaps + tx index, atomically.
+pub fn commit_acceptance(store: &StateStore, result: &AcceptanceResult) -> Result<(), StateError> {
+    store.write_batch(acceptance_store_ops(result)?)
 }
 
 fn append_block_acceptance_ops(
     ops: &mut Vec<StoreOp>,
     block: &BlockAcceptance,
 ) -> Result<(), StateError> {
-    let bitmap_bytes = borsh::to_vec(&block.bitmap)
-        .map_err(|e| StateError::Storage(e.to_string()))?;
+    let bitmap_bytes =
+        borsh::to_vec(&block.bitmap).map_err(|e| StateError::Storage(e.to_string()))?;
     ops.push(StoreOp::Put {
         cf: ColumnFamily::Warm,
         key: acceptance_keys::bitmap(&block.block_hash),
@@ -77,8 +81,7 @@ fn append_block_acceptance_ops(
         coinbase_reward: block.coinbase_reward.as_base_units(),
         blue_score: block.blue_score,
     };
-    let summary_bytes =
-        borsh::to_vec(&summary).map_err(|e| StateError::Storage(e.to_string()))?;
+    let summary_bytes = borsh::to_vec(&summary).map_err(|e| StateError::Storage(e.to_string()))?;
     let mut summary_key = b"accept/summary/".to_vec();
     summary_key.extend_from_slice(block.block_hash.as_bytes());
     ops.push(StoreOp::Put {
@@ -88,11 +91,16 @@ fn append_block_acceptance_ops(
     });
 
     for outcome in &block.outcomes {
+        if !outcome.accepted {
+            // Never index rejects under tx_id — a DuplicateExact reject would
+            // otherwise overwrite a prior Accepted confirmation.
+            continue;
+        }
         let record = AcceptedTxRecord {
             block_hash: block.block_hash,
             blue_score: block.blue_score,
             index: outcome.index,
-            accepted: outcome.accepted,
+            accepted: true,
         };
         let value = borsh::to_vec(&record).map_err(|e| StateError::Storage(e.to_string()))?;
         ops.push(StoreOp::Put {
@@ -122,8 +130,8 @@ pub fn load_acceptance_bitmap(
     else {
         return Ok(None);
     };
-    let bitmap = AcceptanceBitmap::try_from_slice(&bytes)
-        .map_err(|e| StateError::Storage(e.to_string()))?;
+    let bitmap =
+        AcceptanceBitmap::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))?;
     Ok(Some(bitmap))
 }
 
@@ -136,8 +144,8 @@ pub fn tx_confirmation(
     let Some(bytes) = store.get_cf(ColumnFamily::Warm, &acceptance_keys::tx_index(tx_id))? else {
         return Ok(TxConfirmation::pending());
     };
-    let record = AcceptedTxRecord::try_from_slice(&bytes)
-        .map_err(|e| StateError::Storage(e.to_string()))?;
+    let record =
+        AcceptedTxRecord::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))?;
     if record.accepted {
         Ok(TxConfirmation::accepted(
             record.block_hash,
@@ -216,12 +224,18 @@ pub fn is_tx_accepted_in_block(
 }
 
 /// Status enum convenience for RPC serialization.
-pub fn acceptance_status(store: &StateStore, tx_id: &Hash) -> Result<TxAcceptanceStatus, StateError> {
+pub fn acceptance_status(
+    store: &StateStore,
+    tx_id: &Hash,
+) -> Result<TxAcceptanceStatus, StateError> {
     Ok(tx_confirmation(store, tx_id, 0)?.status)
 }
 
 /// Read accepted fees committed for a block (None if not committed).
-pub fn load_accepted_fees(store: &StateStore, block_hash: &Hash) -> Result<Option<Amount>, StateError> {
+pub fn load_accepted_fees(
+    store: &StateStore,
+    block_hash: &Hash,
+) -> Result<Option<Amount>, StateError> {
     let mut key = b"accept/summary/".to_vec();
     key.extend_from_slice(block_hash.as_bytes());
     let Some(bytes) = store.get_cf(ColumnFamily::Warm, &key)? else {

@@ -16,6 +16,9 @@ use crate::messages::NetworkMessage;
 use crate::topics::{blocks_topic, transactions_topic};
 use crate::{NetworkConfig, P2pError};
 
+/// Hard cap on gossip payloads before borsh decode (DoS guard).
+pub const MAX_GOSSIP_MESSAGE_BYTES: usize = 1 << 20; // 1 MiB
+
 #[derive(NetworkBehaviour)]
 pub struct AgoraBehaviour {
     pub gossipsub: gossipsub::Behaviour,
@@ -94,6 +97,7 @@ impl NetworkNode {
         let gossipsub_config = gossipsub::ConfigBuilder::default()
             .heartbeat_interval(Duration::from_millis(500))
             .validation_mode(ValidationMode::Strict)
+            .max_transmit_size(MAX_GOSSIP_MESSAGE_BYTES)
             .message_id_fn(message_id_fn)
             .build()
             .map_err(|e| P2pError::Gossip(e.to_string()))?;
@@ -230,18 +234,44 @@ impl NetworkNode {
                                 message,
                                 ..
                             },
-                        )) => match NetworkMessage::decode(&message.data) {
-                            Ok(decoded) => {
-                                let topic = message.topic.to_string();
-                                debug!(peer = %propagation_source, %topic, "gossip message");
-                                let _ = self.event_tx.send(NetworkEvent::Message {
-                                    peer: propagation_source,
-                                    topic,
-                                    message: decoded,
-                                });
+                        )) => {
+                            if message.data.len() > MAX_GOSSIP_MESSAGE_BYTES {
+                                warn!(
+                                    peer = %propagation_source,
+                                    len = message.data.len(),
+                                    "dropping oversized gossip payload"
+                                );
+                                continue;
                             }
-                            Err(err) => warn!(error = %err, "failed to decode gossip payload"),
-                        },
+                            match NetworkMessage::decode(&message.data) {
+                                Ok(decoded) => {
+                                    let topic = message.topic.to_string();
+                                    // Topic/type sanity: reject obvious mismatches early.
+                                    let topic_ok = match &decoded {
+                                        NetworkMessage::Transaction(_) => {
+                                            topic.contains("/txs/")
+                                        }
+                                        NetworkMessage::Block(_)
+                                        | NetworkMessage::BlockAnnounce { .. } => {
+                                            topic.contains("/blocks/")
+                                        }
+                                    };
+                                    if !topic_ok {
+                                        warn!(peer = %propagation_source, %topic, "topic/type mismatch");
+                                        continue;
+                                    }
+                                    debug!(peer = %propagation_source, %topic, "gossip message");
+                                    let _ = self.event_tx.send(NetworkEvent::Message {
+                                        peer: propagation_source,
+                                        topic,
+                                        message: decoded,
+                                    });
+                                }
+                                Err(err) => {
+                                    warn!(error = %err, "failed to decode gossip payload")
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }

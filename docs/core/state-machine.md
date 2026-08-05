@@ -20,11 +20,9 @@ Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
 
 ## Genesis
 
-`GenesisBuilder` constructs Block 0 (premine coinbase), then `ignite`:
-
-1. Writes block + supply caps + tips + fingerprint
-2. Runs `accept_blue_blocks` on genesis
-3. `commit_acceptance` atomically persists the acceptance bitmap and UTXO journal
+`GenesisBuilder` constructs Block 0 (premine coinbase), then `ignite` computes acceptance
+against an empty in-memory UTXO view and commits **block + caps + tips + fingerprint +
+acceptance bitmap + premine UTXO in a single `write_batch`** (crash-safe; no half-bound datadir).
 
 Default caps: max supply 100,000,000 AGORA; premine 10,000,000 AGORA.
 

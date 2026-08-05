@@ -9,16 +9,10 @@ pub const TOPIC_TRANSACTIONS: &str = "agora/txs/1";
 
 /// Blocks gossip topic for a specific network fingerprint.
 pub fn blocks_topic(fingerprint: &NetworkFingerprint) -> IdentTopic {
-    IdentTopic::new(format!(
-        "agora/{}/blocks/1",
-        fingerprint.digest_hex()
-    ))
+    IdentTopic::new(format!("agora/{}/blocks/1", fingerprint.digest_hex()))
 }
 
 /// Transactions gossip topic for a specific network fingerprint.
 pub fn transactions_topic(fingerprint: &NetworkFingerprint) -> IdentTopic {
-    IdentTopic::new(format!(
-        "agora/{}/txs/1",
-        fingerprint.digest_hex()
-    ))
+    IdentTopic::new(format!("agora/{}/txs/1", fingerprint.digest_hex()))
 }

@@ -6,8 +6,20 @@ use crate::{Amount, Hash, NetworkFingerprint};
 
 /// Bech32-ready raw payload for a secp256k1-derived address (20-byte hash of pubkey).
 #[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    Default,
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
+    TS,
 )]
 #[ts(export)]
 pub struct Address(pub [u8; 20]);
@@ -22,8 +34,20 @@ impl Address {
 
 /// Reference to a previous transaction output spent by an input.
 #[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    Default,
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
+    TS,
 )]
 #[ts(export)]
 pub struct OutPoint {
@@ -33,8 +57,7 @@ pub struct OutPoint {
 
 /// Single transaction input.
 #[derive(
-    Clone, PartialEq, Eq, Debug,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct TxIn {
@@ -43,8 +66,7 @@ pub struct TxIn {
 
 /// Single transaction output.
 #[derive(
-    Clone, PartialEq, Eq, Debug,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct TxOut {
@@ -63,8 +85,7 @@ pub struct TransactionBody {
 
 /// Transfer transaction used across consensus, mempool, and RPC.
 #[derive(
-    Clone, PartialEq, Eq, Debug,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct Transaction {
@@ -93,8 +114,8 @@ impl Transaction {
     /// Prefixed with the network fingerprint digest so signatures cannot be
     /// replayed across networks that share transaction bodies.
     pub fn signing_bytes(&self, fingerprint: &NetworkFingerprint) -> Vec<u8> {
-        let body = borsh::to_vec(&self.body())
-            .expect("borsh serialize is infallible for TransactionBody");
+        let body =
+            borsh::to_vec(&self.body()).expect("borsh serialize is infallible for TransactionBody");
         let mut out = Vec::with_capacity(32 + body.len());
         out.extend_from_slice(fingerprint.digest().as_bytes());
         out.extend_from_slice(&body);

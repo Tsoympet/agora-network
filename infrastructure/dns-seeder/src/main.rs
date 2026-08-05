@@ -4,6 +4,9 @@
 //! - `GET /peers` — JSON array of multiaddrs
 //! - `POST /peers` — body is a single multiaddr string to register
 //! - `GET /health` — liveness
+//!
+//! Default bind is localhost. Open `POST` is intentionally limited (size, prefix,
+//! capacity) but is **not** authenticated — do not expose publicly without a proxy.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -12,6 +15,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
+
+/// Cap registered peers to bound seeder memory (open POST remains localhost-default).
+const MAX_SEEDER_PEERS: usize = 10_000;
+/// Reject absurd registration bodies before parsing.
+const MAX_POST_BODY_BYTES: usize = 512;
 
 #[tokio::main]
 async fn main() {
@@ -74,14 +82,28 @@ async fn handle_request(req: &str, peers: &Arc<Mutex<HashSet<String>>>) -> Strin
             if body.is_empty() {
                 return http_response(400, "empty body");
             }
+            if body.len() > MAX_POST_BODY_BYTES {
+                return http_response(413, "body too large");
+            }
             // Accept raw multiaddr or JSON string.
-            let peer = if let Ok(serde_json::Value::String(s)) = serde_json::from_str::<serde_json::Value>(body)
+            let peer = if let Ok(serde_json::Value::String(s)) =
+                serde_json::from_str::<serde_json::Value>(body)
             {
                 s
             } else {
                 body.trim_matches('"').to_string()
             };
-            peers.lock().await.insert(peer);
+            if !peer.starts_with("/ip4/")
+                && !peer.starts_with("/ip6/")
+                && !peer.starts_with("/dns")
+            {
+                return http_response(400, "invalid multiaddr");
+            }
+            let mut guard = peers.lock().await;
+            if guard.len() >= MAX_SEEDER_PEERS && !guard.contains(&peer) {
+                return http_response(507, "peer capacity reached");
+            }
+            guard.insert(peer);
             http_response(200, "registered")
         }
         _ => http_response(404, "not found"),
@@ -93,6 +115,8 @@ fn http_response(status: u16, body: &str) -> String {
         200 => "OK",
         400 => "Bad Request",
         404 => "Not Found",
+        413 => "Payload Too Large",
+        507 => "Insufficient Storage",
         _ => "Error",
     };
     format!(

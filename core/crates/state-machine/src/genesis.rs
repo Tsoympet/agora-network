@@ -1,12 +1,14 @@
 use agora_consensus::{
-    accept_blue_blocks, BlueBlockInput, EmissionSchedule, GhostdagConfig, OrderedBlock,
+    accept_blue_blocks, BlueBlockInput, EmissionSchedule, GhostdagConfig, MemoryUtxoView,
+    OrderedBlock,
 };
 use agora_types::{
     Address, Amount, Block, BlockHeader, Hash, NetworkFingerprint, Transaction, TxOut,
 };
 
 use crate::columns::{meta_keys, ColumnFamily};
-use crate::journal::{commit_acceptance, write_network_fingerprint, StoreUtxoView};
+use crate::journal::acceptance_store_ops;
+use crate::store::StoreOp;
 use crate::{StateError, StateStore};
 
 /// Fixed monetary parameters written at genesis and never mutated ad hoc.
@@ -107,15 +109,14 @@ impl GenesisBuilder {
         }
     }
 
-    /// Persist genesis block, supply caps, network fingerprint, and acceptance state.
+    /// Persist genesis block, supply caps, network fingerprint, and acceptance state
+    /// in a **single atomic write batch**.
     ///
-    /// Genesis coinbase acceptance is committed atomically with the UTXO journal so
-    /// RPC / explorer never treat premine as “blue but unaccepted.”
+    /// Crash safety: either the datadir is fully bound (fingerprint + premine UTXO +
+    /// acceptance bitmap) or it is unchanged — never half-initialized.
     pub fn ignite(&self, store: &StateStore) -> Result<(Hash, NetworkFingerprint), StateError> {
         if self.supply.premine.as_base_units() > self.supply.max_supply.as_base_units() {
-            return Err(StateError::Storage(
-                "premine exceeds max supply".into(),
-            ));
+            return Err(StateError::Storage("premine exceeds max supply".into()));
         }
 
         // Datadir must not already belong to another network.
@@ -129,48 +130,11 @@ impl GenesisBuilder {
         let block = self.build_block();
         let genesis_hash = block.id();
         let fingerprint = self.fingerprint_for(genesis_hash);
-        let block_bytes = borsh::to_vec(&block)
-            .map_err(|e| StateError::Storage(e.to_string()))?;
+        let block_bytes = borsh::to_vec(&block).map_err(|e| StateError::Storage(e.to_string()))?;
 
-        // Meta + block payloads first (fingerprint binds the datadir).
-        store.write_batch([
-            crate::store::StoreOp::Put {
-                cf: ColumnFamily::Archival,
-                key: genesis_hash.as_bytes().to_vec(),
-                value: block_bytes.clone(),
-            },
-            crate::store::StoreOp::Put {
-                cf: ColumnFamily::Hot,
-                key: genesis_hash.as_bytes().to_vec(),
-                value: block_bytes,
-            },
-            crate::store::StoreOp::Put {
-                cf: ColumnFamily::Meta,
-                key: meta_keys::GENESIS_HASH.to_vec(),
-                value: genesis_hash.as_bytes().to_vec(),
-            },
-            crate::store::StoreOp::Put {
-                cf: ColumnFamily::Meta,
-                key: meta_keys::MAX_SUPPLY.to_vec(),
-                value: self.supply.max_supply.as_base_units().to_le_bytes().to_vec(),
-            },
-            crate::store::StoreOp::Put {
-                cf: ColumnFamily::Meta,
-                key: meta_keys::PREMINE.to_vec(),
-                value: self.supply.premine.as_base_units().to_le_bytes().to_vec(),
-            },
-            crate::store::StoreOp::Put {
-                cf: ColumnFamily::Meta,
-                key: meta_keys::TIPS.to_vec(),
-                value: borsh::to_vec(&vec![genesis_hash])
-                    .map_err(|e| StateError::Storage(e.to_string()))?,
-            },
-        ])?;
-
-        write_network_fingerprint(store, &fingerprint)?;
-
-        // Run acceptance on genesis (empty base UTXO) and commit atomically.
-        let view = StoreUtxoView::new(store);
+        // Run acceptance against an empty in-memory UTXO view (not the store),
+        // so we can commit meta + fingerprint + acceptance/UTXO in one batch.
+        let empty = MemoryUtxoView::new();
         let acceptance = accept_blue_blocks(
             &[BlueBlockInput {
                 ordered: OrderedBlock {
@@ -181,7 +145,7 @@ impl GenesisBuilder {
                 block,
                 subsidy: self.supply.premine,
             }],
-            &view,
+            &empty,
             &fingerprint,
         )
         .map_err(|e| StateError::Storage(e.to_string()))?;
@@ -192,7 +156,56 @@ impl GenesisBuilder {
             ));
         }
 
-        commit_acceptance(store, &acceptance)?;
+        let fp_bytes =
+            borsh::to_vec(&fingerprint).map_err(|e| StateError::Storage(e.to_string()))?;
+        let tips_bytes =
+            borsh::to_vec(&vec![genesis_hash]).map_err(|e| StateError::Storage(e.to_string()))?;
+
+        let mut ops = vec![
+            StoreOp::Put {
+                cf: ColumnFamily::Archival,
+                key: genesis_hash.as_bytes().to_vec(),
+                value: block_bytes.clone(),
+            },
+            StoreOp::Put {
+                cf: ColumnFamily::Hot,
+                key: genesis_hash.as_bytes().to_vec(),
+                value: block_bytes,
+            },
+            StoreOp::Put {
+                cf: ColumnFamily::Meta,
+                key: meta_keys::GENESIS_HASH.to_vec(),
+                value: genesis_hash.as_bytes().to_vec(),
+            },
+            StoreOp::Put {
+                cf: ColumnFamily::Meta,
+                key: meta_keys::MAX_SUPPLY.to_vec(),
+                value: self
+                    .supply
+                    .max_supply
+                    .as_base_units()
+                    .to_le_bytes()
+                    .to_vec(),
+            },
+            StoreOp::Put {
+                cf: ColumnFamily::Meta,
+                key: meta_keys::PREMINE.to_vec(),
+                value: self.supply.premine.as_base_units().to_le_bytes().to_vec(),
+            },
+            StoreOp::Put {
+                cf: ColumnFamily::Meta,
+                key: meta_keys::TIPS.to_vec(),
+                value: tips_bytes,
+            },
+            StoreOp::Put {
+                cf: ColumnFamily::Meta,
+                key: meta_keys::NETWORK_FINGERPRINT.to_vec(),
+                value: fp_bytes,
+            },
+        ];
+        ops.extend(acceptance_store_ops(&acceptance)?);
+
+        store.write_batch(ops)?;
         Ok((genesis_hash, fingerprint))
     }
 }
@@ -226,7 +239,10 @@ mod tests {
             Amount::from_whole(100_000_000).unwrap().as_base_units()
         );
 
-        let tips = store.get_cf(ColumnFamily::Meta, meta_keys::TIPS).unwrap().unwrap();
+        let tips = store
+            .get_cf(ColumnFamily::Meta, meta_keys::TIPS)
+            .unwrap()
+            .unwrap();
         let tips: Vec<Hash> = borsh::from_slice(&tips).unwrap();
         assert_eq!(tips, vec![hash]);
 

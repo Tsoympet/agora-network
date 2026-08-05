@@ -56,8 +56,8 @@ impl Bip44Path {
 pub fn derive_bip44(seed: &[u8; 64], path: &Bip44Path) -> Result<KeyPair, CryptoError> {
     let derivation = DerivationPath::from_str(&path.to_string_path())
         .map_err(|e| CryptoError::Bip32(e.to_string()))?;
-    let xprv = XPrv::derive_from_path(seed, &derivation)
-        .map_err(|e| CryptoError::Bip32(e.to_string()))?;
+    let xprv =
+        XPrv::derive_from_path(seed, &derivation).map_err(|e| CryptoError::Bip32(e.to_string()))?;
     // bip32 uses k256 under the hood; we only take the 32-byte secret into secp256k1.
     KeyPair::from_secret_bytes(xprv.private_key().to_bytes().as_slice())
 }

@@ -69,12 +69,14 @@ impl PowVerifier for LeadingZeroPow {
     }
 }
 
-/// Stub verifier that accepts any header — useful for DAG topology unit tests.
+/// Stub verifier that accepts any header — **test-only**, never wire into a node.
+#[cfg(test)]
 #[derive(Debug)]
 pub struct AcceptAllPow {
     algo: PowAlgorithm,
 }
 
+#[cfg(test)]
 impl Default for AcceptAllPow {
     fn default() -> Self {
         Self {
@@ -83,12 +85,14 @@ impl Default for AcceptAllPow {
     }
 }
 
+#[cfg(test)]
 impl AcceptAllPow {
     pub fn new(algo: PowAlgorithm) -> Self {
         Self { algo }
     }
 }
 
+#[cfg(test)]
 impl PowVerifier for AcceptAllPow {
     fn algorithm(&self) -> PowAlgorithm {
         self.algo

@@ -7,7 +7,9 @@ pub enum NetworkMessage {
     Transaction(Transaction),
     Block(Block),
     /// Compact announcement used before full block fetch (IBD follow-on).
-    BlockAnnounce { hash: Hash },
+    BlockAnnounce {
+        hash: Hash,
+    },
 }
 
 impl NetworkMessage {

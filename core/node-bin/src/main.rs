@@ -41,6 +41,12 @@ async fn main() {
                 .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
                 .expect("read genesis")
                 .expect("genesis hash missing from bound datadir");
+            if genesis_bytes.len() != 32 {
+                panic!(
+                    "corrupt genesis hash in datadir (expected 32 bytes, got {})",
+                    genesis_bytes.len()
+                );
+            }
             let mut bytes = [0u8; 32];
             bytes.copy_from_slice(&genesis_bytes);
             (Hash(bytes), fp)
