@@ -2,20 +2,37 @@
 //!
 //! Consensus-critical encoding uses `borsh`. Client bindings are generated with `ts-rs`.
 
+mod acceptance;
 mod amount;
 mod block;
 mod hash;
+mod network;
 mod transaction;
 
+pub use acceptance::{AcceptanceBitmap, TxAcceptanceStatus, TxConfirmation};
 pub use amount::Amount;
 pub use block::{Block, BlockHeader};
 pub use hash::Hash;
+pub use network::NetworkFingerprint;
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use borsh::{BorshDeserialize, BorshSerialize};
+
+    fn test_fingerprint() -> NetworkFingerprint {
+        NetworkFingerprint {
+            network_name: "agora-test".into(),
+            network_id: 1,
+            genesis_hash: Hash::ZERO,
+            ghostdag_k: 18,
+            max_supply: 1,
+            premine: 0,
+            initial_reward: 50,
+            halving_interval: 210_000,
+        }
+    }
 
     #[test]
     fn amount_whole_conversion() {
@@ -26,6 +43,7 @@ mod tests {
 
     #[test]
     fn transaction_borsh_roundtrip_and_id_stable() {
+        let fp = test_fingerprint();
         let tx = Transaction::unsigned(
             1,
             vec![TxIn {
@@ -44,7 +62,31 @@ mod tests {
         let decoded = Transaction::try_from_slice(&bytes).unwrap();
         assert_eq!(tx, decoded);
         assert_eq!(tx.tx_id(), decoded.tx_id());
-        assert!(!tx.signing_bytes().is_empty());
+        let signing = tx.signing_bytes(&fp);
+        assert!(signing.len() > 32);
+        assert_eq!(&signing[..32], fp.digest().as_bytes());
+    }
+
+    #[test]
+    fn acceptance_bitmap_roundtrip_bits() {
+        let flags = vec![true, false, true, true, false, false, false, true, true];
+        let bitmap = AcceptanceBitmap::from_bools(&flags);
+        assert_eq!(bitmap.len, flags.len() as u32);
+        assert_eq!(bitmap.to_bools(), flags);
+        assert_eq!(bitmap.accepted_count(), 5);
+        let bytes = borsh::to_vec(&bitmap).unwrap();
+        let decoded = AcceptanceBitmap::try_from_slice(&bytes).unwrap();
+        assert_eq!(decoded, bitmap);
+    }
+
+    #[test]
+    fn network_fingerprint_digest_stable() {
+        let a = test_fingerprint();
+        let b = test_fingerprint();
+        assert_eq!(a.digest(), b.digest());
+        let mut c = test_fingerprint();
+        c.network_id = 2;
+        assert_ne!(a.digest(), c.digest());
     }
 
     #[test]
@@ -85,5 +127,9 @@ mod ts_export {
         Transaction::export_all().expect("export Transaction");
         BlockHeader::export_all().expect("export BlockHeader");
         Block::export_all().expect("export Block");
+        NetworkFingerprint::export_all().expect("export NetworkFingerprint");
+        AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
+        TxAcceptanceStatus::export_all().expect("export TxAcceptanceStatus");
+        TxConfirmation::export_all().expect("export TxConfirmation");
     }
 }

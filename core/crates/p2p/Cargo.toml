@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 agora-types = { workspace = true }
 agora-crypto = { workspace = true }
+agora-consensus = { workspace = true }
 borsh = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

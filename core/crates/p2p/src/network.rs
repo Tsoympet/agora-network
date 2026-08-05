@@ -10,6 +10,8 @@ use libp2p::{Multiaddr, PeerId, Swarm, SwarmBuilder};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use agora_types::NetworkFingerprint;
+
 use crate::messages::NetworkMessage;
 use crate::topics::{blocks_topic, transactions_topic};
 use crate::{NetworkConfig, P2pError};
@@ -72,6 +74,7 @@ pub struct NetworkNode {
     swarm: Swarm<AgoraBehaviour>,
     event_tx: mpsc::UnboundedSender<NetworkEvent>,
     command_rx: mpsc::UnboundedReceiver<Command>,
+    fingerprint: NetworkFingerprint,
 }
 
 impl NetworkNode {
@@ -80,6 +83,7 @@ impl NetworkNode {
     ) -> Result<(NetworkHandle, mpsc::UnboundedReceiver<NetworkEvent>, Self), P2pError> {
         let id_keys = Keypair::generate_ed25519();
         let peer_id = id_keys.public().to_peer_id();
+        let fingerprint = config.fingerprint.clone();
 
         let message_id_fn = |message: &gossipsub::Message| {
             let mut hasher = DefaultHasher::new();
@@ -101,10 +105,10 @@ impl NetworkNode {
         .map_err(|e| P2pError::Gossip(e.to_string()))?;
 
         gossipsub
-            .subscribe(&transactions_topic())
+            .subscribe(&transactions_topic(&fingerprint))
             .map_err(|e| P2pError::Gossip(e.to_string()))?;
         gossipsub
-            .subscribe(&blocks_topic())
+            .subscribe(&blocks_topic(&fingerprint))
             .map_err(|e| P2pError::Gossip(e.to_string()))?;
 
         let behaviour = AgoraBehaviour { gossipsub };
@@ -133,7 +137,12 @@ impl NetworkNode {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-        info!(%peer_id, listen = %config.listen_addr, "agora p2p node built");
+        info!(
+            %peer_id,
+            listen = %config.listen_addr,
+            fingerprint = %fingerprint.digest_hex(),
+            "agora p2p node built"
+        );
 
         let handle = NetworkHandle {
             peer_id,
@@ -147,6 +156,7 @@ impl NetworkNode {
                 swarm,
                 event_tx,
                 command_rx,
+                fingerprint,
             },
         ))
     }
@@ -173,10 +183,10 @@ impl NetworkNode {
     fn publish_message(&mut self, message: &NetworkMessage) -> Result<(), P2pError> {
         match message {
             NetworkMessage::Transaction(_) => {
-                self.publish(transactions_topic(), message.encode())
+                self.publish(transactions_topic(&self.fingerprint), message.encode())
             }
             NetworkMessage::Block(_) | NetworkMessage::BlockAnnounce { .. } => {
-                self.publish(blocks_topic(), message.encode())
+                self.publish(blocks_topic(&self.fingerprint), message.encode())
             }
         }
     }

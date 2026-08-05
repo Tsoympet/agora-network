@@ -1,10 +1,15 @@
 //! Agora full node process.
 //!
-//! Wires consensus, state, p2p, and RPC once each crate reaches its roadmap phase.
+//! Boots genesis through the transaction acceptance layer, binds the datadir to
+//! the network fingerprint, and gossips on fingerprint-scoped topics.
 
 use agora_consensus::{EmissionSchedule, Ghostdag, GhostdagConfig};
 use agora_p2p::{NetworkConfig, NetworkEvent, NetworkNode};
-use agora_state_machine::{GenesisBuilder, StateStore};
+use agora_state_machine::{
+    assert_datadir_fingerprint, load_network_fingerprint, meta_keys, ColumnFamily, GenesisBuilder,
+    StateStore,
+};
+use agora_types::Hash;
 use tracing::{info, warn};
 
 #[tokio::main]
@@ -14,8 +19,7 @@ async fn main() {
     let ghostdag = Ghostdag::new(GhostdagConfig::default());
     let emission = EmissionSchedule::default();
 
-    let listen = std::env::var("AGORA_LISTEN")
-        .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/16111".into());
+    let listen = std::env::var("AGORA_LISTEN").unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/16111".into());
     let bootstrap = std::env::var("AGORA_BOOTSTRAP")
         .ok()
         .map(|s| {
@@ -27,15 +31,29 @@ async fn main() {
         })
         .unwrap_or_default();
 
-    let net_cfg = NetworkConfig::default()
-        .with_listen(listen)
-        .with_bootstrap(bootstrap.clone());
-
     let data_dir = std::env::var("AGORA_DATA").unwrap_or_else(|_| "data/agora-node".into());
     let store = StateStore::open(&data_dir).expect("open state store");
-    let genesis_hash = GenesisBuilder::default()
-        .ignite(&store)
-        .expect("genesis ignition");
+
+    let (genesis_hash, fingerprint) = match load_network_fingerprint(&store).expect("load fp") {
+        Some(fp) => {
+            assert_datadir_fingerprint(&store, &fp).expect("datadir fingerprint");
+            let genesis_bytes = store
+                .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
+                .expect("read genesis")
+                .expect("genesis hash missing from bound datadir");
+            let mut bytes = [0u8; 32];
+            bytes.copy_from_slice(&genesis_bytes);
+            (Hash(bytes), fp)
+        }
+        None => GenesisBuilder::default()
+            .ignite(&store)
+            .expect("genesis ignition"),
+    };
+
+    let net_cfg = NetworkConfig::default()
+        .with_listen(listen)
+        .with_bootstrap(bootstrap.clone())
+        .with_fingerprint(fingerprint.clone());
 
     let (handle, mut events, node) = NetworkNode::build(&net_cfg).expect("p2p build");
     for peer in &bootstrap {
@@ -49,12 +67,14 @@ async fn main() {
         initial_reward = emission.initial_reward,
         peer_id = %handle.peer_id(),
         genesis = %genesis_hash.to_hex(),
+        fingerprint = %fingerprint.digest_hex(),
         "agora-node foundation boot ok"
     );
     println!(
-        "Agora Network node — peer {} genesis {}",
+        "Agora Network node — peer {} genesis {} fingerprint {}",
         handle.peer_id(),
-        genesis_hash.to_hex()
+        genesis_hash.to_hex(),
+        fingerprint.digest_hex()
     );
 
     tokio::spawn(async move {

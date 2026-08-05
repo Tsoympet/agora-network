@@ -8,4 +8,6 @@ pub enum ConsensusError {
     InvalidPow,
     #[error("emission schedule error: {0}")]
     Emission(String),
+    #[error("transaction acceptance error: {0}")]
+    Acceptance(String),
 }

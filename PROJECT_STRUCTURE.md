@@ -49,6 +49,15 @@ agora-network/
 - Canonical definitions live in `core/crates/types`
 - After changing shared types, regenerate and verify `ts-rs` bindings under `core/crates/types/bindings/`
 - Wire formats use `borsh` for consensus-critical paths
+- `NetworkFingerprint`, `AcceptanceBitmap`, and `TxConfirmation` are shared so RPC/explorer cannot drift from consensus acceptance
+
+## Transaction Acceptance
+
+- **Policy / bitmaps / fees / coinbase checks:** `agora-consensus::acceptance` (no disk I/O)
+- **Atomic UTXO journals + bitmap persistence + datadir fingerprint:** `agora-state-machine::journal`
+- **Mempool eviction + fingerprint gossip:** `agora-p2p`
+- **Explorer/RPC views:** `agora-rpc` (`BlockAcceptanceView`, `TxAcceptanceView`)
+- Block color alone must never be treated as transaction acceptance
 
 ## Brand Tokens (clients)
 
