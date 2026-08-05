@@ -118,8 +118,10 @@ Addressing static architecture/security reviews of `main`:
 | 26 | Full UTXO clone per admit | **mitigated** — copy-on-write overlay (delta map over live store); RocksDB snapshot still follow-up |
 | 27 | Template score/work mismatches | **fixed** — simulate candidate GHOSTDAG for subsidy/epoch; tip parents ranked by blue work |
 | 28 | Coinbase maturity via primary tx index | **fixed** — resolve creator from journal that created the live outpoint |
-| 29 | Legacy journal subsidy=0 after upgrade | **fixed** — bootstrap migrates journals from block bodies |
-| 30 | Announce→getblock RandomX thrash | **mitigated** — announce fetches soft age-filter; larger epoch cache + cold-build pacing |
+| 29 | Legacy journal subsidy=0 after upgrade | **fixed** — bootstrap migrates only journals that actually created coinbase outs (never Virtual soft-skip journals) |
+| 30 | Announce→getblock RandomX thrash | **mitigated** — announce fetches soft age-filter; larger epoch cache; no sleep under chain lock |
+| 31 | Pruned validators diverge on merges | **mitigated** — testnet/mainnet force archival until pruning points exist |
+| 32 | Virtual soft-skip reserved poisoning | **fixed** — pending reserve committed only for fully selectable txs; underfunded txs hard-fail |
 
 ### Remaining hardening follow-ups (tracked)
 

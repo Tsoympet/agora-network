@@ -353,9 +353,12 @@ fn selectable_transfers<'a>(
         }
         let mut ok = true;
         let mut input_value = 0u64;
+        // Do not mutate `reserved` until the tx is fully selectable — a partial
+        // soft-skip must not poison later spends of the same inputs.
+        let mut pending_reserve: Vec<OutPoint> = Vec::new();
         for input in &tx.inputs {
             let op = input.previous_outpoint;
-            if reserved.contains(&op) {
+            if reserved.contains(&op) || pending_reserve.contains(&op) {
                 ok = false;
                 break;
             }
@@ -371,8 +374,10 @@ fn selectable_transfers<'a>(
                     }
                 }
             };
-            input_value = input_value.saturating_add(utxo.value.as_base_units());
-            reserved.insert(op);
+            input_value = input_value
+                .checked_add(utxo.value.as_base_units())
+                .ok_or_else(|| StateError::InvalidTx("input value overflow".into()))?;
+            pending_reserve.push(op);
         }
         if !ok {
             if mode == ApplyMode::Strict {
@@ -383,15 +388,20 @@ fn selectable_transfers<'a>(
         }
         let mut output_value = 0u64;
         for o in &tx.outputs {
-            output_value = output_value.saturating_add(o.value.as_base_units());
+            output_value = output_value
+                .checked_add(o.value.as_base_units())
+                .ok_or_else(|| StateError::InvalidTx("output value overflow".into()))?;
         }
         if input_value < output_value {
-            if mode == ApplyMode::Strict {
-                out.push((tx, 0));
-            }
-            continue;
+            // Semantic failure — not a soft-skippable duplicate/conflict.
+            return Err(StateError::InvalidTx(format!(
+                "insufficient funds: in={input_value} out={output_value}"
+            )));
         }
         let fee = input_value - output_value;
+        for op in pending_reserve {
+            reserved.insert(op);
+        }
         let tx_id = tx.tx_id();
         for (index, o) in tx.outputs.iter().enumerate() {
             created.insert(
@@ -1167,6 +1177,223 @@ mod tests {
         assert!(matches!(
             apply_block(&store, &block, 50),
             Err(StateError::Coinbase(_))
+        ));
+    }
+
+    #[test]
+    fn virtual_skips_spent_input_without_poisoning_sibling() {
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let bob = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(alice.address())
+            .ignite(&store)
+            .unwrap();
+        let mut premine_txid = Hash::ZERO;
+        store
+            .for_each_cf(ColumnFamily::Utxo, |key, _| {
+                if key.len() == 36 {
+                    let mut h = [0u8; 32];
+                    h.copy_from_slice(&key[..32]);
+                    premine_txid = Hash(h);
+                }
+                Ok(())
+            })
+            .unwrap();
+        let premine_op = OutPoint {
+            tx_id: premine_txid,
+            index: 0,
+        };
+        let premine = load_utxo(&store, &premine_op).unwrap();
+
+        // First transfer spends premine → bob.
+        let mut win = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: premine_op,
+            }],
+            vec![TxOut {
+                value: premine.value,
+                address: bob.address(),
+            }],
+            1,
+        );
+        sign_transaction(&mut win, &alice).unwrap();
+        let (j1, batch1) = apply_block_batched_virtual(
+            &store,
+            &Block {
+                header: BlockHeader {
+                    version: 1,
+                    parents: vec![genesis],
+                    timestamp_ms: 1,
+                    bits: 0,
+                    nonce: 0,
+                    tx_root: Hash::ZERO,
+                },
+                transactions: vec![
+                    Transaction::unsigned(
+                        1,
+                        vec![],
+                        vec![TxOut {
+                            value: Amount::from_base_units(1),
+                            address: Address::ZERO,
+                        }],
+                        1,
+                    ),
+                    win.clone(),
+                ],
+            },
+            1,
+            None,
+        )
+        .unwrap();
+        store.write_batch(batch1).unwrap();
+        assert_eq!(j1.subsidy, 1);
+
+        // Block with: (1) conflicting spend of already-spent premine (multi-input
+        // with a still-live bob out as second input — must not reserve bob's out),
+        // (2) valid spend of bob's new out.
+        let bob_op = OutPoint {
+            tx_id: win.tx_id(),
+            index: 0,
+        };
+        let mut conflict = Transaction::unsigned(
+            1,
+            vec![
+                TxIn {
+                    previous_outpoint: premine_op, // spent
+                },
+                TxIn {
+                    previous_outpoint: bob_op, // live — must not be poisoned by soft-skip
+                },
+            ],
+            vec![TxOut {
+                value: Amount::from_base_units(1),
+                address: alice.address(),
+            }],
+            2,
+        );
+        sign_transaction(&mut conflict, &alice).unwrap();
+
+        let mut ok_spend = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: bob_op,
+            }],
+            vec![TxOut {
+                value: premine.value,
+                address: alice.address(),
+            }],
+            3,
+        );
+        sign_transaction(&mut ok_spend, &bob).unwrap();
+
+        let block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 2,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![
+                Transaction::unsigned(
+                    1,
+                    vec![],
+                    vec![TxOut {
+                        value: Amount::from_base_units(1),
+                        address: Address::ZERO,
+                    }],
+                    2,
+                ),
+                conflict,
+                ok_spend,
+            ],
+        };
+        let (journal, batch) = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
+        store.write_batch(batch).unwrap();
+        assert!(
+            journal.created.iter().any(|op| op.index == 0),
+            "valid bob→alice spend must apply after soft-skip"
+        );
+        assert_eq!(
+            balance_of(&store, &alice.address())
+                .unwrap()
+                .as_base_units(),
+            premine.value.as_base_units()
+        );
+    }
+
+    #[test]
+    fn virtual_rejects_insufficient_funds() {
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(alice.address())
+            .ignite(&store)
+            .unwrap();
+        let mut premine_txid = Hash::ZERO;
+        store
+            .for_each_cf(ColumnFamily::Utxo, |key, _| {
+                if key.len() == 36 {
+                    let mut h = [0u8; 32];
+                    h.copy_from_slice(&key[..32]);
+                    premine_txid = Hash(h);
+                }
+                Ok(())
+            })
+            .unwrap();
+        let premine = load_utxo(
+            &store,
+            &OutPoint {
+                tx_id: premine_txid,
+                index: 0,
+            },
+        )
+        .unwrap();
+        let mut bad = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: premine_txid,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_base_units(premine.value.as_base_units().saturating_add(1)),
+                address: alice.address(),
+            }],
+            9,
+        );
+        sign_transaction(&mut bad, &alice).unwrap();
+        let block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![
+                Transaction::unsigned(
+                    1,
+                    vec![],
+                    vec![TxOut {
+                        value: Amount::from_base_units(1),
+                        address: Address::ZERO,
+                    }],
+                    1,
+                ),
+                bad,
+            ],
+        };
+        assert!(matches!(
+            apply_block_batched_virtual(&store, &block, 1, None),
+            Err(StateError::InvalidTx(_))
         ));
     }
 }

@@ -498,7 +498,7 @@ async fn main() {
     net_cfg = net_cfg.with_identity(identity);
 
     let store = Arc::new(StateStore::open(&data_dir).expect("open state store"));
-    let storage = StoragePolicy::from_env();
+    let storage = StoragePolicy::from_env().for_network(chain_params.network.as_str());
     let premine_address = chain_params.supply.premine_address;
     let expected_genesis = chain_params.expected_genesis;
     let genesis_hash = chain_params

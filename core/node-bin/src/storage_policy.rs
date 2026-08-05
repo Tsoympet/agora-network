@@ -45,4 +45,24 @@ impl StoragePolicy {
             hot_window,
         }
     }
+
+    /// Consensus networks cannot run pruned until pruning points exist.
+    ///
+    /// Forces `archival = true` on testnet/mainnet so every validator can load
+    /// merge-set blue bodies during `blue_order` UTXO proof.
+    pub fn for_network(mut self, network: &str) -> Self {
+        match network.trim().to_ascii_lowercase().as_str() {
+            "testnet" | "mainnet" => {
+                if !self.archival {
+                    tracing::warn!(
+                        network,
+                        "AGORA_ARCHIVAL=0 ignored — pruned validators diverge until pruning points exist"
+                    );
+                }
+                self.archival = true;
+            }
+            _ => {}
+        }
+        self
+    }
 }
