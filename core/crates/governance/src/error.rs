@@ -38,6 +38,10 @@ pub enum GovernanceError {
     InvalidSeat,
     #[error("invalid constitution payload")]
     InvalidConstitution,
+    #[error("invalid community topic")]
+    InvalidTopic,
+    #[error("unknown community topic")]
+    UnknownTopic,
     #[error("deposit below minimum")]
     InsufficientDeposit,
     #[error("quorum not reached")]

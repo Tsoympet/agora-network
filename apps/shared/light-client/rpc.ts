@@ -102,6 +102,71 @@ export type FeeEstimate = {
   suggested_fee: number;
 };
 
+export type VoteChoice = "yes" | "no" | "abstain" | "no_with_veto";
+
+export type LightConstitution = {
+  id: string;
+  content_hash: string;
+  body_markdown: string;
+};
+
+export type LightOffice = {
+  rank: string;
+  title: string;
+  greek: string;
+  seat_index: number;
+  holder: string | null;
+  elected_slot: number | null;
+  term_end_slot: number | null;
+};
+
+export type LightProposalTally = {
+  yes: number;
+  no: number;
+  abstain: number;
+  no_with_veto: number;
+};
+
+export type LightProposal = {
+  id: number;
+  title: string;
+  summary: string;
+  kind: unknown;
+  status: string;
+  chamber: string;
+  author: string;
+  deposit: number;
+  tally: LightProposalTally;
+  sponsors?: string[];
+  voting_start_slot?: number | null;
+  voting_end_slot?: number | null;
+};
+
+export type LightProposalList = {
+  count: number;
+  proposals: LightProposal[];
+};
+
+export type LightGovernance = {
+  constitution: LightConstitution;
+  params: { min_deposit: number; [key: string]: unknown };
+  offices: LightOffice[];
+  proposal_count: number;
+  topic_count: number;
+  constitution_ack_count: number;
+  ecclesia_eligible_power: number;
+};
+
+export type LightForumTopic = {
+  id: number;
+  author: string;
+  title: string;
+  body: string;
+  category: string;
+  created_slot: number;
+  linked_proposal_id: number | null;
+};
+
 export type RpcStatus = "idle" | "ok" | "error";
 
 export type LightClientConfig = {
@@ -124,6 +189,32 @@ export type LightClient = {
   getUtxos: (address: string) => Promise<LightUtxoSet>;
   /** Submit a signed transaction JSON body (native serde / byte-array hashes). */
   submitTransaction: (tx: unknown) => Promise<SubmitTxResult>;
+  getConstitution: () => Promise<LightConstitution>;
+  getGovernance: () => Promise<LightGovernance>;
+  listProposals: (limit?: number) => Promise<LightProposalList>;
+  getProposal: (id: number) => Promise<LightProposal>;
+  listOffices: () => Promise<{ offices: LightOffice[] }>;
+  listForumTopics: (limit?: number) => Promise<{ count: number; topics: LightForumTopic[] }>;
+  castGovVote: (args: {
+    id: number;
+    voter: string;
+    choice: VoteChoice;
+    raw_balance?: number;
+    total_supply?: number;
+  }) => Promise<{ proposal_id: number; voted: boolean }>;
+  submitProposal: (args: {
+    author: string;
+    title: string;
+    summary: string;
+    kind: unknown;
+    slot?: number;
+  }) => Promise<{ proposal_id: number }>;
+  ackConstitution: (address: string, slot?: number) => Promise<{
+    address: string;
+    constitution_id: string;
+    constitution_hash: string;
+    acked: boolean;
+  }>;
 };
 
 export function createLightClient(config: LightClientConfig): LightClient {
@@ -176,5 +267,36 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<LightUtxoSet>("agora_getUtxos", { address }),
     submitTransaction: (tx: unknown) =>
       call<SubmitTxResult>("agora_submitTransaction", { tx }),
+    getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
+    getGovernance: () => call<LightGovernance>("agora_getGovernance", []),
+    listProposals: (limit = 64) =>
+      call<LightProposalList>("agora_listProposals", { limit }),
+    getProposal: (id: number) =>
+      call<LightProposal>("agora_getProposal", { id }),
+    listOffices: () =>
+      call<{ offices: LightOffice[] }>("agora_listOffices", []),
+    listForumTopics: (limit = 64) =>
+      call<{ count: number; topics: LightForumTopic[] }>(
+        "agora_listForumTopics",
+        { limit },
+      ),
+    castGovVote: (args) =>
+      call("agora_castGovVote", {
+        id: args.id,
+        voter: args.voter,
+        choice: args.choice,
+        raw_balance: args.raw_balance ?? 0,
+        total_supply: args.total_supply ?? 1,
+      }),
+    submitProposal: (args) =>
+      call("agora_submitProposal", {
+        author: args.author,
+        title: args.title,
+        summary: args.summary,
+        kind: args.kind,
+        slot: args.slot ?? 0,
+      }),
+    ackConstitution: (address, slot = 0) =>
+      call("agora_ackConstitution", { address, slot }),
   };
 }

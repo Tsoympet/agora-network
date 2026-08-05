@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use agora_types::Address;
+use serde::{Deserialize, Serialize};
 
 use crate::chamber::{primary_chamber, VotingChamber};
 use crate::constitution::EnactedConstitution;
@@ -14,14 +15,14 @@ use crate::ranks::CivicRank;
 use crate::whale::WhaleCapConfig;
 use crate::GovernanceError;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GovernanceState {
     pub constitution: EnactedConstitution,
     pub params: GovernanceParams,
     pub whale_cap: WhaleCapConfig,
     pub offices: OfficeBoard,
     pub proposals: HashMap<u64, Proposal>,
-    next_proposal_id: u64,
+    pub next_proposal_id: u64,
     /// Eligible Ecclesia power snapshot for the open vote (optional override).
     pub ecclesia_eligible_power: u64,
 }

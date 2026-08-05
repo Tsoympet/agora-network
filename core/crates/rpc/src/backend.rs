@@ -1,6 +1,12 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
+use agora_governance::{
+    civic_overview_json, list_proposals_json, list_topics_json, office_json, proposal_json,
+    CivicSnapshot, ProposalKind, TopicCategory, VoteChoice,
+};
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TxOut};
+use serde_json::{json, Value};
 
 use crate::error::RpcError;
 
@@ -141,10 +147,50 @@ pub trait RpcBackend: Send {
     fn get_block_template(&self) -> Result<Block, RpcError>;
     /// Admit a mined block after PoW verification (node) or local insert (tests).
     fn submit_block(&mut self, block: Block) -> Result<Hash, RpcError>;
+
+    // --- Civic governance / community ---
+    fn get_constitution(&self) -> Result<Value, RpcError>;
+    fn get_governance(&self) -> Result<Value, RpcError>;
+    fn list_proposals(&self, limit: usize) -> Result<Value, RpcError>;
+    fn get_proposal(&self, id: u64) -> Result<Value, RpcError>;
+    fn list_offices(&self) -> Result<Value, RpcError>;
+    fn list_forum_topics(&self, limit: usize) -> Result<Value, RpcError>;
+    fn submit_proposal(
+        &mut self,
+        author: Address,
+        title: String,
+        summary: String,
+        kind: ProposalKind,
+        slot: u64,
+    ) -> Result<Value, RpcError>;
+    fn deposit_proposal(&mut self, id: u64, amount: u64) -> Result<Value, RpcError>;
+    fn open_proposal_voting(&mut self, id: u64, slot: u64) -> Result<Value, RpcError>;
+    fn cast_gov_vote(
+        &mut self,
+        id: u64,
+        voter: Address,
+        choice: VoteChoice,
+        raw_balance: u64,
+        total_supply: u64,
+    ) -> Result<Value, RpcError>;
+    fn tally_proposal(&mut self, id: u64) -> Result<Value, RpcError>;
+    fn enter_proposal_timelock(&mut self, id: u64, slot: u64) -> Result<Value, RpcError>;
+    fn execute_proposal(&mut self, id: u64, slot: u64) -> Result<Value, RpcError>;
+    fn post_forum_topic(
+        &mut self,
+        author: Address,
+        title: String,
+        body: String,
+        category: TopicCategory,
+        slot: u64,
+    ) -> Result<Value, RpcError>;
+    fn ack_constitution(&mut self, address: Address, slot: u64) -> Result<Value, RpcError>;
+    fn sponsor_proposal(&mut self, id: u64, who: Address) -> Result<Value, RpcError>;
+    fn assent_proposal(&mut self, id: u64, who: Address) -> Result<Value, RpcError>;
 }
 
 /// In-memory ledger used by unit tests and the local faucet scaffold.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct InMemoryBackend {
     tips: Vec<Hash>,
     blocks: HashMap<Hash, Block>,
@@ -155,14 +201,47 @@ pub struct InMemoryBackend {
     tx_index: HashMap<Hash, (Hash, u32)>,
     template_bits: u32,
     fund_nonce: u64,
+    civic: Mutex<CivicSnapshot>,
+}
+
+impl Default for InMemoryBackend {
+    fn default() -> Self {
+        Self {
+            tips: Vec::new(),
+            blocks: HashMap::new(),
+            balances: HashMap::new(),
+            utxos: HashMap::new(),
+            mempool: HashMap::new(),
+            tx_index: HashMap::new(),
+            template_bits: 0,
+            fund_nonce: 0,
+            civic: Mutex::new(CivicSnapshot::genesis(10_000)),
+        }
+    }
 }
 
 impl InMemoryBackend {
     pub fn new() -> Self {
-        Self {
-            template_bits: 0,
-            ..Self::default()
-        }
+        Self::default()
+    }
+
+    fn with_civic_mut<R>(
+        &self,
+        f: impl FnOnce(&mut CivicSnapshot) -> Result<R, RpcError>,
+    ) -> Result<R, RpcError> {
+        let mut g = self
+            .civic
+            .lock()
+            .map_err(|_| RpcError::Internal("civic lock poisoned".into()))?;
+        f(&mut g)
+    }
+
+    fn with_civic<R>(&self, f: impl FnOnce(&CivicSnapshot) -> Result<R, RpcError>) -> Result<R, RpcError> {
+        let g = self
+            .civic
+            .lock()
+            .map_err(|_| RpcError::Internal("civic lock poisoned".into()))?;
+        f(&g)
     }
 
     pub fn set_tips(&mut self, tips: Vec<Hash>) {
@@ -353,4 +432,174 @@ impl RpcBackend for InMemoryBackend {
         self.insert_block(block);
         Ok(id)
     }
+
+    fn get_constitution(&self) -> Result<Value, RpcError> {
+        self.with_civic(|snap| {
+            Ok(json!({
+                "id": snap.governance.constitution.id,
+                "content_hash": snap.governance.constitution.content_hash_hex(),
+                "body_markdown": snap.governance.constitution.body_markdown,
+            }))
+        })
+    }
+
+    fn get_governance(&self) -> Result<Value, RpcError> {
+        self.with_civic(|snap| Ok(civic_overview_json(snap)))
+    }
+
+    fn list_proposals(&self, limit: usize) -> Result<Value, RpcError> {
+        self.with_civic(|snap| Ok(list_proposals_json(&snap.governance, limit)))
+    }
+
+    fn get_proposal(&self, id: u64) -> Result<Value, RpcError> {
+        self.with_civic(|snap| {
+            let p = snap
+                .governance
+                .proposal(id)
+                .ok_or_else(|| RpcError::NotFound(format!("proposal {id}")))?;
+            Ok(proposal_json(p))
+        })
+    }
+
+    fn list_offices(&self) -> Result<Value, RpcError> {
+        self.with_civic(|snap| {
+            Ok(json!({
+                "offices": snap.governance.offices.seats.iter().map(office_json).collect::<Vec<_>>(),
+            }))
+        })
+    }
+
+    fn list_forum_topics(&self, limit: usize) -> Result<Value, RpcError> {
+        self.with_civic(|snap| Ok(list_topics_json(&snap.community, limit)))
+    }
+
+    fn submit_proposal(
+        &mut self,
+        author: Address,
+        title: String,
+        summary: String,
+        kind: ProposalKind,
+        slot: u64,
+    ) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            let id = snap
+                .governance
+                .submit_proposal(author, title, summary, kind, slot)
+                .map_err(map_gov)?;
+            Ok(json!({ "proposal_id": id }))
+        })
+    }
+
+    fn deposit_proposal(&mut self, id: u64, amount: u64) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            snap.governance
+                .add_deposit(id, amount)
+                .map_err(map_gov)?;
+            let p = snap
+                .governance
+                .proposal(id)
+                .ok_or_else(|| RpcError::NotFound(format!("proposal {id}")))?;
+            Ok(json!({ "proposal_id": id, "deposit": p.deposit }))
+        })
+    }
+
+    fn open_proposal_voting(&mut self, id: u64, slot: u64) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            snap.governance.open_voting(id, slot).map_err(map_gov)?;
+            Ok(json!({ "proposal_id": id, "status": "voting" }))
+        })
+    }
+
+    fn cast_gov_vote(
+        &mut self,
+        id: u64,
+        voter: Address,
+        choice: VoteChoice,
+        raw_balance: u64,
+        total_supply: u64,
+    ) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            snap.governance
+                .cast_vote(id, voter, choice, raw_balance, total_supply)
+                .map_err(map_gov)?;
+            Ok(json!({ "proposal_id": id, "voted": true }))
+        })
+    }
+
+    fn tally_proposal(&mut self, id: u64) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            let status = snap.governance.tally(id).map_err(map_gov)?;
+            Ok(json!({ "proposal_id": id, "status": status }))
+        })
+    }
+
+    fn enter_proposal_timelock(&mut self, id: u64, slot: u64) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            snap.governance
+                .enter_timelock(id, slot)
+                .map_err(map_gov)?;
+            Ok(json!({ "proposal_id": id, "status": "timelock" }))
+        })
+    }
+
+    fn execute_proposal(&mut self, id: u64, slot: u64) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            snap.governance.execute(id, slot).map_err(map_gov)?;
+            Ok(json!({ "proposal_id": id, "status": "executed" }))
+        })
+    }
+
+    fn post_forum_topic(
+        &mut self,
+        author: Address,
+        title: String,
+        body: String,
+        category: TopicCategory,
+        slot: u64,
+    ) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            let id = snap
+                .community
+                .post_topic(author, title, body, category, slot)
+                .map_err(map_gov)?;
+            Ok(json!({ "topic_id": id }))
+        })
+    }
+
+    fn ack_constitution(&mut self, address: Address, slot: u64) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            let id = snap.governance.constitution.id.clone();
+            let hash = snap.governance.constitution.content_hash_hex();
+            snap.community
+                .acknowledge_constitution(address, id.clone(), hash.clone(), slot);
+            Ok(json!({
+                "address": address.to_bech32(),
+                "constitution_id": id,
+                "constitution_hash": hash,
+                "acked": true,
+            }))
+        })
+    }
+
+    fn sponsor_proposal(&mut self, id: u64, who: Address) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            snap.governance
+                .sponsor_as_tamias(id, who)
+                .map_err(map_gov)?;
+            Ok(json!({ "proposal_id": id, "sponsored": true }))
+        })
+    }
+
+    fn assent_proposal(&mut self, id: u64, who: Address) -> Result<Value, RpcError> {
+        self.with_civic_mut(|snap| {
+            snap.governance
+                .record_archon_assent(id, who)
+                .map_err(map_gov)?;
+            Ok(json!({ "proposal_id": id, "assented": true }))
+        })
+    }
+}
+
+fn map_gov(err: agora_governance::GovernanceError) -> RpcError {
+    RpcError::Rejected(err.to_string())
 }

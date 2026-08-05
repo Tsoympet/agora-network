@@ -81,7 +81,10 @@ effective = isqrt(capped)
 
 | Layer | Status |
 | --- | --- |
-| Constitution text + hash | yes (`CONSTITUTION.md` + `constitution` module) |
-| Ranks / chambers / proposal engine | yes (in-crate) |
-| Node persistence + RPC + wallet UI | not wired yet |
-| L2/L3 operator sets as Ecclesia ranks | out of scope (see `TOKEN_ROLES.md`) |
+| Constitution text + hash | yes |
+| Ranks / chambers / proposal engine | yes |
+| Community board (forum + acks) | yes |
+| Node Meta CF persistence (`meta/governance`) | yes |
+| JSON-RPC civic methods | yes |
+| Explorer ballot panel + desktop vote UI | yes |
+| L2/L3 operator sets as Ecclesia ranks | out of scope |

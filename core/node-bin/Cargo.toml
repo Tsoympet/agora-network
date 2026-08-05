@@ -24,6 +24,7 @@ agora-consensus = { workspace = true }
 agora-state-machine = { workspace = true }
 agora-p2p = { workspace = true }
 agora-rpc = { workspace = true }
+agora-governance = { workspace = true }
 borsh = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

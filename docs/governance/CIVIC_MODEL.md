@@ -48,11 +48,8 @@ Archons) — matching Agora’s Greek product language (TLT / OVL / DRC).
 | `Bouleutes` | Bouleutes | 21 |
 | `Tamias` | Tamias | 3 |
 
-## Next wiring (node)
+## Next wiring
 
-- Persist `GovernanceState` under RocksDB meta
-- JSON-RPC: submit / deposit / vote / list proposals / offices
-- Explorer + desktop: Ecclesia ballot UI
+Done: Meta CF persistence, JSON-RPC, explorer `#gov` panel, desktop ballot section.
 
-Until then the constitution and `agora-governance` engine are the **normative
-spec** implementations.
+Optional hardening: signed vote payloads (today voter address is trusted when RPC token is presented).

@@ -48,4 +48,6 @@ pub mod meta_keys {
     pub const ISSUED_SUPPLY: &[u8] = b"meta/issued_supply";
     /// Current DAA difficulty level (`u32` LE) — maps to `BlockHeader.bits`.
     pub const DAA_DIFFICULTY: &[u8] = b"meta/daa_difficulty";
+    /// Civic governance + community board JSON snapshot ([`agora_governance::CivicSnapshot`]).
+    pub const GOVERNANCE: &[u8] = b"meta/governance";
 }

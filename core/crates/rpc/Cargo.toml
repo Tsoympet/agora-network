@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 agora-types = { workspace = true }
+agora-governance = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
