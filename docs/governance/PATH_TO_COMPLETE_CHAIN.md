@@ -82,6 +82,30 @@ See [`docs/scaling/TOKEN_ROLES.md`](../scaling/TOKEN_ROLES.md).
 
 Node already refuses `AGORA_NETWORK=mainnet` until genesis is frozen.
 
+## Consensus hardening (source-review remediation)
+
+Addressing a static architecture/security review of `main`:
+
+| # | Finding | Status |
+| --- | --- | --- |
+| 1 | GHOSTDAG merge-set used local **arrival order** | **fixed** — canonical `(blue_score, hash)` merge order + hash-sorted rebuild; permutation determinism test |
+| 2 | Tip selection used blue **score**, not work | **fixed** — virtual tip compares cumulative `blue_work` (`work_from_bits`) then score then hash |
+| 3 | DAA multiplied the **bit exponent** by the timing factor (256× jumps) | **fixed** — adjust in target/work space; bit delta = `log2(clamped factor)`, ≤ ±1 bit/window at default |
+| 4 | RandomX context built **per candidate header** (DoS) | **fixed** — stable per-epoch seed + cached `Context` |
+| 5 | Block admission not atomic | **partially fixed** — per-block UTXO + journal + issued-supply now commit via one `WriteBatch`; see follow-ups |
+| 6 | Supply tracked separately from UTXO journal | **fixed** — same atomic `WriteBatch` |
+| 7 | Same-block parent→child fee pre-calc | **fixed** — package-aware `sum_transfer_fees` |
+| 8 | L2/L3 "equivalence" wording | **fixed** — `TOKEN_ROLES.md` terminology note (role-modeled, not protocol-equivalent) |
+| 9 | CI gaps | **partially fixed** — blocking clippy on consensus core, `cargo-deny` (advisories+licenses), explorer/desktop build jobs |
+
+### Remaining hardening follow-ups (tracked)
+
+- **Full multi-block reorg atomicity:** wrap the entire virtual-chain reorg (block/header/tx-index/tips/virtual-tip + all per-block UTXO transitions) in a single recoverable transition. The `WriteBatch` primitive + atomic per-block apply are the foundation; whole-reorg batching + crash-recovery replay are still to do.
+- **Persist GHOSTDAG metadata** (selected parent, blue score/work, blue/red sets) instead of recomputing on restart; add restart-equivalence + cross-node state-root comparison tests.
+- **RandomX epoch rotation policy** (height-anchored seed) and pre-PoW rate/structural gating knobs.
+- **Whole-workspace clippy `-D warnings`** (currently blocking only on the consensus core; `bridge-sdk` and others still have advisory lints).
+- **Continuous multi-node partition/reorg soak** + `cargo test --features randomx` compose smoke as required gates.
+
 ## Deferred (explicitly out of scope / later)
 
 - Full Ethereum MPT state roots (SHA-256 account+storage digests today)
