@@ -14,10 +14,57 @@ pub struct StateStore {
     inner: Inner,
 }
 
+/// In-memory backend map: `(cf, key) -> value`.
+type MemStore = Arc<Mutex<HashMap<(u8, Vec<u8>), Vec<u8>>>>;
+
+/// A key/value pair returned by prefix scans.
+pub type KvPair = (Vec<u8>, Vec<u8>);
+
 enum Inner {
-    Memory(Arc<Mutex<HashMap<(u8, Vec<u8>), Vec<u8>>>>),
+    Memory(MemStore),
     #[cfg(feature = "rocksdb")]
     Rocks(Arc<rocksdb::DB>),
+}
+
+/// A single mutation in a [`WriteBatch`].
+enum WriteOp {
+    Put(ColumnFamily, Vec<u8>, Vec<u8>),
+    Delete(ColumnFamily, Vec<u8>),
+}
+
+/// An ordered set of column-family mutations committed atomically by
+/// [`StateStore::write_batch`].
+///
+/// On RocksDB this maps to a native `WriteBatch` (all-or-nothing on `db.write`). On the
+/// in-memory backend all ops are applied under one lock. Use this to commit consensus
+/// state transitions (UTXO changes + journal + issued supply, etc.) as a single unit so a
+/// crash cannot leave the store half-updated.
+#[derive(Default)]
+pub struct WriteBatch {
+    ops: Vec<WriteOp>,
+}
+
+impl WriteBatch {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn put_cf(&mut self, cf: ColumnFamily, key: &[u8], value: &[u8]) {
+        self.ops
+            .push(WriteOp::Put(cf, key.to_vec(), value.to_vec()));
+    }
+
+    pub fn delete_cf(&mut self, cf: ColumnFamily, key: &[u8]) {
+        self.ops.push(WriteOp::Delete(cf, key.to_vec()));
+    }
+
+    pub fn len(&self) -> usize {
+        self.ops.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
+    }
 }
 
 impl StateStore {
@@ -122,7 +169,7 @@ impl StateStore {
         &self,
         cf: ColumnFamily,
         prefix: &[u8],
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StateError> {
+    ) -> Result<Vec<KvPair>, StateError> {
         match &self.inner {
             Inner::Memory(map) => {
                 let guard = map
@@ -151,6 +198,45 @@ impl StateStore {
                     out.push((k.to_vec(), v.to_vec()));
                 }
                 Ok(out)
+            }
+        }
+    }
+
+    /// Commit a [`WriteBatch`] atomically (all ops apply, or none on error).
+    pub fn write_batch(&self, batch: WriteBatch) -> Result<(), StateError> {
+        match &self.inner {
+            Inner::Memory(map) => {
+                let mut guard = map
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                for op in batch.ops {
+                    match op {
+                        WriteOp::Put(cf, key, value) => {
+                            guard.insert((cf as u8, key), value);
+                        }
+                        WriteOp::Delete(cf, key) => {
+                            guard.remove(&(cf as u8, key));
+                        }
+                    }
+                }
+                Ok(())
+            }
+            #[cfg(feature = "rocksdb")]
+            Inner::Rocks(db) => {
+                let mut wb = rocksdb::WriteBatch::default();
+                for op in batch.ops {
+                    match op {
+                        WriteOp::Put(cf, key, value) => {
+                            let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                            wb.put_cf(handle, key, value);
+                        }
+                        WriteOp::Delete(cf, key) => {
+                            let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                            wb.delete_cf(handle, key);
+                        }
+                    }
+                }
+                db.write(wb).map_err(|e| StateError::Storage(e.to_string()))
             }
         }
     }

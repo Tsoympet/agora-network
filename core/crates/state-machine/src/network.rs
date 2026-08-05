@@ -153,8 +153,10 @@ impl ChainParams {
     pub fn testnet() -> Self {
         let premine_address =
             Address::from_hex(TESTNET_PREMINE_ADDRESS_HEX).expect("static testnet premine hex");
-        let mut supply = SupplyCaps::default();
-        supply.premine_address = premine_address;
+        let supply = SupplyCaps {
+            premine_address,
+            ..SupplyCaps::default()
+        };
         let expected =
             Hash::from_hex(TESTNET_GENESIS_HASH_HEX).expect("static testnet genesis hex");
         Self {

@@ -14,9 +14,9 @@ use agora_consensus::{
     PowVerifier,
 };
 use agora_state_machine::{
-    apply_block, delete_utxo_journal, index_block_transactions, load_header, load_utxo_journal,
-    lookup_tx_location, meta_keys, revert_journal, store_header, store_utxo_journal,
-    sum_transfer_fees, ColumnFamily, StateStore,
+    apply_block_batched, delete_utxo_journal, index_block_transactions, load_header,
+    load_utxo_journal, lookup_tx_location, meta_keys, revert_journal, store_header,
+    sum_transfer_fees, utxo_diff_key, ColumnFamily, StateStore,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -515,7 +515,7 @@ impl ChainState {
             .insert(id, block.header.parents.clone())
             .map_err(|e| AdmitError::Consensus(e.to_string()))?;
         self.ghostdag
-            .add_block(&self.dag, id)
+            .add_block_with_work(&self.dag, id, work_from_bits(block.header.bits))
             .map_err(|e| AdmitError::Consensus(e.to_string()))?;
 
         let old_virtual = self.virtual_tip()?;
@@ -813,11 +813,21 @@ impl ChainState {
         if issued.saturating_add(subsidy) > max {
             return Err(AdmitError::SupplyCapExceeded);
         }
-        let journal = apply_block(self.store.as_ref(), &block, emission)
+        // Atomic commit: UTXO changes + revert journal + issued-supply update land as a
+        // single WriteBatch so a crash cannot leave UTXOs and supply out of sync.
+        let (journal, mut batch) = apply_block_batched(self.store.as_ref(), &block, emission)
             .map_err(|e| AdmitError::Utxo(e.to_string()))?;
-        store_utxo_journal(self.store.as_ref(), &hash, &journal)
+        let journal_bytes =
+            borsh::to_vec(&journal).map_err(|e| AdmitError::Storage(e.to_string()))?;
+        batch.put_cf(ColumnFamily::Warm, &utxo_diff_key(&hash), &journal_bytes);
+        batch.put_cf(
+            ColumnFamily::Meta,
+            meta_keys::ISSUED_SUPPLY,
+            &issued.saturating_add(subsidy).to_le_bytes(),
+        );
+        self.store
+            .write_batch(batch)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
-        self.persist_issued_supply(issued.saturating_add(subsidy))?;
         Ok(())
     }
 
@@ -1057,16 +1067,28 @@ fn rebuild_dag_from_store(
         pending.insert(hash, parents);
     }
 
+    // Real PoW work per block so rebuilt `blue_work` matches live admission exactly.
+    let block_work = |hash: &Hash| -> u128 {
+        load_header(store, hash)
+            .ok()
+            .flatten()
+            .map(|h| work_from_bits(h.bits))
+            .unwrap_or(1)
+    };
+
     let mut dag = Dag::new();
     dag.insert(genesis, vec![])
         .map_err(|e| AdmitError::Consensus(e.to_string()))?;
     let mut ghostdag = Ghostdag::new(ghostdag_config);
     ghostdag
-        .add_block(&dag, genesis)
+        .add_block_with_work(&dag, genesis, block_work(&genesis))
         .map_err(|e| AdmitError::Consensus(e.to_string()))?;
 
     while !pending.is_empty() {
-        let ready: Vec<Hash> = pending
+        // Canonical (hash-sorted) ready order so restart reconstructs the same DAG
+        // regardless of HashMap iteration order. (Coloring is arrival-order independent,
+        // but a stable order keeps `blocks_in_insert_order` deterministic too.)
+        let mut ready: Vec<Hash> = pending
             .iter()
             .filter(|(_, parents)| parents.iter().all(|p| dag.contains(p)))
             .map(|(hash, _)| *hash)
@@ -1076,12 +1098,13 @@ fn rebuild_dag_from_store(
                 "cannot rebuild dag: missing parents or cycle".into(),
             ));
         }
+        ready.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
         for hash in ready {
             let parents = pending.remove(&hash).expect("ready hash");
             dag.insert(hash, parents)
                 .map_err(|e| AdmitError::Consensus(e.to_string()))?;
             ghostdag
-                .add_block(&dag, hash)
+                .add_block_with_work(&dag, hash, block_work(&hash))
                 .map_err(|e| AdmitError::Consensus(e.to_string()))?;
         }
     }
@@ -1254,7 +1277,10 @@ mod tests {
     fn mine_one(chain: &mut ChainState, nonce: u64) -> Hash {
         let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
         block.header.nonce = nonce;
-        block.header.timestamp_ms = nonce;
+        // Space blocks ~at the target so the DAA holds difficulty at the (0) floor;
+        // otherwise sub-target spacing correctly raises `bits` and the fixed nonce
+        // would no longer satisfy the leading-zero requirement.
+        block.header.timestamp_ms = nonce.saturating_mul(1_000);
         let digest = RandomXPowHasher.pow_hash(&block.header);
         LeadingZeroPow::new(PowAlgorithm::RandomX)
             .verify(&block.header, &digest)
@@ -1424,7 +1450,8 @@ mod tests {
         let mut block = chain.block_template(payout, &[]).unwrap();
         block.header.parents = parents.to_vec();
         block.header.nonce = nonce;
-        block.header.timestamp_ms = nonce;
+        // Target-spaced timestamps keep the DAA at the difficulty floor (see mine_one).
+        block.header.timestamp_ms = nonce.saturating_mul(1_000);
         // Recompute coinbase for emission estimate from these parents.
         let emission = chain
             .emission
@@ -1621,7 +1648,7 @@ mod tests {
         sign_transaction(&mut spend, &miner).unwrap();
         let mut block = chain.block_template(Address::ZERO, &[spend]).unwrap();
         block.header.nonce = 61;
-        block.header.timestamp_ms = 61;
+        block.header.timestamp_ms = 61_000;
         block.header.tx_root = Block::compute_tx_root(&block.transactions);
         let digest = RandomXPowHasher.pow_hash(&block.header);
         LeadingZeroPow::new(PowAlgorithm::RandomX)
@@ -1652,7 +1679,7 @@ mod tests {
         sign_transaction(&mut spend2, &miner).unwrap();
         let mut ok = chain.block_template(Address::ZERO, &[spend2]).unwrap();
         ok.header.nonce = 64;
-        ok.header.timestamp_ms = 64;
+        ok.header.timestamp_ms = 64_000;
         ok.header.tx_root = Block::compute_tx_root(&ok.transactions);
         let digest = RandomXPowHasher.pow_hash(&ok.header);
         LeadingZeroPow::new(PowAlgorithm::RandomX)
@@ -1691,7 +1718,8 @@ mod tests {
         let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
         block.header.parents = parents.to_vec();
         block.header.nonce = nonce;
-        block.header.timestamp_ms = nonce;
+        // Target-spaced timestamps keep the DAA at the difficulty floor (see mine_one).
+        block.header.timestamp_ms = nonce.saturating_mul(1_000);
         let emission = chain
             .emission
             .reward_at_blue_score(chain.estimate_blue_score(parents));

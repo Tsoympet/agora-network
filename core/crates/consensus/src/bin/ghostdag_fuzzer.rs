@@ -75,7 +75,7 @@ fn run_partition_scenario(seed: u64, tag: u32) -> Result<(), String> {
         } else {
             // Additional bridges may also pull in a random earlier tip from either side.
             let mut parents = vec![merge_tip];
-            if rng.next_u32() % 2 == 0 {
+            if rng.next_u32().is_multiple_of(2) {
                 parents.push(left_tip);
             } else {
                 parents.push(right_tip);

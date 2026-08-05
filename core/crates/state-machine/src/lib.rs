@@ -18,8 +18,8 @@ mod utxo_diff;
 mod zones;
 
 pub use apply::{
-    apply_block, balance_of, revert_journal, sum_transfer_fees, transfer_fee, validate_mempool_tx,
-    UtxoJournal,
+    apply_block, apply_block_batched, balance_of, revert_journal, sum_transfer_fees, transfer_fee,
+    validate_mempool_tx, UtxoJournal,
 };
 pub use columns::{meta_keys, ColumnFamily};
 pub use error::StateError;
@@ -32,7 +32,7 @@ pub use network::{
     TESTNET_GENESIS_HASH_HEX, TESTNET_GENESIS_TIMESTAMP_MS, TESTNET_PREMINE_ADDRESS_HEX,
 };
 pub use orphans::{delete_orphan, list_orphans, load_orphan, orphan_key, store_orphan};
-pub use store::StateStore;
+pub use store::{StateStore, WriteBatch};
 pub use tx_index::{
     decode_tx_location, encode_tx_location, index_block_transactions, lookup_tx_location,
     tx_index_key,
