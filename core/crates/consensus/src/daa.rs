@@ -34,7 +34,11 @@ impl Default for Difficulty {
 /// Compute next difficulty from window timestamps (ms) ordered oldest → newest.
 ///
 /// Uses blue-work windows in production; this scaffold keys off observed timestamps only.
-pub fn next_difficulty(config: &DaaConfig, current: Difficulty, window_timestamps_ms: &[u64]) -> Difficulty {
+pub fn next_difficulty(
+    config: &DaaConfig,
+    current: Difficulty,
+    window_timestamps_ms: &[u64],
+) -> Difficulty {
     if window_timestamps_ms.len() < 2 {
         return current;
     }
@@ -55,9 +59,7 @@ pub fn next_difficulty(config: &DaaConfig, current: Difficulty, window_timestamp
     }
 
     let next = (current.level as f64 * factor).round() as u32;
-    Difficulty {
-        level: next.max(1),
-    }
+    Difficulty { level: next.max(1) }
 }
 
 #[cfg(test)]

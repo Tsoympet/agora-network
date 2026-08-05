@@ -37,7 +37,7 @@ agora-network/
 | `core/crates/crypto` | `types`, audited crypto crates | Consensus policy, P2P |
 | `core/crates/consensus` | `types`, `crypto` | Disk I/O, UI, RPC transport |
 | `core/crates/state-machine` | `types`, `consensus` | libp2p, UI |
-| `core/crates/p2p` | `types`, `consensus` | RocksDB, UI |
+| `core/crates/p2p` | `types`, `consensus`, `crypto` (mempool sig verify) | RocksDB, UI |
 | `core/crates/rpc` | `types`, node services | Mining loops, UI frameworks |
 | `core/crates/miner-sidecar` | `types`, `crypto` | Full state machine |
 | `core/node-bin` | all core crates | Client UI |

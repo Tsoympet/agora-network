@@ -5,8 +5,8 @@
 //! algorithm-pluggable (RandomX / kHeavyHash).
 
 mod acceptance;
-mod dag;
 mod daa;
+mod dag;
 mod emission;
 mod error;
 mod ghostdag;
@@ -16,9 +16,11 @@ pub use acceptance::{
     accept_blue_blocks, coinbase_reward, fees_from_accepted, AcceptanceResult, BlockAcceptance,
     BlueBlockInput, MemoryUtxoView, TxAcceptanceOutcome, TxRejectReason, UtxoJournalOp, UtxoView,
 };
-pub use dag::Dag;
 pub use daa::{next_difficulty, DaaConfig, Difficulty};
+pub use dag::Dag;
 pub use emission::EmissionSchedule;
 pub use error::ConsensusError;
 pub use ghostdag::{Ghostdag, GhostdagConfig, GhostdagData, OrderedBlock};
-pub use pow::{AcceptAllPow, LeadingZeroPow, PowAlgorithm, PowVerifier};
+#[cfg(test)]
+pub use pow::AcceptAllPow;
+pub use pow::{LeadingZeroPow, PowAlgorithm, PowVerifier};

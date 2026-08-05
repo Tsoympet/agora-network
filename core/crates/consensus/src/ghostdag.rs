@@ -124,15 +124,9 @@ impl Ghostdag {
             .filter(|h| *h != block && *h != selected_parent && !past_sp.contains(h))
             .collect();
 
-        // Process merge-set in DAG insertion order for determinism.
-        let order_index: HashMap<Hash, usize> = dag
-            .blocks_in_insert_order()
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(i, h)| (h, i))
-            .collect();
-        merge_set.sort_by_key(|h| order_index.get(h).copied().unwrap_or(usize::MAX));
+        // Process merge-set in hash order — topology-only, independent of local
+        // receive/insert order so all honest nodes color the same DAG identically.
+        merge_set.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
 
         for candidate in merge_set {
             let anticone = dag.anticone(candidate)?;
@@ -160,7 +154,11 @@ impl Ghostdag {
     }
 
     /// Color every block in insert order, then return a total order for a tip's past.
-    pub fn order_past(&mut self, dag: &Dag, tip: Hash) -> Result<Vec<OrderedBlock>, ConsensusError> {
+    pub fn order_past(
+        &mut self,
+        dag: &Dag,
+        tip: Hash,
+    ) -> Result<Vec<OrderedBlock>, ConsensusError> {
         for hash in dag.blocks_in_insert_order() {
             self.add_block(dag, *hash)?;
         }
@@ -190,9 +188,17 @@ impl Ghostdag {
         Ok(ordered)
     }
 
-    /// Backward-compatible helper: insert tip with parents into a temporary view is not done here.
-    /// Prefer [`Self::order_past`] with an explicit [`Dag`].
-    pub fn order_tip(&self, tip: Hash, parents: &[Hash]) -> Result<Vec<OrderedBlock>, ConsensusError> {
+    /// Deprecated stub that fabricates an all-blue order without GHOSTDAG.
+    ///
+    /// Do **not** use for acceptance. Prefer [`Self::order_past`] with an explicit [`Dag`].
+    #[deprecated(
+        note = "use Ghostdag::order_past with a real Dag — this stub is not consensus-safe"
+    )]
+    pub fn order_tip(
+        &self,
+        tip: Hash,
+        parents: &[Hash],
+    ) -> Result<Vec<OrderedBlock>, ConsensusError> {
         let mut ordered = Vec::with_capacity(parents.len() + 1);
         for (i, parent) in parents.iter().enumerate() {
             ordered.push(OrderedBlock {

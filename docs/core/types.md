@@ -30,7 +30,8 @@ Consensus objects must have a single canonical definition. Clients consume the s
 
 - `Transaction::tx_id()` = SHA-256(borsh(tx))
 - `Block::id()` = SHA-256(borsh(header))
-- `Block::compute_tx_root` = pairwise merkle over tx ids
+- `Block::compute_tx_root` = domain-separated pairwise merkle over tx ids (leaf/node/pad tags + leaf count; no duplicate-last-leaf collision)
+- `Block::verify_tx_root` must pass before acceptance
 - `Transaction::signing_bytes(fingerprint)` = `fingerprint.digest() || borsh(body)`
 - `NetworkFingerprint::digest()` = SHA-256(borsh(fingerprint))
 

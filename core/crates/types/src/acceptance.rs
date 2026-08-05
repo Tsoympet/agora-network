@@ -9,7 +9,16 @@ use crate::Hash;
 /// Bit `i` corresponds to `block.transactions[i]`. Bits are packed little-endian
 /// within each byte (bit 0 of byte 0 = transaction index 0).
 #[derive(
-    Clone, PartialEq, Eq, Debug, Default, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone,
+    PartialEq,
+    Eq,
+    Debug,
+    Default,
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
+    TS,
 )]
 #[ts(export)]
 pub struct AcceptanceBitmap {

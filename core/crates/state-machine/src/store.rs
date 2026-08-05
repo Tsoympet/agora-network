@@ -56,8 +56,8 @@ impl StateStore {
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
-        let cfs = ColumnFamily::ALL
-            .map(|cf| ColumnFamilyDescriptor::new(cf.name(), Options::default()));
+        let cfs =
+            ColumnFamily::ALL.map(|cf| ColumnFamilyDescriptor::new(cf.name(), Options::default()));
 
         let db = DB::open_cf_descriptors(&opts, path, cfs)
             .map_err(|e| StateError::Storage(e.to_string()))?;
@@ -125,13 +125,11 @@ impl StateStore {
                 for op in ops {
                     match op {
                         StoreOp::Put { cf, key, value } => {
-                            let handle =
-                                db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                            let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
                             batch.put_cf(handle, key, value);
                         }
                         StoreOp::Delete { cf, key } => {
-                            let handle =
-                                db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                            let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
                             batch.delete_cf(handle, key);
                         }
                     }
@@ -168,7 +166,11 @@ mod tests {
             );
         }
         store
-            .put_cf(ColumnFamily::Meta, meta_keys::MAX_SUPPLY, &1_000u64.to_le_bytes())
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::MAX_SUPPLY,
+                &1_000u64.to_le_bytes(),
+            )
             .unwrap();
         assert!(store
             .get_cf(ColumnFamily::Meta, meta_keys::MAX_SUPPLY)

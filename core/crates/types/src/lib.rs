@@ -107,6 +107,20 @@ mod tests {
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
+        assert!(block.verify_tx_root());
+    }
+
+    #[test]
+    fn tx_root_rejects_odd_length_duplicate_collision() {
+        let a = Transaction::unsigned(1, vec![], vec![], 1);
+        let b = Transaction::unsigned(1, vec![], vec![], 2);
+        let c = Transaction::unsigned(1, vec![], vec![], 3);
+        let root_abc = Block::compute_tx_root(&[a.clone(), b.clone(), c.clone()]);
+        let root_abcc = Block::compute_tx_root(&[a, b, c.clone(), c]);
+        assert_ne!(
+            root_abc, root_abcc,
+            "duplicate-last-leaf collision must not be possible"
+        );
     }
 }
 

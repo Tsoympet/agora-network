@@ -7,8 +7,20 @@ use ts_rs::TS;
 ///
 /// Stored as a fixed array so DAG indexes can key by value without heap allocation.
 #[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug,
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    Debug,
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
+    TS,
 )]
 #[ts(export)]
 pub struct Hash(pub [u8; 32]);

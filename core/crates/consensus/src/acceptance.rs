@@ -12,11 +12,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use agora_crypto::verify_transaction;
+use agora_crypto::{signer_address, verify_transaction};
 use agora_types::{
     AcceptanceBitmap, Amount, Block, Hash, NetworkFingerprint, OutPoint, Transaction, TxOut,
 };
 
+use crate::emission::EmissionSchedule;
 use crate::ghostdag::OrderedBlock;
 use crate::ConsensusError;
 
@@ -220,6 +221,19 @@ pub fn accept_blue_blocks<V: UtxoView>(
                 "ordered block hash does not match block payload".into(),
             ));
         }
+        if !input.block.verify_tx_root() {
+            return Err(ConsensusError::Acceptance(
+                "block tx_root does not commit to transactions".into(),
+            ));
+        }
+        let expected_subsidy = expected_subsidy_for(fingerprint, input);
+        if input.subsidy != expected_subsidy {
+            return Err(ConsensusError::Acceptance(format!(
+                "subsidy {} does not match network schedule {}",
+                input.subsidy.as_base_units(),
+                expected_subsidy.as_base_units()
+            )));
+        }
 
         let block_acceptance =
             accept_single_blue_block(input, &mut overlay, &mut accepted_tx_ids, fingerprint)?;
@@ -256,26 +270,30 @@ fn accept_single_blue_block<'a, V: UtxoView>(
         ));
     }
 
-    let mut flags = vec![false; txs.len()];
+    // Coinbase slot is exclusive: index 0 must have no inputs. Never treat it as a
+    // regular spend (that previously allowed apply-then-reject without rollback).
+    if !txs[0].inputs.is_empty() {
+        return Err(ConsensusError::Acceptance(
+            "block transaction 0 must be coinbase (no inputs)".into(),
+        ));
+    }
+
     let mut outcomes = Vec::with_capacity(txs.len());
     let mut accepted_fees = Amount::ZERO;
 
-    // Pass 1: fully validate every non-coinbase tx, then resolve conflicts by blue order.
-    for (index, tx) in txs.iter().enumerate() {
-        let is_coinbase = index == 0 && tx.inputs.is_empty();
-        if is_coinbase {
-            outcomes.push(TxAcceptanceOutcome {
-                tx_id: tx.tx_id(),
-                index: index as u32,
-                is_coinbase: true,
-                structurally_valid: false,
-                accepted: false,
-                fee: Amount::ZERO,
-                reject_reason: None,
-            });
-            continue;
-        }
+    // Placeholder for coinbase; finalized after fees are known.
+    outcomes.push(TxAcceptanceOutcome {
+        tx_id: txs[0].tx_id(),
+        index: 0,
+        is_coinbase: true,
+        structurally_valid: false,
+        accepted: false,
+        fee: Amount::ZERO,
+        reject_reason: None,
+    });
 
+    // Pass 1: fully validate every non-coinbase tx, then resolve conflicts by blue order.
+    for (index, tx) in txs.iter().enumerate().skip(1) {
         let (structurally_valid, fee, validation_reject) =
             validate_regular_tx(tx, overlay, fingerprint);
 
@@ -288,7 +306,11 @@ fn accept_single_blue_block<'a, V: UtxoView>(
             if accepted_tx_ids.contains(&tx_id) {
                 accepted = false;
                 reject_reason = Some(TxRejectReason::DuplicateExact);
-            } else if tx.inputs.iter().any(|i| overlay.is_spent(&i.previous_outpoint)) {
+            } else if tx
+                .inputs
+                .iter()
+                .any(|i| overlay.is_spent(&i.previous_outpoint))
+            {
                 accepted = false;
                 reject_reason = Some(TxRejectReason::InputConflict);
             }
@@ -300,7 +322,6 @@ fn accept_single_blue_block<'a, V: UtxoView>(
             accepted_fees = accepted_fees
                 .checked_add(fee)
                 .ok_or_else(|| ConsensusError::Acceptance("fee overflow".into()))?;
-            flags[index] = true;
         }
 
         outcomes.push(TxAcceptanceOutcome {
@@ -325,18 +346,7 @@ fn accept_single_blue_block<'a, V: UtxoView>(
 
     // Pass 2: coinbase must claim exactly subsidy + accepted fees.
     let coinbase = &txs[0];
-    let is_coinbase = coinbase.inputs.is_empty();
-    let (cb_valid, cb_reject, cb_accepted) = if is_coinbase {
-        validate_coinbase(coinbase, coinbase_reward)
-    } else {
-        (
-            false,
-            Some(TxRejectReason::Invalid(
-                "block transaction 0 must be coinbase (no inputs)",
-            )),
-            false,
-        )
-    };
+    let (cb_valid, cb_reject, cb_accepted) = validate_coinbase(coinbase, coinbase_reward);
 
     if cb_accepted && accepted_tx_ids.contains(&coinbase.tx_id()) {
         outcomes[0] = TxAcceptanceOutcome {
@@ -351,7 +361,6 @@ fn accept_single_blue_block<'a, V: UtxoView>(
     } else if cb_accepted {
         accepted_tx_ids.insert(coinbase.tx_id());
         overlay.apply_accepted(coinbase);
-        flags[0] = true;
         outcomes[0] = TxAcceptanceOutcome {
             tx_id: coinbase.tx_id(),
             index: 0,
@@ -365,13 +374,16 @@ fn accept_single_blue_block<'a, V: UtxoView>(
         outcomes[0] = TxAcceptanceOutcome {
             tx_id: coinbase.tx_id(),
             index: 0,
-            is_coinbase,
+            is_coinbase: true,
             structurally_valid: cb_valid,
             accepted: false,
             fee: Amount::ZERO,
             reject_reason: cb_reject,
         };
     }
+
+    // Bitmap is derived from final outcomes only.
+    let flags: Vec<bool> = outcomes.iter().map(|o| o.accepted).collect();
 
     Ok(BlockAcceptance {
         block_hash: input.ordered.hash,
@@ -382,6 +394,18 @@ fn accept_single_blue_block<'a, V: UtxoView>(
         subsidy: input.subsidy,
         coinbase_reward,
     })
+}
+
+/// Subsidy implied by the network fingerprint (premine for genesis, emission otherwise).
+fn expected_subsidy_for(fingerprint: &NetworkFingerprint, input: &BlueBlockInput) -> Amount {
+    if input.block.header.parents.is_empty() {
+        return Amount::from_base_units(fingerprint.premine);
+    }
+    let schedule = EmissionSchedule {
+        initial_reward: fingerprint.initial_reward,
+        halving_interval: fingerprint.halving_interval,
+    };
+    Amount::from_base_units(schedule.reward_at_blue_score(input.ordered.blue_score))
 }
 
 /// Fully validate a regular (non-coinbase) transaction.
@@ -413,6 +437,13 @@ fn validate_regular_tx<V: UtxoView>(
             Some(TxRejectReason::Invalid("invalid signature")),
         );
     }
+    let Ok(signer) = signer_address(tx, fingerprint) else {
+        return (
+            false,
+            Amount::ZERO,
+            Some(TxRejectReason::Invalid("invalid signature")),
+        );
+    };
 
     let mut seen = HashSet::new();
     for input in &tx.inputs {
@@ -434,6 +465,14 @@ fn validate_regular_tx<V: UtxoView>(
                 Some(TxRejectReason::Invalid("missing utxo")),
             );
         };
+        // Critical: signature alone is not enough — signer must own each spent UTXO.
+        if utxo.address != signer {
+            return (
+                false,
+                Amount::ZERO,
+                Some(TxRejectReason::Invalid("signer does not own utxo")),
+            );
+        }
         input_total = match input_total.checked_add(utxo.value) {
             Some(v) => v,
             None => {
@@ -556,7 +595,7 @@ mod tests {
     const PHRASE: &str =
         "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
-    fn fingerprint(genesis: Hash) -> NetworkFingerprint {
+    fn fingerprint(genesis: Hash, premine: Amount) -> NetworkFingerprint {
         let emission = EmissionSchedule::default();
         NetworkFingerprint {
             network_name: "agora-test".into(),
@@ -564,7 +603,7 @@ mod tests {
             genesis_hash: genesis,
             ghostdag_k: 18,
             max_supply: Amount::from_whole(100_000_000).unwrap().as_base_units(),
-            premine: Amount::from_whole(10_000_000).unwrap().as_base_units(),
+            premine: premine.as_base_units(),
             initial_reward: emission.initial_reward,
             halving_interval: emission.halving_interval,
         }
@@ -650,7 +689,7 @@ mod tests {
         let genesis_cb = coinbase(premine, alice, 0);
         let genesis = make_block(vec![], vec![genesis_cb.clone()]);
         let genesis_hash = genesis.id();
-        let fp = fingerprint(genesis_hash);
+        let fp = fingerprint(genesis_hash, premine);
 
         let mut utxos = MemoryUtxoView::new();
         let genesis_txid = genesis_cb.tx_id();
@@ -723,7 +762,7 @@ mod tests {
         let genesis_cb = coinbase(premine, alice, 0);
         let genesis = make_block(vec![], vec![genesis_cb.clone()]);
         let genesis_hash = genesis.id();
-        let fp = fingerprint(genesis_hash);
+        let fp = fingerprint(genesis_hash, premine);
         let genesis_txid = genesis_cb.tx_id();
 
         let mut utxos = MemoryUtxoView::new();
@@ -819,7 +858,7 @@ mod tests {
         let genesis_cb = coinbase(premine, alice, 0);
         let genesis = make_block(vec![], vec![genesis_cb.clone()]);
         let genesis_hash = genesis.id();
-        let fp = fingerprint(genesis_hash);
+        let fp = fingerprint(genesis_hash, premine);
         let genesis_txid = genesis_cb.tx_id();
 
         let mut utxos = MemoryUtxoView::new();
@@ -887,13 +926,81 @@ mod tests {
     }
 
     #[test]
+    fn rejects_spend_when_signer_does_not_own_utxo() {
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let owner = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let thief = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let premine = Amount::from_whole(10).unwrap();
+        let genesis_cb = coinbase(premine, owner.address(), 0);
+        let genesis = make_block(vec![], vec![genesis_cb.clone()]);
+        let genesis_hash = genesis.id();
+        let fp = fingerprint(genesis_hash, premine);
+        let mut utxos = MemoryUtxoView::new();
+        utxos.insert(
+            OutPoint {
+                tx_id: genesis_cb.tx_id(),
+                index: 0,
+            },
+            genesis_cb.outputs[0].clone(),
+        );
+
+        // Thief signs a spend of owner's UTXO — must fail ownership check.
+        let mut stolen = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: genesis_cb.tx_id(),
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_whole(1).unwrap(),
+                address: thief.address(),
+            }],
+            77,
+        );
+        sign_transaction(&mut stolen, &thief, &fp).unwrap();
+
+        let subsidy = Amount::from_base_units(EmissionSchedule::default().initial_reward);
+        let cb = coinbase(subsidy, owner.address(), 40);
+        let block = make_block(vec![genesis_hash], vec![cb, stolen]);
+        let hash = block.id();
+
+        let result = accept_blue_blocks(
+            &[
+                BlueBlockInput {
+                    ordered: ordered(genesis_hash, 1),
+                    block: genesis,
+                    subsidy: premine,
+                },
+                BlueBlockInput {
+                    ordered: ordered(hash, 2),
+                    block,
+                    subsidy,
+                },
+            ],
+            &utxos,
+            &fp,
+        )
+        .unwrap();
+
+        let outcome = &result.blocks[1].outcomes[1];
+        assert!(!outcome.structurally_valid);
+        assert!(!outcome.accepted);
+        assert_eq!(
+            outcome.reject_reason,
+            Some(TxRejectReason::Invalid("signer does not own utxo"))
+        );
+    }
+
+    #[test]
     fn invalid_tx_fully_validated_but_rejected() {
         let alice = Address([1u8; 20]);
         let premine = Amount::from_whole(1).unwrap();
         let genesis_cb = coinbase(premine, alice, 0);
         let genesis = make_block(vec![], vec![genesis_cb.clone()]);
         let genesis_hash = genesis.id();
-        let fp = fingerprint(genesis_hash);
+        let fp = fingerprint(genesis_hash, premine);
 
         let mut utxos = MemoryUtxoView::new();
         utxos.insert(

@@ -5,7 +5,8 @@ use agora_p2p::{dial_addr, Mempool, NetworkConfig, NetworkEvent, NetworkMessage,
 use agora_types::{Amount, Hash, NetworkFingerprint, OutPoint, Transaction, TxIn, TxOut};
 use tokio::time::timeout;
 
-const PHRASE: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const PHRASE: &str =
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 fn test_fingerprint() -> NetworkFingerprint {
     NetworkFingerprint {

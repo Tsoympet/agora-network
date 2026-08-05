@@ -7,6 +7,4 @@ mod error;
 mod methods;
 
 pub use error::RpcError;
-pub use methods::{
-    BlockAcceptanceView, RpcMethod, RpcRequest, RpcResponse, TxAcceptanceView,
-};
+pub use methods::{BlockAcceptanceView, RpcMethod, RpcRequest, RpcResponse, TxAcceptanceView};
