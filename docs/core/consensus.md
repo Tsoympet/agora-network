@@ -28,7 +28,7 @@ Blue order is an input to — not a substitute for — acceptance. See [`accepta
 ## DAA
 
 `DaaConfig` targets sub-second block times (`target_block_time_ms`, default 1000).  
-`next_difficulty` adjusts a simple integer difficulty level from a timestamp window, clamped by `max_adjustment_factor`.
+`next_difficulty` is **integer-only** (`max_adjustment_factor: u64`) so difficulty is deterministic across platforms. Clamps to `[current/max, current*max]` per window.
 
 Production will key windows off blue-work; the scaffold uses timestamps to lock the API.
 

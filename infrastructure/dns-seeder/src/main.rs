@@ -93,9 +93,7 @@ async fn handle_request(req: &str, peers: &Arc<Mutex<HashSet<String>>>) -> Strin
             } else {
                 body.trim_matches('"').to_string()
             };
-            if !peer.starts_with("/ip4/")
-                && !peer.starts_with("/ip6/")
-                && !peer.starts_with("/dns")
+            if !peer.starts_with("/ip4/") && !peer.starts_with("/ip6/") && !peer.starts_with("/dns")
             {
                 return http_response(400, "invalid multiaddr");
             }

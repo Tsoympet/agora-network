@@ -43,6 +43,7 @@ version = "0.1.0"
 dependencies = [
  "agora-crypto",
  "agora-types",
+ "borsh",
  "thiserror 2.0.19",
  "tracing",
 ]
@@ -91,6 +92,9 @@ dependencies = [
  "agora-rpc",
  "agora-state-machine",
  "agora-types",
+ "borsh",
+ "hex",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -105,7 +109,9 @@ dependencies = [
  "agora-types",
  "borsh",
  "futures",
+ "hex",
  "libp2p",
+ "sha2",
  "thiserror 2.0.19",
  "tokio",
  "tracing",

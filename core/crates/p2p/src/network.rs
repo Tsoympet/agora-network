@@ -1,17 +1,17 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash as StdHash, Hasher};
 use std::time::Duration;
 
 use futures::StreamExt;
 use libp2p::gossipsub::{self, IdentTopic, MessageAuthenticity, ValidationMode};
 use libp2p::identity::Keypair;
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
-use libp2p::{Multiaddr, PeerId, Swarm, SwarmBuilder};
+use libp2p::{connection_limits, Multiaddr, PeerId, Swarm, SwarmBuilder};
+use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use agora_types::NetworkFingerprint;
 
+use crate::identity::load_or_create_identity;
 use crate::messages::NetworkMessage;
 use crate::topics::{blocks_topic, transactions_topic};
 use crate::{NetworkConfig, P2pError};
@@ -22,6 +22,7 @@ pub const MAX_GOSSIP_MESSAGE_BYTES: usize = 1 << 20; // 1 MiB
 #[derive(NetworkBehaviour)]
 pub struct AgoraBehaviour {
     pub gossipsub: gossipsub::Behaviour,
+    pub connection_limits: connection_limits::Behaviour,
 }
 
 /// Events surfaced to the node runtime.
@@ -47,7 +48,7 @@ enum Command {
 #[derive(Clone)]
 pub struct NetworkHandle {
     peer_id: PeerId,
-    commands: mpsc::UnboundedSender<Command>,
+    commands: mpsc::Sender<Command>,
 }
 
 impl NetworkHandle {
@@ -57,41 +58,44 @@ impl NetworkHandle {
 
     pub fn dial(&self, addr: &str) -> Result<(), P2pError> {
         self.commands
-            .send(Command::Dial(addr.to_string()))
-            .map_err(|_| P2pError::Network("swarm task stopped".into()))
+            .try_send(Command::Dial(addr.to_string()))
+            .map_err(|e| P2pError::Network(format!("command channel: {e}")))
     }
 
     pub fn publish_message(&self, message: NetworkMessage) -> Result<(), P2pError> {
         self.commands
-            .send(Command::Publish(message))
-            .map_err(|_| P2pError::Network("swarm task stopped".into()))
+            .try_send(Command::Publish(message))
+            .map_err(|e| P2pError::Network(format!("command channel: {e}")))
     }
 
     pub fn shutdown(&self) {
-        let _ = self.commands.send(Command::Shutdown);
+        let _ = self.commands.try_send(Command::Shutdown);
     }
 }
 
 /// libp2p gossip node for Agora.
 pub struct NetworkNode {
     swarm: Swarm<AgoraBehaviour>,
-    event_tx: mpsc::UnboundedSender<NetworkEvent>,
-    command_rx: mpsc::UnboundedReceiver<Command>,
+    event_tx: mpsc::Sender<NetworkEvent>,
+    command_rx: mpsc::Receiver<Command>,
     fingerprint: NetworkFingerprint,
 }
 
 impl NetworkNode {
     pub fn build(
         config: &NetworkConfig,
-    ) -> Result<(NetworkHandle, mpsc::UnboundedReceiver<NetworkEvent>, Self), P2pError> {
-        let id_keys = Keypair::generate_ed25519();
+    ) -> Result<(NetworkHandle, mpsc::Receiver<NetworkEvent>, Self), P2pError> {
+        let id_keys = match &config.identity_path {
+            Some(path) => load_or_create_identity(path)?,
+            None => Keypair::generate_ed25519(),
+        };
         let peer_id = id_keys.public().to_peer_id();
         let fingerprint = config.fingerprint.clone();
 
+        // Cryptographic message ids (not std DefaultHasher).
         let message_id_fn = |message: &gossipsub::Message| {
-            let mut hasher = DefaultHasher::new();
-            message.data.hash(&mut hasher);
-            gossipsub::MessageId::from(hasher.finish().to_string())
+            let digest = Sha256::digest(&message.data);
+            gossipsub::MessageId::from(hex::encode(digest))
         };
 
         let gossipsub_config = gossipsub::ConfigBuilder::default()
@@ -115,7 +119,17 @@ impl NetworkNode {
             .subscribe(&blocks_topic(&fingerprint))
             .map_err(|e| P2pError::Gossip(e.to_string()))?;
 
-        let behaviour = AgoraBehaviour { gossipsub };
+        let connection_limits = connection_limits::Behaviour::new(
+            connection_limits::ConnectionLimits::default()
+                .with_max_established(Some(config.max_peers))
+                .with_max_established_incoming(Some(config.max_peers))
+                .with_max_established_outgoing(Some(config.max_peers)),
+        );
+
+        let behaviour = AgoraBehaviour {
+            gossipsub,
+            connection_limits,
+        };
 
         let mut swarm = SwarmBuilder::with_existing_identity(id_keys)
             .with_tokio()
@@ -138,13 +152,14 @@ impl NetworkNode {
             .listen_on(listen)
             .map_err(|e| P2pError::Network(e.to_string()))?;
 
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::channel(config.event_channel_capacity.max(16));
+        let (command_tx, command_rx) = mpsc::channel(config.command_channel_capacity.max(16));
 
         info!(
             %peer_id,
             listen = %config.listen_addr,
             fingerprint = %fingerprint.digest_hex(),
+            max_peers = config.max_peers,
             "agora p2p node built"
         );
 
@@ -218,15 +233,15 @@ impl NetworkNode {
                     match event {
                         SwarmEvent::NewListenAddr { address, .. } => {
                             info!(%address, "listening");
-                            let _ = self.event_tx.send(NetworkEvent::Listening(address));
+                            let _ = self.event_tx.try_send(NetworkEvent::Listening(address));
                         }
                         SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                             info!(%peer_id, "peer connected");
-                            let _ = self.event_tx.send(NetworkEvent::PeerConnected(peer_id));
+                            let _ = self.event_tx.try_send(NetworkEvent::PeerConnected(peer_id));
                         }
                         SwarmEvent::ConnectionClosed { peer_id, .. } => {
                             info!(%peer_id, "peer disconnected");
-                            let _ = self.event_tx.send(NetworkEvent::PeerDisconnected(peer_id));
+                            let _ = self.event_tx.try_send(NetworkEvent::PeerDisconnected(peer_id));
                         }
                         SwarmEvent::Behaviour(AgoraBehaviourEvent::Gossipsub(
                             gossipsub::Event::Message {
@@ -246,11 +261,8 @@ impl NetworkNode {
                             match NetworkMessage::decode(&message.data) {
                                 Ok(decoded) => {
                                     let topic = message.topic.to_string();
-                                    // Topic/type sanity: reject obvious mismatches early.
                                     let topic_ok = match &decoded {
-                                        NetworkMessage::Transaction(_) => {
-                                            topic.contains("/txs/")
-                                        }
+                                        NetworkMessage::Transaction(_) => topic.contains("/txs/"),
                                         NetworkMessage::Block(_)
                                         | NetworkMessage::BlockAnnounce { .. } => {
                                             topic.contains("/blocks/")
@@ -261,7 +273,7 @@ impl NetworkNode {
                                         continue;
                                     }
                                     debug!(peer = %propagation_source, %topic, "gossip message");
-                                    let _ = self.event_tx.send(NetworkEvent::Message {
+                                    let _ = self.event_tx.try_send(NetworkEvent::Message {
                                         peer: propagation_source,
                                         topic,
                                         message: decoded,

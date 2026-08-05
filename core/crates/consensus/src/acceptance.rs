@@ -21,15 +21,46 @@ use crate::emission::EmissionSchedule;
 use crate::ghostdag::OrderedBlock;
 use crate::ConsensusError;
 
+/// Minimum fee (base units) required for regular transactions (acceptance + mempool).
+pub const MIN_RELAY_FEE: Amount = Amount(1);
+
+/// Coinbase / premine outputs are immature until this many blue-score units elapse.
+pub const COINBASE_MATURITY: u64 = 10;
+
+/// Spendable UTXO with maturity metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UtxoEntry {
+    pub output: TxOut,
+    pub created_blue_score: u64,
+    pub is_coinbase: bool,
+}
+
+impl UtxoEntry {
+    pub fn new(output: TxOut, created_blue_score: u64, is_coinbase: bool) -> Self {
+        Self {
+            output,
+            created_blue_score,
+            is_coinbase,
+        }
+    }
+
+    pub fn is_mature(&self, tip_blue_score: u64) -> bool {
+        if !self.is_coinbase {
+            return true;
+        }
+        tip_blue_score.saturating_sub(self.created_blue_score) >= COINBASE_MATURITY
+    }
+}
+
 /// Read-only UTXO lookup used during validation (implemented by the state machine).
 pub trait UtxoView {
-    fn get(&self, outpoint: &OutPoint) -> Option<TxOut>;
+    fn get(&self, outpoint: &OutPoint) -> Option<UtxoEntry>;
 }
 
 /// In-memory UTXO map for tests and ephemeral overlays.
 #[derive(Debug, Default, Clone)]
 pub struct MemoryUtxoView {
-    utxos: HashMap<OutPoint, TxOut>,
+    utxos: HashMap<OutPoint, UtxoEntry>,
 }
 
 impl MemoryUtxoView {
@@ -37,11 +68,11 @@ impl MemoryUtxoView {
         Self::default()
     }
 
-    pub fn insert(&mut self, outpoint: OutPoint, output: TxOut) {
-        self.utxos.insert(outpoint, output);
+    pub fn insert(&mut self, outpoint: OutPoint, entry: UtxoEntry) {
+        self.utxos.insert(outpoint, entry);
     }
 
-    pub fn remove(&mut self, outpoint: &OutPoint) -> Option<TxOut> {
+    pub fn remove(&mut self, outpoint: &OutPoint) -> Option<UtxoEntry> {
         self.utxos.remove(outpoint)
     }
 
@@ -55,13 +86,13 @@ impl MemoryUtxoView {
 }
 
 impl UtxoView for MemoryUtxoView {
-    fn get(&self, outpoint: &OutPoint) -> Option<TxOut> {
+    fn get(&self, outpoint: &OutPoint) -> Option<UtxoEntry> {
         self.utxos.get(outpoint).cloned()
     }
 }
 
-impl UtxoView for HashMap<OutPoint, TxOut> {
-    fn get(&self, outpoint: &OutPoint) -> Option<TxOut> {
+impl UtxoView for HashMap<OutPoint, UtxoEntry> {
+    fn get(&self, outpoint: &OutPoint) -> Option<UtxoEntry> {
         HashMap::get(self, outpoint).cloned()
     }
 }
@@ -69,8 +100,13 @@ impl UtxoView for HashMap<OutPoint, TxOut> {
 /// Single UTXO mutation produced by accepted transactions (applied atomically by state).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UtxoJournalOp {
-    Create { outpoint: OutPoint, output: TxOut },
-    Spend { outpoint: OutPoint },
+    Create {
+        outpoint: OutPoint,
+        entry: UtxoEntry,
+    },
+    Spend {
+        outpoint: OutPoint,
+    },
 }
 
 /// Why a transaction failed validation or conflict resolution.
@@ -138,9 +174,9 @@ pub struct BlueBlockInput {
 /// fully validated (fee / value checks) independent of conflict outcome.
 struct UtxoOverlay<'a, V: UtxoView> {
     base: &'a V,
-    created: HashMap<OutPoint, TxOut>,
+    created: HashMap<OutPoint, UtxoEntry>,
     spent: HashSet<OutPoint>,
-    spent_values: HashMap<OutPoint, TxOut>,
+    spent_values: HashMap<OutPoint, UtxoEntry>,
 }
 
 impl<'a, V: UtxoView> UtxoOverlay<'a, V> {
@@ -154,12 +190,12 @@ impl<'a, V: UtxoView> UtxoOverlay<'a, V> {
     }
 
     /// Lookup for validation — includes outputs already spent by accepted txs.
-    fn get_for_validation(&self, outpoint: &OutPoint) -> Option<TxOut> {
-        if let Some(out) = self.created.get(outpoint) {
-            return Some(out.clone());
+    fn get_for_validation(&self, outpoint: &OutPoint) -> Option<UtxoEntry> {
+        if let Some(entry) = self.created.get(outpoint) {
+            return Some(entry.clone());
         }
-        if let Some(out) = self.spent_values.get(outpoint) {
-            return Some(out.clone());
+        if let Some(entry) = self.spent_values.get(outpoint) {
+            return Some(entry.clone());
         }
         self.base.get(outpoint)
     }
@@ -168,13 +204,18 @@ impl<'a, V: UtxoView> UtxoOverlay<'a, V> {
         self.spent.contains(outpoint)
     }
 
-    fn apply_accepted(&mut self, tx: &Transaction) -> Vec<UtxoJournalOp> {
+    fn apply_accepted(
+        &mut self,
+        tx: &Transaction,
+        blue_score: u64,
+        is_coinbase: bool,
+    ) -> Vec<UtxoJournalOp> {
         let tx_id = tx.tx_id();
         let mut ops = Vec::new();
         for input in &tx.inputs {
             let op = input.previous_outpoint;
-            if let Some(value) = self.get_for_validation(&op) {
-                self.spent_values.insert(op, value);
+            if let Some(entry) = self.get_for_validation(&op) {
+                self.spent_values.insert(op, entry);
             }
             self.spent.insert(op);
             self.created.remove(&op);
@@ -185,13 +226,11 @@ impl<'a, V: UtxoView> UtxoOverlay<'a, V> {
                 tx_id,
                 index: index as u32,
             };
-            self.created.insert(outpoint, output.clone());
+            let entry = UtxoEntry::new(output.clone(), blue_score, is_coinbase);
+            self.created.insert(outpoint, entry.clone());
             self.spent.remove(&outpoint);
             self.spent_values.remove(&outpoint);
-            ops.push(UtxoJournalOp::Create {
-                outpoint,
-                output: output.clone(),
-            });
+            ops.push(UtxoJournalOp::Create { outpoint, entry });
         }
         ops
     }
@@ -246,7 +285,11 @@ pub fn accept_blue_blocks<V: UtxoView>(
     for (input, acceptance) in inputs.iter().zip(blocks_out.iter()) {
         for (idx, outcome) in acceptance.outcomes.iter().enumerate() {
             if outcome.accepted {
-                journal.extend(rebuild.apply_accepted(&input.block.transactions[idx]));
+                journal.extend(rebuild.apply_accepted(
+                    &input.block.transactions[idx],
+                    acceptance.blue_score,
+                    outcome.is_coinbase,
+                ));
             }
         }
     }
@@ -295,7 +338,7 @@ fn accept_single_blue_block<'a, V: UtxoView>(
     // Pass 1: fully validate every non-coinbase tx, then resolve conflicts by blue order.
     for (index, tx) in txs.iter().enumerate().skip(1) {
         let (structurally_valid, fee, validation_reject) =
-            validate_regular_tx(tx, overlay, fingerprint);
+            validate_regular_tx(tx, overlay, fingerprint, input.ordered.blue_score);
 
         let mut reject_reason = validation_reject;
         // Start from pure validation; conflict resolution may still reject.
@@ -318,7 +361,7 @@ fn accept_single_blue_block<'a, V: UtxoView>(
 
         if accepted {
             accepted_tx_ids.insert(tx.tx_id());
-            overlay.apply_accepted(tx);
+            overlay.apply_accepted(tx, input.ordered.blue_score, false);
             accepted_fees = accepted_fees
                 .checked_add(fee)
                 .ok_or_else(|| ConsensusError::Acceptance("fee overflow".into()))?;
@@ -360,7 +403,7 @@ fn accept_single_blue_block<'a, V: UtxoView>(
         };
     } else if cb_accepted {
         accepted_tx_ids.insert(coinbase.tx_id());
-        overlay.apply_accepted(coinbase);
+        overlay.apply_accepted(coinbase, input.ordered.blue_score, true);
         outcomes[0] = TxAcceptanceOutcome {
             tx_id: coinbase.tx_id(),
             index: 0,
@@ -415,6 +458,7 @@ fn validate_regular_tx<V: UtxoView>(
     tx: &Transaction,
     overlay: &UtxoOverlay<'_, V>,
     fingerprint: &NetworkFingerprint,
+    tip_blue_score: u64,
 ) -> (bool, Amount, Option<TxRejectReason>) {
     if tx.inputs.is_empty() {
         return (
@@ -428,6 +472,21 @@ fn validate_regular_tx<V: UtxoView>(
             false,
             Amount::ZERO,
             Some(TxRejectReason::Invalid("tx requires outputs")),
+        );
+    }
+    if tx.inputs.len() > MAX_TX_INPUTS || tx.outputs.len() > MAX_TX_OUTPUTS {
+        return (
+            false,
+            Amount::ZERO,
+            Some(TxRejectReason::Invalid("too many inputs or outputs")),
+        );
+    }
+    let encoded_len = borsh::to_vec(tx).map(|b| b.len()).unwrap_or(usize::MAX);
+    if encoded_len > MAX_TX_BYTES {
+        return (
+            false,
+            Amount::ZERO,
+            Some(TxRejectReason::Invalid("transaction too large")),
         );
     }
     if verify_transaction(tx, fingerprint).is_err() {
@@ -458,7 +517,7 @@ fn validate_regular_tx<V: UtxoView>(
 
     let mut input_total = Amount::ZERO;
     for input in &tx.inputs {
-        let Some(utxo) = overlay.get_for_validation(&input.previous_outpoint) else {
+        let Some(entry) = overlay.get_for_validation(&input.previous_outpoint) else {
             return (
                 false,
                 Amount::ZERO,
@@ -466,14 +525,21 @@ fn validate_regular_tx<V: UtxoView>(
             );
         };
         // Critical: signature alone is not enough — signer must own each spent UTXO.
-        if utxo.address != signer {
+        if entry.output.address != signer {
             return (
                 false,
                 Amount::ZERO,
                 Some(TxRejectReason::Invalid("signer does not own utxo")),
             );
         }
-        input_total = match input_total.checked_add(utxo.value) {
+        if !entry.is_mature(tip_blue_score) {
+            return (
+                false,
+                Amount::ZERO,
+                Some(TxRejectReason::Invalid("coinbase immature")),
+            );
+        }
+        input_total = match input_total.checked_add(entry.output.value) {
             Some(v) => v,
             None => {
                 return (
@@ -513,8 +579,45 @@ fn validate_regular_tx<V: UtxoView>(
             Some(TxRejectReason::Invalid("outputs exceed inputs")),
         );
     };
+    if fee < MIN_RELAY_FEE {
+        return (
+            false,
+            Amount::ZERO,
+            Some(TxRejectReason::Invalid("fee below minimum")),
+        );
+    }
 
     (true, fee, None)
+}
+
+/// Max serialized regular transaction size admitted by consensus/mempool.
+pub const MAX_TX_BYTES: usize = 100_000;
+/// Max inputs / outputs on a regular transaction.
+pub const MAX_TX_INPUTS: usize = 1_024;
+pub const MAX_TX_OUTPUTS: usize = 1_024;
+
+/// Mempool / RPC pre-check: full regular-tx validation against a UTXO view.
+///
+/// Returns the fee on success. Does not apply conflict resolution against other
+/// mempool txs (caller may add that later).
+pub fn precheck_regular_tx<V: UtxoView>(
+    tx: &Transaction,
+    utxo: &V,
+    fingerprint: &NetworkFingerprint,
+    tip_blue_score: u64,
+) -> Result<Amount, ConsensusError> {
+    let overlay = UtxoOverlay::new(utxo);
+    let (ok, fee, reason) = validate_regular_tx(tx, &overlay, fingerprint, tip_blue_score);
+    if ok && reason.is_none() {
+        Ok(fee)
+    } else {
+        let msg = match reason {
+            Some(TxRejectReason::Invalid(s)) => s.to_string(),
+            Some(other) => format!("{other:?}"),
+            None => "invalid transaction".into(),
+        };
+        Err(ConsensusError::Acceptance(msg))
+    }
 }
 
 fn validate_coinbase(
@@ -698,7 +801,7 @@ mod tests {
                 tx_id: genesis_txid,
                 index: 0,
             },
-            genesis_cb.outputs[0].clone(),
+            UtxoEntry::new(genesis_cb.outputs[0].clone(), 1, true),
         );
 
         let spend = signed_spend(
@@ -727,7 +830,7 @@ mod tests {
                     subsidy: premine,
                 },
                 BlueBlockInput {
-                    ordered: ordered(block_hash, 2),
+                    ordered: ordered(block_hash, 11),
                     block,
                     subsidy,
                 },
@@ -771,7 +874,7 @@ mod tests {
                 tx_id: genesis_txid,
                 index: 0,
             },
-            genesis_cb.outputs[0].clone(),
+            UtxoEntry::new(genesis_cb.outputs[0].clone(), 1, true),
         );
 
         let outpoint = OutPoint {
@@ -817,12 +920,12 @@ mod tests {
                     subsidy: premine,
                 },
                 BlueBlockInput {
-                    ordered: ordered(hash_a, 2),
+                    ordered: ordered(hash_a, 11),
                     block: block_a,
                     subsidy,
                 },
                 BlueBlockInput {
-                    ordered: ordered(hash_b, 3),
+                    ordered: ordered(hash_b, 12),
                     block: block_b,
                     subsidy,
                 },
@@ -867,7 +970,7 @@ mod tests {
                 tx_id: genesis_txid,
                 index: 0,
             },
-            genesis_cb.outputs[0].clone(),
+            UtxoEntry::new(genesis_cb.outputs[0].clone(), 1, true),
         );
 
         let tx = signed_spend(
@@ -901,12 +1004,12 @@ mod tests {
                     subsidy: premine,
                 },
                 BlueBlockInput {
-                    ordered: ordered(hash1, 2),
+                    ordered: ordered(hash1, 11),
                     block: block1,
                     subsidy,
                 },
                 BlueBlockInput {
-                    ordered: ordered(hash2, 3),
+                    ordered: ordered(hash2, 12),
                     block: block2,
                     subsidy,
                 },
@@ -941,7 +1044,7 @@ mod tests {
                 tx_id: genesis_cb.tx_id(),
                 index: 0,
             },
-            genesis_cb.outputs[0].clone(),
+            UtxoEntry::new(genesis_cb.outputs[0].clone(), 1, true),
         );
 
         // Thief signs a spend of owner's UTXO — must fail ownership check.
@@ -974,7 +1077,7 @@ mod tests {
                     subsidy: premine,
                 },
                 BlueBlockInput {
-                    ordered: ordered(hash, 2),
+                    ordered: ordered(hash, 11),
                     block,
                     subsidy,
                 },
@@ -1008,7 +1111,7 @@ mod tests {
                 tx_id: genesis_cb.tx_id(),
                 index: 0,
             },
-            genesis_cb.outputs[0].clone(),
+            UtxoEntry::new(genesis_cb.outputs[0].clone(), 1, true),
         );
 
         let bad = Transaction::unsigned(
@@ -1038,7 +1141,7 @@ mod tests {
                     subsidy: premine,
                 },
                 BlueBlockInput {
-                    ordered: ordered(hash, 2),
+                    ordered: ordered(hash, 11),
                     block,
                     subsidy,
                 },
