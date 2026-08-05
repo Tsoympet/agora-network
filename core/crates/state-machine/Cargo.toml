@@ -1,5 +1,6 @@
 [package]
 name = "agora-state-machine"
+publish = false
 description = "RocksDB-backed triple-zone state machine for Agora Network"
 version.workspace = true
 edition.workspace = true

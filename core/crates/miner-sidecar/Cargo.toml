@@ -1,5 +1,6 @@
 [package]
 name = "agora-miner-sidecar"
+publish = false
 description = "Standalone RandomX CPU miner sidecar for Agora Network"
 version.workspace = true
 edition.workspace = true

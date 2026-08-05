@@ -8,11 +8,19 @@
 //! - `AGORA_MINE_POLL_MS` (default `2000`)
 //! - `AGORA_MINE_MAX_BLOCKS` (default `0` = unlimited; set `1` for IBD smoke)
 
-use agora_consensus::{LeadingZeroPow, PowHasher, RandomXPowHasher};
+use agora_consensus::{LeadingZeroPow, RandomXPowHasher};
 use agora_rpc::{RpcRequest, RpcResponse};
 use agora_types::Block;
+use serde::Deserialize;
 use serde_json::json;
 use tracing::{info, warn};
+
+#[derive(Debug, Deserialize)]
+struct TemplateResponse {
+    block: Block,
+    #[serde(default)]
+    randomx_epoch: u64,
+}
 
 #[tokio::main]
 async fn main() {
@@ -62,19 +70,19 @@ async fn mine_one_round(
     nonce_cursor: &mut u64,
 ) -> Result<Option<String>, String> {
     let template = rpc_call(rpc_url, "agora_getBlockTemplate", json!([])).await?;
-    let mut block: Block = serde_json::from_value(
-        template
-            .result
-            .ok_or_else(|| format!("template error: {:?}", template.error))?,
-    )
-    .map_err(|e| e.to_string())?;
+    let raw = template
+        .result
+        .ok_or_else(|| format!("template error: {:?}", template.error))?;
+    let mut tmpl: TemplateResponse = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+    let epoch = tmpl.randomx_epoch;
+    let mut block = tmpl.block;
 
     // Search a bounded nonce window per poll so we re-fetch fresh tips/timestamps.
     const WINDOW: u64 = 256;
     let start = *nonce_cursor;
     for n in start..start.saturating_add(WINDOW) {
         block.header.nonce = n;
-        let digest = hasher.pow_hash(&block.header);
+        let digest = hasher.pow_hash_with_epoch(&block.header, epoch);
         if LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits {
             let submitted = rpc_call(rpc_url, "agora_submitBlock", json!(block.clone())).await?;
             *nonce_cursor = n.wrapping_add(1);
@@ -119,17 +127,12 @@ async fn rpc_call(
 
     let mut stream = tokio::net::TcpStream::connect(host_port)
         .await
-        .map_err(|e| format!("connect {host_port}: {e}"))?;
-    let auth = std::env::var("AGORA_RPC_TOKEN")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .map(|t| format!("Authorization: Bearer {t}\r\n"))
-        .unwrap_or_default();
+        .map_err(|e| e.to_string())?;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let req = format!(
-        "POST {path} HTTP/1.1\r\nHost: {host_port}\r\nContent-Type: application/json\r\n{auth}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST {path} HTTP/1.1\r\nHost: {host_port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     stream
         .write_all(req.as_bytes())
         .await
@@ -140,10 +143,8 @@ async fn rpc_call(
         .await
         .map_err(|e| e.to_string())?;
     let text = String::from_utf8_lossy(&buf);
-    let json_body = text
-        .split("\r\n\r\n")
-        .nth(1)
-        .ok_or_else(|| "missing HTTP body".to_string())?
-        .trim();
-    serde_json::from_str(json_body).map_err(|e| format!("rpc decode: {e}; body={json_body}"))
+    let json_start = text
+        .find('{')
+        .ok_or_else(|| "no json in response".to_string())?;
+    serde_json::from_str(&text[json_start..]).map_err(|e| e.to_string())
 }

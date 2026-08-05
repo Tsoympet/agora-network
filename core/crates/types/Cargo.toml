@@ -1,5 +1,6 @@
 [package]
 name = "agora-types"
+publish = false
 description = "Shared BlockDAG types and ts-rs bindings for Agora Network"
 version.workspace = true
 edition.workspace = true

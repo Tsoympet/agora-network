@@ -1,5 +1,6 @@
 [package]
 name = "agora-rpc"
+publish = false
 description = "JSON-RPC / REST access layer for Agora Network"
 version.workspace = true
 edition.workspace = true

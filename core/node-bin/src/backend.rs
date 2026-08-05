@@ -360,6 +360,13 @@ impl RpcBackend for NodeBackend {
             .map_err(|e| RpcError::Internal(e.to_string()))
     }
 
+    fn randomx_epoch(&self, parents: &[Hash]) -> u64 {
+        self.chain
+            .lock()
+            .map(|c| c.randomx_epoch_for_parents(parents))
+            .unwrap_or(0)
+    }
+
     fn submit_block(&mut self, block: Block) -> Result<Hash, RpcError> {
         let id = self
             .chain

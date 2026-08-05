@@ -1,5 +1,6 @@
 [package]
 name = "agora-ovolos-rollup"
+publish = false
 description = "Ovolos optimistic rollup (L2) for EVM smart-contract scaling"
 version.workspace = true
 edition.workspace = true

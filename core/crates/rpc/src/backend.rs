@@ -145,6 +145,11 @@ pub trait RpcBackend: Send {
     fn fund_address(&mut self, address: Address, amount: Amount) -> Result<Amount, RpcError>;
     /// Mining template (header + coinbase txs) for the CPU sidecar / stratum.
     fn get_block_template(&self) -> Result<Block, RpcError>;
+    /// Blue-score–anchored RandomX epoch for a template's parents (default 0).
+    fn randomx_epoch(&self, parents: &[Hash]) -> u64 {
+        let _ = parents;
+        0
+    }
     /// Admit a mined block after PoW verification (node) or local insert (tests).
     fn submit_block(&mut self, block: Block) -> Result<Hash, RpcError>;
 
@@ -236,7 +241,10 @@ impl InMemoryBackend {
         f(&mut g)
     }
 
-    fn with_civic<R>(&self, f: impl FnOnce(&CivicSnapshot) -> Result<R, RpcError>) -> Result<R, RpcError> {
+    fn with_civic<R>(
+        &self,
+        f: impl FnOnce(&CivicSnapshot) -> Result<R, RpcError>,
+    ) -> Result<R, RpcError> {
         let g = self
             .civic
             .lock()
@@ -492,9 +500,7 @@ impl RpcBackend for InMemoryBackend {
 
     fn deposit_proposal(&mut self, id: u64, amount: u64) -> Result<Value, RpcError> {
         self.with_civic_mut(|snap| {
-            snap.governance
-                .add_deposit(id, amount)
-                .map_err(map_gov)?;
+            snap.governance.add_deposit(id, amount).map_err(map_gov)?;
             let p = snap
                 .governance
                 .proposal(id)
@@ -535,9 +541,7 @@ impl RpcBackend for InMemoryBackend {
 
     fn enter_proposal_timelock(&mut self, id: u64, slot: u64) -> Result<Value, RpcError> {
         self.with_civic_mut(|snap| {
-            snap.governance
-                .enter_timelock(id, slot)
-                .map_err(map_gov)?;
+            snap.governance.enter_timelock(id, slot).map_err(map_gov)?;
             Ok(json!({ "proposal_id": id, "status": "timelock" }))
         })
     }

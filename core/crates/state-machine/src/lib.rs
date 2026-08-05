@@ -7,6 +7,7 @@ mod apply;
 mod columns;
 mod error;
 mod genesis;
+mod ghostdag_store;
 mod headers;
 mod marks;
 mod network;
@@ -18,12 +19,15 @@ mod utxo_diff;
 mod zones;
 
 pub use apply::{
-    apply_block, apply_block_batched, balance_of, revert_journal, sum_transfer_fees, transfer_fee,
-    validate_mempool_tx, UtxoJournal,
+    apply_block, apply_block_batched, balance_of, revert_journal, revert_journal_batched,
+    sum_transfer_fees, transfer_fee, validate_mempool_tx, UtxoJournal,
 };
 pub use columns::{meta_keys, ColumnFamily};
 pub use error::StateError;
 pub use genesis::{GenesisBuilder, SupplyCaps};
+pub use ghostdag_store::{
+    ghostdag_key, load_ghostdag_record, store_ghostdag_record, GhostdagRecord,
+};
 pub use headers::{header_key, load_header, store_header};
 pub use marks::{default_token_marks, TokenMark};
 pub use network::{

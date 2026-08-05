@@ -1,7 +1,7 @@
 //! Versioned Agora Constitution (higher law).
 
-use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// In-protocol constitution identifier for v1.
 pub const CONSTITUTION_V1_ID: &str = "constitution-v1";

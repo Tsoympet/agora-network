@@ -10,13 +10,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agora_consensus::{
     next_difficulty_weighted, work_from_bits, ConsensusLimits, DaaConfig, DaaSample, Dag,
-    Difficulty, EmissionSchedule, Ghostdag, GhostdagConfig, LeadingZeroPow, PowAlgorithm,
-    PowVerifier,
+    Difficulty, EmissionSchedule, Ghostdag, GhostdagConfig, GhostdagSnapshot, LeadingZeroPow,
+    PowAlgorithm, PowVerifier, RandomXPowHasher,
 };
 use agora_state_machine::{
-    apply_block_batched, delete_utxo_journal, index_block_transactions, load_header,
-    load_utxo_journal, lookup_tx_location, meta_keys, revert_journal, store_header,
-    sum_transfer_fees, utxo_diff_key, ColumnFamily, StateStore,
+    apply_block_batched, index_block_transactions, load_ghostdag_record, load_header,
+    load_utxo_journal, lookup_tx_location, meta_keys, revert_journal_batched,
+    store_ghostdag_record, store_header, sum_transfer_fees, utxo_diff_key, ColumnFamily,
+    GhostdagRecord, StateStore, WriteBatch,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -163,7 +164,7 @@ impl ChainState {
 
         let difficulty = load_or_init_difficulty(&store, boot.initial_bits, boot.daa.min_level)?;
 
-        let chain = Self {
+        let mut chain = Self {
             store,
             genesis,
             dag,
@@ -180,6 +181,8 @@ impl ChainState {
             let tip = chain.select_virtual_tip()?.unwrap_or(genesis);
             chain.persist_virtual_tip(tip)?;
         }
+        // Crash recovery: finish any in-flight virtual reorg before serving.
+        chain.recover_pending_virtual()?;
         Ok(chain)
     }
 
@@ -428,8 +431,13 @@ impl ChainState {
         Ok(tips)
     }
 
+    /// RandomX epoch for a candidate parented at `parents` (blue-score anchored).
+    pub fn randomx_epoch_for_parents(&self, parents: &[Hash]) -> u64 {
+        RandomXPowHasher::epoch_from_blue_score(self.estimate_blue_score(parents))
+    }
+
     /// Estimate blue score for coinbase budgeting before GHOSTDAG colors the block.
-    fn estimate_blue_score(&self, parents: &[Hash]) -> u64 {
+    pub fn estimate_blue_score(&self, parents: &[Hash]) -> u64 {
         if parents.is_empty() {
             return 1;
         }
@@ -504,10 +512,12 @@ impl ChainState {
             return Err(AdmitError::BadTxRoot);
         }
 
-        let pow_hash = self.pow.hasher().pow_hash(&block.header);
-        self.pow
-            .verify(&block.header, &pow_hash)
-            .map_err(|_| AdmitError::InvalidPow)?;
+        // Height-anchored RandomX: epoch from parent blue-score, not wall-clock.
+        let epoch = self.randomx_epoch_for_parents(&block.header.parents);
+        let pow_hash = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
+        if LeadingZeroPow::leading_zero_bits(&pow_hash) < block.header.bits {
+            return Err(AdmitError::InvalidPow);
+        }
 
         // Persist + color first — UTXO follows virtual tip after GHOSTDAG.
         self.persist_block(&block, id)?;
@@ -517,6 +527,7 @@ impl ChainState {
         self.ghostdag
             .add_block_with_work(&self.dag, id, work_from_bits(block.header.bits))
             .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+        self.persist_ghostdag_coloring(&id)?;
 
         let old_virtual = self.virtual_tip()?;
         let new_virtual = self
@@ -525,7 +536,6 @@ impl ChainState {
 
         // On failure, `reorg_utxo_to_virtual` restores UTXO to `old_virtual` blues.
         self.reorg_utxo_to_virtual(old_virtual, new_virtual)?;
-        self.persist_virtual_tip(new_virtual)?;
 
         let window = self.daa_window(new_virtual)?;
         self.difficulty = next_difficulty_weighted(&self.daa, self.difficulty, &window);
@@ -704,16 +714,6 @@ impl ChainState {
         Ok(u64::from_le_bytes(bytes.try_into().unwrap()))
     }
 
-    fn persist_issued_supply(&self, issued: u64) -> Result<(), AdmitError> {
-        self.store
-            .put_cf(
-                ColumnFamily::Meta,
-                meta_keys::ISSUED_SUPPLY,
-                &issued.to_le_bytes(),
-            )
-            .map_err(|e| AdmitError::Storage(e.to_string()))
-    }
-
     fn clamp_emission(&self, scheduled: u64) -> Result<u64, AdmitError> {
         let max = self.load_max_supply()?;
         let issued = self.load_issued_supply()?;
@@ -755,27 +755,131 @@ impl ChainState {
     }
 
     /// Sync live UTXO from blues(`old`) → blues(`new`) via durable journals.
+    ///
+    /// Crash safety: writes `meta/pending_virtual` before mutating UTXO, commits all
+    /// unapplies in one [`WriteBatch`], applies each new blue atomically, then commits
+    /// `virtual_tip` + clears pending in a final batch. [`Self::recover_pending_virtual`]
+    /// finishes an interrupted reorg on bootstrap.
     fn reorg_utxo_to_virtual(&mut self, old: Hash, new: Hash) -> Result<(), AdmitError> {
+        if old == new {
+            let mut tip_batch = WriteBatch::new();
+            tip_batch.put_cf(ColumnFamily::Meta, meta_keys::VIRTUAL_TIP, new.as_bytes());
+            tip_batch.delete_cf(ColumnFamily::Meta, meta_keys::PENDING_VIRTUAL);
+            self.store
+                .write_batch(tip_batch)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            return Ok(());
+        }
+
+        // Durably mark the target tip before any UTXO mutation.
+        self.store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::PENDING_VIRTUAL,
+                new.as_bytes(),
+            )
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+
         let applied = self.applied_blues(old)?;
         let target = self.applied_blues(new)?;
         let prefix = common_prefix_len(&applied, &target);
 
+        // All unapplies share one batch (ops ordered reverse along the abandoned suffix).
+        let mut unapply_batch = WriteBatch::new();
+        let mut issued = self.load_issued_supply()?;
         for hash in applied[prefix..].iter().rev() {
-            self.unapply_block_from_virtual(*hash)?;
+            if let Some(subsidy) = self.plan_unapply_block(*hash, &mut unapply_batch)? {
+                issued = issued.saturating_sub(subsidy);
+            }
+        }
+        if !unapply_batch.is_empty() {
+            unapply_batch.put_cf(
+                ColumnFamily::Meta,
+                meta_keys::ISSUED_SUPPLY,
+                &issued.to_le_bytes(),
+            );
+            self.store
+                .write_batch(unapply_batch)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
         }
 
         for (offset, hash) in target[prefix..].iter().enumerate() {
             if let Err(err) = self.apply_block_to_virtual(*hash) {
+                // Best-effort restore toward `old` so callers see a consistent UTXO set.
                 for undo in target[prefix..prefix + offset].iter().rev() {
-                    let _ = self.unapply_block_from_virtual(*undo);
+                    let mut batch = WriteBatch::new();
+                    if let Ok(Some(sub)) = self.plan_unapply_block(*undo, &mut batch) {
+                        let cur = self.load_issued_supply().unwrap_or(0);
+                        batch.put_cf(
+                            ColumnFamily::Meta,
+                            meta_keys::ISSUED_SUPPLY,
+                            &cur.saturating_sub(sub).to_le_bytes(),
+                        );
+                        let _ = self.store.write_batch(batch);
+                    }
                 }
                 for redo in &applied[prefix..] {
                     let _ = self.apply_block_to_virtual(*redo);
                 }
+                // Leave PENDING_VIRTUAL set so recovery can retry toward `new`, or clear
+                // it if we restored `old` successfully.
+                let mut clear = WriteBatch::new();
+                clear.put_cf(ColumnFamily::Meta, meta_keys::VIRTUAL_TIP, old.as_bytes());
+                clear.delete_cf(ColumnFamily::Meta, meta_keys::PENDING_VIRTUAL);
+                let _ = self.store.write_batch(clear);
                 return Err(err);
             }
         }
+
+        // Final tip meta + clear pending — one atomic commit.
+        let mut tip_batch = WriteBatch::new();
+        tip_batch.put_cf(ColumnFamily::Meta, meta_keys::VIRTUAL_TIP, new.as_bytes());
+        tip_batch.delete_cf(ColumnFamily::Meta, meta_keys::PENDING_VIRTUAL);
+        self.store
+            .write_batch(tip_batch)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
         Ok(())
+    }
+
+    /// Finish an interrupted reorg after crash/restart.
+    fn recover_pending_virtual(&mut self) -> Result<(), AdmitError> {
+        let Some(bytes) = self
+            .store
+            .get_cf(ColumnFamily::Meta, meta_keys::PENDING_VIRTUAL)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?
+        else {
+            return Ok(());
+        };
+        if bytes.len() != 32 {
+            self.store
+                .delete_cf(ColumnFamily::Meta, meta_keys::PENDING_VIRTUAL)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            return Ok(());
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        let pending = Hash(arr);
+        let current = self.virtual_tip()?;
+        debug!(
+            current = %current.to_hex(),
+            pending = %pending.to_hex(),
+            "recovering pending virtual reorg"
+        );
+        self.reorg_utxo_to_virtual(current, pending)
+    }
+
+    fn persist_ghostdag_coloring(&self, hash: &Hash) -> Result<(), AdmitError> {
+        let Some(snap) = self.ghostdag.snapshot(hash) else {
+            return Ok(());
+        };
+        let record = GhostdagRecord {
+            selected_parent: snap.selected_parent,
+            blue_score: snap.blue_score,
+            blue_work: snap.blue_work,
+            blues: snap.blues,
+        };
+        store_ghostdag_record(self.store.as_ref(), hash, &record)
+            .map_err(|e| AdmitError::Storage(e.to_string()))
     }
 
     fn apply_block_to_virtual(&self, hash: Hash) -> Result<(), AdmitError> {
@@ -831,26 +935,24 @@ impl ChainState {
         Ok(())
     }
 
-    fn unapply_block_from_virtual(&self, hash: Hash) -> Result<(), AdmitError> {
+    /// Plan an unapply into `batch`. Returns subsidy delta when a journal existed.
+    /// Missing journal = already unapplied (idempotent, for crash recovery).
+    fn plan_unapply_block(
+        &self,
+        hash: Hash,
+        batch: &mut WriteBatch,
+    ) -> Result<Option<u64>, AdmitError> {
         if hash == self.genesis {
-            return Ok(());
+            return Ok(None);
         }
         let Some(journal) = load_utxo_journal(self.store.as_ref(), &hash)
             .map_err(|e| AdmitError::Storage(e.to_string()))?
         else {
-            return Err(AdmitError::Utxo(format!(
-                "missing utxo journal for {}",
-                hash.to_hex()
-            )));
+            return Ok(None);
         };
         let block = self
             .load_block(&hash)?
             .ok_or_else(|| AdmitError::Storage(format!("missing block {}", hash.to_hex())))?;
-        // Fees = coinbase − subsidy; recover subsidy from journal created coinbase outs vs spent.
-        // Prefer: coinbase_total − Σ(spent values − created non-coinbase) is messy.
-        // Recompute fees from journal spent/created is hard; use coinbase_total − (sum spent - sum
-        // non-coinbase created)... Simpler: fees were `coinbase_total - subsidy` and subsidy was
-        // tracked only in issued_supply. Recover via coinbase_total and fee from spent inputs:
         let coinbase_total = Self::coinbase_output_sum(&block)?;
         let mut input_sum = 0u64;
         let mut transfer_out = 0u64;
@@ -874,13 +976,11 @@ impl ChainState {
         let fees = input_sum.saturating_sub(transfer_out);
         let subsidy = coinbase_total.saturating_sub(fees);
 
-        revert_journal(self.store.as_ref(), &journal)
-            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
-        delete_utxo_journal(self.store.as_ref(), &hash)
-            .map_err(|e| AdmitError::Storage(e.to_string()))?;
-        let issued = self.load_issued_supply()?;
-        self.persist_issued_supply(issued.saturating_sub(subsidy))?;
-        Ok(())
+        let revert =
+            revert_journal_batched(&journal).map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        batch.append(revert);
+        batch.delete_cf(ColumnFamily::Warm, &utxo_diff_key(&hash));
+        Ok(Some(subsidy))
     }
 
     fn coinbase_output_sum(block: &Block) -> Result<u64, AdmitError> {
@@ -1080,9 +1180,7 @@ fn rebuild_dag_from_store(
     dag.insert(genesis, vec![])
         .map_err(|e| AdmitError::Consensus(e.to_string()))?;
     let mut ghostdag = Ghostdag::new(ghostdag_config);
-    ghostdag
-        .add_block_with_work(&dag, genesis, block_work(&genesis))
-        .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+    hydrate_or_recolor(store, &mut ghostdag, &dag, genesis, block_work(&genesis))?;
 
     while !pending.is_empty() {
         // Canonical (hash-sorted) ready order so restart reconstructs the same DAG
@@ -1103,13 +1201,49 @@ fn rebuild_dag_from_store(
             let parents = pending.remove(&hash).expect("ready hash");
             dag.insert(hash, parents)
                 .map_err(|e| AdmitError::Consensus(e.to_string()))?;
-            ghostdag
-                .add_block_with_work(&dag, hash, block_work(&hash))
-                .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+            hydrate_or_recolor(store, &mut ghostdag, &dag, hash, block_work(&hash))?;
         }
     }
 
     Ok((dag, ghostdag))
+}
+
+/// Load durable GHOSTDAG coloring when present; otherwise recompute and persist.
+fn hydrate_or_recolor(
+    store: &StateStore,
+    ghostdag: &mut Ghostdag,
+    dag: &Dag,
+    hash: Hash,
+    work: u128,
+) -> Result<(), AdmitError> {
+    if let Some(record) =
+        load_ghostdag_record(store, &hash).map_err(|e| AdmitError::Storage(e.to_string()))?
+    {
+        ghostdag.import_snapshot(
+            hash,
+            GhostdagSnapshot {
+                selected_parent: record.selected_parent,
+                blue_score: record.blue_score,
+                blue_work: record.blue_work,
+                blues: record.blues,
+            },
+        );
+        return Ok(());
+    }
+    ghostdag
+        .add_block_with_work(dag, hash, work)
+        .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+    if let Some(snap) = ghostdag.snapshot(&hash) {
+        let record = GhostdagRecord {
+            selected_parent: snap.selected_parent,
+            blue_score: snap.blue_score,
+            blue_work: snap.blue_work,
+            blues: snap.blues,
+        };
+        store_ghostdag_record(store, &hash, &record)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+    }
+    Ok(())
 }
 
 fn common_prefix_len(a: &[Hash], b: &[Hash]) -> usize {
@@ -1155,7 +1289,7 @@ fn load_or_init_difficulty(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agora_consensus::{PowHasher, RandomXPowHasher};
+    use agora_consensus::RandomXPowHasher;
     use agora_state_machine::GenesisBuilder;
 
     #[test]
@@ -1203,10 +1337,9 @@ mod tests {
         let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
         block.header.nonce = 9;
         block.header.timestamp_ms = 1;
-        let digest = RandomXPowHasher.pow_hash(&block.header);
-        LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&block.header, &digest)
-            .unwrap();
+        let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
+        let digest = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
+        assert!(LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits);
         assert_eq!(block.transactions.len(), 1);
         assert!(block.transactions[0].inputs.is_empty());
         let id = chain.admit_block(block).unwrap();
@@ -1254,10 +1387,9 @@ mod tests {
         .unwrap();
         let mut block = chain.block_template(Address::ZERO, &[]).unwrap();
         block.header.nonce = 3;
-        let digest = RandomXPowHasher.pow_hash(&block.header);
-        LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&block.header, &digest)
-            .unwrap();
+        let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
+        let digest = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
+        assert!(LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits);
         let id = chain.admit_block(block).unwrap();
 
         let reloaded = ChainState::bootstrap(
@@ -1281,10 +1413,9 @@ mod tests {
         // otherwise sub-target spacing correctly raises `bits` and the fixed nonce
         // would no longer satisfy the leading-zero requirement.
         block.header.timestamp_ms = nonce.saturating_mul(1_000);
-        let digest = RandomXPowHasher.pow_hash(&block.header);
-        LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&block.header, &digest)
-            .unwrap();
+        let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
+        let digest = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
+        assert!(LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits);
         chain.admit_block(block).unwrap()
     }
 
@@ -1466,10 +1597,9 @@ mod tests {
             nonce,
         )];
         block.header.tx_root = Block::compute_tx_root(&block.transactions);
-        let digest = RandomXPowHasher.pow_hash(&block.header);
-        LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&block.header, &digest)
-            .unwrap();
+        let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
+        let digest = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
+        assert!(LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits);
         chain.admit_block(block).unwrap()
     }
 
@@ -1579,10 +1709,9 @@ mod tests {
             42,
         )];
         block.header.tx_root = Block::compute_tx_root(&block.transactions);
-        let digest = RandomXPowHasher.pow_hash(&block.header);
-        LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&block.header, &digest)
-            .unwrap();
+        let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
+        let digest = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
+        assert!(LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits);
         assert!(matches!(
             chain.admit_block(block),
             Err(AdmitError::TooManyParents { .. })
@@ -1593,10 +1722,9 @@ mod tests {
         early.header.timestamp_ms = 0;
         early.header.nonce = 43;
         early.header.tx_root = Block::compute_tx_root(&early.transactions);
-        let digest = RandomXPowHasher.pow_hash(&early.header);
-        LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&early.header, &digest)
-            .unwrap();
+        let epoch = chain.randomx_epoch_for_parents(&early.header.parents);
+        let digest = RandomXPowHasher.pow_hash_with_epoch(&early.header, epoch);
+        assert!(LeadingZeroPow::leading_zero_bits(&digest) >= early.header.bits);
         assert!(matches!(
             chain.admit_block(early),
             Err(AdmitError::TimestampBeforeParent { .. })
@@ -1650,10 +1778,9 @@ mod tests {
         block.header.nonce = 61;
         block.header.timestamp_ms = 61_000;
         block.header.tx_root = Block::compute_tx_root(&block.transactions);
-        let digest = RandomXPowHasher.pow_hash(&block.header);
-        LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&block.header, &digest)
-            .unwrap();
+        let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
+        let digest = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
+        assert!(LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits);
         assert!(matches!(
             chain.admit_block(block),
             Err(AdmitError::ImmatureCoinbase(_))
@@ -1681,10 +1808,9 @@ mod tests {
         ok.header.nonce = 64;
         ok.header.timestamp_ms = 64_000;
         ok.header.tx_root = Block::compute_tx_root(&ok.transactions);
-        let digest = RandomXPowHasher.pow_hash(&ok.header);
-        LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&ok.header, &digest)
-            .unwrap();
+        let epoch = chain.randomx_epoch_for_parents(&ok.header.parents);
+        let digest = RandomXPowHasher.pow_hash_with_epoch(&ok.header, epoch);
+        assert!(LeadingZeroPow::leading_zero_bits(&digest) >= ok.header.bits);
         chain.admit_block(ok).unwrap();
     }
 
@@ -1733,10 +1859,9 @@ mod tests {
             nonce,
         )];
         block.header.tx_root = Block::compute_tx_root(&block.transactions);
-        let digest = RandomXPowHasher.pow_hash(&block.header);
-        LeadingZeroPow::new(PowAlgorithm::RandomX)
-            .verify(&block.header, &digest)
-            .unwrap();
+        let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
+        let digest = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
+        assert!(LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits);
         block
     }
 
@@ -1902,5 +2027,86 @@ mod tests {
         assert!(orphans.is_empty());
         assert!(chain.has_block(&tip_id).unwrap());
         assert_eq!(chain.virtual_tip().unwrap(), tip_id);
+    }
+
+    #[test]
+    fn ghostdag_persist_matches_recompute_after_restart() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store.clone(),
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        let a = mine_one(&mut chain, 11);
+        let b = mine_one(&mut chain, 12);
+        let live_a = chain.ghostdag.snapshot(&a).unwrap();
+        let live_b = chain.ghostdag.snapshot(&b).unwrap();
+        let tip = chain.virtual_tip().unwrap();
+        let tip_work = chain.ghostdag.blue_work(&tip).unwrap();
+
+        let reloaded = ChainState::bootstrap(
+            store,
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        assert_eq!(reloaded.ghostdag.snapshot(&a).unwrap(), live_a);
+        assert_eq!(reloaded.ghostdag.snapshot(&b).unwrap(), live_b);
+        assert_eq!(reloaded.virtual_tip().unwrap(), tip);
+        assert_eq!(reloaded.ghostdag.blue_work(&tip).unwrap(), tip_work);
+    }
+
+    #[test]
+    fn pending_virtual_recovers_after_crash_marker() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut chain = ChainState::bootstrap(
+            store.clone(),
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        let tip = mine_one(&mut chain, 21);
+        assert_eq!(chain.virtual_tip().unwrap(), tip);
+
+        // Simulate a crash after marking pending but before tip meta advanced: tip meta
+        // still points at genesis while UTXO already follows `tip` (journal present).
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::VIRTUAL_TIP,
+                genesis.as_bytes(),
+            )
+            .unwrap();
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::PENDING_VIRTUAL,
+                tip.as_bytes(),
+            )
+            .unwrap();
+
+        let recovered = ChainState::bootstrap(
+            store.clone(),
+            genesis,
+            PowAlgorithm::RandomX,
+            0,
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        assert_eq!(recovered.virtual_tip().unwrap(), tip);
+        assert!(store
+            .get_cf(ColumnFamily::Meta, meta_keys::PENDING_VIRTUAL)
+            .unwrap()
+            .is_none());
+        assert!(load_utxo_journal(store.as_ref(), &tip).unwrap().is_some());
     }
 }

@@ -50,4 +50,8 @@ pub mod meta_keys {
     pub const DAA_DIFFICULTY: &[u8] = b"meta/daa_difficulty";
     /// Civic governance + community board JSON snapshot ([`agora_governance::CivicSnapshot`]).
     pub const GOVERNANCE: &[u8] = b"meta/governance";
+    /// In-flight virtual reorg target (32-byte hash). Cleared after the UTXO
+    /// transition + virtual-tip meta commit atomically. Present across a crash means
+    /// recovery should finish (or redo) the reorg toward this tip.
+    pub const PENDING_VIRTUAL: &[u8] = b"meta/pending_virtual";
 }

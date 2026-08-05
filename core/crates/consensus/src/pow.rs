@@ -39,18 +39,23 @@ impl PowHasher for Sha256PowHasher {
 
 /// Length of a RandomX seed epoch in milliseconds (~35 min).
 ///
-/// The RandomX key (which selects the multi-hundred-MB dataset) is derived from the
-/// header timestamp bucketed into epochs, so it is **stable within an epoch**. Both the
-/// miner and verifiers compute the same key from the header, letting the expensive
-/// [`rust_randomx::Context`] be built once per epoch and reused (see `cached_context`).
+/// Retained for legacy timestamp-bucket helpers and tests. Production admission and
+/// mining use [`RANDOMX_EPOCH_BLOCKS`] (height / blue-score anchoring).
 pub const RANDOMX_EPOCH_MS: u64 = 1 << 21;
 
-/// Domain separator for the RandomX epoch seed.
-const RANDOMX_SEED_DOMAIN: &[u8] = b"agora-randomx-epoch-v1";
+/// Blue-score length of a RandomX seed epoch (~35 min at ~1 block/sec).
+///
+/// Anchoring the key to parent-derived blue score (not wall-clock) stops miners from
+/// nudging `timestamp_ms` near a boundary to force an expensive context rebuild / DoS.
+pub const RANDOMX_EPOCH_BLOCKS: u64 = 2_048;
+
+/// Domain separator for the RandomX epoch seed (v2 = blue-score anchored).
+const RANDOMX_SEED_DOMAIN: &[u8] = b"agora-randomx-epoch-v2";
 
 /// Official RandomX digest over an Agora header (feature `randomx`).
 ///
-/// - Key (seed) = `SHA-256(domain ‖ epoch)` where `epoch = timestamp_ms / RANDOMX_EPOCH_MS`
+/// - Key (seed) = `SHA-256(domain ‖ epoch)` where
+///   `epoch = blue_score_anchor / RANDOMX_EPOCH_BLOCKS`
 /// - Input = full `borsh(header)` including the candidate nonce
 ///
 /// The epoch seed keeps the RandomX key stable across a mining window so the dataset is
@@ -60,14 +65,54 @@ const RANDOMX_SEED_DOMAIN: &[u8] = b"agora-randomx-epoch-v1";
 pub struct RandomXPowHasher;
 
 impl RandomXPowHasher {
-    /// Epoch index for a header timestamp.
+    /// Epoch index from a parent-derived blue-score anchor.
+    pub fn epoch_from_blue_score(blue_score_anchor: u64) -> u64 {
+        blue_score_anchor / RANDOMX_EPOCH_BLOCKS
+    }
+
+    /// Legacy timestamp-bucket epoch (tests / transitional tooling only).
     pub fn epoch(header: &BlockHeader) -> u64 {
         header.timestamp_ms / RANDOMX_EPOCH_MS
     }
 
-    /// Stable per-epoch RandomX key/seed (independent of nonce and other header fields).
+    /// Stable per-epoch RandomX key/seed from an explicit epoch index.
+    pub fn key_hash_for_epoch(epoch: u64) -> Hash {
+        Hash::hash_borsh(&(RANDOMX_SEED_DOMAIN, epoch))
+    }
+
+    /// Key from a blue-score anchor (preferred production path).
+    pub fn key_hash_for_blue_score(blue_score_anchor: u64) -> Hash {
+        Self::key_hash_for_epoch(Self::epoch_from_blue_score(blue_score_anchor))
+    }
+
+    /// Legacy helper: timestamp-bucket key (does **not** match production admission).
     pub fn key_hash(header: &BlockHeader) -> Hash {
-        Hash::hash_borsh(&(RANDOMX_SEED_DOMAIN, Self::epoch(header)))
+        Self::key_hash_for_epoch(Self::epoch(header))
+    }
+
+    /// RandomX digest using an explicit epoch (blue-score anchored in production).
+    pub fn pow_hash_with_epoch(&self, header: &BlockHeader, epoch: u64) -> Hash {
+        self.pow_hash_with_key(header, Self::key_hash_for_epoch(epoch))
+    }
+
+    fn pow_hash_with_key(&self, header: &BlockHeader, key: Hash) -> Hash {
+        #[cfg(feature = "randomx")]
+        {
+            use rust_randomx::Hasher;
+
+            let input = borsh::to_vec(header).expect("borsh header is infallible");
+            let ctx = cached_context(key.as_bytes());
+            let hasher = Hasher::new(ctx);
+            let out = hasher.hash(&input);
+            let mut digest = [0u8; 32];
+            digest.copy_from_slice(out.as_ref());
+            Hash(digest)
+        }
+        #[cfg(not(feature = "randomx"))]
+        {
+            let _ = key;
+            Sha256PowHasher.pow_hash(header)
+        }
     }
 }
 
@@ -94,35 +139,16 @@ fn cached_context(key: &[u8; 32]) -> std::sync::Arc<rust_randomx::Context> {
     ctx
 }
 
-#[cfg(feature = "randomx")]
 impl PowHasher for RandomXPowHasher {
     fn algorithm(&self) -> PowAlgorithm {
         PowAlgorithm::RandomX
     }
 
     fn pow_hash(&self, header: &BlockHeader) -> Hash {
-        use rust_randomx::Hasher;
-
-        let key = Self::key_hash(header);
-        let input = borsh::to_vec(header).expect("borsh header is infallible");
-        let ctx = cached_context(key.as_bytes());
-        let hasher = Hasher::new(ctx);
-        let out = hasher.hash(&input);
-        let mut digest = [0u8; 32];
-        digest.copy_from_slice(out.as_ref());
-        Hash(digest)
-    }
-}
-
-#[cfg(not(feature = "randomx"))]
-impl PowHasher for RandomXPowHasher {
-    fn algorithm(&self) -> PowAlgorithm {
-        PowAlgorithm::RandomX
-    }
-
-    fn pow_hash(&self, header: &BlockHeader) -> Hash {
-        // Fall back so workspace builds without a C++ toolchain still compile.
-        Sha256PowHasher.pow_hash(header)
+        // Trait default uses the legacy timestamp bucket so callers without a DAG
+        // still get a stable cached key. Production admission/mining must call
+        // [`Self::pow_hash_with_epoch`] with the parent blue-score epoch.
+        self.pow_hash_with_epoch(header, Self::epoch(header))
     }
 }
 
@@ -303,8 +329,7 @@ mod tests {
 
     #[test]
     fn randomx_key_is_epoch_stable_across_nonce() {
-        // Same epoch + different nonce => same RandomX key (enables dataset caching and
-        // removes the per-header context-init DoS vector).
+        // Same blue-score epoch + different nonce/timestamp => same RandomX key.
         let base = BlockHeader {
             version: 1,
             parents: vec![Hash::ZERO],
@@ -315,21 +340,25 @@ mod tests {
         };
         let other_nonce = BlockHeader {
             nonce: 999,
+            timestamp_ms: base.timestamp_ms + 60_000,
             ..base.clone()
         };
+        let epoch = RandomXPowHasher::epoch_from_blue_score(100);
         assert_eq!(
-            RandomXPowHasher::key_hash(&base),
-            RandomXPowHasher::key_hash(&other_nonce)
+            RandomXPowHasher::key_hash_for_epoch(epoch),
+            RandomXPowHasher::key_hash_for_blue_score(100)
+        );
+        // Key is stable for any blue-score inside the same epoch bucket.
+        let _ = (base, other_nonce);
+        assert_eq!(
+            RandomXPowHasher::key_hash_for_blue_score(100),
+            RandomXPowHasher::key_hash_for_blue_score(RANDOMX_EPOCH_BLOCKS - 1)
         );
 
-        // A timestamp in a later epoch rotates the key.
-        let next_epoch = BlockHeader {
-            timestamp_ms: base.timestamp_ms + RANDOMX_EPOCH_MS,
-            ..base.clone()
-        };
+        // Crossing a blue-score epoch boundary rotates the key.
         assert_ne!(
-            RandomXPowHasher::key_hash(&base),
-            RandomXPowHasher::key_hash(&next_epoch)
+            RandomXPowHasher::key_hash_for_blue_score(RANDOMX_EPOCH_BLOCKS - 1),
+            RandomXPowHasher::key_hash_for_blue_score(RANDOMX_EPOCH_BLOCKS)
         );
     }
 

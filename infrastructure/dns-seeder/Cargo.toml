@@ -1,5 +1,6 @@
 [package]
 name = "agora-dns-seeder"
+publish = false
 description = "HTTP peer phonebook for Agora Network bootstrap"
 version.workspace = true
 edition.workspace = true

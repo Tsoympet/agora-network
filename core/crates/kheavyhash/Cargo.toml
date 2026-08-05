@@ -1,5 +1,6 @@
 [package]
 name = "agora-kheavyhash"
+publish = false
 description = "Audited Kaspa kHeavyHash PoW digest (vendored, no wasm deps)"
 version.workspace = true
 edition.workspace = true

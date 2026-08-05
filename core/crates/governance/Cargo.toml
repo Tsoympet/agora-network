@@ -1,5 +1,6 @@
 [package]
 name = "agora-governance"
+publish = false
 description = "Agora civic governance: constitution, elected ranks, chambers, quadratic voting"
 version.workspace = true
 edition.workspace = true

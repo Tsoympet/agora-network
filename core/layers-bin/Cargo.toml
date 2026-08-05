@@ -1,5 +1,6 @@
 [package]
 name = "agora-layers"
+publish = false
 description = "Agora L2/L3/L4 operator runtime binary"
 version.workspace = true
 edition.workspace = true
