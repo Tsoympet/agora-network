@@ -15,6 +15,7 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Genesis ignition:** `GenesisBuilder` for Block 0 and fixed supply caps
 - [x] **Consensus core (initial):** GHOSTDAG blue-set ordering + DAA scaffold + leading-zero PoW verify hooks (RandomX / kHeavyHash FFI later)
 - [x] **P2P handshake:** libp2p gossipsub + mempool admission + DNS seeder; two-node local gossip test
+- [x] **Transaction acceptance layer:** validate-all → blue-order conflict resolution → deterministic bitmaps; fees from accepted txs only; coinbase = subsidy + accepted fees; atomic UTXO journals; RPC/mempool/confirmations acceptance-aware; datadir + signatures + gossip bound to `NetworkFingerprint`
 
 ### Stack locks
 

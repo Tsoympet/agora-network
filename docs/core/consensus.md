@@ -1,6 +1,7 @@
 # Consensus (`agora-consensus`)
 
-GHOSTDAG ordering, difficulty adjustment, PoW verification, and emission.
+GHOSTDAG ordering, difficulty adjustment, PoW verification, emission, and the
+**transaction acceptance layer**.
 
 ## GHOSTDAG
 
@@ -14,9 +15,15 @@ Agora orders a BlockDAG rather than a single chain. Parallel blocks are retained
    - Inherit the selected parent's blue set and add the selected parent.
    - Walk the **merge set** (`past(B) \ past(selected_parent)`); add a candidate if `|anticone(candidate) ∩ blues| ≤ k`.
    - Insert `B` into its blue set; `blue_score(B) = |blues|`.
-3. `order_past(tip)` returns tip-past blocks with blue/red flags for conflict resolution.
+3. `order_past(tip)` returns tip-past blocks with blue/red flags.
 
 Synthetic DAG unit tests cover chains, parallel merges (`k` large ⇒ all blue), and `k = 0` red merges.
+
+## Transaction acceptance
+
+Blue order is an input to — not a substitute for — acceptance. See [`acceptance.md`](acceptance.md).
+
+`accept_blue_blocks` validates every transaction, resolves duplicates/input conflicts by blue order, produces per-block bitmaps, credits fees only from accepted txs, and checks coinbase against `subsidy + accepted_fees`.
 
 ## DAA
 
@@ -36,4 +43,4 @@ Verification is trait-based (`PowVerifier`). Until RandomX/kHeavyHash FFI lands,
 
 ## Emission
 
-`EmissionSchedule` owns reward math (initial subsidy + halving interval). Callers must not hardcode rewards elsewhere.
+`EmissionSchedule` owns subsidy math (initial subsidy + halving interval). Coinbase may claim `reward_at_blue_score(blue_score) + accepted_fees` only — never fees from rejected txs.

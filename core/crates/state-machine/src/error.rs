@@ -6,4 +6,6 @@ pub enum StateError {
     Storage(String),
     #[error("unknown zone")]
     UnknownZone,
+    #[error("network fingerprint mismatch: {0}")]
+    FingerprintMismatch(String),
 }

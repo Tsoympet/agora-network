@@ -100,6 +100,7 @@ dependencies = [
 name = "agora-p2p"
 version = "0.1.0"
 dependencies = [
+ "agora-consensus",
  "agora-crypto",
  "agora-types",
  "borsh",

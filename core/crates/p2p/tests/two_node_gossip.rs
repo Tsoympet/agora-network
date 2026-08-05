@@ -2,21 +2,39 @@ use std::time::Duration;
 
 use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
 use agora_p2p::{dial_addr, Mempool, NetworkConfig, NetworkEvent, NetworkMessage, NetworkNode};
-use agora_types::{Amount, Hash, OutPoint, Transaction, TxIn, TxOut};
+use agora_types::{Amount, Hash, NetworkFingerprint, OutPoint, Transaction, TxIn, TxOut};
 use tokio::time::timeout;
 
 const PHRASE: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
+fn test_fingerprint() -> NetworkFingerprint {
+    NetworkFingerprint {
+        network_name: "agora-test".into(),
+        network_id: 1,
+        genesis_hash: Hash::ZERO,
+        ghostdag_k: 18,
+        max_supply: 1,
+        premine: 0,
+        initial_reward: 50,
+        halving_interval: 210_000,
+    }
+}
+
 #[tokio::test]
 async fn two_nodes_exchange_signed_transaction() {
     let _ = tracing_subscriber::fmt::try_init();
+    let fingerprint = test_fingerprint();
 
     let (handle_a, mut events_a, node_a) = NetworkNode::build(
-        &NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"),
+        &NetworkConfig::default()
+            .with_listen("/ip4/127.0.0.1/tcp/0")
+            .with_fingerprint(fingerprint.clone()),
     )
     .expect("node a");
     let (handle_b, mut events_b, node_b) = NetworkNode::build(
-        &NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"),
+        &NetworkConfig::default()
+            .with_listen("/ip4/127.0.0.1/tcp/0")
+            .with_fingerprint(fingerprint.clone()),
     )
     .expect("node b");
 
@@ -49,9 +67,9 @@ async fn two_nodes_exchange_signed_transaction() {
         }],
         9,
     );
-    sign_transaction(&mut tx, &kp).unwrap();
+    sign_transaction(&mut tx, &kp, &fingerprint).unwrap();
     let mut pool = Mempool::new(32);
-    pool.admit(tx.clone()).unwrap();
+    pool.admit(tx.clone(), &fingerprint).unwrap();
 
     handle_b
         .publish_message(NetworkMessage::Transaction(tx))
@@ -74,7 +92,9 @@ async fn two_nodes_exchange_signed_transaction() {
 
     assert_eq!(received.nonce, 9);
     let mut remote_pool = Mempool::new(32);
-    remote_pool.admit(received).expect("remote admission");
+    remote_pool
+        .admit(received, &fingerprint)
+        .expect("remote admission");
 
     handle_a.shutdown();
     handle_b.shutdown();

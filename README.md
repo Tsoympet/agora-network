@@ -55,6 +55,8 @@ cargo check -p agora-state-machine --features rocksdb
 
 TypeScript bindings for shared types are generated under `core/crates/types/bindings/` when `agora-types` tests run.
 
+**Transaction acceptance** is the sole authority for UTXO finality (not block color). See [`docs/core/acceptance.md`](docs/core/acceptance.md).
+
 
 ### Binaries
 

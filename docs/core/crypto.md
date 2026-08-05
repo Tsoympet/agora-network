@@ -14,7 +14,9 @@ Wallet and signature primitives for Agora Network.
 - BIP-44 paths via `bip32` CKD (`m/44'/8888'/account'/change/index`)
 - Address = first 20 bytes of SHA-256(compressed pubkey)
 - ECDSA sign / verify over SHA-256 digests
-- Transaction auth: sign `TransactionBody` borsh bytes; attach pubkey + compact signature
+- Transaction auth: `sign_transaction` / `verify_transaction` take a `NetworkFingerprint` and sign `Transaction::signing_bytes(fingerprint)` (fingerprint digest || body)
+
+Signatures from one network fingerprint must not verify under another.
 
 ## BIP-44 notes
 

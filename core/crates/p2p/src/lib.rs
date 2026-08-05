@@ -15,3 +15,6 @@ pub use mempool::Mempool;
 pub use messages::NetworkMessage;
 pub use network::{dial_addr, NetworkEvent, NetworkHandle, NetworkNode};
 pub use topics::{blocks_topic, transactions_topic, TOPIC_BLOCKS, TOPIC_TRANSACTIONS};
+
+// Re-export for callers wiring fingerprint-bound networks.
+pub use agora_types::NetworkFingerprint;

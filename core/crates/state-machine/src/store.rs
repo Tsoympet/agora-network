@@ -5,6 +5,20 @@ use std::sync::{Arc, Mutex};
 use crate::columns::ColumnFamily;
 use crate::{StateError, StateZone};
 
+/// Atomic write operation against a column family.
+#[derive(Debug, Clone)]
+pub enum StoreOp {
+    Put {
+        cf: ColumnFamily,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    },
+    Delete {
+        cf: ColumnFamily,
+        key: Vec<u8>,
+    },
+}
+
 /// State backend used by the node.
 ///
 /// Default build keeps an in-memory map so the workspace compiles without a C++
@@ -54,21 +68,18 @@ impl StateStore {
     }
 
     pub fn put_cf(&self, cf: ColumnFamily, key: &[u8], value: &[u8]) -> Result<(), StateError> {
-        match &self.inner {
-            Inner::Memory(map) => {
-                let mut guard = map
-                    .lock()
-                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
-                guard.insert((cf as u8, key.to_vec()), value.to_vec());
-                Ok(())
-            }
-            #[cfg(feature = "rocksdb")]
-            Inner::Rocks(db) => {
-                let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
-                db.put_cf(handle, key, value)
-                    .map_err(|e| StateError::Storage(e.to_string()))
-            }
-        }
+        self.write_batch([StoreOp::Put {
+            cf,
+            key: key.to_vec(),
+            value: value.to_vec(),
+        }])
+    }
+
+    pub fn delete_cf(&self, cf: ColumnFamily, key: &[u8]) -> Result<(), StateError> {
+        self.write_batch([StoreOp::Delete {
+            cf,
+            key: key.to_vec(),
+        }])
     }
 
     pub fn get_cf(&self, cf: ColumnFamily, key: &[u8]) -> Result<Option<Vec<u8>>, StateError> {
@@ -83,6 +94,49 @@ impl StateStore {
             Inner::Rocks(db) => {
                 let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
                 db.get_cf(handle, key)
+                    .map_err(|e| StateError::Storage(e.to_string()))
+            }
+        }
+    }
+
+    /// Apply all ops atomically (single map lock / RocksDB WriteBatch).
+    pub fn write_batch(&self, ops: impl IntoIterator<Item = StoreOp>) -> Result<(), StateError> {
+        let ops: Vec<StoreOp> = ops.into_iter().collect();
+        match &self.inner {
+            Inner::Memory(map) => {
+                let mut guard = map
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                for op in ops {
+                    match op {
+                        StoreOp::Put { cf, key, value } => {
+                            guard.insert((cf as u8, key), value);
+                        }
+                        StoreOp::Delete { cf, key } => {
+                            guard.remove(&(cf as u8, key));
+                        }
+                    }
+                }
+                Ok(())
+            }
+            #[cfg(feature = "rocksdb")]
+            Inner::Rocks(db) => {
+                let mut batch = rocksdb::WriteBatch::default();
+                for op in ops {
+                    match op {
+                        StoreOp::Put { cf, key, value } => {
+                            let handle =
+                                db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                            batch.put_cf(handle, key, value);
+                        }
+                        StoreOp::Delete { cf, key } => {
+                            let handle =
+                                db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                            batch.delete_cf(handle, key);
+                        }
+                    }
+                }
+                db.write(batch)
                     .map_err(|e| StateError::Storage(e.to_string()))
             }
         }
@@ -120,5 +174,32 @@ mod tests {
             .get_cf(ColumnFamily::Meta, meta_keys::MAX_SUPPLY)
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn write_batch_is_atomic_for_memory() {
+        let store = StateStore::open("/tmp/agora-batch-test").unwrap();
+        store
+            .write_batch([
+                StoreOp::Put {
+                    cf: ColumnFamily::Utxo,
+                    key: b"a".to_vec(),
+                    value: b"1".to_vec(),
+                },
+                StoreOp::Put {
+                    cf: ColumnFamily::Warm,
+                    key: b"b".to_vec(),
+                    value: b"2".to_vec(),
+                },
+            ])
+            .unwrap();
+        assert_eq!(
+            store.get_cf(ColumnFamily::Utxo, b"a").unwrap(),
+            Some(b"1".to_vec())
+        );
+        assert_eq!(
+            store.get_cf(ColumnFamily::Warm, b"b").unwrap(),
+            Some(b"2".to_vec())
+        );
     }
 }

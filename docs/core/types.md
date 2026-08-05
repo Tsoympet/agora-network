@@ -22,12 +22,17 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | `Transaction` | Signed transfer (`public_key` + `signature`) |
 | `TransactionBody` | Signable subset (no auth material) |
 | `BlockHeader` / `Block` | Multi-parent DAG header + txs |
+| `NetworkFingerprint` | Full network identity (genesis + consensus/monetary params) |
+| `AcceptanceBitmap` | Per-block accepted/rejected tx bits |
+| `TxAcceptanceStatus` / `TxConfirmation` | Explorer/RPC acceptance lifecycle |
 
-## IDs
+## IDs & domains
 
 - `Transaction::tx_id()` = SHA-256(borsh(tx))
 - `Block::id()` = SHA-256(borsh(header))
 - `Block::compute_tx_root` = pairwise merkle over tx ids
+- `Transaction::signing_bytes(fingerprint)` = `fingerprint.digest() || borsh(body)`
+- `NetworkFingerprint::digest()` = SHA-256(borsh(fingerprint))
 
 ## Change process
 
