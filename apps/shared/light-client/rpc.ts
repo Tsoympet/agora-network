@@ -93,6 +93,8 @@ export type LightNodeInfo = {
   miner_address: string | null;
   /** Hex id of Block 0 when reported by the node. */
   genesis_hash: string | null;
+  /** Network-bound signing chain id (`agora-testnet-1`, …). */
+  chain_id?: string | null;
   /** Minimum mempool relay fee when reported. */
   min_relay_fee?: number;
 };

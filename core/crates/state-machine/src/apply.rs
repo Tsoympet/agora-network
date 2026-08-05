@@ -192,6 +192,19 @@ pub fn apply_block_batched(
     apply_block_batched_with_auth(store, block, emission_reward, None)
 }
 
+/// How to treat duplicate / conflicting transactions when applying a block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyMode {
+    /// Any double-spend or duplicate outpoint fails the block (mempool / lone validation).
+    Strict,
+    /// Skip txs whose inputs are already spent (or outputs already exist).
+    ///
+    /// Used when applying blues in virtual order so ordinary concurrent mempool
+    /// duplicates and conflicting sibling spends do not invalidate a merge block.
+    /// Consensus order determines the winner: first applied blue wins the UTXO.
+    Virtual,
+}
+
 /// Like [`apply_block_batched`] with optional network-bound signature verification.
 pub fn apply_block_batched_with_auth(
     store: &StateStore,
@@ -199,11 +212,26 @@ pub fn apply_block_batched_with_auth(
     emission_reward: u64,
     auth: Option<&TxAuthContext>,
 ) -> Result<(UtxoJournal, WriteBatch), StateError> {
-    let fees = sum_transfer_fees(store, &block.transactions)?;
-    let coinbase_budget = emission_reward
-        .checked_add(fees)
-        .ok_or_else(|| StateError::Coinbase("reward overflow".into()))?;
+    apply_block_batched_mode(store, block, emission_reward, auth, ApplyMode::Strict)
+}
 
+/// Virtual-order apply: skip already-spent / duplicate-outpoint txs instead of failing.
+pub fn apply_block_batched_virtual(
+    store: &StateStore,
+    block: &Block,
+    emission_reward: u64,
+    auth: Option<&TxAuthContext>,
+) -> Result<(UtxoJournal, WriteBatch), StateError> {
+    apply_block_batched_mode(store, block, emission_reward, auth, ApplyMode::Virtual)
+}
+
+fn apply_block_batched_mode(
+    store: &StateStore,
+    block: &Block,
+    emission_reward: u64,
+    auth: Option<&TxAuthContext>,
+    mode: ApplyMode,
+) -> Result<(UtxoJournal, WriteBatch), StateError> {
     let mut batch = WriteBatch::new();
     let mut journal = UtxoJournal::default();
     let mut spent_in_block: HashSet<OutPoint> = HashSet::new();
@@ -211,12 +239,29 @@ pub fn apply_block_batched_with_auth(
     let mut coinbase_created: HashSet<OutPoint> = HashSet::new();
     let mut coinbases = 0u32;
     let mut coinbase_total = 0u64;
+    let mut applied_fees = 0u64;
 
+    // Pre-scan transfers that will apply so coinbase budget matches Virtual skips.
+    let transferable = selectable_transfers(store, block, auth, mode)?;
+    for (_, fee) in &transferable {
+        applied_fees = applied_fees
+            .checked_add(*fee)
+            .ok_or_else(|| StateError::InvalidTx("fee overflow".into()))?;
+    }
+    let coinbase_budget = emission_reward
+        .checked_add(applied_fees)
+        .ok_or_else(|| StateError::Coinbase("reward overflow".into()))?;
+
+    let mut transfer_idx = 0usize;
     for tx in &block.transactions {
         if tx.inputs.is_empty() {
             coinbases += 1;
             if coinbases > 1 {
                 return Err(StateError::Coinbase("multiple coinbase txs".into()));
+            }
+            if mode == ApplyMode::Virtual && coinbase_outpoints_exist(store, tx)? {
+                // Identical sibling coinbase already created — skip (subsidy 0).
+                continue;
             }
             coinbase_total = apply_coinbase(
                 store,
@@ -227,6 +272,24 @@ pub fn apply_block_batched_with_auth(
                 &mut created_in_block,
                 &mut coinbase_created,
             )?;
+        } else if transfer_idx < transferable.len()
+            && transferable[transfer_idx].0.tx_id() == tx.tx_id()
+        {
+            apply_transfer(
+                store,
+                tx,
+                auth,
+                &mut batch,
+                &mut journal,
+                &mut spent_in_block,
+                &mut created_in_block,
+                &coinbase_created,
+            )?;
+            transfer_idx += 1;
+        } else if mode == ApplyMode::Virtual {
+            // Skipped duplicate / conflicting transfer — still verify it was signed
+            // when present so garbage auth cannot hide in blue blocks unnoticed.
+            let _ = verify_and_signer(tx, auth)?;
         } else {
             apply_transfer(
                 store,
@@ -244,11 +307,121 @@ pub fn apply_block_batched_with_auth(
         return Err(StateError::Coinbase("missing coinbase".into()));
     }
 
-    journal.fees = fees;
+    journal.fees = applied_fees;
     journal.coinbase_total = coinbase_total;
-    journal.subsidy = coinbase_total.saturating_sub(fees);
+    journal.subsidy = coinbase_total.saturating_sub(applied_fees.min(coinbase_total));
 
     Ok((journal, batch))
+}
+
+/// Transfers that still have spendable inputs in `store` (plus in-block creates).
+fn selectable_transfers<'a>(
+    store: &StateStore,
+    block: &'a Block,
+    auth: Option<&TxAuthContext>,
+    mode: ApplyMode,
+) -> Result<Vec<(&'a Transaction, u64)>, StateError> {
+    let mut out = Vec::new();
+    let mut reserved: HashSet<OutPoint> = HashSet::new();
+    let mut created: HashMap<OutPoint, TxOut> = HashMap::new();
+    // Seed created with coinbase outs that will apply (non-duplicate).
+    for tx in &block.transactions {
+        if tx.inputs.is_empty() {
+            if mode == ApplyMode::Virtual && coinbase_outpoints_exist(store, tx)? {
+                continue;
+            }
+            let tx_id = tx.tx_id();
+            for (index, o) in tx.outputs.iter().enumerate() {
+                created.insert(
+                    OutPoint {
+                        tx_id,
+                        index: index as u32,
+                    },
+                    o.clone(),
+                );
+            }
+        }
+    }
+    for tx in &block.transactions {
+        if tx.inputs.is_empty() {
+            continue;
+        }
+        // Auth must be valid even for txs we may skip under Virtual
+        // (except we only require auth when selecting — skipped later also verify).
+        if mode == ApplyMode::Strict {
+            let _ = verify_and_signer(tx, auth)?;
+        }
+        let mut ok = true;
+        let mut input_value = 0u64;
+        for input in &tx.inputs {
+            let op = input.previous_outpoint;
+            if reserved.contains(&op) {
+                ok = false;
+                break;
+            }
+            let utxo = if let Some(c) = created.get(&op) {
+                c.clone()
+            } else {
+                match store.get_cf(ColumnFamily::Utxo, &outpoint_key(&op))? {
+                    Some(bytes) => TxOut::try_from_slice(&bytes)
+                        .map_err(|e| StateError::Storage(e.to_string()))?,
+                    None => {
+                        ok = false;
+                        break;
+                    }
+                }
+            };
+            input_value = input_value.saturating_add(utxo.value.as_base_units());
+            reserved.insert(op);
+        }
+        if !ok {
+            if mode == ApplyMode::Strict {
+                // Fall through to apply_transfer which reports the precise error.
+                out.push((tx, 0));
+            }
+            continue;
+        }
+        let mut output_value = 0u64;
+        for o in &tx.outputs {
+            output_value = output_value.saturating_add(o.value.as_base_units());
+        }
+        if input_value < output_value {
+            if mode == ApplyMode::Strict {
+                out.push((tx, 0));
+            }
+            continue;
+        }
+        let fee = input_value - output_value;
+        let tx_id = tx.tx_id();
+        for (index, o) in tx.outputs.iter().enumerate() {
+            created.insert(
+                OutPoint {
+                    tx_id,
+                    index: index as u32,
+                },
+                o.clone(),
+            );
+        }
+        out.push((tx, fee));
+    }
+    Ok(out)
+}
+
+fn coinbase_outpoints_exist(store: &StateStore, tx: &Transaction) -> Result<bool, StateError> {
+    let tx_id = tx.tx_id();
+    for index in 0..tx.outputs.len() {
+        let op = OutPoint {
+            tx_id,
+            index: index as u32,
+        };
+        if store
+            .get_cf(ColumnFamily::Utxo, &outpoint_key(&op))?
+            .is_some()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn apply_coinbase(

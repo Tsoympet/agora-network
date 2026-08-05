@@ -4,7 +4,7 @@
 //! BIP-44 external(0) account from `AGORA_FAUCET_MNEMONIC` (testnet premine uses
 //! the well-known `abandon … about` phrase).
 
-use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
+use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction_bound, Bip44Path};
 use agora_types::{Address, Amount, Hash, OutPoint, Transaction, TxIn, TxOut};
 use serde_json::json;
 
@@ -77,15 +77,46 @@ pub async fn drip_from_treasury(
         })
         .collect();
 
+    let (chain_id, genesis) = node_signing_identity(rpc_url).await?;
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(1);
     let mut tx = Transaction::unsigned(1, inputs, outputs, nonce);
-    sign_transaction(&mut tx, &kp).map_err(|e| e.to_string())?;
+    sign_transaction_bound(&mut tx, &kp, &chain_id, &genesis).map_err(|e| e.to_string())?;
 
     submit_transaction(rpc_url, &tx).await?;
     node_rpc::get_balance(rpc_url, &recipient).await
+}
+
+async fn node_signing_identity(rpc_url: &str) -> Result<(String, Hash), String> {
+    let resp = node_rpc::rpc_call(rpc_url, "agora_getNodeInfo", json!([])).await?;
+    let value = resp
+        .result
+        .ok_or_else(|| format!("getNodeInfo error: {:?}", resp.error))?;
+    let chain_id = value
+        .get("chain_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            value
+                .get("network")
+                .and_then(|v| v.as_str())
+                .map(|net| match net.to_ascii_lowercase().as_str() {
+                    "mainnet" => "agora-mainnet-1".into(),
+                    "testnet" => "agora-testnet-1".into(),
+                    _ => "agora-dev".into(),
+                })
+        })
+        .ok_or_else(|| "getNodeInfo missing chain_id/network".to_string())?;
+    let genesis_hex = value
+        .get("genesis_hash")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "getNodeInfo missing genesis_hash".to_string())?;
+    let genesis =
+        Hash::from_hex(genesis_hex).ok_or_else(|| format!("bad genesis_hash {genesis_hex}"))?;
+    Ok((chain_id, genesis))
 }
 
 async fn get_utxos(rpc_url: &str, address: &Address) -> Result<Vec<RpcUtxo>, String> {

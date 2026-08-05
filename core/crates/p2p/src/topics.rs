@@ -13,28 +13,46 @@ pub const TOPIC_VERSION: &str = "1";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkTopics {
     pub network: String,
+    /// Optional 16-hex fingerprint segment (empty → legacy label-only topics).
+    pub fingerprint: String,
 }
 
 impl NetworkTopics {
     pub fn new(network: impl Into<String>) -> Self {
+        Self::with_fingerprint(network, "")
+    }
+
+    pub fn with_fingerprint(network: impl Into<String>, fingerprint: impl Into<String>) -> Self {
         let network = sanitize_network(network.into());
-        Self { network }
+        let fingerprint = fingerprint.into().trim().to_ascii_lowercase();
+        Self {
+            network,
+            fingerprint,
+        }
+    }
+
+    fn scope(&self) -> String {
+        if self.fingerprint.is_empty() {
+            self.network.clone()
+        } else {
+            format!("{}/{}", self.network, self.fingerprint)
+        }
     }
 
     pub fn blocks_name(&self) -> String {
-        format!("agora/{}/blocks/{}", self.network, TOPIC_VERSION)
+        format!("agora/{}/blocks/{}", self.scope(), TOPIC_VERSION)
     }
 
     pub fn transactions_name(&self) -> String {
-        format!("agora/{}/txs/{}", self.network, TOPIC_VERSION)
+        format!("agora/{}/txs/{}", self.scope(), TOPIC_VERSION)
     }
 
     pub fn getblock_protocol_name(&self) -> String {
-        format!("/agora/{}/getblock/{}", self.network, TOPIC_VERSION)
+        format!("/agora/{}/getblock/{}", self.scope(), TOPIC_VERSION)
     }
 
     pub fn getheaders_protocol_name(&self) -> String {
-        format!("/agora/{}/getheaders/{}", self.network, TOPIC_VERSION)
+        format!("/agora/{}/getheaders/{}", self.scope(), TOPIC_VERSION)
     }
 
     pub fn blocks(&self) -> IdentTopic {
@@ -115,6 +133,18 @@ mod tests {
             dev.getheaders_protocol_name(),
             testnet.getheaders_protocol_name()
         );
+    }
+
+    #[test]
+    fn scopes_topics_by_fingerprint() {
+        let a = NetworkTopics::with_fingerprint("testnet", "aabbccddeeff0011");
+        let b = NetworkTopics::with_fingerprint("testnet", "1122334455667788");
+        assert_eq!(
+            a.blocks_name(),
+            "agora/testnet/aabbccddeeff0011/blocks/1"
+        );
+        assert_ne!(a.blocks_name(), b.blocks_name());
+        assert_ne!(a.getblock_protocol_name(), b.getblock_protocol_name());
     }
 
     #[test]

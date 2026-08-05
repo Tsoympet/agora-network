@@ -141,4 +141,66 @@ mod tests {
         // Unbound verify must not accept a bound signature.
         assert!(verify_transaction(&tx).is_err());
     }
+
+    /// Stable cross-language vector: Rust and TypeScript must produce the same
+    /// preimage, pubkey, and signature for this fixture (devnet / testnet / mainnet ids).
+    #[test]
+    fn bound_signing_vector_abandon_external0() {
+        let seed = seed_from_mnemonic(PHRASE, "").expect("seed");
+        let kp = derive_bip44(&seed, &Bip44Path::external(0)).expect("derive");
+        let genesis = Hash::from_hex(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .unwrap();
+        let mut tx = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: Hash::ZERO,
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_base_units(1_000),
+                address: kp.address(),
+            }],
+            42,
+        );
+        for (chain_id, preimage_prefix) in [
+            ("agora-dev", "61676f72612d74782d7631"), // domain utf8 hex starts after len
+            ("agora-testnet-1", "61676f72612d74782d7631"),
+            ("agora-mainnet-1", "61676f72612d74782d7631"),
+        ] {
+            let preimage = tx.signing_bytes_bound(chain_id, &genesis);
+            let pre_hex = hex::encode(&preimage);
+            assert!(
+                pre_hex.contains(preimage_prefix),
+                "preimage must include domain for {chain_id}"
+            );
+            sign_transaction_bound(&mut tx, &kp, chain_id, &genesis).unwrap();
+            verify_transaction_bound(&tx, chain_id, &genesis).unwrap();
+            assert_eq!(hex::encode(&tx.public_key), hex::encode(kp.public_key_bytes()));
+            assert_eq!(tx.signature.len(), 64);
+            // Re-sign must be deterministic for the same key/preimage (RFC6979).
+            let sig1 = tx.signature.clone();
+            sign_transaction_bound(&mut tx, &kp, chain_id, &genesis).unwrap();
+            assert_eq!(tx.signature, sig1);
+        }
+        // Fixture values consumed by apps/shared/light-client signing vector smoke.
+        let chain_id = "agora-testnet-1";
+        let preimage = tx.signing_bytes_bound(chain_id, &genesis);
+        assert_eq!(
+            hex::encode(&preimage),
+            "0b00000061676f72612d74782d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef010000000100000000000000000000000000000000000000000000000000000000000000000000000000000001000000e803000000000000ff9ec96f09eb154d038a552ecae59c50204ea9a92a00000000000000"
+        );
+        sign_transaction_bound(&mut tx, &kp, chain_id, &genesis).unwrap();
+        assert_eq!(
+            hex::encode(&tx.public_key),
+            "03ae62ade894b15c2b7aa2c61ac1103ee2de672f93668ab05a2760060d7f59b397"
+        );
+        assert_eq!(
+            hex::encode(&tx.signature),
+            "7c66bbaf11a82cf00f8edafd90e6c99627f4b4d25e1e285d7eeeb8f8dac01053354eb9b3b206246391bd61fa545af1d4b61631d5a7d2e025ea239b63a511a4a2"
+        );
+    }
 }

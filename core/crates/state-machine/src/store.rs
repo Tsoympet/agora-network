@@ -17,6 +17,9 @@ pub struct StateStore {
 /// In-memory backend map: `(cf, key) -> value`.
 type MemStore = Arc<Mutex<HashMap<(u8, Vec<u8>), Vec<u8>>>>;
 
+/// Overlay delta: `None` means deleted relative to the base store.
+type CowDelta = Arc<Mutex<HashMap<(u8, Vec<u8>), Option<Vec<u8>>>>>;
+
 /// A key/value pair returned by prefix scans.
 pub type KvPair = (Vec<u8>, Vec<u8>);
 
@@ -24,6 +27,8 @@ enum Inner {
     Memory(MemStore),
     #[cfg(feature = "rocksdb")]
     Rocks(Arc<rocksdb::DB>),
+    /// Copy-on-write view over another store: reads fall through; writes stay in `delta`.
+    Cow { base: Arc<StateStore>, delta: CowDelta },
 }
 
 /// A single mutation in a [`WriteBatch`].
@@ -80,6 +85,19 @@ impl StateStore {
         }
     }
 
+    /// Copy-on-write overlay: shares the base store for reads; mutations stay local.
+    ///
+    /// Used by blue_order UTXO pre-validation so tip extensions do not clone the
+    /// entire UTXO set / journal corpus into a new map.
+    pub fn open_cow_overlay(base: Arc<StateStore>) -> Self {
+        Self {
+            inner: Inner::Cow {
+                base,
+                delta: Arc::new(Mutex::new(HashMap::new())),
+            },
+        }
+    }
+
     /// Open durable storage at `path` when the `rocksdb` feature is enabled.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StateError> {
         #[cfg(feature = "rocksdb")]
@@ -131,6 +149,13 @@ impl StateStore {
                 db.put_cf(handle, key, value)
                     .map_err(|e| StateError::Storage(e.to_string()))
             }
+            Inner::Cow { delta, .. } => {
+                let mut guard = delta
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                guard.insert((cf as u8, key.to_vec()), Some(value.to_vec()));
+                Ok(())
+            }
         }
     }
 
@@ -147,6 +172,16 @@ impl StateStore {
                 let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
                 db.get_cf(handle, key)
                     .map_err(|e| StateError::Storage(e.to_string()))
+            }
+            Inner::Cow { base, delta } => {
+                let guard = delta
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                if let Some(entry) = guard.get(&(cf as u8, key.to_vec())) {
+                    return Ok(entry.clone());
+                }
+                drop(guard);
+                base.get_cf(cf, key)
             }
         }
     }
@@ -165,6 +200,13 @@ impl StateStore {
                 let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
                 db.delete_cf(handle, key)
                     .map_err(|e| StateError::Storage(e.to_string()))
+            }
+            Inner::Cow { delta, .. } => {
+                let mut guard = delta
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                guard.insert((cf as u8, key.to_vec()), None);
+                Ok(())
             }
         }
     }
@@ -198,6 +240,30 @@ impl StateStore {
                     }
                     out.push((k.to_vec(), v.to_vec()));
                 }
+                Ok(out)
+            }
+            Inner::Cow { base, delta } => {
+                let mut map: HashMap<Vec<u8>, Vec<u8>> = base
+                    .scan_prefix(cf, prefix)?
+                    .into_iter()
+                    .collect();
+                let guard = delta
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                for ((c, k), v) in guard.iter() {
+                    if *c == cf as u8 && k.starts_with(prefix) {
+                        match v {
+                            Some(bytes) => {
+                                map.insert(k.clone(), bytes.clone());
+                            }
+                            None => {
+                                map.remove(k);
+                            }
+                        }
+                    }
+                }
+                let mut out: Vec<_> = map.into_iter().collect();
+                out.sort_by(|a, b| a.0.cmp(&b.0));
                 Ok(out)
             }
         }
@@ -239,6 +305,22 @@ impl StateStore {
                 }
                 db.write(wb).map_err(|e| StateError::Storage(e.to_string()))
             }
+            Inner::Cow { delta, .. } => {
+                let mut guard = delta
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                for op in batch.ops {
+                    match op {
+                        WriteOp::Put(cf, key, value) => {
+                            guard.insert((cf as u8, key), Some(value));
+                        }
+                        WriteOp::Delete(cf, key) => {
+                            guard.insert((cf as u8, key), None);
+                        }
+                    }
+                }
+                Ok(())
+            }
         }
     }
 
@@ -279,6 +361,34 @@ impl StateStore {
                 }
                 Ok(())
             }
+            Inner::Cow { base, delta } => {
+                // Use scan_prefix (not for_each_cf) to avoid monomorphization recursion
+                // when overlays are stacked.
+                let mut map: HashMap<Vec<u8>, Vec<u8>> =
+                    base.scan_prefix(cf, &[])?.into_iter().collect();
+                let guard = delta
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                for ((c, k), v) in guard.iter() {
+                    if *c == cf as u8 {
+                        match v {
+                            Some(bytes) => {
+                                map.insert(k.clone(), bytes.clone());
+                            }
+                            None => {
+                                map.remove(k);
+                            }
+                        }
+                    }
+                }
+                let mut keys: Vec<_> = map.keys().cloned().collect();
+                keys.sort();
+                for k in keys {
+                    let v = &map[&k];
+                    f(k.as_slice(), v.as_slice())?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -287,6 +397,23 @@ impl StateStore {
 mod tests {
     use super::*;
     use crate::columns::meta_keys;
+    use std::sync::Arc;
+
+    #[test]
+    fn cow_overlay_isolates_writes() {
+        let base = Arc::new(StateStore::open_in_memory());
+        base.put_cf(ColumnFamily::Utxo, b"a", b"1").unwrap();
+        let overlay = StateStore::open_cow_overlay(base.clone());
+        assert_eq!(overlay.get_cf(ColumnFamily::Utxo, b"a").unwrap(), Some(b"1".to_vec()));
+        overlay.put_cf(ColumnFamily::Utxo, b"a", b"2").unwrap();
+        overlay.put_cf(ColumnFamily::Utxo, b"b", b"3").unwrap();
+        overlay.delete_cf(ColumnFamily::Utxo, b"a").unwrap();
+        assert_eq!(overlay.get_cf(ColumnFamily::Utxo, b"a").unwrap(), None);
+        assert_eq!(overlay.get_cf(ColumnFamily::Utxo, b"b").unwrap(), Some(b"3".to_vec()));
+        // Base unchanged.
+        assert_eq!(base.get_cf(ColumnFamily::Utxo, b"a").unwrap(), Some(b"1".to_vec()));
+        assert_eq!(base.get_cf(ColumnFamily::Utxo, b"b").unwrap(), None);
+    }
 
     #[test]
     fn five_column_families_roundtrip() {

@@ -1,6 +1,7 @@
 /**
  * Browser/mobile wallet helpers matching `agora-crypto`:
- * BIP-39 seed → BIP-44 m/44'/8888'/0'/0/index → secp256k1 sign of borsh(TransactionBody).
+ * BIP-39 seed → BIP-44 m/44'/8888'/0'/0/index → secp256k1 sign of
+ * borsh(domain ‖ chain_id ‖ genesis ‖ TransactionBody) (network-bound).
  */
 
 import { sha256 } from "@noble/hashes/sha256";
@@ -86,6 +87,21 @@ function writeU64(view: DataView, offset: number, value: number | bigint): numbe
   return offset + 8;
 }
 
+/** Must match Rust `agora_types::TX_SIGNING_DOMAIN`. */
+export const TX_SIGNING_DOMAIN = new TextEncoder().encode("agora-tx-v1");
+
+/** Chain ID strings matching `NetworkId::chain_id` in Rust. */
+export function chainIdForNetwork(network: string): string {
+  switch (network.trim().toLowerCase()) {
+    case "mainnet":
+      return "agora-mainnet-1";
+    case "testnet":
+      return "agora-testnet-1";
+    default:
+      return "agora-dev";
+  }
+}
+
 /** Borsh encoding of `TransactionBody` (must match Rust `agora_types`). */
 export function encodeTransactionBody(body: {
   version: number;
@@ -117,6 +133,47 @@ export function encodeTransactionBody(body: {
     o += 20;
   }
   writeU64(view, o, body.nonce);
+  return bytes;
+}
+
+/**
+ * Network-bound signing preimage matching Rust `Transaction::signing_bytes_bound`:
+ * borsh(domain: Vec<u8>, chain_id: String, genesis: [u8;32], body: TransactionBody).
+ */
+export function encodeSigningBytesBound(
+  chainId: string,
+  genesisHex: string,
+  body: {
+    version: number;
+    inputs: { tx_id: Uint8Array; index: number }[];
+    outputs: { value: number; address: Uint8Array }[];
+    nonce: number | bigint;
+  },
+): Uint8Array {
+  const genesis = hexToBytes(genesisHex);
+  if (genesis.length !== 32) throw new Error("genesis must be 32 bytes");
+  const chainBytes = new TextEncoder().encode(chainId);
+  const bodyBytes = encodeTransactionBody(body);
+  const size =
+    4 +
+    TX_SIGNING_DOMAIN.length +
+    4 +
+    chainBytes.length +
+    32 +
+    bodyBytes.length;
+  const buf = new ArrayBuffer(size);
+  const view = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+  let o = 0;
+  o = writeU32(view, o, TX_SIGNING_DOMAIN.length);
+  bytes.set(TX_SIGNING_DOMAIN, o);
+  o += TX_SIGNING_DOMAIN.length;
+  o = writeU32(view, o, chainBytes.length);
+  bytes.set(chainBytes, o);
+  o += chainBytes.length;
+  bytes.set(genesis, o);
+  o += 32;
+  bytes.set(bodyBytes, o);
   return bytes;
 }
 
@@ -191,6 +248,23 @@ export async function signTransactionBody(
   return { publicKey, signature: compact };
 }
 
+/** Sign the network-bound preimage (preferred for production nodes). */
+export async function signTransactionBound(
+  secretKey: Uint8Array,
+  chainId: string,
+  genesisHex: string,
+  body: {
+    version: number;
+    inputs: { tx_id: Uint8Array; index: number }[];
+    outputs: { value: number; address: Uint8Array }[];
+    nonce: number | bigint;
+  },
+): Promise<{ publicKey: Uint8Array; signature: Uint8Array; signingBytes: Uint8Array }> {
+  const signingBytes = encodeSigningBytesBound(chainId, genesisHex, body);
+  const { publicKey, signature } = await signTransactionBody(secretKey, signingBytes);
+  return { publicKey, signature, signingBytes };
+}
+
 /** Greedy coin selection + BIP-44 change; fee (`in − out`) is paid to the miner. */
 export async function buildSignedTransfer(options: {
   mnemonic: string;
@@ -202,6 +276,10 @@ export async function buildSignedTransfer(options: {
   fee?: number;
   nonce?: number;
   network?: string;
+  /** Required for production nodes — hex genesis from `agora_getNodeInfo`. */
+  genesisHash?: string;
+  /** Override chain id; defaults from `network` via `chainIdForNetwork`. */
+  chainId?: string;
   /** When true, inputs are from the internal chain and signed with change keys. */
   spendChange?: boolean;
 }): Promise<BuiltTransfer> {
@@ -259,15 +337,19 @@ export async function buildSignedTransfer(options: {
   }));
   const version = 1;
   const nonce = options.nonce ?? Date.now();
-  const bodyBytes = encodeTransactionBody({
-    version,
-    inputs,
-    outputs,
-    nonce,
-  });
-  const { publicKey, signature } = await signTransactionBody(
+  const body = { version, inputs, outputs, nonce };
+  const genesisHash = options.genesisHash;
+  if (!genesisHash) {
+    throw new Error(
+      "genesisHash is required for network-bound signatures (from agora_getNodeInfo)",
+    );
+  }
+  const chainId = options.chainId ?? chainIdForNetwork(network);
+  const { publicKey, signature } = await signTransactionBound(
     account.secretKey,
-    bodyBytes,
+    chainId,
+    genesisHash,
+    body,
   );
 
   const tx = {
@@ -347,10 +429,18 @@ export async function sendTransfer(
       );
     }
   }
+  const info = await client.getNodeInfo();
+  const genesisHash = info.genesis_hash;
+  if (!genesisHash) {
+    throw new Error("agora_getNodeInfo did not return genesis_hash");
+  }
+  const chainId = info.chain_id ?? chainIdForNetwork(info.network || network);
   const built = await buildSignedTransfer({
     ...options,
     fee,
-    network,
+    network: info.network || network,
+    genesisHash,
+    chainId,
     utxos,
     spendChange,
   });

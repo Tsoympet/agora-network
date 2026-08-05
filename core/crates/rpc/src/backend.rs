@@ -77,6 +77,8 @@ pub struct NodeInfo {
     pub miner_address: Option<String>,
     /// Hex id of Block 0 for this datadir / network.
     pub genesis_hash: Option<String>,
+    /// Signing domain chain id (`agora-mainnet-1` / `agora-testnet-1` / `agora-dev`).
+    pub chain_id: Option<String>,
     /// Minimum mempool relay fee (`in − out`) in base units.
     pub min_relay_fee: u64,
 }
@@ -376,6 +378,7 @@ impl RpcBackend for InMemoryBackend {
             allow_fund: true,
             miner_address: None,
             genesis_hash: self.tips.first().map(|h| h.to_hex()),
+            chain_id: Some("agora-dev".into()),
             min_relay_fee: 1,
         })
     }
