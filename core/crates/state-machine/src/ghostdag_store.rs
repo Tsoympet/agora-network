@@ -1,4 +1,4 @@
-//! Durable GHOSTDAG coloring records (selected parent, blue score/work, blues).
+//! Durable GHOSTDAG coloring records (compact merge-set form).
 
 use agora_types::Hash;
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -8,14 +8,17 @@ use crate::{StateError, StateStore};
 
 const GHOSTDAG_PREFIX: &[u8] = b"ghostdag/";
 
-/// Persisted GHOSTDAG coloring for one block.
+/// Persisted GHOSTDAG coloring for one block (compact).
+///
+/// `mergeset_blues` + `selected_parent` reconstruct the full blue set by walking the
+/// selected-parent chain — O(mergeset) storage per block instead of O(past).
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct GhostdagRecord {
     pub selected_parent: Option<Hash>,
     pub blue_score: u64,
     pub blue_work: u128,
-    /// Blue set in this block's view (sorted for canonical encoding).
-    pub blues: Vec<Hash>,
+    pub block_work: u128,
+    pub mergeset_blues: Vec<Hash>,
 }
 
 pub fn ghostdag_key(hash: &Hash) -> Vec<u8> {
@@ -41,9 +44,12 @@ pub fn load_ghostdag_record(
     let Some(bytes) = store.get_cf(ColumnFamily::Warm, &ghostdag_key(hash))? else {
         return Ok(None);
     };
-    let record =
-        GhostdagRecord::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))?;
-    Ok(Some(record))
+    match GhostdagRecord::try_from_slice(&bytes) {
+        Ok(record) => Ok(Some(record)),
+        // Legacy full-blues encoding cannot be mapped losslessly to mergeset form —
+        // return None so callers recolor from headers.
+        Err(_) => Ok(None),
+    }
 }
 
 #[cfg(test)]
@@ -56,13 +62,14 @@ mod tests {
         let store = StateStore::open_in_memory();
         let hash = Hash([3u8; 32]);
         let parent = Hash([1u8; 32]);
-        let mut blues = vec![parent, hash];
-        blues.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+        let mut mergeset = vec![Hash([2u8; 32])];
+        mergeset.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
         let record = GhostdagRecord {
             selected_parent: Some(parent),
-            blue_score: 2,
+            blue_score: 3,
             blue_work: 42,
-            blues,
+            block_work: 10,
+            mergeset_blues: mergeset,
         };
         store_ghostdag_record(&store, &hash, &record).unwrap();
         assert_eq!(

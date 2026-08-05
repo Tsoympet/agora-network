@@ -53,6 +53,21 @@ impl Dag {
         Ok(())
     }
 
+    /// Remove a tip block (no dependents). Used to roll back a failed admission attempt.
+    pub fn remove_tip(&mut self, hash: &Hash) -> bool {
+        if !self.contains(hash) {
+            return false;
+        }
+        for parents in self.parents.values() {
+            if parents.iter().any(|p| p == hash) {
+                return false;
+            }
+        }
+        self.parents.remove(hash);
+        self.order.retain(|h| h != hash);
+        true
+    }
+
     pub fn tips(&self) -> Vec<Hash> {
         let mut referenced = HashSet::new();
         for parents in self.parents.values() {

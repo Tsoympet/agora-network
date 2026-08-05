@@ -24,21 +24,29 @@ impl Default for GhostdagConfig {
 pub struct GhostdagData {
     pub selected_parent: Option<Hash>,
     pub blue_score: u64,
-    /// Cumulative proof-of-work along the selected-parent chain. On the node each block
-    /// contributes `work_from_bits(header.bits)` via [`Ghostdag::add_block_with_work`];
-    /// pure-topology tests use unit work via [`Ghostdag::add_block`].
+    /// Cumulative work of accepted blues in this block's view
+    /// (selected-parent blues + merge-set blues + self).
+    ///
+    /// On the node each block contributes `work_from_bits(header.bits)` via
+    /// [`Ghostdag::add_block_with_work`].
     pub blue_work: u128,
     pub is_blue_in_tip_view: bool,
 }
 
-/// Durable coloring snapshot (selected parent, scores, blue set).
+/// Durable coloring snapshot (compact merge-set form).
+///
+/// Stores **mergeset blues** (not the full past blue set) so persistent GHOSTDAG
+/// metadata stays O(mergeset) per block. Full past blues are reconstructed by
+/// walking the selected-parent chain on hydrate.
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct GhostdagSnapshot {
     pub selected_parent: Option<Hash>,
     pub blue_score: u64,
     pub blue_work: u128,
-    /// Blue hashes in this block's view (caller should keep sorted for encoding stability).
-    pub blues: Vec<Hash>,
+    /// This block's own PoW contribution.
+    pub block_work: u128,
+    /// Blues accepted from the merge set (excludes selected-parent past and self).
+    pub mergeset_blues: Vec<Hash>,
 }
 
 /// Block after GHOSTDAG has assigned relative order / color.
@@ -53,8 +61,16 @@ pub struct OrderedBlock {
 struct BlockColoring {
     selected_parent: Option<Hash>,
     /// Blue blocks in the past of this block (including itself when it is blue in its own view).
+    ///
+    /// Kept in memory for anticone checks; durable snapshots store only `mergeset_blues`.
     blues: HashSet<Hash>,
+    /// Blues newly accepted from the merge set (compact durable form).
+    mergeset_blues: Vec<Hash>,
+    /// This block's own work contribution.
+    block_work: u128,
     blue_score: u64,
+    /// Cumulative work of **all accepted blues** in this block's view
+    /// (`SP.blue_work + Σ mergeset_blue.block_work + self.block_work`).
     blue_work: u128,
 }
 
@@ -89,22 +105,62 @@ impl Ghostdag {
         self.coloring.get(hash).and_then(|c| c.selected_parent)
     }
 
-    /// Export a durable coloring snapshot for `hash` (blues sorted by hash bytes).
+    /// Drop coloring for `hash` (admission rollback). Does not rewrite ancestors.
+    pub fn remove(&mut self, hash: &Hash) {
+        self.coloring.remove(hash);
+    }
+
+    /// Export a durable coloring snapshot for `hash`.
     pub fn snapshot(&self, hash: &Hash) -> Option<GhostdagSnapshot> {
         let c = self.coloring.get(hash)?;
-        let mut blues: Vec<Hash> = c.blues.iter().copied().collect();
-        blues.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+        let mut mergeset_blues = c.mergeset_blues.clone();
+        mergeset_blues.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
         Some(GhostdagSnapshot {
             selected_parent: c.selected_parent,
             blue_score: c.blue_score,
             blue_work: c.blue_work,
-            blues,
+            block_work: c.block_work,
+            mergeset_blues,
         })
     }
 
+    /// Whether `block` is blue in the current virtual tip's view.
+    pub fn is_blue_in_view(&self, tip: &Hash, block: &Hash) -> bool {
+        self.coloring
+            .get(tip)
+            .map(|c| c.blues.contains(block))
+            .unwrap_or(false)
+    }
+
+    /// Compare two colored blocks for selected-parent / tip ranking.
+    fn rank_key(
+        a: &BlockColoring,
+        a_hash: &Hash,
+        b: &BlockColoring,
+        b_hash: &Hash,
+    ) -> std::cmp::Ordering {
+        a.blue_work
+            .cmp(&b.blue_work)
+            .then_with(|| a.blue_score.cmp(&b.blue_score))
+            .then_with(|| a_hash.as_bytes().cmp(b_hash.as_bytes()))
+    }
+
     /// Hydrate coloring from a durable snapshot without recomputing GHOSTDAG.
+    ///
+    /// Requires the selected parent (if any) to already be hydrated so the full
+    /// blue set can be reconstructed from compact `mergeset_blues`.
     pub fn import_snapshot(&mut self, hash: Hash, snap: GhostdagSnapshot) -> GhostdagData {
-        let blues: HashSet<Hash> = snap.blues.into_iter().collect();
+        let mut blues: HashSet<Hash> = HashSet::new();
+        if let Some(sp) = snap.selected_parent {
+            if let Some(parent) = self.coloring.get(&sp) {
+                blues.extend(parent.blues.iter().copied());
+                blues.insert(sp);
+            }
+        }
+        for h in &snap.mergeset_blues {
+            blues.insert(*h);
+        }
+        blues.insert(hash);
         let is_blue = blues.contains(&hash);
         let data = GhostdagData {
             selected_parent: snap.selected_parent,
@@ -117,6 +173,8 @@ impl Ghostdag {
             BlockColoring {
                 selected_parent: snap.selected_parent,
                 blues,
+                mergeset_blues: snap.mergeset_blues,
+                block_work: snap.block_work.max(1),
                 blue_score: snap.blue_score,
                 blue_work: snap.blue_work,
             },
@@ -134,12 +192,13 @@ impl Ghostdag {
 
     /// Color `block` given a DAG that already contains it and all ancestors.
     ///
-    /// `block_work` is this block's own PoW contribution (e.g. `work_from_bits(bits)`);
-    /// cumulative `blue_work` = selected-parent `blue_work` + `block_work`.
+    /// `block_work` is this block's own PoW contribution (e.g. `work_from_bits(bits)`).
+    /// Cumulative `blue_work` includes the selected parent's blue work **plus** the work
+    /// of every newly accepted merge-set blue **plus** this block — i.e. accepted blue
+    /// DAG work, not merely selected-chain work.
     ///
-    /// Coloring is a pure function of the block's past: the merge set is processed in a
-    /// **canonical** order (blue score, then hash) so nodes that receive the same DAG in
-    /// different arrival orders compute identical blue/red sets and ordering.
+    /// Selected parent is chosen by the same ranking as [`Self::select_virtual_tip`]
+    /// (`blue_work`, then `blue_score`, then hash).
     pub fn add_block_with_work(
         &mut self,
         dag: &Dag,
@@ -155,28 +214,29 @@ impl Ghostdag {
             });
         }
 
+        let block_work = block_work.max(1);
         let parents = dag.parents_of(&block)?;
         if parents.is_empty() {
             let mut blues = HashSet::new();
             blues.insert(block);
-            let blue_work = block_work.max(1);
             let coloring = BlockColoring {
                 selected_parent: None,
                 blue_score: 1,
-                blue_work,
+                blue_work: block_work,
                 blues,
+                mergeset_blues: Vec::new(),
+                block_work,
             };
             let out = GhostdagData {
                 selected_parent: None,
                 blue_score: 1,
-                blue_work,
+                blue_work: block_work,
                 is_blue_in_tip_view: true,
             };
             self.coloring.insert(block, coloring);
             return Ok(out);
         }
 
-        // Ensure parents are colored first (supports out-of-order calls if DAG is complete).
         for parent in parents {
             if !self.coloring.contains_key(parent) {
                 self.add_block(dag, *parent)?;
@@ -186,11 +246,7 @@ impl Ghostdag {
         let selected_parent = parents
             .iter()
             .copied()
-            .max_by(|a, b| {
-                let sa = self.coloring[a].blue_score;
-                let sb = self.coloring[b].blue_score;
-                sa.cmp(&sb).then_with(|| a.as_bytes().cmp(b.as_bytes()))
-            })
+            .max_by(|a, b| Self::rank_key(&self.coloring[a], a, &self.coloring[b], b))
             .expect("parents non-empty");
 
         let mut blues = self.coloring[&selected_parent].blues.clone();
@@ -203,31 +259,41 @@ impl Ghostdag {
             .filter(|h| *h != block && *h != selected_parent && !past_sp.contains(h))
             .collect();
 
-        // Canonical merge-set order: (blue_score asc, then hash bytes). Merge-set members
-        // are all ancestors of `block` and therefore already colored, so this is a total,
-        // topology-respecting order that does NOT depend on local DAG insertion order.
         merge_set.sort_by(|a, b| {
             let sa = self.coloring.get(a).map(|c| c.blue_score).unwrap_or(0);
             let sb = self.coloring.get(b).map(|c| c.blue_score).unwrap_or(0);
             sa.cmp(&sb).then_with(|| a.as_bytes().cmp(b.as_bytes()))
         });
 
+        let mut mergeset_blues = Vec::new();
+        let mut mergeset_work = 0u128;
         for candidate in merge_set {
             let anticone = dag.anticone(candidate)?;
             let blue_anticone = anticone.intersection(&blues).count() as u32;
             if blue_anticone <= self.config.k {
                 blues.insert(candidate);
+                mergeset_blues.push(candidate);
+                let w = self
+                    .coloring
+                    .get(&candidate)
+                    .map(|c| c.block_work)
+                    .unwrap_or(1);
+                mergeset_work = mergeset_work.saturating_add(w);
             }
         }
 
-        // The new tip is blue in its own view by construction of the selected chain.
         blues.insert(block);
         let blue_score = blues.len() as u64;
         let parent_work = self.coloring[&selected_parent].blue_work;
-        let blue_work = parent_work.saturating_add(block_work.max(1));
+        let blue_work = parent_work
+            .saturating_add(mergeset_work)
+            .saturating_add(block_work);
+        mergeset_blues.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
         let coloring = BlockColoring {
             selected_parent: Some(selected_parent),
             blues: blues.clone(),
+            mergeset_blues,
+            block_work,
             blue_score,
             blue_work,
         };
@@ -243,21 +309,20 @@ impl Ghostdag {
 
     /// Pick the virtual tip among `tips`: highest accumulated **blue work**, then blue
     /// score, then hash bytes.
-    ///
-    /// Comparing cumulative proof-of-work (not just block count) prevents a longer chain
-    /// of lower-work blocks from outranking a shorter chain of higher-work blocks.
     pub fn select_virtual_tip(&self, tips: &[Hash]) -> Option<Hash> {
         tips.iter()
             .copied()
             .filter(|h| self.coloring.contains_key(h))
-            .max_by(|a, b| {
-                let ca = &self.coloring[a];
-                let cb = &self.coloring[b];
-                ca.blue_work
-                    .cmp(&cb.blue_work)
-                    .then_with(|| ca.blue_score.cmp(&cb.blue_score))
-                    .then_with(|| a.as_bytes().cmp(b.as_bytes()))
-            })
+            .max_by(|a, b| Self::rank_key(&self.coloring[a], a, &self.coloring[b], b))
+    }
+
+    /// Choose the selected parent among `parents` using work-then-score ranking.
+    pub fn select_parent_among(&self, parents: &[Hash]) -> Option<Hash> {
+        parents
+            .iter()
+            .copied()
+            .filter(|h| self.coloring.contains_key(h))
+            .max_by(|a, b| Self::rank_key(&self.coloring[a], a, &self.coloring[b], b))
     }
 
     /// Color every block in insert order, then return a total order for a tip's past.
@@ -470,6 +535,42 @@ mod tests {
         // h(3) has higher blue_score (3) but h(1) has far higher blue_work.
         assert!(ghostdag.blue_score(&h(3)).unwrap() > ghostdag.blue_score(&h(1)).unwrap());
         assert_eq!(ghostdag.select_virtual_tip(&[h(1), h(3)]), Some(h(1)));
+    }
+
+    #[test]
+    fn selected_parent_prefers_work_not_score() {
+        let mut dag = Dag::new();
+        dag.insert(h(0), vec![]).unwrap();
+        dag.insert(h(1), vec![h(0)]).unwrap(); // heavy
+        dag.insert(h(2), vec![h(0)]).unwrap();
+        dag.insert(h(3), vec![h(2)]).unwrap(); // longer light chain tip
+        dag.insert(h(4), vec![h(1), h(3)]).unwrap();
+
+        let mut ghostdag = Ghostdag::new(GhostdagConfig { k: 18 });
+        ghostdag.add_block_with_work(&dag, h(0), 1).unwrap();
+        ghostdag.add_block_with_work(&dag, h(1), 1_000_000).unwrap();
+        ghostdag.add_block_with_work(&dag, h(2), 1).unwrap();
+        ghostdag.add_block_with_work(&dag, h(3), 1).unwrap();
+        let data = ghostdag.add_block_with_work(&dag, h(4), 1).unwrap();
+        assert_eq!(data.selected_parent, Some(h(1)));
+    }
+
+    #[test]
+    fn blue_work_includes_mergeset_blues() {
+        let mut dag = Dag::new();
+        dag.insert(h(0), vec![]).unwrap();
+        dag.insert(h(1), vec![h(0)]).unwrap();
+        dag.insert(h(2), vec![h(0)]).unwrap();
+        dag.insert(h(3), vec![h(1), h(2)]).unwrap();
+
+        let mut ghostdag = Ghostdag::new(GhostdagConfig { k: 18 });
+        ghostdag.add_block_with_work(&dag, h(0), 10).unwrap();
+        ghostdag.add_block_with_work(&dag, h(1), 100).unwrap();
+        ghostdag.add_block_with_work(&dag, h(2), 50).unwrap();
+        let data = ghostdag.add_block_with_work(&dag, h(3), 7).unwrap();
+        // SP is h(1) (higher work). blues = {0,1,2,3}; work = 10+100+50+7.
+        assert_eq!(data.selected_parent, Some(h(1)));
+        assert_eq!(data.blue_work, 10 + 100 + 50 + 7);
     }
 
     #[test]

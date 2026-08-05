@@ -86,33 +86,37 @@ Node already refuses `AGORA_NETWORK=mainnet` until genesis is frozen.
 
 ## Consensus hardening (source-review remediation)
 
-Addressing a static architecture/security review of `main`:
+Addressing static architecture/security reviews of `main`:
 
 | # | Finding | Status |
 | --- | --- | --- |
-| 1 | GHOSTDAG merge-set used local **arrival order** | **fixed** — canonical `(blue_score, hash)` merge order + hash-sorted rebuild; permutation determinism test |
-| 2 | Tip selection used blue **score**, not work | **fixed** — virtual tip compares cumulative `blue_work` (`work_from_bits`) then score then hash |
-| 3 | DAA multiplied the **bit exponent** by the timing factor (256× jumps) | **fixed** — adjust in target/work space; bit delta = `log2(clamped factor)`, ≤ ±1 bit/window at default |
-| 4 | RandomX context built **per candidate header** (DoS) | **fixed** — stable per-epoch seed + cached `Context` |
-| 5 | Block admission not atomic | **fixed** — per-block apply batch + multi-block unapply batch + `meta/pending_virtual` crash recovery |
-| 6 | Supply tracked separately from UTXO journal | **fixed** — same atomic `WriteBatch` |
-| 7 | Same-block parent→child fee pre-calc | **fixed** — package-aware `sum_transfer_fees` |
-| 8 | L2/L3 "equivalence" wording | **fixed** — `TOKEN_ROLES.md` terminology note (role-modeled, not protocol-equivalent) |
-| 9 | CI gaps | **fixed** — fmt, `publish = false` for cargo-deny wildcards, advisory ignores for transitive hickory, shared deps for app builds, bridge-sdk clippy allow |
+| 1 | GHOSTDAG merge-set used local **arrival order** | **fixed** — canonical `(blue_score, hash)` merge order + hash-sorted rebuild |
+| 2 | Tip / selected-parent used blue **score**, not work | **fixed** — SP + virtual tip rank by cumulative **blue DAG work** (SP + mergeset blues + self), then score, then hash |
+| 3 | DAA bit-exponent multiply + node-global bits | **fixed** — parent-contextual `expected_bits(SP)`; hashrate DAA (`work/elapsed`); MTP; `max_level`; `work_from_bits` beyond 63; cache updates only when virtual tip moves |
+| 4 | RandomX context thrash / per-header rebuild | **fixed** — epoch cache (cap 4, build outside mutex) + `max_parent_blue_score_lag` |
+| 5 | Invalid before full tx/UTXO validation | **fixed** — signatures + UTXO overlay dry-run **before** durable DAG mutation; body/header/tx-index/tips/ghostdag in one WriteBatch; `pending_virtual` for UTXO reorg |
+| 6 | Supply vs UTXO journal | **fixed** — same atomic apply batch |
+| 7 | `blue_work` = selected-chain only | **fixed** — includes mergeset blue `block_work` |
+| 8 | Full blues `HashSet` persisted per block | **mitigated** — durable compact `mergeset_blues` (+ hydrate); in-memory blues still used for anticone (bounded reachability / prune still follow-up) |
+| 9 | Tx index last-writer-wins / confirmations ignore virtual | **fixed** — multi-inclusion `txi/` keys; primary pointer refreshed on reorg; confirmations require blue-in-virtual + UTXO journal |
+| 10 | Admit ignored configured `PowAlgorithm` | **fixed** — RandomX vs kHeavyHash branch in `verify_pow` |
+| 11 | Tx signing lacked network domain | **fixed** — `TX_SIGNING_DOMAIN` + `signing_bytes_bound(chain_id, genesis)` |
+| 12 | Governance described as on-chain | **docs** — classified as **admin RPC prototype** (see Deferred) |
+| 13 | CI gaps for consensus readiness | **partial** — fmt/portable/selected tests; full node suite, arrival-order, crash-injection, epoch-thrash, Docker smoke still follow-up |
 
 ### Remaining hardening follow-ups (tracked)
 
-- **Whole-admit single WriteBatch** (body/header/tx-index/tips + UTXO reorg + tip meta in one RocksDB commit) — pending_virtual recovery covers crash windows today; overlay-backed apply batching would collapse the apply loop too.
-- **Pre-PoW rate/structural gating knobs** beyond existing `ConsensusLimits` + RPC auth.
-- **Continuous multi-node partition/reorg soak** + `cargo test --features randomx` compose smoke as required gates.
-- **Whole-workspace clippy `-D warnings` as a hard CI gate** (bridge-sdk allowlisted; advisory clippy job still `continue-on-error`).
+- Collapse UTXO reorg into the same WriteBatch as body/tips (true single-commit admit).
+- Production GHOSTDAG: bounded reachability, pruning points, incremental anticone (drop full in-memory blues).
+- Require `verify_transaction_bound` in admission once wallets migrate to network-bound signatures.
+- Multi-node arrival-order / partition soak, RandomX epoch-thrash, crash injection, whole-workspace clippy `-D warnings`, required Docker public-testnet smoke.
 
 ## Deferred (explicitly out of scope / later)
 
 - Full Ethereum MPT state roots (SHA-256 account+storage digests today)
 - EIP-2718 typed txs beyond legacy (1559 / access-list) on OVL
 - XRPL trust lines / issued currencies / DEX order books (native DRC only)
-- Signed wallet attestation of gov votes (RPC accepts voter address today; soft auth via token)
+- **On-chain governance** (signed gov txs, consensus balance snapshots, locked/refundable deposits, height deadlines, deterministic execution, governance state roots, block replication) — current Meta-CF RPC is an administrative prototype
 - Non-mint faucet via separate cold treasury ops runbook polish
 
 ## What you must decide / do outside the repo

@@ -13,6 +13,9 @@ pub struct ConsensusLimits {
     pub max_timestamp_ahead_ms: u64,
     /// Blue-score delta before a non-genesis coinbase output may be spent.
     pub coinbase_maturity: u64,
+    /// Reject candidates whose parent blue-score lag behind the virtual tip exceeds this
+    /// (bounds RandomX epoch thrashing / ancient-parent DoS).
+    pub max_parent_blue_score_lag: u64,
 }
 
 impl Default for ConsensusLimits {
@@ -27,6 +30,8 @@ impl Default for ConsensusLimits {
             max_block_bytes: 1_000_000,
             max_timestamp_ahead_ms: 60_000,
             coinbase_maturity: 100,
+            // ~2 RandomX epochs at 2048 blocks/epoch.
+            max_parent_blue_score_lag: 4_096,
         }
     }
 }
