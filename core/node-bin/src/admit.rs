@@ -425,7 +425,10 @@ impl ChainState {
         let blue_score = self.simulate_blue_score(&parents, bits)?;
         let scheduled = self.emission.reward_at_blue_score(blue_score);
         let emission = self.clamp_emission(scheduled)?;
-        let fees = sum_transfer_fees(self.store.as_ref(), transfers)
+        let max_transfers = self.limits.max_block_transactions.saturating_sub(1);
+        let included = &transfers[..transfers.len().min(max_transfers)];
+        // Fee total must match only the transfers that enter the block body.
+        let fees = sum_transfer_fees(self.store.as_ref(), included)
             .map_err(|e| AdmitError::Utxo(e.to_string()))?;
         let reward = emission
             .checked_add(fees)
@@ -443,10 +446,9 @@ impl ChainState {
             }],
             coinbase_nonce,
         );
-        let max_transfers = self.limits.max_block_transactions.saturating_sub(1);
-        let mut transactions = Vec::with_capacity(1 + transfers.len().min(max_transfers));
+        let mut transactions = Vec::with_capacity(1 + included.len());
         transactions.push(coinbase);
-        transactions.extend(transfers.iter().take(max_transfers).cloned());
+        transactions.extend(included.iter().cloned());
         let tx_root = Block::compute_tx_root(&transactions);
         Ok(Block {
             header: BlockHeader {
@@ -1690,9 +1692,10 @@ fn template_extranonce(timestamp_ms: u64) -> u32 {
 impl ChainState {
     /// Rewrite legacy journals that loaded with `subsidy = 0` using block bodies.
     ///
-    /// Heuristic: `subsidy = min(coinbase_total, scheduled_emission)` and
-    /// `fees = coinbase_total - subsidy`. Safe when miners claimed the full budget
-    /// (the common case) and conservative against over-issuance on reorg.
+    /// Only repairs journals whose `created` set includes the block's coinbase
+    /// outpoints (coinbase was applied, accounting fields were not persisted).
+    /// Virtual soft-skip journals (duplicate coinbase skipped, transfers may still
+    /// create outs) must not be rewritten — that would invent phantom subsidies.
     fn migrate_legacy_journal_subsidies(&self) -> Result<(), AdmitError> {
         let diffs = self
             .store
@@ -1703,7 +1706,13 @@ impl ChainState {
                 Ok(j) => j,
                 Err(_) => continue,
             };
-            if journal.subsidy != 0 || journal.coinbase_total != 0 || journal.created.is_empty() {
+            // Modern journals (including Virtual skip with fees) keep non-zero
+            // accounting or empty creates — leave them alone.
+            if journal.subsidy != 0
+                || journal.coinbase_total != 0
+                || journal.fees != 0
+                || journal.created.is_empty()
+            {
                 continue;
             }
             if key.len() < b"utxo_diff/".len() + 32 {
@@ -1716,11 +1725,22 @@ impl ChainState {
                 continue;
             }
             let Some(block) = self.load_block(&hash)? else {
+                // Pruned body: cannot repair — operator must reindex / reset datadir.
+                warn!(
+                    block = %hash.to_hex(),
+                    "legacy utxo journal needs migration but body is missing"
+                );
                 continue;
             };
             let Some(cb) = block.transactions.iter().find(|tx| tx.inputs.is_empty()) else {
                 continue;
             };
+            let cb_txid = cb.tx_id();
+            let coinbase_created = journal.created.iter().any(|op| op.tx_id == cb_txid);
+            if !coinbase_created {
+                // Virtual duplicate-coinbase skip (or transfer-only journal): not legacy.
+                continue;
+            }
             let mut coinbase_total = 0u64;
             for out in &cb.outputs {
                 coinbase_total = coinbase_total.saturating_add(out.value.as_base_units());
