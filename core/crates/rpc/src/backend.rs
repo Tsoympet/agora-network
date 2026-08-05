@@ -22,6 +22,8 @@ pub struct UtxoEntry {
 pub enum TxStatus {
     Pending,
     Confirmed,
+    /// Indexed in a block that is red / non-accepted in the current virtual view.
+    Orphaned,
     Unknown,
 }
 
@@ -30,6 +32,7 @@ impl TxStatus {
         match self {
             Self::Pending => "pending",
             Self::Confirmed => "confirmed",
+            Self::Orphaned => "orphaned",
             Self::Unknown => "unknown",
         }
     }
@@ -120,6 +123,18 @@ impl TxLookup {
             index: Some(index),
             fee: None,
             confirmations: Some(confirmations.max(1)),
+            transaction: Some(tx),
+        }
+    }
+
+    pub fn orphaned(tx: Transaction, block_id: Hash, index: u32) -> Self {
+        Self {
+            tx_id: tx.tx_id(),
+            status: TxStatus::Orphaned,
+            block_id: Some(block_id),
+            index: Some(index),
+            fee: None,
+            confirmations: None,
             transaction: Some(tx),
         }
     }
@@ -314,13 +329,15 @@ impl RpcBackend for InMemoryBackend {
             if let Some(block) = self.blocks.get(&block_id) {
                 if let Some(tx) = block.transactions.get(index as usize) {
                     // In-memory backend: tip distance via ancestor walk when possible.
-                    let confirmations = self.tip_confirmations(&block_id).unwrap_or(1);
-                    return Ok(TxLookup::confirmed(
-                        tx.clone(),
-                        block_id,
-                        index,
-                        confirmations,
-                    ));
+                    return match self.tip_confirmations(&block_id) {
+                        Some(confirmations) => Ok(TxLookup::confirmed(
+                            tx.clone(),
+                            block_id,
+                            index,
+                            confirmations,
+                        )),
+                        None => Ok(TxLookup::orphaned(tx.clone(), block_id, index)),
+                    };
                 }
             }
         }

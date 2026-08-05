@@ -21,7 +21,7 @@ pub fn daa_config_testnet() -> DaaConfig {
     DaaConfig {
         target_block_time_ms: 1_000,
         window_size: 90,
-        max_adjustment_factor: 2.0,
+        max_adjustment_bits: 1,
         min_level: 8,
         max_level: 128,
     }
@@ -32,7 +32,7 @@ pub fn daa_config_mainnet() -> DaaConfig {
     DaaConfig {
         target_block_time_ms: 1_000,
         window_size: 90,
-        max_adjustment_factor: 2.0,
+        max_adjustment_bits: 1,
         min_level: 8,
         max_level: 128,
     }
@@ -251,7 +251,10 @@ impl ChainParams {
 }
 
 /// Consensus policy snapshot embedded in genesis JSON (does not affect Block 0 hash).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Identity: peers must agree on [`Self::canonical_hash`] in addition to the genesis
+/// block hash — otherwise two nodes can share Block 0 while enforcing different rules.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GenesisConsensusPolicy {
     pub pow_algorithm: String,
     pub ghostdag_k: u32,
@@ -261,6 +264,24 @@ pub struct GenesisConsensusPolicy {
     pub daa_min_level: u32,
     #[serde(default = "default_daa_max_level")]
     pub daa_max_level: u32,
+}
+
+impl GenesisConsensusPolicy {
+    /// Canonical SHA-256 over a stable encoding of consensus knobs.
+    pub fn canonical_hash(&self) -> Hash {
+        // Fixed field order — do not use serde_json (key order / float formatting).
+        let factor_milli = (self.daa_max_adjustment_factor * 1000.0).round() as u64;
+        let payload = (
+            self.pow_algorithm.as_str(),
+            self.ghostdag_k,
+            self.target_block_time_ms,
+            self.daa_window_size,
+            factor_milli,
+            self.daa_min_level,
+            self.daa_max_level,
+        );
+        Hash::hash_borsh(&payload)
+    }
 }
 
 fn default_daa_max_level() -> u32 {
@@ -306,6 +327,9 @@ pub struct GenesisArtifact {
     pub tokens: Vec<TokenMark>,
     #[serde(default)]
     pub consensus: Option<GenesisConsensusPolicy>,
+    /// Hash of [`GenesisConsensusPolicy`] — network identity beyond Block 0.
+    #[serde(default)]
+    pub consensus_policy_hash: String,
     #[serde(default)]
     pub wallet: Option<GenesisWalletPolicy>,
 }
@@ -341,6 +365,16 @@ impl GenesisArtifact {
         let hrp = params.network.address_hrp();
         let coin_type = params.network.coin_type();
         let max_supply = params.supply.max_supply.as_base_units();
+        let consensus = GenesisConsensusPolicy {
+            pow_algorithm: pow_algorithm_name(params.pow_algorithm).into(),
+            ghostdag_k: params.ghostdag_k,
+            target_block_time_ms: params.daa.target_block_time_ms,
+            daa_window_size: params.daa.window_size,
+            daa_max_adjustment_factor: params.daa.max_adjustment_factor(),
+            daa_min_level: params.daa.min_level,
+            daa_max_level: params.daa.max_level,
+        };
+        let consensus_policy_hash = consensus.canonical_hash().to_hex();
         Self {
             network: params.network,
             version: 2,
@@ -358,15 +392,8 @@ impl GenesisArtifact {
             decimals: 8,
             native_ticker: "TLT".into(),
             tokens: default_token_marks(max_supply),
-            consensus: Some(GenesisConsensusPolicy {
-                pow_algorithm: pow_algorithm_name(params.pow_algorithm).into(),
-                ghostdag_k: params.ghostdag_k,
-                target_block_time_ms: params.daa.target_block_time_ms,
-                daa_window_size: params.daa.window_size,
-                daa_max_adjustment_factor: params.daa.max_adjustment_factor,
-                daa_min_level: params.daa.min_level,
-                daa_max_level: params.daa.max_level,
-            }),
+            consensus: Some(consensus),
+            consensus_policy_hash,
             wallet: Some(GenesisWalletPolicy {
                 address_hrp: hrp.into(),
                 coin_type,
@@ -403,11 +430,26 @@ impl GenesisArtifact {
             let pow = parse_pow_algorithm(&c.pow_algorithm).ok_or_else(|| {
                 format!("unsupported pow_algorithm in genesis: {}", c.pow_algorithm)
             })?;
+            let policy_hash = c.canonical_hash();
+            if !self.consensus_policy_hash.is_empty() {
+                let expected = Hash::from_hex(&self.consensus_policy_hash).ok_or_else(|| {
+                    "invalid consensus_policy_hash in genesis artifact".to_string()
+                })?;
+                if expected != policy_hash {
+                    return Err(format!(
+                        "consensus_policy_hash mismatch: artifact {} != computed {}",
+                        self.consensus_policy_hash,
+                        policy_hash.to_hex()
+                    ));
+                }
+            }
             (
                 DaaConfig {
                     target_block_time_ms: c.target_block_time_ms,
                     window_size: c.daa_window_size,
-                    max_adjustment_factor: c.daa_max_adjustment_factor,
+                    max_adjustment_bits: DaaConfig::max_adjustment_bits_from_factor(
+                        c.daa_max_adjustment_factor,
+                    ),
                     min_level: c.daa_min_level,
                     max_level: c.daa_max_level,
                 },
@@ -502,6 +544,15 @@ mod tests {
         assert_eq!(roundtrip.compute_genesis_hash(), hash);
         assert_eq!(roundtrip.ghostdag_k, params.ghostdag_k);
         assert_eq!(roundtrip.daa.min_level, params.daa.min_level);
+        let policy = artifact.consensus.as_ref().unwrap();
+        assert_eq!(
+            artifact.consensus_policy_hash,
+            policy.canonical_hash().to_hex()
+        );
+        eprintln!(
+            "testnet consensus_policy_hash = {}",
+            artifact.consensus_policy_hash
+        );
     }
 
     #[test]

@@ -14,7 +14,8 @@ use agora_p2p::{
 };
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
-    lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx, ColumnFamily, StateStore,
+    lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth, ColumnFamily,
+    StateStore, TxAuthContext,
 };
 use agora_types::{Address, Amount, Block, Hash, OutPoint, Transaction, TxOut};
 use borsh::BorshDeserialize;
@@ -30,16 +31,17 @@ fn min_relay_fee() -> u64 {
         .unwrap_or(DEFAULT_MIN_RELAY_FEE)
 }
 
-/// UTXO + signature + mempool reservation checks, then admit under one lock.
+/// UTXO + network-bound signature + mempool reservation checks, then admit.
 pub(crate) fn admit_transaction(
     store: &StateStore,
     mempool: &Mutex<Mempool>,
     tx: Transaction,
+    auth: &TxAuthContext,
 ) -> Result<Hash, RpcError> {
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-    let fee = validate_mempool_tx(store, &tx, pool.reserved())
+    let fee = validate_mempool_tx_with_auth(store, &tx, pool.reserved(), Some(auth))
         .map_err(|e| RpcError::Rejected(format!("utxo: {e}")))?;
     let min_fee = min_relay_fee();
     if fee < min_fee {
@@ -47,6 +49,7 @@ pub(crate) fn admit_transaction(
             "fee too low: {fee} < min relay {min_fee}"
         )));
     }
+    // Auth already verified; mempool only tracks reservations / fee market.
     pool.admit_priced(tx, fee)
         .map_err(|e| RpcError::Rejected(e.to_string()))
 }
@@ -94,6 +97,18 @@ impl NodeBackend {
             connected_peers,
             network: network.into(),
             genesis_hash,
+        }
+    }
+
+    fn tx_auth(&self) -> TxAuthContext {
+        let chain_id = match self.network.to_ascii_lowercase().as_str() {
+            "mainnet" => "agora-mainnet-1",
+            "testnet" => "agora-testnet-1",
+            _ => "agora-dev",
+        };
+        TxAuthContext {
+            chain_id: chain_id.into(),
+            genesis: self.genesis_hash,
         }
     }
 
@@ -213,18 +228,20 @@ impl RpcBackend for NodeBackend {
         let Some(tx) = block.transactions.get(index as usize) else {
             return Ok(TxLookup::unknown(*tx_id));
         };
-        let confirmations = self
+        match self
             .chain
             .lock()
             .ok()
             .and_then(|g| g.confirmations(&block_id))
-            .unwrap_or(1);
-        Ok(TxLookup::confirmed(
-            tx.clone(),
-            block_id,
-            index,
-            confirmations,
-        ))
+        {
+            Some(confirmations) => Ok(TxLookup::confirmed(
+                tx.clone(),
+                block_id,
+                index,
+                confirmations,
+            )),
+            None => Ok(TxLookup::orphaned(tx.clone(), block_id, index)),
+        }
     }
 
     fn get_mempool(&self, limit: usize) -> Result<Vec<MempoolEntry>, RpcError> {
@@ -291,7 +308,8 @@ impl RpcBackend for NodeBackend {
     }
 
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError> {
-        let id = admit_transaction(&self.store, &self.mempool, tx.clone())?;
+        let auth = self.tx_auth();
+        let id = admit_transaction(&self.store, &self.mempool, tx.clone(), &auth)?;
         if let Some(net) = &self.net {
             if let Err(err) = net.publish_message(NetworkMessage::Transaction(tx)) {
                 return Err(RpcError::Internal(err.to_string()));

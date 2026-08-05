@@ -2,8 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use agora_crypto::{signer_address, verify_transaction};
-use agora_types::{Amount, Block, OutPoint, Transaction, TxOut};
+use agora_crypto::{address_from_pubkey, signer_address, verify_transaction_bound, PublicKeyBytes};
+use agora_types::{Amount, Block, Hash, OutPoint, Transaction, TxOut};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::columns::ColumnFamily;
@@ -11,13 +11,54 @@ use crate::store::WriteBatch;
 use crate::utxo::outpoint_key;
 use crate::{StateError, StateStore};
 
+/// Network domain for transaction signatures (`chain_id` + genesis).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TxAuthContext {
+    pub chain_id: String,
+    pub genesis: Hash,
+}
+
 /// Journal of UTXO mutations so a failed admission / reorg can roll back.
-#[derive(Debug, Default, Clone, BorshSerialize, BorshDeserialize)]
+///
+/// Accounting fields (`fees`, `subsidy`, `coinbase_total`) are persisted so unapply
+/// never reverse-engineers fees from spent/created lists (which omit same-block
+/// parent→child package edges).
+#[derive(Debug, Default, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct UtxoJournal {
     /// Outputs removed while applying (for revert: re-insert).
     pub spent: Vec<(OutPoint, TxOut)>,
     /// Outpoints created while applying (for revert: delete).
     pub created: Vec<OutPoint>,
+    /// Exact transfer fee total (`Σ in − out`) for this block.
+    pub fees: u64,
+    /// Exact coinbase subsidy (`coinbase_total − fees`) credited to issued supply.
+    pub subsidy: u64,
+    /// Sum of coinbase outputs.
+    pub coinbase_total: u64,
+}
+
+/// Pre-v2 journal (spent + created only) for load migration.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct LegacyUtxoJournal {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+}
+
+impl UtxoJournal {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
+        if let Ok(j) = Self::try_from_slice(bytes) {
+            return Ok(j);
+        }
+        let legacy = LegacyUtxoJournal::try_from_slice(bytes)
+            .map_err(|e| StateError::Storage(e.to_string()))?;
+        Ok(Self {
+            spent: legacy.spent,
+            created: legacy.created,
+            fees: 0,
+            subsidy: 0,
+            coinbase_total: 0,
+        })
+    }
 }
 
 /// Implicit fee of a transfer (`input − output`) against the live UTXO set.
@@ -112,19 +153,28 @@ fn transfer_fee_in_context(
 /// Apply all transactions in `block` to `cf_utxo`.
 ///
 /// Rules:
-/// - At most one coinbase (`inputs` empty); its outputs must total
+/// - **Exactly one** coinbase (`inputs` empty); its outputs must total
 ///   ≤ `emission_reward + Σ transfer fees`
 /// - Non-coinbase txs must verify secp256k1 auth; each spent UTXO must belong to the signer
 /// - Input value ≥ output value (difference is the fee paid to the coinbase miner)
 /// - No double-spends within the block or against the live set
+/// - Newly created outpoints must not already exist (duplicate coinbase bodies rejected)
 pub fn apply_block(
     store: &StateStore,
     block: &Block,
     emission_reward: u64,
 ) -> Result<UtxoJournal, StateError> {
-    // Compute the full UTXO transition into a batch, then commit atomically so a crash
-    // cannot leave `cf_utxo` half-applied.
-    let (journal, batch) = apply_block_batched(store, block, emission_reward)?;
+    apply_block_with_auth(store, block, emission_reward, None)
+}
+
+/// Like [`apply_block`] with optional network-bound signature verification.
+pub fn apply_block_with_auth(
+    store: &StateStore,
+    block: &Block,
+    emission_reward: u64,
+    auth: Option<&TxAuthContext>,
+) -> Result<UtxoJournal, StateError> {
+    let (journal, batch) = apply_block_batched_with_auth(store, block, emission_reward, auth)?;
     store.write_batch(batch)?;
     Ok(journal)
 }
@@ -139,6 +189,16 @@ pub fn apply_block_batched(
     block: &Block,
     emission_reward: u64,
 ) -> Result<(UtxoJournal, WriteBatch), StateError> {
+    apply_block_batched_with_auth(store, block, emission_reward, None)
+}
+
+/// Like [`apply_block_batched`] with optional network-bound signature verification.
+pub fn apply_block_batched_with_auth(
+    store: &StateStore,
+    block: &Block,
+    emission_reward: u64,
+    auth: Option<&TxAuthContext>,
+) -> Result<(UtxoJournal, WriteBatch), StateError> {
     let fees = sum_transfer_fees(store, &block.transactions)?;
     let coinbase_budget = emission_reward
         .checked_add(fees)
@@ -150,6 +210,7 @@ pub fn apply_block_batched(
     let mut created_in_block: HashMap<OutPoint, TxOut> = HashMap::new();
     let mut coinbase_created: HashSet<OutPoint> = HashSet::new();
     let mut coinbases = 0u32;
+    let mut coinbase_total = 0u64;
 
     for tx in &block.transactions {
         if tx.inputs.is_empty() {
@@ -157,7 +218,8 @@ pub fn apply_block_batched(
             if coinbases > 1 {
                 return Err(StateError::Coinbase("multiple coinbase txs".into()));
             }
-            apply_coinbase(
+            coinbase_total = apply_coinbase(
+                store,
                 tx,
                 coinbase_budget,
                 &mut batch,
@@ -169,6 +231,7 @@ pub fn apply_block_batched(
             apply_transfer(
                 store,
                 tx,
+                auth,
                 &mut batch,
                 &mut journal,
                 &mut spent_in_block,
@@ -177,18 +240,26 @@ pub fn apply_block_batched(
             )?;
         }
     }
+    if coinbases == 0 {
+        return Err(StateError::Coinbase("missing coinbase".into()));
+    }
+
+    journal.fees = fees;
+    journal.coinbase_total = coinbase_total;
+    journal.subsidy = coinbase_total.saturating_sub(fees);
 
     Ok((journal, batch))
 }
 
 fn apply_coinbase(
+    store: &StateStore,
     tx: &Transaction,
     coinbase_reward: u64,
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
     created_in_block: &mut HashMap<OutPoint, TxOut>,
     coinbase_created: &mut HashSet<OutPoint>,
-) -> Result<(), StateError> {
+) -> Result<u64, StateError> {
     if tx.outputs.is_empty() {
         return Err(StateError::Coinbase("coinbase has no outputs".into()));
     }
@@ -203,21 +274,29 @@ fn apply_coinbase(
             "coinbase {total} exceeds reward {coinbase_reward}"
         )));
     }
-    create_outputs(batch, tx, journal, created_in_block, Some(coinbase_created))
+    create_outputs(
+        store,
+        batch,
+        tx,
+        journal,
+        created_in_block,
+        Some(coinbase_created),
+    )?;
+    Ok(total)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn apply_transfer(
     store: &StateStore,
     tx: &Transaction,
+    auth: Option<&TxAuthContext>,
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
     spent_in_block: &mut HashSet<OutPoint>,
     created_in_block: &mut HashMap<OutPoint, TxOut>,
     coinbase_created: &HashSet<OutPoint>,
 ) -> Result<(), StateError> {
-    verify_transaction(tx).map_err(|e| StateError::InvalidTx(e.to_string()))?;
-    let signer = signer_address(tx).map_err(|e| StateError::InvalidTx(e.to_string()))?;
+    let signer = verify_and_signer(tx, auth)?;
 
     let mut input_value = 0u64;
     let mut pending_spends: Vec<(OutPoint, TxOut)> = Vec::new();
@@ -271,7 +350,26 @@ fn apply_transfer(
     for (op, out) in pending_spends {
         spend_utxo(batch, &op, &out, journal, spent_in_block, created_in_block);
     }
-    create_outputs(batch, tx, journal, created_in_block, None)
+    create_outputs(store, batch, tx, journal, created_in_block, None)
+}
+
+fn verify_and_signer(
+    tx: &Transaction,
+    auth: Option<&TxAuthContext>,
+) -> Result<agora_types::Address, StateError> {
+    match auth {
+        Some(ctx) => {
+            verify_transaction_bound(tx, &ctx.chain_id, &ctx.genesis)
+                .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+            if tx.public_key.len() != 33 {
+                return Err(StateError::InvalidTx("bad pubkey".into()));
+            }
+            let mut pubkey: PublicKeyBytes = [0u8; 33];
+            pubkey.copy_from_slice(&tx.public_key);
+            Ok(address_from_pubkey(&pubkey))
+        }
+        None => signer_address(tx).map_err(|e| StateError::InvalidTx(e.to_string())),
+    }
 }
 
 fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
@@ -302,6 +400,7 @@ fn spend_utxo(
 }
 
 fn create_outputs(
+    store: &StateStore,
     batch: &mut WriteBatch,
     tx: &Transaction,
     journal: &mut UtxoJournal,
@@ -314,7 +413,21 @@ fn create_outputs(
             tx_id,
             index: index as u32,
         };
+        if created_in_block.contains_key(&op) {
+            return Err(StateError::DuplicateOutpoint(format!(
+                "{}:{}",
+                op.tx_id.to_hex(),
+                op.index
+            )));
+        }
         let key = outpoint_key(&op);
+        if store.get_cf(ColumnFamily::Utxo, &key)?.is_some() {
+            return Err(StateError::DuplicateOutpoint(format!(
+                "{}:{} (already in utxo set)",
+                op.tx_id.to_hex(),
+                op.index
+            )));
+        }
         let bytes = borsh::to_vec(out).map_err(|e| StateError::Storage(e.to_string()))?;
         batch.put_cf(ColumnFamily::Utxo, &key, &bytes);
         journal.created.push(op);
@@ -360,6 +473,16 @@ pub fn validate_mempool_tx(
     tx: &Transaction,
     reserved: &HashSet<OutPoint>,
 ) -> Result<u64, StateError> {
+    validate_mempool_tx_with_auth(store, tx, reserved, None)
+}
+
+/// Mempool validation with optional network-bound signatures.
+pub fn validate_mempool_tx_with_auth(
+    store: &StateStore,
+    tx: &Transaction,
+    reserved: &HashSet<OutPoint>,
+    auth: Option<&TxAuthContext>,
+) -> Result<u64, StateError> {
     if tx.inputs.is_empty() {
         return Err(StateError::InvalidTx(
             "coinbase not allowed in mempool".into(),
@@ -387,8 +510,7 @@ pub fn validate_mempool_tx(
             agora_consensus::MAX_TX_BYTES
         )));
     }
-    verify_transaction(tx).map_err(|e| StateError::InvalidTx(e.to_string()))?;
-    let signer = signer_address(tx).map_err(|e| StateError::InvalidTx(e.to_string()))?;
+    let signer = verify_and_signer(tx, auth)?;
 
     let mut input_value = 0u64;
     let mut seen: HashSet<OutPoint> = HashSet::new();
@@ -508,6 +630,16 @@ mod tests {
         );
         sign_transaction(&mut tx, &from).unwrap();
 
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let txs = vec![coinbase, tx.clone()];
         let block = Block {
             header: BlockHeader {
                 version: 1,
@@ -515,12 +647,14 @@ mod tests {
                 timestamp_ms: 1,
                 bits: 0,
                 nonce: 0,
-                tx_root: Block::compute_tx_root(std::slice::from_ref(&tx)),
+                tx_root: Block::compute_tx_root(&txs),
             },
-            transactions: vec![tx.clone()],
+            transactions: txs,
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
+        assert_eq!(journal.fees, 0);
+        assert_eq!(journal.subsidy, 0);
         assert_eq!(
             balance_of(&store, &to).unwrap().as_base_units(),
             Amount::from_whole(1).unwrap().as_base_units()

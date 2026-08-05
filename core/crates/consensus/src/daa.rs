@@ -2,6 +2,9 @@
 //!
 //! Expected bits for a candidate are derived from its **canonical selected parent**
 //! context, never from whichever tip the local node retargeted most recently.
+//!
+//! Retarget math is **integer-only** (no `f64` / `log2`) so every architecture
+//! produces bit-identical difficulty decisions from the same samples.
 
 /// Difficulty Adjustment Algorithm parameters for sub-second BlockDAG tips.
 #[derive(Debug, Clone)]
@@ -10,11 +13,11 @@ pub struct DaaConfig {
     pub target_block_time_ms: u64,
     /// Sliding window length in samples (timestamps), not including the newest alone.
     pub window_size: u64,
-    /// Clamp on the per-window **work** change (e.g. 2.0 => at most 2x / 0.5x work).
+    /// Maximum absolute bit delta applied per window (e.g. `1` ⇒ at most 2× / 0.5× work).
     ///
-    /// Mapped to a bit delta of at most `log2(max_adjustment_factor)` per window
-    /// (±1 bit at the default 2.0).
-    pub max_adjustment_factor: f64,
+    /// Retained `max_adjustment_factor` in genesis JSON maps onto this via
+    /// [`Self::max_adjustment_bits_from_factor`].
+    pub max_adjustment_bits: u32,
     /// Floor for `Difficulty.level` / `header.bits` (use `0` for unrestricted testnets).
     pub min_level: u32,
     /// Ceiling for `Difficulty.level` / `header.bits` (hard cap against runaway retargets).
@@ -26,9 +29,34 @@ impl Default for DaaConfig {
         Self {
             target_block_time_ms: 1_000,
             window_size: 90,
-            max_adjustment_factor: 2.0,
+            max_adjustment_bits: 1,
             min_level: 1,
             max_level: 128,
+        }
+    }
+}
+
+impl DaaConfig {
+    /// Map a genesis JSON adjustment factor (power-of-two style) onto bit deltas.
+    ///
+    /// `2.0 → 1`, `4.0 → 2`, values below 2 clamp to 1. Purely integer thresholds
+    /// afterward — the factor itself is not used in sample math.
+    pub fn max_adjustment_bits_from_factor(factor: f64) -> u32 {
+        if factor >= 8.0 {
+            3
+        } else if factor >= 4.0 {
+            2
+        } else {
+            1
+        }
+    }
+
+    /// Compatibility accessor for genesis serialization.
+    pub fn max_adjustment_factor(&self) -> f64 {
+        match self.max_adjustment_bits {
+            0 | 1 => 2.0,
+            2 => 4.0,
+            _ => 8.0,
         }
     }
 }
@@ -98,10 +126,9 @@ pub fn median_time_past(timestamps_newest_first: &[u64]) -> u64 {
 
 /// Next difficulty from selected-parent spine samples (oldest → newest).
 ///
-/// Uses `observed_hashrate = total_window_work / robust_elapsed` and
-/// `next_target_work ≈ observed_hashrate × target_block_time`, then maps the
-/// work ratio onto a bounded bit delta. Equal / non-increasing timestamps are
-/// replaced with a 1 ms floor so they cannot zero the denominator or skip work.
+/// Integer hashrate form:
+/// `next_target_work ≈ total_window_work × target_block_time / elapsed`
+/// compared against `parent_work` with exact doubling thresholds (no floats).
 pub fn next_difficulty_weighted(
     config: &DaaConfig,
     parent_bits: Difficulty,
@@ -129,33 +156,52 @@ pub fn next_difficulty_weighted(
         return parent;
     }
 
-    // observed_hashrate = total_window_work / robust_elapsed
-    // next_target_work  = observed_hashrate × target_block_time
-    // Map onto bits relative to the selected parent's own work contribution.
-    let parent_work = work_from_bits(parent.level) as f64;
-    if parent_work <= 0.0 {
-        return parent;
-    }
-    let observed_hashrate = (total_work as f64) / (elapsed_ms as f64);
-    let target = config.target_block_time_ms as f64;
-    let next_target_work = observed_hashrate * target;
-    let mut factor = next_target_work / parent_work;
-    if !factor.is_finite() || factor <= 0.0 {
-        return parent;
+    let parent_work = work_from_bits(parent.level).max(1);
+    let target = config.target_block_time_ms.max(1) as u128;
+    let elapsed = elapsed_ms as u128;
+
+    // Compare total_work * target  ?  parent_work * elapsed * 2^k without division.
+    // num = total_work * target; den = parent_work * elapsed
+    let num = total_work.saturating_mul(target);
+    let den = parent_work.saturating_mul(elapsed);
+
+    let max_bits = config.max_adjustment_bits.max(1);
+    let mut delta: i64 = 0;
+    if num >= den {
+        // How many exact doublings of den fit under num?
+        let mut thr = den;
+        while delta < max_bits as i64 {
+            let next_thr = thr.saturating_mul(2);
+            if num >= next_thr {
+                delta += 1;
+                thr = next_thr;
+                if thr == u128::MAX {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    } else {
+        // How many exact doublings of num fit under den?
+        let mut thr = num;
+        while delta > -(max_bits as i64) {
+            let next_thr = thr.saturating_mul(2);
+            if den >= next_thr {
+                delta -= 1;
+                thr = next_thr;
+                if thr == u128::MAX {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
     }
 
-    let max = config.max_adjustment_factor.max(1.0);
-    if factor > max {
-        factor = max;
-    } else if factor < 1.0 / max {
-        factor = 1.0 / max;
-    }
-
-    let delta_bits = factor.log2();
-    let next = (parent.level as f64 + delta_bits).round() as i64;
-    Difficulty {
-        level: next.clamp(config.min_level as i64, config.max_level as i64) as u32,
-    }
+    let next =
+        (parent.level as i64 + delta).clamp(config.min_level as i64, config.max_level as i64);
+    Difficulty { level: next as u32 }
 }
 
 /// Uniform-work helper — prefer [`next_difficulty_weighted`] with real block work.
@@ -243,7 +289,7 @@ mod tests {
     fn respects_max_level() {
         let config = DaaConfig {
             max_level: 12,
-            max_adjustment_factor: 2.0,
+            max_adjustment_bits: 1,
             ..DaaConfig::default()
         };
         let current = Difficulty { level: 12 };
@@ -280,12 +326,11 @@ mod tests {
         let config = DaaConfig {
             target_block_time_ms: 1_000,
             window_size: 2,
-            max_adjustment_factor: 2.0,
+            max_adjustment_bits: 1,
             min_level: 1,
             max_level: 128,
         };
         let current = Difficulty { level: 10 };
-        // Zero elapsed would previously skip the interval; 1 ms floor still counts work.
         let samples = vec![
             DaaSample {
                 timestamp_ms: 1_000,
@@ -318,7 +363,7 @@ mod tests {
         let config = DaaConfig {
             target_block_time_ms: 1_000,
             window_size: 2,
-            max_adjustment_factor: 4.0,
+            max_adjustment_bits: 2,
             min_level: 1,
             max_level: 128,
         };
@@ -343,5 +388,15 @@ mod tests {
         ];
         let next = next_difficulty_weighted(&config, current, &fast);
         assert!(next.level > current.level, "got {}", next.level);
+    }
+
+    #[test]
+    fn integer_daa_is_deterministic() {
+        let config = DaaConfig::default();
+        let current = Difficulty { level: 10 };
+        let ts: Vec<u64> = (0..91).map(|i| i * 500).collect();
+        let a = next_difficulty(&config, current, &ts);
+        let b = next_difficulty(&config, current, &ts);
+        assert_eq!(a, b);
     }
 }
