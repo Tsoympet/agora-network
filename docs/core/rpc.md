@@ -18,6 +18,12 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
 | `agora_getBlockTemplate` | Mining template block (tips as parents + coinbase) |
 | `agora_submitBlock` | Admit a mined block (PoW verify + store + gossip) |
+| `agora_getFinality` | Trident checkpoint certificate / state for a block hash |
+| `agora_getFinalizedTip` | Finalized blue-score frontier |
+| `agora_submitAttestation` | Admit + gossip an OVL/DRC checkpoint attestation |
+| `agora_getValidatorSet` | OVL/DRC validator snapshot (`asset`, optional `epoch`) |
+| `agora_getValidator` | One validator record |
+| `agora_getRewardPool` | Slash/reward pool balance for OVL or DRC |
 | `agora_getConstitution` | Enacted constitution id, content hash, body |
 | `agora_getGovernance` | Civic overview (params, offices, counts) |
 | `agora_listProposals` / `agora_getProposal` | Proposal ballot board |
