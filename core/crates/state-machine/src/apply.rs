@@ -3,13 +3,23 @@
 use std::collections::{HashMap, HashSet};
 
 use agora_crypto::{address_from_pubkey, signer_address, verify_transaction_bound, PublicKeyBytes};
-use agora_types::{Amount, Block, Hash, OutPoint, Transaction, TxOut};
+use agora_types::{
+    Amount, Block, Hash, OutPoint, Transaction, TransactionAcceptance, TxOut,
+};
 use borsh::{BorshDeserialize, BorshSerialize};
 
+use crate::acceptance::BlockAcceptanceRecord;
 use crate::columns::ColumnFamily;
 use crate::store::WriteBatch;
 use crate::utxo::outpoint_key;
 use crate::{StateError, StateStore};
+
+/// Result of applying one block's UTXO transition (journal + typed acceptance + batch).
+pub struct BlockApplyResult {
+    pub journal: UtxoJournal,
+    pub acceptance: BlockAcceptanceRecord,
+    pub batch: WriteBatch,
+}
 
 /// Network domain for transaction signatures (`chain_id` + genesis).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,21 +184,21 @@ pub fn apply_block_with_auth(
     emission_reward: u64,
     auth: Option<&TxAuthContext>,
 ) -> Result<UtxoJournal, StateError> {
-    let (journal, batch) = apply_block_batched_with_auth(store, block, emission_reward, auth)?;
-    store.write_batch(batch)?;
-    Ok(journal)
+    let result = apply_block_batched_with_auth(store, block, emission_reward, auth)?;
+    store.write_batch(result.batch)?;
+    Ok(result.journal)
 }
 
 /// Compute a block's UTXO transition without mutating the store.
 ///
-/// Returns the revert [`UtxoJournal`] and an uncommitted [`WriteBatch`] of the UTXO
-/// changes. Callers can extend the batch (e.g. with the journal record and issued-supply
-/// update) and commit everything atomically via [`StateStore::write_batch`].
+/// Returns journal, typed acceptance outcomes, and an uncommitted [`WriteBatch`].
+/// Callers can extend the batch (journal record, acceptance, issued-supply) and
+/// commit atomically via [`StateStore::write_batch`].
 pub fn apply_block_batched(
     store: &StateStore,
     block: &Block,
     emission_reward: u64,
-) -> Result<(UtxoJournal, WriteBatch), StateError> {
+) -> Result<BlockApplyResult, StateError> {
     apply_block_batched_with_auth(store, block, emission_reward, None)
 }
 
@@ -211,17 +221,21 @@ pub fn apply_block_batched_with_auth(
     block: &Block,
     emission_reward: u64,
     auth: Option<&TxAuthContext>,
-) -> Result<(UtxoJournal, WriteBatch), StateError> {
+) -> Result<BlockApplyResult, StateError> {
     apply_block_batched_mode(store, block, emission_reward, auth, ApplyMode::Strict)
 }
 
 /// Virtual-order apply: skip already-spent / duplicate-outpoint txs instead of failing.
+///
+/// Emits a [`BlockAcceptanceRecord`]: only [`TransactionAcceptance::Accepted`] txs
+/// mutate UTXO and credit fees. Soft-skipped conflicts become `ConflictLost` or
+/// `ExactDuplicate` after full structural/auth validation.
 pub fn apply_block_batched_virtual(
     store: &StateStore,
     block: &Block,
     emission_reward: u64,
     auth: Option<&TxAuthContext>,
-) -> Result<(UtxoJournal, WriteBatch), StateError> {
+) -> Result<BlockApplyResult, StateError> {
     apply_block_batched_mode(store, block, emission_reward, auth, ApplyMode::Virtual)
 }
 
@@ -231,7 +245,7 @@ fn apply_block_batched_mode(
     emission_reward: u64,
     auth: Option<&TxAuthContext>,
     mode: ApplyMode,
-) -> Result<(UtxoJournal, WriteBatch), StateError> {
+) -> Result<BlockApplyResult, StateError> {
     let mut batch = WriteBatch::new();
     let mut journal = UtxoJournal::default();
     let mut spent_in_block: HashSet<OutPoint> = HashSet::new();
@@ -240,6 +254,9 @@ fn apply_block_batched_mode(
     let mut coinbases = 0u32;
     let mut coinbase_total = 0u64;
     let mut applied_fees = 0u64;
+    let mut statuses: Vec<TransactionAcceptance> =
+        Vec::with_capacity(block.transactions.len());
+    let mut accepted_tx_ids: HashSet<Hash> = HashSet::new();
 
     // Pre-scan transfers that will apply so coinbase budget matches Virtual skips.
     let transferable = selectable_transfers(store, block, auth, mode)?;
@@ -261,6 +278,7 @@ fn apply_block_batched_mode(
             }
             if mode == ApplyMode::Virtual && coinbase_outpoints_exist(store, tx)? {
                 // Identical sibling coinbase already created — skip (subsidy 0).
+                statuses.push(TransactionAcceptance::ExactDuplicate);
                 continue;
             }
             coinbase_total = apply_coinbase(
@@ -272,6 +290,8 @@ fn apply_block_batched_mode(
                 &mut created_in_block,
                 &mut coinbase_created,
             )?;
+            accepted_tx_ids.insert(tx.tx_id());
+            statuses.push(TransactionAcceptance::Accepted);
         } else if transfer_idx < transferable.len()
             && transferable[transfer_idx].0.tx_id() == tx.tx_id()
         {
@@ -285,11 +305,19 @@ fn apply_block_batched_mode(
                 &mut created_in_block,
                 &coinbase_created,
             )?;
+            accepted_tx_ids.insert(tx.tx_id());
+            statuses.push(TransactionAcceptance::Accepted);
             transfer_idx += 1;
         } else if mode == ApplyMode::Virtual {
-            // Skipped duplicate / conflicting transfer — still verify it was signed
-            // when present so garbage auth cannot hide in blue blocks unnoticed.
+            // Skipped duplicate / conflicting transfer — still fully validate auth
+            // so garbage cannot hide in blue blocks unnoticed. Auth failure fails
+            // the block (not a soft status): Invalid must not be silently dropped.
             let _ = verify_and_signer(tx, auth)?;
+            if accepted_tx_ids.contains(&tx.tx_id()) {
+                statuses.push(TransactionAcceptance::ExactDuplicate);
+            } else {
+                statuses.push(TransactionAcceptance::ConflictLost);
+            }
         } else {
             apply_transfer(
                 store,
@@ -301,6 +329,8 @@ fn apply_block_batched_mode(
                 &mut created_in_block,
                 &coinbase_created,
             )?;
+            accepted_tx_ids.insert(tx.tx_id());
+            statuses.push(TransactionAcceptance::Accepted);
         }
     }
     if coinbases == 0 {
@@ -311,7 +341,23 @@ fn apply_block_batched_mode(
     journal.coinbase_total = coinbase_total;
     journal.subsidy = coinbase_total.saturating_sub(applied_fees.min(coinbase_total));
 
-    Ok((journal, batch))
+    // Fees credit only Accepted transfers (selectable set).
+    debug_assert_eq!(
+        statuses
+            .iter()
+            .filter(|s| s.credits_fees() && !matches!(s, TransactionAcceptance::Accepted))
+            .count(),
+        0
+    );
+
+    Ok(BlockApplyResult {
+        journal,
+        acceptance: BlockAcceptanceRecord {
+            block_hash: Hash::ZERO, // filled by caller with block id
+            statuses,
+        },
+        batch,
+    })
 }
 
 /// Transfers that still have spendable inputs in `store` (plus in-block creates).
@@ -757,6 +803,7 @@ mod tests {
 
     use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
     use agora_types::{
+        TransactionAcceptance,
         Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TxIn, TxOut,
     };
 
@@ -1220,7 +1267,7 @@ mod tests {
             1,
         );
         sign_transaction(&mut win, &alice).unwrap();
-        let (j1, batch1) = apply_block_batched_virtual(
+        let r1 = apply_block_batched_virtual(
             &store,
             &Block {
                 header: BlockHeader {
@@ -1248,8 +1295,9 @@ mod tests {
             None,
         )
         .unwrap();
-        store.write_batch(batch1).unwrap();
-        assert_eq!(j1.subsidy, 1);
+        store.write_batch(r1.batch).unwrap();
+        assert_eq!(r1.journal.subsidy, 1);
+        assert!(r1.acceptance.statuses.iter().all(|s| s.is_accepted()));
 
         // Block with: (1) conflicting spend of already-spent premine (multi-input
         // with a still-live bob out as second input — must not reserve bob's out),
@@ -1312,11 +1360,19 @@ mod tests {
                 ok_spend,
             ],
         };
-        let (journal, batch) = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
-        store.write_batch(batch).unwrap();
+        let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
+        store.write_batch(result.batch).unwrap();
         assert!(
-            journal.created.iter().any(|op| op.index == 0),
+            result.journal.created.iter().any(|op| op.index == 0),
             "valid bob→alice spend must apply after soft-skip"
+        );
+        assert_eq!(
+            result.acceptance.statuses[1],
+            TransactionAcceptance::ConflictLost
+        );
+        assert_eq!(
+            result.acceptance.statuses[2],
+            TransactionAcceptance::Accepted
         );
         assert_eq!(
             balance_of(&store, &alice.address())

@@ -124,6 +124,33 @@ impl GenesisBuilder {
             meta_keys::ISSUED_SUPPLY,
             &self.supply.premine.as_base_units().to_le_bytes(),
         )?;
+        // Trident schema: per-asset supply keys + schema version (TLT issued = premine).
+        let mut supply_batch = crate::store::WriteBatch::new();
+        crate::supply::put_max_supply_into(
+            &mut supply_batch,
+            agora_types::NativeAssetId::TLT,
+            self.supply.max_supply.as_base_units(),
+        );
+        crate::supply::put_issued_supply_into(
+            &mut supply_batch,
+            agora_types::NativeAssetId::TLT,
+            self.supply.premine.as_base_units(),
+        );
+        let policy = crate::monetary::TridentMonetaryPolicy::default();
+        crate::supply::put_max_supply_into(
+            &mut supply_batch,
+            agora_types::NativeAssetId::OVL,
+            policy.ovl.max_supply,
+        );
+        crate::supply::put_issued_supply_into(&mut supply_batch, agora_types::NativeAssetId::OVL, 0);
+        crate::supply::put_max_supply_into(
+            &mut supply_batch,
+            agora_types::NativeAssetId::DRC,
+            policy.drc.max_supply,
+        );
+        crate::supply::put_issued_supply_into(&mut supply_batch, agora_types::NativeAssetId::DRC, 0);
+        crate::supply::put_schema_version_into(&mut supply_batch, crate::SCHEMA_VERSION);
+        store.write_batch(supply_batch)?;
 
         let tips = vec![genesis_hash];
         let tips_bytes = borsh::to_vec(&tips).map_err(|e| StateError::Storage(e.to_string()))?;

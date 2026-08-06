@@ -807,6 +807,12 @@ impl ChainState {
                 overlay
                     .delete_cf(ColumnFamily::Warm, &utxo_diff_key(hash))
                     .map_err(|e| AdmitError::Storage(e.to_string()))?;
+                overlay
+                    .delete_cf(
+                        ColumnFamily::Warm,
+                        &agora_state_machine::acceptance_key(hash),
+                    )
+                    .map_err(|e| AdmitError::Storage(e.to_string()))?;
             }
         }
 
@@ -828,17 +834,27 @@ impl ChainState {
             let blue_score = self.ghostdag.blue_score(hash).unwrap_or(1);
             let scheduled = self.emission.reward_at_blue_score(blue_score);
             let emission = scheduled.min(max.saturating_sub(issued.min(max)));
-            let (journal, mut batch) =
+            let mut applied =
                 apply_block_batched_virtual(&overlay, &body, emission, self.auth.as_ref())
                     .map_err(|e| AdmitError::Utxo(e.to_string()))?;
-            if issued.saturating_add(journal.subsidy) > max {
+            if issued.saturating_add(applied.journal.subsidy) > max {
                 return Err(AdmitError::SupplyCapExceeded);
             }
-            issued = issued.saturating_add(journal.subsidy);
-            let bytes = borsh::to_vec(&journal).map_err(|e| AdmitError::Storage(e.to_string()))?;
-            batch.put_cf(ColumnFamily::Warm, &utxo_diff_key(hash), &bytes);
+            issued = issued.saturating_add(applied.journal.subsidy);
+            let bytes = borsh::to_vec(&applied.journal)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            applied
+                .batch
+                .put_cf(ColumnFamily::Warm, &utxo_diff_key(hash), &bytes);
+            applied.acceptance.block_hash = *hash;
+            agora_state_machine::put_acceptance_into(
+                &mut applied.batch,
+                hash,
+                &applied.acceptance,
+            )
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
             overlay
-                .write_batch(batch)
+                .write_batch(applied.batch)
                 .map_err(|e| AdmitError::Storage(e.to_string()))?;
         }
         Ok(())
@@ -1328,35 +1344,44 @@ impl ChainState {
         let emission = self.clamp_emission(scheduled)?;
         // Atomic commit: UTXO changes + revert journal + issued-supply update land as a
         // single WriteBatch so a crash cannot leave UTXOs and supply out of sync.
-        let (journal, mut batch) = apply_block_batched_virtual(
+        let mut applied = apply_block_batched_virtual(
             self.store.as_ref(),
             &block,
             emission,
             self.auth.as_ref(),
         )
         .map_err(|e| AdmitError::Utxo(e.to_string()))?;
-        if journal.subsidy > emission {
+        if applied.journal.subsidy > emission {
             return Err(AdmitError::Utxo(format!(
                 "coinbase subsidy {} exceeds clamped emission {emission}",
-                journal.subsidy
+                applied.journal.subsidy
             )));
         }
         let max = self.load_max_supply()?;
         let issued = self.load_issued_supply()?;
-        if issued.saturating_add(journal.subsidy) > max {
+        if issued.saturating_add(applied.journal.subsidy) > max {
             return Err(AdmitError::SupplyCapExceeded);
         }
-        let subsidy = journal.subsidy;
-        let journal_bytes =
-            borsh::to_vec(&journal).map_err(|e| AdmitError::Storage(e.to_string()))?;
-        batch.put_cf(ColumnFamily::Warm, &utxo_diff_key(&hash), &journal_bytes);
-        batch.put_cf(
-            ColumnFamily::Meta,
-            meta_keys::ISSUED_SUPPLY,
-            &issued.saturating_add(subsidy).to_le_bytes(),
+        let subsidy = applied.journal.subsidy;
+        let journal_bytes = borsh::to_vec(&applied.journal)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        applied
+            .batch
+            .put_cf(ColumnFamily::Warm, &utxo_diff_key(&hash), &journal_bytes);
+        applied.acceptance.block_hash = hash;
+        agora_state_machine::put_acceptance_into(
+            &mut applied.batch,
+            &hash,
+            &applied.acceptance,
+        )
+        .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        agora_state_machine::put_issued_supply_into(
+            &mut applied.batch,
+            agora_types::NativeAssetId::TLT,
+            issued.saturating_add(subsidy),
         );
         self.store
-            .write_batch(batch)
+            .write_batch(applied.batch)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
         Ok(())
     }
@@ -1384,6 +1409,7 @@ impl ChainState {
             revert_journal_batched(&journal).map_err(|e| AdmitError::Utxo(e.to_string()))?;
         batch.append(revert);
         batch.delete_cf(ColumnFamily::Warm, &utxo_diff_key(&hash));
+        agora_state_machine::delete_acceptance_into(batch, &hash);
         Ok(Some(subsidy))
     }
 

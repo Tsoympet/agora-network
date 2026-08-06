@@ -42,6 +42,21 @@ impl TransactionAcceptance {
     pub const fn credits_fees(self) -> bool {
         self.is_accepted()
     }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "Accepted",
+            Self::ExactDuplicate => "ExactDuplicate",
+            Self::ConflictLost => "ConflictLost",
+            Self::Invalid => "Invalid",
+        }
+    }
+}
+
+impl std::fmt::Display for TransactionAcceptance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Packed accepted/rejected bits for transactions in one blue block.

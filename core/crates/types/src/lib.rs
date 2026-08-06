@@ -3,6 +3,7 @@
 //! Consensus-critical encoding uses `borsh`. Client bindings are generated with `ts-rs`.
 
 mod acceptance;
+mod account;
 mod amount;
 mod asset;
 mod block;
@@ -11,6 +12,7 @@ mod hrp;
 mod transaction;
 
 pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
+pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
 pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{Block, BlockHeader};
@@ -118,5 +120,6 @@ mod ts_export {
         AssetTxOut::export_all().expect("export AssetTxOut");
         TransactionAcceptance::export_all().expect("export TransactionAcceptance");
         AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
+        AccountTransfer::export_all().expect("export AccountTransfer");
     }
 }

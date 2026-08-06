@@ -38,9 +38,9 @@ impl ColumnFamily {
 
 /// Explicit datadir schema version (u32 LE in [`meta_keys::SCHEMA_VERSION`]).
 ///
-/// - `1` — pre-Trident L1 UTXO (current `main` / genesis v2)
-/// - `2` — Trident multi-asset columns (Phase 2+); requires migration / reindex
-pub const SCHEMA_VERSION: u32 = 1;
+/// - `1` — pre-Trident L1 UTXO (genesis v2)
+/// - `2` — Trident acceptance records + per-asset supply keys + OVL/DRC accounts
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {

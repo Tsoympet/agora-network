@@ -6,8 +6,8 @@
 
 | `SCHEMA_VERSION` | Meaning |
 | --- | --- |
-| `1` (current default) | Pre-Trident L1 UTXO + virtual tip journals (genesis v2) |
-| `2` (planned) | Trident multi-asset: OVL/DRC account CFs, per-asset supply, acceptance roots, finality certificates |
+| `1` | Pre-Trident L1 UTXO + virtual tip journals (genesis v2) |
+| `2` (current) | Acceptance records (`acceptance/<hash>`), per-asset supply keys, OVL/DRC account records under Meta |
 
 Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 

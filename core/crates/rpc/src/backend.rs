@@ -48,6 +48,8 @@ pub struct TxLookup {
     pub fee: Option<u64>,
     /// Blue-score depth vs best tip (`tip − block + 1`) when confirmed; else `None`.
     pub confirmations: Option<u64>,
+    /// Explicit acceptance status (`Accepted` / `ConflictLost` / …). Never infer from color alone.
+    pub acceptance: Option<String>,
     pub transaction: Option<Transaction>,
 }
 
@@ -101,6 +103,7 @@ impl TxLookup {
             index: None,
             fee: None,
             confirmations: None,
+            acceptance: None,
             transaction: None,
         }
     }
@@ -113,6 +116,7 @@ impl TxLookup {
             index: None,
             fee,
             confirmations: None,
+            acceptance: None,
             transaction: Some(tx),
         }
     }
@@ -125,6 +129,7 @@ impl TxLookup {
             index: Some(index),
             fee: None,
             confirmations: Some(confirmations.max(1)),
+            acceptance: Some("Accepted".into()),
             transaction: Some(tx),
         }
     }
@@ -137,8 +142,14 @@ impl TxLookup {
             index: Some(index),
             fee: None,
             confirmations: None,
+            acceptance: None,
             transaction: Some(tx),
         }
+    }
+
+    pub fn with_acceptance(mut self, acceptance: impl Into<String>) -> Self {
+        self.acceptance = Some(acceptance.into());
+        self
     }
 }
 
