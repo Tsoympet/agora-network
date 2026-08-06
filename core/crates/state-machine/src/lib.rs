@@ -10,9 +10,11 @@ mod genesis;
 mod ghostdag_store;
 mod headers;
 mod marks;
+mod monetary;
 mod network;
 mod orphans;
 mod store;
+mod trident_genesis;
 mod tx_index;
 mod utxo;
 mod utxo_diff;
@@ -24,7 +26,7 @@ pub use apply::{
     transfer_fee, validate_mempool_tx, validate_mempool_tx_with_auth, ApplyMode, TxAuthContext,
     UtxoJournal,
 };
-pub use columns::{meta_keys, ColumnFamily};
+pub use columns::{meta_keys, ColumnFamily, SCHEMA_VERSION};
 pub use error::StateError;
 pub use genesis::{GenesisBuilder, SupplyCaps};
 pub use ghostdag_store::{
@@ -32,10 +34,19 @@ pub use ghostdag_store::{
 };
 pub use headers::{header_key, load_header, store_header, store_header_into};
 pub use marks::{default_token_marks, TokenMark};
+pub use monetary::{
+    issued_within_cap, AssetMonetaryPolicy, EmissionKind, TridentMonetaryPolicy,
+    DRC_MAX_SUPPLY_BASE, OVL_MAX_SUPPLY_BASE, TLT_MAX_SUPPLY_BASE,
+};
 pub use network::{
     daa_config_mainnet, daa_config_testnet, ChainParams, GenesisArtifact, GenesisConsensusPolicy,
     GenesisWalletPolicy, NetworkId, DEFAULT_GHOSTDAG_K, TESTNET_GENESIS_BITS,
     TESTNET_GENESIS_HASH_HEX, TESTNET_GENESIS_TIMESTAMP_MS, TESTNET_PREMINE_ADDRESS_HEX,
+};
+pub use trident_genesis::{
+    TridentFinalityPolicy, TridentGenesisArtifact, TridentValidatorGenesis,
+    TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA, TRIDENT_NET_FP_DOMAIN,
+    TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION, TRIDENT_TX_SIGNING_VERSION,
 };
 pub use orphans::{delete_orphan, list_orphans, load_orphan, orphan_key, store_orphan};
 pub use store::{StateStore, WriteBatch};
