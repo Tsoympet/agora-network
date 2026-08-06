@@ -20,7 +20,7 @@ Network communications for Agora **must** use `libp2p`.
 | flood_publish | true |
 | peer scoring | on |
 
-Peer scoring uses gossipsub P1–P7 with Agora topic weights (blocks = 1.0, txs = 0.5) for the configured network. Soft mesh-delivery thresholds avoid graylisting tiny local meshes. `agora-node` also sets application scores (`reward_peer` / `penalize_peer`) when RR/gossip blocks admit or reject.
+Peer scoring uses gossipsub P1–P7 with Agora topic weights (blocks = 1.0, attestations = 0.75, txs = 0.5) for the configured network. Soft mesh-delivery thresholds avoid graylisting tiny local meshes. `agora-node` also sets application scores (`reward_peer` / `penalize_peer`) when RR/gossip blocks admit or reject.
 
 ## Topics (v1, network-scoped)
 
@@ -29,6 +29,7 @@ Topics and the getblock protocol are scoped by `NetworkConfig::network` (from `A
 | Name | Example (`testnet`) | Payload |
 | --- | --- | --- |
 | blocks | `agora/testnet/blocks/1` | `Block` / `BlockAnnounce` / `CompactBlock` / `GetBlock` |
+| attestations | `agora/testnet/attestations/1` | `CheckpointAttestation` (Trident dual-PoS) |
 | txs | `agora/testnet/txs/1` | `Transaction` |
 | getblock RR | `/agora/testnet/getblock/1` | CBOR `GetBlockRequest` / `GetBlockResponse` |
 

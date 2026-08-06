@@ -1,6 +1,6 @@
 # Hybrid PoW + Dual PoS Finality
 
-**Maturity:** Experimental. Core types, quorum/finality gadget, attestation crypto, and OVL/DRC staking modules land in Phase 3. Not yet wired into live block admission / public RPC.
+**Maturity:** Experimental. Library gadget + node admit reorg guard + PoW certificate note + attestation admit/RPC/gossip. Not public-testnet ready.
 
 ## Roles
 

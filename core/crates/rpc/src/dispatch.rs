@@ -132,6 +132,42 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let id = self.backend.submit_block(block)?;
                 Ok(json!({ "block_id": id.to_hex() }))
             }
+            RpcMethod::GetFinality => {
+                let hash = param_hash(&req.params, "hash")?;
+                self.backend.get_finality(&hash)
+            }
+            RpcMethod::GetFinalizedTip => self.backend.get_finalized_tip(),
+            RpcMethod::SubmitAttestation => {
+                let att = req
+                    .params
+                    .get("attestation")
+                    .cloned()
+                    .or_else(|| {
+                        if req.params.is_object() {
+                            Some(req.params.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or_else(|| {
+                        RpcError::InvalidParams("missing attestation object".into())
+                    })?;
+                self.backend.submit_attestation(att)
+            }
+            RpcMethod::GetValidatorSet => {
+                let asset = param_string(&req.params, "asset")?;
+                let epoch = optional_u64_opt(&req.params, "epoch")?;
+                self.backend.get_validator_set(&asset, epoch)
+            }
+            RpcMethod::GetValidator => {
+                let asset = param_string(&req.params, "asset")?;
+                let operator = param_address(&req.params, "operator")?;
+                self.backend.get_validator(&asset, &operator)
+            }
+            RpcMethod::GetRewardPool => {
+                let asset = param_string(&req.params, "asset")?;
+                self.backend.get_reward_pool(&asset)
+            }
             RpcMethod::GetConstitution => self.backend.get_constitution(),
             RpcMethod::GetGovernance => self.backend.get_governance(),
             RpcMethod::ListProposals => {
@@ -440,14 +476,19 @@ fn param_u64(params: &Value, key: &str) -> Result<u64, RpcError> {
 }
 
 fn optional_u64(params: &Value, key: &str, default: u64) -> Result<u64, RpcError> {
+    Ok(optional_u64_opt(params, key)?.unwrap_or(default))
+}
+
+fn optional_u64_opt(params: &Value, key: &str) -> Result<Option<u64>, RpcError> {
     let Some(obj) = params.as_object() else {
-        return Ok(default);
+        return Ok(None);
     };
     match obj.get(key) {
-        None | Some(Value::Null) => Ok(default),
+        None | Some(Value::Null) => Ok(None),
         Some(v) => v
             .as_u64()
             .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            .map(Some)
             .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be u64"))),
     }
 }

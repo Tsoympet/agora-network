@@ -93,11 +93,12 @@ Vendored from rusty-kaspa (`kaspa-hashes` / `kaspa-pow`, ISC). Pipeline:
 - RPC `agora_submitBlock`
 - Gossip `NetworkMessage::Block`
 
-## Dual-PoS finality (Trident Phase 3)
+## Dual-PoS finality (Trident Phase 3+)
 
 Additive gadget — does not replace GHOSTDAG/PoW admission:
 
 - `quorum`, `finality`, `evidence` modules evaluate `FinalityCertificate` / reorg guards
+- `agora-node` enforces reorg-beyond-finality and notes PoW on the virtual tip
 - Spec: [`../consensus/HYBRID_POW_DUAL_POS.md`](../consensus/HYBRID_POW_DUAL_POS.md)
 - Implementation notes: [`finality.md`](finality.md)
 

@@ -166,6 +166,49 @@ fn snapshot_key(asset: NativeAssetId, epoch: u64) -> Vec<u8> {
     k
 }
 
+fn reward_pool_key(asset: NativeAssetId) -> Vec<u8> {
+    let mut k = b"stake/reward_pool/".to_vec();
+    k.push(asset.wire_byte());
+    k
+}
+
+/// Slash / fee proceeds held for epoch distribution (never TLT).
+pub fn load_reward_pool(store: &StateStore, asset: NativeAssetId) -> Result<u64, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &reward_pool_key(asset))? else {
+        return Ok(0);
+    };
+    if bytes.len() != 8 {
+        return Ok(0);
+    }
+    let mut arr = [0u8; 8];
+    arr.copy_from_slice(&bytes);
+    Ok(u64::from_le_bytes(arr))
+}
+
+pub fn put_reward_pool_into(batch: &mut WriteBatch, asset: NativeAssetId, amount: u64) {
+    batch.put_cf(
+        ColumnFamily::Meta,
+        &reward_pool_key(asset),
+        &amount.to_le_bytes(),
+    );
+}
+
+pub fn credit_reward_pool_into(
+    store: &StateStore,
+    batch: &mut WriteBatch,
+    asset: NativeAssetId,
+    amount: u64,
+) -> Result<u64, StateError> {
+    if !matches!(asset, NativeAssetId::OVL | NativeAssetId::DRC) {
+        return Err(StateError::InvalidTx("reward pool only for OVL/DRC".into()));
+    }
+    let next = load_reward_pool(store, asset)?
+        .checked_add(amount)
+        .ok_or_else(|| StateError::InvalidTx("reward pool overflow".into()))?;
+    put_reward_pool_into(batch, asset, next);
+    Ok(next)
+}
+
 pub fn load_epoch(store: &StateStore, asset: NativeAssetId) -> Result<u64, StateError> {
     let Some(bytes) = store.get_cf(ColumnFamily::Meta, &epoch_key(asset))? else {
         return Ok(0);
@@ -471,7 +514,7 @@ pub fn build_snapshot(
     })
 }
 
-/// Advance epoch and persist snapshot.
+/// Advance epoch, persist snapshot, and distribute any reward-pool proceeds.
 pub fn advance_epoch(
     store: &StateStore,
     batch: &mut WriteBatch,
@@ -482,7 +525,100 @@ pub fn advance_epoch(
     put_epoch_into(batch, asset, next);
     let bytes = borsh::to_vec(&snap).map_err(|e| StateError::Storage(e.to_string()))?;
     batch.put_cf(ColumnFamily::Meta, &snapshot_key(asset, next), &bytes);
+    let _distributed = distribute_reward_pool(store, batch, asset, &snap)?;
     Ok(snap)
+}
+
+/// Pro-rata reward-pool drip to bonded validators (commission + self/delegator split).
+///
+/// Source is slash proceeds (and later staking-reserve drip) — never TLT mint.
+pub fn distribute_reward_pool(
+    store: &StateStore,
+    batch: &mut WriteBatch,
+    asset: NativeAssetId,
+    snap: &ValidatorSetSnapshot,
+) -> Result<u64, StateError> {
+    use std::collections::BTreeMap;
+
+    let pool = load_reward_pool(store, asset)?;
+    if pool == 0 || snap.total_active_stake == 0 {
+        return Ok(0);
+    }
+    let mut remaining = pool;
+    let mut credits: BTreeMap<[u8; 20], u64> = BTreeMap::new();
+
+    for (op, power) in &snap.validators {
+        if *power == 0 {
+            continue;
+        }
+        let share = ((u128::from(pool) * u128::from(*power)) / u128::from(snap.total_active_stake))
+            as u64;
+        if share == 0 {
+            continue;
+        }
+        let Some(val) = load_validator(store, asset, op)? else {
+            continue;
+        };
+        let commission = ((u128::from(share) * u128::from(val.commission_bps)) / 10_000) as u64;
+        let after_commission = share.saturating_sub(commission);
+        let bonded = val.self_bond.saturating_add(val.delegated).max(1);
+        let op_stake_share =
+            ((u128::from(after_commission) * u128::from(val.self_bond)) / u128::from(bonded)) as u64;
+        let mut to_operator = commission.saturating_add(op_stake_share);
+        let mut del_paid = 0u64;
+        let mut del_credits: Vec<(Address, u64)> = Vec::new();
+        let prefix = {
+            let mut p = b"stake/del/".to_vec();
+            p.push(asset.wire_byte());
+            p.push(b'/');
+            p
+        };
+        store.for_each_cf(ColumnFamily::Meta, |key, value| {
+            if !key.starts_with(&prefix) {
+                return Ok(());
+            }
+            // stake/del/<asset>/<delegator20>/<validator20>
+            let expected_len = prefix.len() + 20 + 1 + 20;
+            if key.len() != expected_len || key[prefix.len() + 20] != b'/' {
+                return Ok(());
+            }
+            if &key[prefix.len() + 21..] != op.0.as_slice() {
+                return Ok(());
+            }
+            let del = DelegationRecord::try_from_slice(value)
+                .map_err(|e| StateError::Storage(e.to_string()))?;
+            if del.amount == 0 {
+                return Ok(());
+            }
+            let piece = ((u128::from(after_commission) * u128::from(del.amount))
+                / u128::from(bonded)) as u64;
+            if piece > 0 {
+                del_credits.push((del.delegator, piece));
+                del_paid = del_paid.saturating_add(piece);
+            }
+            Ok(())
+        })?;
+        for (addr, amt) in del_credits {
+            credits
+                .entry(addr.0)
+                .and_modify(|v| *v = v.saturating_add(amt))
+                .or_insert(amt);
+        }
+        let unpaid = after_commission.saturating_sub(op_stake_share + del_paid);
+        to_operator = to_operator.saturating_add(unpaid);
+        if to_operator > 0 {
+            credits
+                .entry(val.withdrawal.0)
+                .and_modify(|v| *v = v.saturating_add(to_operator))
+                .or_insert(to_operator);
+        }
+        remaining = remaining.saturating_sub(share);
+    }
+    for (bytes, amt) in credits {
+        credit_liquid(store, batch, asset, &Address(bytes), amt)?;
+    }
+    put_reward_pool_into(batch, asset, remaining);
+    Ok(pool.saturating_sub(remaining))
 }
 
 pub fn load_snapshot(
@@ -528,6 +664,9 @@ pub fn apply_evidence(
         val.jailed_until_epoch = epoch.saturating_add(jail_epochs);
     }
     put_validator_into(batch, evidence.set, &val)?;
+    if slash > 0 {
+        credit_reward_pool_into(store, batch, evidence.set, slash)?;
+    }
     Ok(slash)
 }
 
@@ -733,6 +872,84 @@ mod tests {
             .unwrap();
         assert_eq!(val.status, ValidatorStatus::Tombstoned);
         assert_eq!(val.self_bond, 9_500);
+    }
+
+    #[test]
+    fn slash_credits_reward_pool_and_epoch_distributes() {
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let op = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let params = StakingParams {
+            min_self_bond: 10_000,
+            ..StakingParams::ovl_default()
+        };
+        fund(&store, NativeAssetId::OVL, &op.address(), 20_000);
+        let mut batch = WriteBatch::new();
+        bond_validator(
+            &store,
+            &mut batch,
+            &params,
+            op.address(),
+            op.public_key_bytes().to_vec(),
+            op.address(),
+            10_000,
+            0,
+            Hash::ZERO,
+        )
+        .unwrap();
+        store.write_batch(batch).unwrap();
+
+        let body = |b| CheckpointBody {
+            chain_id: "c".into(),
+            genesis_hash: Hash::ZERO,
+            consensus_policy_hash: Hash::ZERO,
+            state_transition_version: "v".into(),
+            blue_score: 1,
+            block_hash: Hash([b; 32]),
+            state_root: Hash::ZERO,
+            validator_epoch: 1,
+        };
+        let a = sign_checkpoint_attestation(body(1), NativeAssetId::OVL, &op).unwrap();
+        let b = sign_checkpoint_attestation(body(2), NativeAssetId::OVL, &op).unwrap();
+        let ev = detect_double_checkpoint(&a, &b).unwrap();
+        let mut batch = WriteBatch::new();
+        let slashed = apply_evidence(&store, &mut batch, &ev, &SlashPolicy::default()).unwrap();
+        store.write_batch(batch).unwrap();
+        assert_eq!(slashed, 500);
+        assert_eq!(load_reward_pool(&store, NativeAssetId::OVL).unwrap(), 500);
+
+        // Bond again via a fresh validator address so the pool can distribute to an active set.
+        let op2 = derive_bip44(&seed, &Bip44Path::external(3)).unwrap();
+        fund(&store, NativeAssetId::OVL, &op2.address(), 1_000);
+        let mut batch = WriteBatch::new();
+        bond_validator(
+            &store,
+            &mut batch,
+            &StakingParams {
+                min_self_bond: 100,
+                ..StakingParams::ovl_default()
+            },
+            op2.address(),
+            op2.public_key_bytes().to_vec(),
+            op2.address(),
+            100,
+            0,
+            Hash::ZERO,
+        )
+        .unwrap();
+        store.write_batch(batch).unwrap();
+        let mut batch = WriteBatch::new();
+        let snap = advance_epoch(&store, &mut batch, NativeAssetId::OVL).unwrap();
+        store.write_batch(batch).unwrap();
+        assert!(snap.total_active_stake >= 100);
+        // Tombstoned op has 0 power; op2 receives the pool.
+        assert_eq!(load_reward_pool(&store, NativeAssetId::OVL).unwrap(), 0);
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &op2.address())
+                .unwrap()
+                .balance,
+            900 + 500 // 1000-100 bond + 500 reward
+        );
     }
 
     #[test]

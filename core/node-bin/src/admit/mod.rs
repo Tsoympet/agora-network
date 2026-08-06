@@ -1,6 +1,8 @@
 //! Block admission: parent-contextual DAA + PoW → full blue_order UTXO proof →
 //! atomic DAG persist → virtual UTXO reorg.
 //!
+//! Finality hooks live in [`finality`].
+//!
 //! **Conflict model:** before any durable mutation, the node proves that
 //! `blue_order(candidate)` (selected-parent blues + newly accepted merge-set
 //! blues + the candidate) is a valid *virtual* UTXO transition. Blue-block
@@ -11,6 +13,8 @@
 //!
 //! Live `cf_utxo` follows blues of `order_past(virtual_tip)` (tip by cumulative
 //! blue work). Consensus `header.bits` come from the selected-parent DAA window.
+
+mod finality;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -88,6 +92,10 @@ pub enum AdmitError {
     ImmatureCoinbase(String),
     #[error("supply cap exceeded")]
     SupplyCapExceeded,
+    #[error("reorg beyond finality: abandoned blue_score {abandoned} <= finalized {finalized}")]
+    FinalityReorg { finalized: u64, abandoned: u64 },
+    #[error("invalid attestation: {0}")]
+    InvalidAttestation(String),
 }
 
 /// Shared chain state mutated by RPC submit and gossip admission.
@@ -104,6 +112,8 @@ pub struct ChainState {
     limits: ConsensusLimits,
     /// When set, transfer signatures must be network-bound to this identity.
     auth: Option<TxAuthContext>,
+    /// Canonical consensus-policy hash bound into checkpoint bodies.
+    consensus_policy_hash: Hash,
 }
 
 /// Runtime consensus knobs loaded from [`agora_state_machine::ChainParams`].
@@ -116,6 +126,8 @@ pub struct ChainBootConfig {
     pub emission: EmissionSchedule,
     /// `agora-testnet-1` / … — required for bound tx signatures in production.
     pub chain_id: String,
+    /// Bound into Trident checkpoint bodies (from [`agora_state_machine::GenesisConsensusPolicy`]).
+    pub consensus_policy_hash: Hash,
 }
 
 impl Default for ChainBootConfig {
@@ -130,12 +142,16 @@ impl Default for ChainBootConfig {
             ghostdag: GhostdagConfig::default(),
             emission: EmissionSchedule::default(),
             chain_id: String::new(),
+            consensus_policy_hash: Hash::ZERO,
         }
     }
 }
 
 impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
     fn from(params: &agora_state_machine::ChainParams) -> Self {
+        let policy = agora_state_machine::GenesisArtifact::from_params(params);
+        let consensus_policy_hash = Hash::from_hex(&policy.consensus_policy_hash)
+            .unwrap_or(Hash::ZERO);
         Self {
             pow: params.pow_algorithm,
             initial_bits: params.bits,
@@ -143,6 +159,7 @@ impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
             ghostdag: params.ghostdag_config(),
             emission: params.emission.clone(),
             chain_id: params.network.chain_id().into(),
+            consensus_policy_hash,
         }
     }
 }
@@ -199,6 +216,7 @@ impl ChainState {
             storage,
             limits: ConsensusLimits::default(),
             auth,
+            consensus_policy_hash: boot.consensus_policy_hash,
         };
         // Fresh / upgraded datadirs: ensure virtual tip meta exists.
         if chain.load_virtual_tip()?.is_none() {
@@ -680,6 +698,13 @@ impl ChainState {
             }
         };
 
+        // Finality frontier: reject tip changes that abandon a finalized blue.
+        if let Err(err) = self.guard_reorg_vs_finality(old_virtual, new_virtual) {
+            self.ghostdag.remove(&id);
+            let _ = self.dag.remove_tip(&id);
+            return Err(err);
+        }
+
         // Single batch: body/header/tx-index/tips/ghostdag (+ pending marker).
         if let Err(err) = self.persist_block_atomic(&block, id, new_virtual) {
             self.ghostdag.remove(&id);
@@ -689,6 +714,11 @@ impl ChainState {
 
         // UTXO reorg (own crash-recovery via pending_virtual).
         self.reorg_utxo_to_virtual(old_virtual, new_virtual)?;
+
+        // PoW leg of Trident finality for the new virtual tip (PoS may still be pending).
+        if let Err(err) = self.note_pow_on_virtual_tip(new_virtual) {
+            debug!(error = %err, "finality pow note skipped");
+        }
 
         // Cached mining difficulty tracks the virtual tip only — never a side-block path.
         if new_virtual != old_virtual {
