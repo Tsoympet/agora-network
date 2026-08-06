@@ -6,24 +6,29 @@ alwaysApply: true
 # Agora Network: System Instructions
 
 ## 1. Project Mission
-Agora Network is a sovereign, multi-layer BlockDAG blockchain.
+Agora Network targets **Agora Trident L1**: one hybrid BlockDAG Layer 1 with three protocol-native assets (TLT, OVL, DRC).
 - Core: Rust (Consensus, P2P, State Machine).
 - Clients: Tauri (Desktop), React Native/Expo (Mobile), Web (Explorer).
 - Branding: "Obsidian & Gold" aesthetic (Agora Obsidian #101218, Burnished Gold #C59835, Aegean Cyan #06BBDF).
+- TLT: only mineable asset (RandomX). OVL/DRC: never mined; independent PoS validator sets for finality.
+- Architecture: `docs/architecture/TRIDENT_L1.md`.
 
 ## 2. Technical Stack Rules
 - Rust: Strictly idiomatic, thread-safe, and asynchronous (Tokio). Use `borsh` for serialization and `rocksdb` for state storage.
 - React: Use Tailwind CSS and follow the "Agora Brand System" (Cinzel for headers, Inter for UI).
 - Security: All cryptography MUST use secp256k1. Never implement custom crypto. Use existing, audited crates (`bip39`, `secp256k1`).
 - P2P: Use `libp2p` for all network communications.
-- Mining: RandomX for CPU, kHeavyHash for ASIC.
+- Mining: RandomX for TLT CPU; kHeavyHash for ASIC/dev — never a silent public-network PoW fallback.
+- Finality: PoW work threshold AND ≥⅔ OVL stake AND ≥⅔ DRC stake (no price-oracle stake mixing).
 
 ## 3. Monorepo Workflow
 - Always respect the workspace boundaries defined in `PROJECT_STRUCTURE.md`.
 - When modifying shared types, update `core/crates/types` and verify the `ts-rs` bindings.
-- Before suggesting new code, check if the architecture for that component is defined in `AGORA_MASTER_EXECUTION_ROADMAP.md`.
+- Before suggesting new architecture, check `docs/architecture/TRIDENT_L1.md` and `docs/architecture/TRIDENT_PHASE0_AUDIT.md`.
+- Preserve consensus hardening from PRs #76–#81; port acceptance concepts without regressing them.
 
 ## 4. Coding Style
 - Comments: Explain the "why," not the "what."
 - Performance: Agora is a sub-second BlockDAG. Code must be highly optimized. Avoid cloning data unless absolutely necessary. Use references and zero-copy types.
 - Documentation: Every major module in `core/` must have a corresponding markdown file in `docs/` explaining the algorithm/protocol.
+- Maturity labels: Scaffold · Experimental · Single-node prototype · Multi-node devnet · Public testnet · Audited production · Mainnet ready. No false readiness claims.

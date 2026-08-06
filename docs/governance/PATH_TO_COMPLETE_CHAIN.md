@@ -1,9 +1,14 @@
 # Path to a complete working Agora blockchain
 
-Status: **in-tree engineering for the three-mark stack is finalized** for public-testnet
-readiness. What remains for a live public network is ops deployment + human freeze
-decisions. This is **role-complete** (TLT≈Bitcoin, OVL≈Ethereum, DRC≈XRP), not
-byte-for-byte protocol clones.
+> **Trident supersession.** Canonical readiness tracking moves to
+> [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md),
+> [`../architecture/TRIDENT_PHASE0_AUDIT.md`](../architecture/TRIDENT_PHASE0_AUDIT.md),
+> and [`../testing/TRIDENT_TEST_PLAN.md`](../testing/TRIDENT_TEST_PLAN.md).
+> The checklist below is **historical** (pre-Trident layered marks). Do not treat
+> “role-complete” language as public-testnet or mainnet readiness.
+
+Status (historical): in-tree layered three-mark demos existed via `agora-layers`.
+Trident redesign places TLT/OVL/DRC on one L1; maturity must be labeled explicitly.
 
 ## What already works
 

@@ -1,0 +1,116 @@
+{
+  "network": "testnet",
+  "version": 3,
+  "schema": "agora-trident-genesis-v3",
+  "maturity": "scaffold-draft",
+  "chain_name": "Agora Trident",
+  "chain_id": "agora-trident-testnet-1",
+  "timestamp_ms": 0,
+  "genesis_hash": "UNFROZEN",
+  "network_fingerprint": "UNFROZEN",
+  "state_transition_version": "agora-trident-state-v1",
+  "consensus_policy_version": "agora-trident-consensus-v1",
+  "governance_constitution_hash": "UNFROZEN",
+  "emergency_policy_hash": "UNFROZEN",
+  "decimals": 8,
+  "wallet": {
+    "address_hrp": "agoratest",
+    "coin_type": 8888,
+    "coin_type_status": "provisional-slip44-pending",
+    "bip44_path_account0": "m/44'/8888'/0'/0/0",
+    "notes": "Per-asset and per-role derivation paths land with wallet Phase; one seed phrase"
+  },
+  "assets": {
+    "TLT": {
+      "id": "0x00",
+      "name": "Talanton",
+      "max_supply": 10000000000000000,
+      "decimals": 8,
+      "mineable": true,
+      "pow_algorithm": "randomx",
+      "genesis_allocation": 1000000000000000,
+      "staking_reward_reserve": 0,
+      "treasury_allocation": 0,
+      "emission": {
+        "initial_reward": 5000000000,
+        "halving_interval": 210000
+      },
+      "role": "L1 settlement / PoW security / base network fees"
+    },
+    "OVL": {
+      "id": "0x01",
+      "name": "Ovolos",
+      "max_supply": 2100000000000000000,
+      "decimals": 8,
+      "mineable": false,
+      "pow_algorithm": null,
+      "genesis_allocation": 0,
+      "staking_reward_reserve": 0,
+      "treasury_allocation": 0,
+      "emission": {
+        "kind": "staking_reserve",
+        "notes": "Filled at freeze ceremony; never PoW minted"
+      },
+      "role": "L1 execution gas / OVL validators / builder economy"
+    },
+    "DRC": {
+      "id": "0x02",
+      "name": "Drachma",
+      "max_supply": 600000000000000000,
+      "decimals": 8,
+      "mineable": false,
+      "pow_algorithm": null,
+      "genesis_allocation": 0,
+      "staking_reward_reserve": 0,
+      "treasury_allocation": 0,
+      "emission": {
+        "kind": "staking_community_reserve",
+        "notes": "Filled at freeze ceremony; never PoW minted; not a stablecoin"
+      },
+      "role": "L1 payments / DRC validators / community economy"
+    }
+  },
+  "treasuries": {
+    "tlt_security": { "asset": "TLT", "control": "multisig_or_governance", "allocation": 0 },
+    "ovl_builder": { "asset": "OVL", "control": "multisig_or_governance", "allocation": 0 },
+    "drc_community": { "asset": "DRC", "control": "multisig_or_governance", "allocation": 0 }
+  },
+  "pow": {
+    "algorithm": "randomx",
+    "ghostdag_k": 18,
+    "target_block_time_ms": 1000,
+    "daa_window_size": 90,
+    "daa_max_adjustment_bits": 1,
+    "daa_min_level": 8,
+    "daa_max_level": 128
+  },
+  "finality": {
+    "model": "pow_plus_dual_pos",
+    "pow_work_threshold_policy": "UNFROZEN",
+    "ovl_quorum_numerator": 2,
+    "ovl_quorum_denominator": 3,
+    "drc_quorum_numerator": 2,
+    "drc_quorum_denominator": 3,
+    "combine_stakes_by_price": false,
+    "admin_bypass": false
+  },
+  "ovl_validators": {
+    "max_validators": 0,
+    "min_self_bond": 0,
+    "unbonding_period_checkpoints": 0,
+    "genesis_set": []
+  },
+  "drc_validators": {
+    "max_validators": 0,
+    "min_self_bond": 0,
+    "unbonding_period_checkpoints": 0,
+    "genesis_set": []
+  },
+  "vesting_schedules": [],
+  "initial_allocations": [],
+  "notes": [
+    "DRAFT ONLY — genesis_hash and fingerprint must be computed by deterministic serialization at freeze.",
+    "Allocation and reserve fields are placeholders for the genesis ceremony.",
+    "Does not claim public-testnet or mainnet readiness."
+  ]
+}

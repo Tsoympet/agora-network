@@ -5,8 +5,8 @@
 <h1 align="center">Agora Network</h1>
 
 <p align="center">
-  <strong>Sovereign BlockDAG L1</strong> — GHOSTDAG consensus, UTXO settlement, RandomX PoW.<br/>
-  Native asset <strong>TLT</strong> (Talanton). Built in Rust.
+  <strong>Agora Trident L1</strong> — hybrid BlockDAG: TLT RandomX PoW + dual OVL/DRC PoS finality.<br/>
+  Three protocol-native assets: <strong>TLT</strong> · <strong>OVL</strong> · <strong>DRC</strong>. Built in Rust.
 </p>
 
 <p align="center">
@@ -22,17 +22,17 @@
 
 ## About
 
-Agora is a proof-of-work **BlockDAG**: blocks can reference multiple parents, ordered by **GHOSTDAG**, with a single-asset L1 UTXO ledger denominated in **TLT**. Peers sync with headers-first IBD over libp2p; wallets talk JSON-RPC.
+**Target architecture:** [Agora Trident L1](docs/architecture/TRIDENT_L1.md) — one canonical Layer 1 with three protocol-native assets. TLT RandomX miners propose and order blocks; OVL and DRC validator sets independently attest finality. Peers sync with headers-first IBD over libp2p; wallets talk JSON-RPC.
 
-| Mark | Layer | Consensus | Analog | Role |
-| --- | --- | --- | --- | --- |
-| **TLT** (Talanton) | L1 | Pure PoW (RandomX) | Bitcoin | BlockDAG UTXO settlement |
-| **OVL** (Ovolos) | L2 | Hybrid PoW mint + bonded sequencers | Ethereum | EVM gas + smart-contract money |
-| **DRC** (Drachma) | L3 | Hybrid PoW mint + bonded attestors | XRP | Payments / path payments / bridge rail |
+| Mark | Locus (target) | Issuance | Role |
+| --- | --- | --- | --- |
+| **TLT** (Talanton) | L1 UTXO | PoW only | Settlement, security, base network fees |
+| **OVL** (Ovolos) | L1 accounts | Genesis + staking reserve (never mined) | Execution gas, builders, technical validators |
+| **DRC** (Drachma) | L1 accounts | Genesis + staking/community reserve (never mined) | Payments, merchants, community validators |
 
-See [`docs/scaling/TOKEN_ROLES.md`](docs/scaling/TOKEN_ROLES.md).
+See [`docs/architecture/TRIDENT_L1.md`](docs/architecture/TRIDENT_L1.md) and [`docs/assets/NATIVE_ASSETS.md`](docs/assets/NATIVE_ASSETS.md).
 
-> **Status:** Testnet genesis is **frozen in-repo** and the three-mark stack is **role-complete in-tree** (TLT≈Bitcoin fee market, OVL≈Ethereum EVM+eth_*, DRC≈XRP payments/tags). **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot. L2–L4 run in-process via `agora-layers`; public multi-node deploy is still ops.
+> **Status / maturity:** Trident is in **design freeze + Phase 1 implementation**. Current `main` still runs **TLT-only L1 UTXO** plus an in-process `agora-layers` lab stack for historical OVL/DRC prototypes — **not** a deployed multi-chain network. OVL is **not** Ethereum-equivalent; DRC is **not** XRPL-equivalent. **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot. Do not use “role-complete” as a readiness claim; use the maturity levels in the Trident docs.
 
 ## Features
 
@@ -145,10 +145,10 @@ cd apps/mobile   && npm install && npm start          # Expo light client
 ```
 
 
-### L2 / L3 / L4 (operator runtime)
+### Legacy layer lab runtime (deprecated as money source)
 
 ```bash
-cargo run -p agora-layers   # JSON-RPC on 127.0.0.1:8555 — see docs/scaling/OVERVIEW.md
+cargo run -p agora-layers   # in-process lab only — see docs/scaling/OVERVIEW.md + Trident migration docs
 ```
 
 ## Architecture
@@ -182,15 +182,18 @@ Full workspace map: [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md)
 
 | Document | Description |
 | --- | --- |
+| [Trident L1 architecture](docs/architecture/TRIDENT_L1.md) | Canonical hybrid L1 design |
+| [Phase 0 audit](docs/architecture/TRIDENT_PHASE0_AUDIT.md) | Gap analysis, impact map, PR sequence |
+| [Hybrid finality](docs/consensus/HYBRID_POW_DUAL_POS.md) | PoW + dual PoS checkpoints |
+| [Native assets / monetary policy](docs/assets/NATIVE_ASSETS.md) | TLT / OVL / DRC rules |
 | [Public testnet ops](docs/ops/PUBLIC_TESTNET.md) | Docker, seeds, PoW policy, TLS |
-| [Path to complete chain](docs/governance/PATH_TO_COMPLETE_CHAIN.md) | What’s done vs mainnet gates |
-| [Constitution](docs/governance/CONSTITUTION.md) | Civic higher law, ranks, voting chambers |
-| [Civic model](docs/governance/CIVIC_MODEL.md) | On-chain governance overview |
-| [Genesis](docs/genesis/README.md) | Frozen testnet / mainnet draft |
+| [Path to complete chain](docs/governance/PATH_TO_COMPLETE_CHAIN.md) | Historical checklist (pre-Trident) |
+| [Constitution (Trident)](docs/governance/AGORA_CONSTITUTION.md) | Chambers + approval matrix |
+| [Genesis](docs/genesis/README.md) | Frozen testnet v2 / Trident v3 drafts |
 | [RPC](docs/core/rpc.md) · [OpenAPI](docs/core/openapi.yaml) | JSON-RPC surface |
-| [P2P](docs/core/p2p.md) · [Consensus](docs/core/consensus.md) | Protocol notes |
-| [Mainnet freeze](docs/governance/MAINNET_GENESIS_FREEZE.md) | Freeze checklist |
-| [SLIP-0044](docs/governance/SLIP0044.md) | Provisional coin type `8888` |
+| [Migration OVL/DRC → L1](docs/migration/OVL_DRC_TO_L1.md) | Genesis-native preferred |
+| [Threat model](docs/security/THREAT_MODEL.md) | Security requirements |
+| [Trident test plan](docs/testing/TRIDENT_TEST_PLAN.md) | Unit / consensus / CI gates |
 | [Brand system](docs/brand/BRAND_SYSTEM.md) | Obsidian & Gold |
 | [Roadmap](AGORA_MASTER_EXECUTION_ROADMAP.md) | Execution phases |
 

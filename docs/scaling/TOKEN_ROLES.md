@@ -1,93 +1,38 @@
-# Token roles: Bitcoin / Ethereum / XRP mapping
+# Token roles (Trident L1)
 
-Agora keeps **three native marks on three layers**. Product roles map as:
+> **Superseded non-goal.** Earlier revisions forbade putting OVL/DRC into L1 UTXO and kept them on L2/L3. **Agora Trident L1** moves all three marks into one canonical L1 state machine. See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md).
 
-| Mark | Layer | Design analog | Consensus | Meaning in Agora |
-| --- | --- | --- | --- | --- |
-| **TLT** | L1 | **Bitcoin** | **Pure PoW** (RandomX) | Scarce UTXO settlement money |
-| **OVL** | L2 | **Ethereum** | **Hybrid** PoW mint + bonded sequencers | EVM gas + smart-contract money |
-| **DRC** | L3 | **XRP** | **Hybrid** PoW mint + bonded attestors | Payments / path payments / bridge rail |
+| Mark | Locus (target) | Consensus role | Meaning in Agora |
+| --- | --- | --- | --- |
+| **TLT** | L1 UTXO | RandomX PoW block proposal / ordering | Scarce settlement money; base network fees; security treasury |
+| **OVL** | L1 accounts | PoS validator set (finality) | Execution gas; builder economy; technical governance collateral |
+| **DRC** | L1 accounts | PoS validator set (finality) | Payments / merchants / community economy; community governance collateral |
 
-> **Terminology.** "Analog", "-style" and "role-modeled" describe the *product role*
-> each mark plays — not protocol equivalence. Agora is **not** Bitcoin, Ethereum, or
-> XRPL/Ripple and does not implement their wire formats or full state models. Concretely,
-> OVL is **not** Ethereum-equivalent (no Merkle Patricia Trie state roots, no EIP-2718
-> typed / EIP-1559 transactions) and DRC is **not** XRPL-equivalent (no trust lines, no
-> issued currencies, no on-ledger DEX). "Role-complete" means the in-tree role is
-> implemented and tested, not that the layer is a drop-in clone. See the per-layer
-> completeness tables and *"What we deliberately do not do"* below for exact scope.
+## Terminology
 
-## Consensus model
+"Bitcoin-class", "Ethereum-class", and "XRP-class" describe **product roles**, not protocol equivalence.
 
-### TLT — pure PoW (Bitcoin-class)
-Unchanged L1 BlockDAG: RandomX miners, GHOSTDAG, UTXO.
-Fee market: `agora_estimateFee` uses mempool median + congestion premium; full mempool
-evicts lower-fee txs for higher-fee admissions.
+- OVL is **not** Ethereum-equivalent (no claim of full MPT / EIP surface unless implemented and labeled honestly).
+- DRC is **not** XRPL-equivalent (no trust lines / DEX by default) and is **not** a stablecoin unless a separately audited stabilizer exists.
+- Prefer maturity levels (Scaffold → Mainnet ready) over “role-complete.”
 
-### OVL — hybrid (PoW + PoS sequencers) ≈ Ethereum
-- **PoW** (`sha256_leading_zero`) still mints OVL coinbase to miners.
-- **Bonded sequencers** lock OVL (`bond_sequencer`). Once any sequencer is active:
-  - `submit_batch` / `finalize_due` require a bonded sequencer (`submit_batch_as` / `finalize_due_as`).
-- Empty sequencer set ⇒ permissionless (bootstrap / tests).
-- Persistent `revm` account **+ contract storage** in the L2 state root
-  (SHA-256 account/storage digests, **not** an Ethereum Merkle Patricia Trie).
-- Ethereum-**style** RPC subset (not the full Ethereum JSON-RPC): `eth_chainId`,
-  `eth_blockNumber`, `eth_getBalance`,
-  `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`, `eth_call`,
-  `eth_sendRawTransaction` (legacy RLP + secp256k1 recovery; compact fallback).
-- Durable checkpoint under `AGORA_LAYERS_DATA`.
+## Issuance (target)
 
-### DRC — hybrid (PoW + PoS attestors) ≈ XRP
-- **PoW** still mints DRC coinbase to miners.
-- **Bonded attestors** lock DRC on the hub (`bond_attestor`). Once any attestor is active:
-  - Payments stay `Paid` until quorum → `Finalized`.
-  - `claim_mint` requires attestor quorum (`attest_message`).
-- Empty attestor set ⇒ instant finality (bootstrap / tests).
-- Default quorum: 2-of-3 of active attestors.
-- Same-district **Payment** + destination tag + fee.
-- Hub **path payment** with an XRPL-**style** `deliverMin` floor (not XRPL pathfinding).
-- Destination-tag **registry** + payment index for exchange deposit routing.
-- Intent settle uses real path payments; when attestors are bonded, intents enter
-  `AwaitingFinality` until `finalize_intent` after quorum.
-
-## OVL ≈ Ethereum (L2) — in-tree completeness
-
-| Capability | Status |
+| Mark | After genesis |
 | --- | --- |
-| Account/value transfers | **done** |
-| CREATE + bytecode | **done** |
-| Contract storage in state root | **done** |
-| `eth_call` / `eth_getCode` / `eth_getStorageAt` | **done** |
-| L2 mempool (`eth_sendRawTransaction`) | **done** (legacy RLP + compact) |
-| Bonded sequencer set | **done** |
-| secp256k1 signed Ethereum txs / RLP | **done** (legacy + EIP-155) |
-| Durable L2 checkpoint | **done** (`AGORA_LAYERS_DATA`) |
-| Full Ethereum MPT state roots | deferred (SHA-256 digests today) |
+| TLT | PoW subsidy only |
+| OVL | Staking emissions + fee/slash policy — **never mined** |
+| DRC | Staking/community emissions + fee/slash policy — **never mined** |
 
-## DRC ≈ XRP (L3) — in-tree completeness
+## Historical layer stack
 
-| Capability | Status |
-| --- | --- |
-| Same-district Payment + fee | **done** |
-| Destination tags + registry / index | **done** |
-| Path payment + deliverMin | **done** |
-| Attestor quorum finality | **done** |
-| Intent balance-backed settle | **done** |
-| Trust lines / issued currencies / DEX order books | out of scope (native DRC only) |
+`agora-ovolos-rollup`, `agora-bridge-sdk`, and `agora-layers` remain in-tree as **lab / reuse sources** while Trident modules land. They must not be described as the canonical money locus after Trident genesis v3. Migration: [`../migration/OVL_DRC_TO_L1.md`](../migration/OVL_DRC_TO_L1.md).
 
-## TLT ≈ Bitcoin (L1) — in-tree completeness
+## Current code vs target
 
-| Capability | Status |
-| --- | --- |
-| UTXO + PoW + GHOSTDAG | **done** |
-| Mempool fee ordering + eviction | **done** |
-| Congestion-aware fee estimate | **done** |
-| Headers-first IBD + durable orphans | **done** |
-| Public seeds / mainnet freeze | **ops / human** |
-
-## What we deliberately do *not* do
-
-- Do **not** put OVL or DRC into L1 UTXO
-- Do **not** move OVL/DRC to pure PoS (keeps mined issuance)
-- Do **not** run a second full PoW security budget on L2/L3 for ordering
-- Do **not** claim byte-for-byte Bitcoin / Ethereum / XRPL protocol parity
+| Concern | Code on `main` today | Trident target |
+| --- | --- | --- |
+| TLT | L1 UTXO + RandomX | Unchanged locus; keep hardening |
+| OVL | L2 ledger + revm lab | L1 native accounts + execution module |
+| DRC | L3 district ledger lab | L1 native accounts + payment module |
+| Finality | Pure PoW blues | PoW ∧ OVL ⅔ ∧ DRC ⅔ |
