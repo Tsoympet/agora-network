@@ -228,19 +228,40 @@ impl RpcBackend for NodeBackend {
         let Some(tx) = block.transactions.get(index as usize) else {
             return Ok(TxLookup::unknown(*tx_id));
         };
+        let acceptance = agora_state_machine::tx_acceptance_status(self.store.as_ref(), &block_id, index)
+            .ok()
+            .flatten();
         match self
             .chain
             .lock()
             .ok()
             .and_then(|g| g.confirmations(&block_id))
         {
-            Some(confirmations) => Ok(TxLookup::confirmed(
-                tx.clone(),
-                block_id,
-                index,
-                confirmations,
-            )),
-            None => Ok(TxLookup::orphaned(tx.clone(), block_id, index)),
+            Some(confirmations) => {
+                // Explicit acceptance wins over block color. Missing record =
+                // legacy pre-acceptance blocks (treat as confirmed when blue).
+                if let Some(status) = acceptance {
+                    if !status.is_accepted() {
+                        return Ok(TxLookup::orphaned(tx.clone(), block_id, index)
+                            .with_acceptance(status.as_str()));
+                    }
+                    return Ok(TxLookup::confirmed(tx.clone(), block_id, index, confirmations)
+                        .with_acceptance(status.as_str()));
+                }
+                Ok(TxLookup::confirmed(
+                    tx.clone(),
+                    block_id,
+                    index,
+                    confirmations,
+                ))
+            }
+            None => {
+                let mut lookup = TxLookup::orphaned(tx.clone(), block_id, index);
+                if let Some(status) = acceptance {
+                    lookup.acceptance = Some(status.as_str().into());
+                }
+                Ok(lookup)
+            }
         }
     }
 
@@ -601,7 +622,7 @@ mod tests {
     use super::*;
     use crate::admit::ChainState;
     use agora_consensus::{PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
-    use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
+    use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction_bound, Bip44Path};
     use agora_state_machine::{ColumnFamily, GenesisBuilder};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
     use borsh::BorshDeserialize;
@@ -690,11 +711,13 @@ mod tests {
         };
         let premine_txid = genesis_block.transactions[0].tx_id();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(
+            ChainState::bootstrap_with(
                 store.clone(),
                 genesis,
-                PowAlgorithm::RandomX,
-                0,
+                crate::admit::ChainBootConfig {
+                    chain_id: "agora-dev".into(),
+                    ..crate::admit::ChainBootConfig::default()
+                },
                 crate::storage_policy::StoragePolicy::default(),
             )
             .unwrap(),
@@ -725,7 +748,7 @@ mod tests {
             }],
             1,
         );
-        sign_transaction(&mut bad, &from).unwrap();
+        sign_transaction_bound(&mut bad, &from, "agora-dev", &genesis).unwrap();
         assert!(backend.submit_transaction(bad).is_err());
 
         let premine = Amount::from_whole(10_000_000).unwrap();
@@ -751,13 +774,13 @@ mod tests {
             ],
             2,
         );
-        sign_transaction(&mut good, &from).unwrap();
+        sign_transaction_bound(&mut good, &from, "agora-dev", &genesis).unwrap();
         let id = backend.submit_transaction(good.clone()).unwrap();
         assert_eq!(id, good.tx_id());
         // Second spend of the same outpoint must fail while the first is reserved.
         let mut conflict = good.clone();
         conflict.nonce = 3;
-        sign_transaction(&mut conflict, &from).unwrap();
+        sign_transaction_bound(&mut conflict, &from, "agora-dev", &genesis).unwrap();
         assert!(backend.submit_transaction(conflict).is_err());
     }
 
@@ -783,11 +806,13 @@ mod tests {
         };
         let premine_txid = genesis_block.transactions[0].tx_id();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(
+            ChainState::bootstrap_with(
                 store.clone(),
                 genesis,
-                PowAlgorithm::RandomX,
-                0,
+                crate::admit::ChainBootConfig {
+                    chain_id: "agora-dev".into(),
+                    ..crate::admit::ChainBootConfig::default()
+                },
                 crate::storage_policy::StoragePolicy::default(),
             )
             .unwrap(),
@@ -828,7 +853,7 @@ mod tests {
             ],
             7,
         );
-        sign_transaction(&mut transfer, &from).unwrap();
+        sign_transaction_bound(&mut transfer, &from, "agora-dev", &genesis).unwrap();
         let tx_id = backend.submit_transaction(transfer.clone()).unwrap();
 
         let pending = backend.get_transaction(&tx_id).unwrap();
@@ -866,6 +891,7 @@ mod tests {
 
         let confirmed = backend.get_transaction(&tx_id).unwrap();
         assert_eq!(confirmed.status.as_str(), "confirmed");
+        assert_eq!(confirmed.acceptance.as_deref(), Some("Accepted"));
         assert_eq!(confirmed.block_id, Some(block_id));
         assert_eq!(confirmed.index, Some(1));
     }
@@ -884,11 +910,13 @@ mod tests {
             .ignite(&store)
             .unwrap();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(
+            ChainState::bootstrap_with(
                 store.clone(),
                 genesis,
-                PowAlgorithm::RandomX,
-                0,
+                crate::admit::ChainBootConfig {
+                    chain_id: "agora-dev".into(),
+                    ..crate::admit::ChainBootConfig::default()
+                },
                 crate::storage_policy::StoragePolicy::default(),
             )
             .unwrap(),
@@ -949,7 +977,7 @@ mod tests {
             }],
             1,
         );
-        sign_transaction(&mut spend, &funded).unwrap();
+        sign_transaction_bound(&mut spend, &funded, "agora-dev", &genesis).unwrap();
         backend.submit_transaction(spend).unwrap();
         let mut block = backend.get_block_template().unwrap();
         assert_eq!(block.transactions.len(), 2);

@@ -254,6 +254,7 @@ fn tx_lookup_to_json(lookup: &crate::backend::TxLookup) -> Value {
         "index": lookup.index,
         "fee": lookup.fee,
         "confirmations": lookup.confirmations,
+        "acceptance": lookup.acceptance,
         "transaction": lookup.transaction.as_ref().map(tx_to_explorer_json),
     })
 }

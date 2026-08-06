@@ -3,6 +3,7 @@
 //! All signing uses secp256k1. Do not add custom elliptic-curve constructions here.
 //! BIP-44 paths are realized via the `bip32` crate; secrets are imported into `secp256k1`.
 
+mod account;
 mod address;
 mod bip44;
 mod error;
@@ -10,6 +11,9 @@ mod keys;
 mod mnemonic;
 mod transaction;
 
+pub use account::{
+    account_signer_address, sign_account_transfer_bound, verify_account_transfer_bound,
+};
 pub use address::address_from_pubkey;
 pub use bip44::{
     derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,

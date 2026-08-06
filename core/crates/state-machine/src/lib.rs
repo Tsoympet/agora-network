@@ -3,6 +3,8 @@
 //! Five column families (hot / warm / archival / meta / utxo) keep tip validation
 //! off cold compaction paths while fixing genesis supply caps in `meta`.
 
+mod acceptance;
+mod accounts;
 mod apply;
 mod columns;
 mod error;
@@ -14,19 +16,33 @@ mod monetary;
 mod network;
 mod orphans;
 mod store;
+mod supply;
 mod trident_genesis;
 mod tx_index;
 mod utxo;
 mod utxo_diff;
 mod zones;
 
+pub use acceptance::{
+    acceptance_key, delete_acceptance_into, load_acceptance, put_acceptance_into, store_acceptance,
+    tx_acceptance_status, BlockAcceptanceRecord,
+};
+pub use accounts::{
+    account_key, account_root, apply_account_transfer, credit_account_into, genesis_credit,
+    load_account, put_account_into, revert_account_journal_into, AccountJournal, AccountState,
+};
 pub use apply::{
     apply_block, apply_block_batched, apply_block_batched_virtual, apply_block_batched_with_auth,
     apply_block_with_auth, balance_of, revert_journal, revert_journal_batched, sum_transfer_fees,
-    transfer_fee, validate_mempool_tx, validate_mempool_tx_with_auth, ApplyMode, TxAuthContext,
-    UtxoJournal,
+    transfer_fee, validate_mempool_tx, validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult,
+    TxAuthContext, UtxoJournal,
 };
 pub use columns::{meta_keys, ColumnFamily, SCHEMA_VERSION};
+pub use supply::{
+    ignite_trident_supply, issued_supply_key, load_issued_supply, load_max_supply,
+    load_schema_version, max_supply_key, put_issued_supply_into, put_max_supply_into,
+    put_schema_version_into, verify_supply_invariants,
+};
 pub use error::StateError;
 pub use genesis::{GenesisBuilder, SupplyCaps};
 pub use ghostdag_store::{
