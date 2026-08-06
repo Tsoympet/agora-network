@@ -14,12 +14,13 @@ use agora_p2p::{
 };
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
-    build_snapshot, load_epoch, load_reward_pool, load_validator, lookup_tx_location, meta_keys,
-    outpoint_key, validate_mempool_tx_with_auth, ColumnFamily, StateStore, TxAuthContext,
+    apply_signed_stake_tx, build_snapshot, load_epoch, load_reward_pool, load_validator,
+    lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth, ColumnFamily,
+    StateStore, StakingParams, TxAuthContext, WriteBatch,
 };
 use agora_types::{
-    Address, Amount, Block, CheckpointAttestation, Hash, NativeAssetId, OutPoint, Transaction,
-    TxOut,
+    Address, Amount, Block, CheckpointAttestation, Hash, NativeAssetId, OutPoint, SignedStakeTx,
+    Transaction, TxOut,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -586,6 +587,34 @@ impl RpcBackend for NodeBackend {
         Ok(json!({
             "asset": asset.ticker(),
             "amount": amount,
+        }))
+    }
+
+    fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError> {
+        let tx: SignedStakeTx = serde_json::from_value(stake_tx)
+            .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+        let params = match tx.asset {
+            NativeAssetId::OVL => StakingParams::ovl_default(),
+            NativeAssetId::DRC => StakingParams::drc_default(),
+            NativeAssetId::TLT => {
+                return Err(RpcError::Rejected("TLT cannot be staked".into()));
+            }
+        };
+        let auth = self.tx_auth();
+        let mut batch = WriteBatch::new();
+        apply_signed_stake_tx(self.store.as_ref(), &mut batch, &tx, &auth, &params)
+            .map_err(|e| RpcError::Rejected(e.to_string()))?;
+        self.store
+            .write_batch(batch)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "stake_tx_id": tx.stake_tx_id().to_hex(),
+            "kind": tx.kind.as_str(),
+            "asset": tx.asset.ticker(),
+            "actor": tx.actor.to_bech32(),
+            "validator": tx.validator.to_bech32(),
+            "amount": tx.amount,
+            "nonce": tx.nonce,
         }))
     }
 

@@ -8,7 +8,8 @@
 | --- | --- |
 | `1` | Pre-Trident L1 UTXO + virtual tip journals (genesis v2) |
 | `2` | Acceptance records (`acceptance/<hash>`), per-asset supply keys, OVL/DRC account records under Meta |
-| `3` (current) | Additive Meta keys for OVL/DRC staking (`stake/…`) and finality certificates (`finality/…`) |
+| `3` | Additive Meta keys for OVL/DRC staking (`stake/…`) and finality certificates (`finality/…`) |
+| `4` (current) | State-root composition helpers; `stake/reserve_remaining/…`; signed stake ops (`agora_submitStakeTx`) |
 
 Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
