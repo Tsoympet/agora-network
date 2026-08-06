@@ -1,12 +1,9 @@
 //! Agora mark / token registry for genesis artifacts.
 //!
-//! Each mark is **native PoW money on its own layer**:
-//! - **TLT** — L1 BlockDAG UTXO (RandomX)
-//! - **OVL** — L2 Ovolos ledger (sha256_leading_zero)
-//! - **DRC** — L3 Drachma / districts ledger (sha256_leading_zero)
-//!
-//! Only TLT is an L1 UTXO asset id. OVL and DRC each have a layer genesis
-//! (`docs/genesis/ovolos.*.json`, `docs/genesis/drachma.*.json`).
+//! **Trident L1:** all three marks are protocol-native on one Layer 1.
+//! - **TLT** — UTXO settlement; only mineable asset (RandomX)
+//! - **OVL** — account module; never mined; execution + OVL validators
+//! - **DRC** — account module; never mined; payments + DRC validators
 
 use serde::{Deserialize, Serialize};
 
@@ -15,18 +12,27 @@ use serde::{Deserialize, Serialize};
 pub struct TokenMark {
     pub ticker: String,
     pub name: String,
-    /// `L1` | `L2` | `L3`
+    /// Always `L1` under Trident. Historical artifacts may still say `L2`/`L3`.
     pub layer: String,
     /// Max supply in base units (8 decimals), when hard-capped.
     pub max_supply: u64,
     pub decimals: u8,
     pub role: String,
-    /// Native money on the mark's declared layer (PoW + coinbase / emission).
+    /// Native money on the mark's declared layer.
     #[serde(default)]
     pub native: bool,
-    /// PoW algorithm id for this mark's layer.
+    /// PoW algorithm id, or empty/`none` when not mineable.
     #[serde(default)]
     pub pow_algorithm: String,
+    /// When false, protocol forbids PoW issuance for this mark.
+    #[serde(default = "default_true_mineable_compat")]
+    pub mineable: bool,
+}
+
+fn default_true_mineable_compat() -> bool {
+    // Historical JSON without `mineable` keeps prior PoW marks readable;
+    // Trident constructors set the field explicitly.
+    true
 }
 
 impl TokenMark {
@@ -38,39 +44,42 @@ impl TokenMark {
             layer: "L1".into(),
             max_supply: max_supply_base,
             decimals: 8,
-            role: "native store of value / BlockDAG settlement".into(),
+            role: "L1 settlement / PoW security / base network fees".into(),
             native: true,
             pow_algorithm: "randomx".into(),
+            mineable: true,
         }
     }
 
-    /// Drachma — native L3 PoW money (6B whole = 60× TLT unit scale).
+    /// Drachma — native L1 payment / community validator asset (never mined).
     pub fn drachma() -> Self {
         Self {
             ticker: "DRC".into(),
             name: "Drachma".into(),
-            layer: "L3".into(),
+            layer: "L1".into(),
             // 6_000_000_000 * 10^8
             max_supply: 600_000_000_000_000_000,
             decimals: 8,
-            role: "XRP-class payments rail / district path payments / bridge liquidity".into(),
+            role: "L1 payments / DRC validators / community economy".into(),
             native: true,
-            pow_algorithm: "sha256_leading_zero".into(),
+            pow_algorithm: "none".into(),
+            mineable: false,
         }
     }
 
-    /// Ovolos — native L2 PoW money (21B whole, Bitcoin-shaped emission).
+    /// Ovolos — native L1 execution / technical validator asset (never mined).
     pub fn ovolos() -> Self {
         Self {
             ticker: "OVL".into(),
             name: "Ovolos".into(),
-            layer: "L2".into(),
+            layer: "L1".into(),
             // 21_000_000_000 * 10^8
             max_supply: 2_100_000_000_000_000_000,
             decimals: 8,
-            role: "Ethereum-class L2 gas + EVM execution money".into(),
+            role: "L1 execution gas / OVL validators / builder economy".into(),
             native: true,
-            pow_algorithm: "sha256_leading_zero".into(),
+            pow_algorithm: "none".into(),
+            mineable: false,
         }
     }
 }
@@ -79,8 +88,8 @@ impl TokenMark {
 pub fn default_token_marks(native_max_supply_base: u64) -> Vec<TokenMark> {
     vec![
         TokenMark::native_tlt(native_max_supply_base),
-        TokenMark::drachma(),
         TokenMark::ovolos(),
+        TokenMark::drachma(),
     ]
 }
 
@@ -89,24 +98,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn three_marks_each_native_pow_on_own_layer() {
+    fn three_marks_native_on_l1_only_tlt_mineable() {
         let l1 = 10_000_000_000_000_000u64; // 100M TLT
         let marks = default_token_marks(l1);
         assert_eq!(marks.len(), 3);
         assert_eq!(marks[0].ticker, "TLT");
         assert_eq!(marks[0].layer, "L1");
         assert!(marks[0].native);
+        assert!(marks[0].mineable);
         assert_eq!(marks[0].pow_algorithm, "randomx");
         assert_eq!(marks[0].max_supply, l1);
-        assert_eq!(marks[1].ticker, "DRC");
-        assert_eq!(marks[1].layer, "L3");
+
+        assert_eq!(marks[1].ticker, "OVL");
+        assert_eq!(marks[1].layer, "L1");
         assert!(marks[1].native);
-        assert_eq!(marks[1].pow_algorithm, "sha256_leading_zero");
-        assert_eq!(marks[2].ticker, "OVL");
-        assert_eq!(marks[2].layer, "L2");
+        assert!(!marks[1].mineable);
+        assert_eq!(marks[1].pow_algorithm, "none");
+
+        assert_eq!(marks[2].ticker, "DRC");
+        assert_eq!(marks[2].layer, "L1");
         assert!(marks[2].native);
-        assert_eq!(marks[2].pow_algorithm, "sha256_leading_zero");
-        assert!(marks[1].max_supply > l1);
-        assert!(marks[2].max_supply > marks[1].max_supply);
+        assert!(!marks[2].mineable);
+        assert_eq!(marks[2].pow_algorithm, "none");
+
+        assert!(marks[2].max_supply > l1);
+        assert!(marks[1].max_supply > marks[2].max_supply);
     }
 }

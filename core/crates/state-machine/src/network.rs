@@ -477,8 +477,10 @@ impl GenesisArtifact {
             }
         }
 
-        // L1 UTXO mark (TLT) must agree with top-level max_supply when present.
-        // OVL/DRC are also native on their layers but are not L1 UTXO assets.
+        // TLT max_supply in the registry must agree with top-level max_supply when present.
+        // Under Trident, OVL/DRC are also L1-native (account modules); v2 artifacts may
+        // still list historical L2/L3 layer strings — monetary locus is defined by
+        // `TridentGenesisArtifact` (v3) going forward.
         if let Some(tlt) = self.tokens.iter().find(|t| t.ticker == "TLT") {
             if tlt.max_supply != self.max_supply {
                 return Err(format!(

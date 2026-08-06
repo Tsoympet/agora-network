@@ -2,13 +2,17 @@
 //!
 //! Consensus-critical encoding uses `borsh`. Client bindings are generated with `ts-rs`.
 
+mod acceptance;
 mod amount;
+mod asset;
 mod block;
 mod hash;
 mod hrp;
 mod transaction;
 
+pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
 pub use amount::Amount;
+pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{Block, BlockHeader};
 pub use hash::Hash;
 pub use hrp::{
@@ -109,5 +113,10 @@ mod ts_export {
         Transaction::export_all().expect("export Transaction");
         BlockHeader::export_all().expect("export BlockHeader");
         Block::export_all().expect("export Block");
+        NativeAssetId::export_all().expect("export NativeAssetId");
+        NativeAmount::export_all().expect("export NativeAmount");
+        AssetTxOut::export_all().expect("export AssetTxOut");
+        TransactionAcceptance::export_all().expect("export TransactionAcceptance");
+        AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
     }
 }
