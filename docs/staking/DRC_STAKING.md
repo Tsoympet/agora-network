@@ -1,6 +1,6 @@
 # DRC Staking
 
-**Maturity:** Scaffold. Independent of OVL staking.
+**Maturity:** Experimental (`agora-state-machine::staking` with `StakingParams::drc_default`). Independent of OVL staking. Not yet exposed on public RPC.
 
 ## Purpose
 

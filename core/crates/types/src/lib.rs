@@ -7,6 +7,7 @@ mod account;
 mod amount;
 mod asset;
 mod block;
+mod finality;
 mod hash;
 mod hrp;
 mod transaction;
@@ -16,6 +17,10 @@ pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
 pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{Block, BlockHeader};
+pub use finality::{
+    CheckpointAttestation, CheckpointBody, CheckpointState, FinalityCertificate,
+    CHECKPOINT_ATTESTATION_DOMAIN,
+};
 pub use hash::Hash;
 pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
@@ -121,5 +126,9 @@ mod ts_export {
         TransactionAcceptance::export_all().expect("export TransactionAcceptance");
         AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
         AccountTransfer::export_all().expect("export AccountTransfer");
+        CheckpointState::export_all().expect("export CheckpointState");
+        CheckpointBody::export_all().expect("export CheckpointBody");
+        CheckpointAttestation::export_all().expect("export CheckpointAttestation");
+        FinalityCertificate::export_all().expect("export FinalityCertificate");
     }
 }
