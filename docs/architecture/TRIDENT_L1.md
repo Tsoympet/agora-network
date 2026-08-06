@@ -139,6 +139,8 @@ PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.
 - [`../assets/MONETARY_POLICY.md`](../assets/MONETARY_POLICY.md)
 - [`../staking/OVL_STAKING.md`](../staking/OVL_STAKING.md)
 - [`../staking/DRC_STAKING.md`](../staking/DRC_STAKING.md)
+- [`../core/finality.md`](../core/finality.md)
+- [`../consensus/HYBRID_POW_DUAL_POS.md`](../consensus/HYBRID_POW_DUAL_POS.md)
 - [`../migration/OVL_DRC_TO_L1.md`](../migration/OVL_DRC_TO_L1.md)
 - [`../security/THREAT_MODEL.md`](../security/THREAT_MODEL.md)
 - [`../testing/TRIDENT_TEST_PLAN.md`](../testing/TRIDENT_TEST_PLAN.md)

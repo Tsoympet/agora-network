@@ -5,6 +5,7 @@
 
 mod account;
 mod address;
+mod attestation;
 mod bip44;
 mod error;
 mod keys;
@@ -14,6 +15,7 @@ mod transaction;
 pub use account::{
     account_signer_address, sign_account_transfer_bound, verify_account_transfer_bound,
 };
+pub use attestation::{sign_checkpoint_attestation, verify_checkpoint_attestation};
 pub use address::address_from_pubkey;
 pub use bip44::{
     derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,

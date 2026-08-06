@@ -1,29 +1,28 @@
 # Datadir schema migration (Trident)
 
-**Maturity:** Scaffold (Phase 1 constants). Migration commands land with Phase 2+.
+**Maturity:** Experimental (schema constants + library persistence). Full migrate/reindex CLI still pending.
 
 ## Versions
 
 | `SCHEMA_VERSION` | Meaning |
 | --- | --- |
 | `1` | Pre-Trident L1 UTXO + virtual tip journals (genesis v2) |
-| `2` (current) | Acceptance records (`acceptance/<hash>`), per-asset supply keys, OVL/DRC account records under Meta |
+| `2` | Acceptance records (`acceptance/<hash>`), per-asset supply keys, OVL/DRC account records under Meta |
+| `3` (current) | Additive Meta keys for OVL/DRC staking (`stake/…`) and finality certificates (`finality/…`) |
 
 Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
 ## Rules
 
-1. Never silently open a schema-2 datadir with schema-1 code (or the reverse) on public networks.
-2. Provide explicit `migrate` / `reindex` / `verify-invariants` commands before claiming Phase 2 complete.
+1. Never silently open a newer schema datadir with older code (or the reverse) on public networks.
+2. Provide explicit `migrate` / `reindex` / `verify-invariants` commands before public testnet.
 3. Trident public testnet prefers a **fresh genesis v3 datadir** over in-place upgrade from v2 economic state.
 4. Lab `agora-layers` balances use the snapshot/claim path in [`OVL_DRC_TO_L1.md`](OVL_DRC_TO_L1.md) — not ad-hoc SQL/scripts.
 
-## Planned CF additions (Phase 2+)
+## Meta key families (Trident)
 
-- OVL account + stake column families (or prefixed keys under Meta/Utxo-equivalent)
-- DRC account + payment + stake families
-- Acceptance bitmap / acceptance-root persistence
-- Finality certificate tip
-- Per-asset `meta/issued_supply/<asset>`
+- OVL/DRC accounts (`account/…`), acceptance (`acceptance/…`), per-asset supply
+- Staking: `stake/val|del|unbond|epoch|snap/…`
+- Finality: `finality/cert/<block_hash>`, `finality/tip_blue_score`
 
 Atomic `WriteBatch` commit rules from PRs #76–#81 remain mandatory.

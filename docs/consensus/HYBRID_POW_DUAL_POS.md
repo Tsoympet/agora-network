@@ -1,6 +1,6 @@
 # Hybrid PoW + Dual PoS Finality
 
-**Maturity:** Scaffold (specification). Implementation lands in Phases 3+.
+**Maturity:** Experimental. Core types, quorum/finality gadget, attestation crypto, and OVL/DRC staking modules land in Phase 3. Not yet wired into live block admission / public RPC.
 
 ## Roles
 
