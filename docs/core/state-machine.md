@@ -75,14 +75,14 @@ Outpoint keys are `tx_id || index_le` (36 bytes), same as genesis.
 
 Transaction index (`cf_warm`): key `tx/` ‖ `tx_id`, value `block_id` ‖ `index` LE — written on genesis ignite and every `persist_block` for `agora_getTransaction`.
 
-## Trident staking + finality store (Phase 3)
+## Trident staking + finality store (Phase 3+)
 
 Meta CF keys (additive; `SCHEMA_VERSION = 3`):
 
-- `stake/val|del|unbond|epoch|snap/…` — independent OVL/DRC staking
-- `finality/cert/<block_hash>`, `finality/tip_blue_score` — certificates + finalized tip
+- `stake/val|del|unbond|epoch|snap|reward_pool/…` — independent OVL/DRC staking + slash pool
+- `finality/cert|idx|last_att/…`, `finality/tip_blue_score` — certificates, signer index, tip
 
-Library APIs only; node admission / RPC wiring is a follow-up. See [`finality.md`](finality.md).
+Node admit enforces reorg-beyond-finality; RPC/P2P admit attestations. See [`finality.md`](finality.md).
 
 ## Storage backends
 

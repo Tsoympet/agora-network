@@ -34,14 +34,16 @@ pub use accounts::{
     load_account, put_account_into, revert_account_journal_into, AccountJournal, AccountState,
 };
 pub use finality_store::{
-    certificate_key, load_certificate, load_finalized_blue_score, put_certificate_into,
-    AttestationIndex,
+    certificate_key, load_attestation_index, load_certificate, load_finalized_blue_score,
+    load_last_attestation, put_attestation_index_into, put_certificate_into,
+    put_last_attestation_into, AttestationIndex,
 };
 pub use staking::{
-    advance_epoch, apply_evidence, begin_unbond_self, bond_validator, build_snapshot, delegate,
-    load_epoch, load_snapshot, load_validator, put_epoch_into, put_validator_into, signed_stake_for,
-    validator_key_matches, withdraw_unbonded, DelegationRecord, StakingParams, UnbondingEntry,
-    ValidatorRecord, ValidatorSetSnapshot, ValidatorStatus,
+    advance_epoch, apply_evidence, begin_unbond_self, bond_validator, build_snapshot,
+    credit_reward_pool_into, delegate, distribute_reward_pool, load_epoch, load_reward_pool,
+    load_snapshot, load_validator, put_epoch_into, put_reward_pool_into, put_validator_into,
+    signed_stake_for, validator_key_matches, withdraw_unbonded, DelegationRecord, StakingParams,
+    UnbondingEntry, ValidatorRecord, ValidatorSetSnapshot, ValidatorStatus,
 };
 pub use apply::{
     apply_block, apply_block_batched, apply_block_batched_virtual, apply_block_batched_with_auth,

@@ -114,6 +114,9 @@ pub fn agora_peer_score_params(topics: &NetworkTopics) -> PeerScoreParams {
         .insert(topics.blocks().hash(), agora_topic_score_params(1.0));
     params
         .topics
+        .insert(topics.attestations().hash(), agora_topic_score_params(0.75));
+    params
+        .topics
         .insert(topics.transactions().hash(), agora_topic_score_params(0.5));
     // App-specific score (set via NetworkHandle) can reward good IBD peers.
     params.app_specific_weight = 1.0;
