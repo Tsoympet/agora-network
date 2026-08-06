@@ -42,7 +42,8 @@ impl ColumnFamily {
 /// - `2` — Trident acceptance records + per-asset supply keys + OVL/DRC accounts
 /// - `3` — staking + finality Meta keys
 /// - `4` — state-root commitments + staking reserve remaining + signed stake ops
-pub const SCHEMA_VERSION: u32 = 4;
+/// - `5` — multi-lane block body (account/stake) + working non-zero staking reserves
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {

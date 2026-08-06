@@ -31,6 +31,6 @@ These are defaults for testnets; production values require governance + audit. D
 
 **v1 (wired):** slash proceeds credit `stake/reward_pool/OVL` and distribute pro-rata on epoch advance (commission + self/delegator split).
 
-**Reserve drip:** `stake/reserve_remaining/OVL` initialized from genesis `StakingReserve.reserve_base_units` (still 0 until ceremony); `drip_staking_reserve` / `epoch_reserve_drip` scaffold.
+**Reserve drip:** `stake/reserve_remaining/OVL` initialized from working genesis `StakingReserve.reserve_base_units` (10% of max; not ceremony-frozen); `drip_staking_reserve` / `epoch_reserve_drip` wired.
 
-**Fee share:** `credit_fee_share_to_reward_pool` hook for Phase 4 execution fees — never divert TLT miner fees.
+**Fee share:** Accepted OVL `AccountTransfer.fee` credits the reward pool via `credit_fee_share_to_reward_pool` — never divert TLT miner fees.

@@ -1,8 +1,4 @@
 //! Native account-transfer envelope for OVL/DRC (Trident L1).
-//!
-//! These are protocol-native account moves — not ERC-20. Inclusion into the
-//! canonical block body is Phase 2+ wiring; the type and state-machine apply
-//! path are the monetary foundation.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
@@ -10,8 +6,8 @@ use ts_rs::TS;
 
 use crate::{Address, Amount, Hash, NativeAssetId};
 
-/// Domain separator for native account transfers.
-pub const ACCOUNT_TX_SIGNING_DOMAIN: &[u8] = b"agora-trident-account-tx-v1";
+/// Domain separator for native account transfers (includes fee field).
+pub const ACCOUNT_TX_SIGNING_DOMAIN: &[u8] = b"agora-trident-account-tx-v2";
 
 /// Signed account-to-account transfer for OVL or DRC.
 #[derive(
@@ -32,6 +28,8 @@ pub struct AccountTransfer {
     pub from: Address,
     pub to: Address,
     pub amount: Amount,
+    /// Explicit same-asset fee (credited to staking reward pool when Accepted).
+    pub fee: Amount,
     /// Sender account nonce (must match current on-chain nonce).
     pub nonce: u64,
     pub public_key: Vec<u8>,
@@ -49,6 +47,7 @@ impl AccountTransfer {
             self.from,
             self.to,
             self.amount,
+            self.fee,
             self.nonce,
         );
         borsh::to_vec(&body).expect("borsh serialize account transfer body")
@@ -65,12 +64,24 @@ impl AccountTransfer {
         amount: Amount,
         nonce: u64,
     ) -> Self {
+        Self::unsigned_with_fee(asset, from, to, amount, Amount::ZERO, nonce)
+    }
+
+    pub fn unsigned_with_fee(
+        asset: NativeAssetId,
+        from: Address,
+        to: Address,
+        amount: Amount,
+        fee: Amount,
+        nonce: u64,
+    ) -> Self {
         Self {
-            version: 1,
+            version: 2,
             asset,
             from,
             to,
             amount,
+            fee,
             nonce,
             public_key: Vec::new(),
             signature: Vec::new(),
@@ -93,5 +104,6 @@ mod tests {
         );
         assert_eq!(tx.transfer_id(), tx.transfer_id());
         assert!(!tx.asset.is_mineable());
+        assert_eq!(tx.fee.as_base_units(), 0);
     }
 }

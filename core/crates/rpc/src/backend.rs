@@ -473,6 +473,8 @@ impl RpcBackend for InMemoryBackend {
                 tx_root: Hash::ZERO,
             },
             transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
         })
     }
 

@@ -591,6 +591,8 @@ impl RpcBackend for NodeBackend {
     }
 
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError> {
+        // Lab helper: applies immediately. Consensus path is `block.stake_ops` in
+        // the DAG body + Virtual acceptance (templates still UTXO-first).
         let tx: SignedStakeTx = serde_json::from_value(stake_tx)
             .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
         let params = match tx.asset {
@@ -615,6 +617,8 @@ impl RpcBackend for NodeBackend {
             "validator": tx.validator.to_bech32(),
             "amount": tx.amount,
             "nonce": tx.nonce,
+            "path": "immediate",
+            "note": "consensus inclusion is block.stake_ops; this RPC is a lab shortcut",
         }))
     }
 

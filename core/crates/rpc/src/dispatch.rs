@@ -276,6 +276,8 @@ fn block_to_explorer_json(block: &Block) -> Value {
         "id": id,
         "header": header_to_explorer_json(&block.header, Some(id)),
         "tx_count": block.transactions.len(),
+        "account_transfer_count": block.account_transfers.len(),
+        "stake_op_count": block.stake_ops.len(),
         "transactions": transactions,
     })
 }
@@ -573,6 +575,8 @@ mod tests {
                 tx_root: Hash::ZERO,
             },
             transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -680,6 +684,8 @@ mod tests {
                 tx_root: Block::compute_tx_root(std::slice::from_ref(&tx)),
             },
             transactions: vec![tx],
+            account_transfers: vec![],
+            stake_ops: vec![],
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -706,6 +712,8 @@ mod tests {
                 tx_root: Block::compute_tx_root(&[]),
             },
             transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {

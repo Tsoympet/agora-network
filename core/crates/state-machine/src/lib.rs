@@ -46,8 +46,10 @@ pub use staking::{
     drip_staking_reserve, init_staking_reserve_into, load_epoch, load_reward_pool,
     load_snapshot, load_staking_reserve_remaining, load_validator, put_epoch_into,
     put_reward_pool_into, put_staking_reserve_remaining_into, put_validator_into, signed_stake_for,
-    validator_key_matches, withdraw_unbonded, DelegationRecord, StakingParams, UnbondingEntry,
-    ValidatorRecord, ValidatorSetSnapshot, ValidatorStatus,
+    reward_pool_meta_key, snapshot_meta_keys, stake_meta_keys_touched, validator_key_matches,
+    withdraw_unbonded,
+    DelegationRecord, StakingParams, UnbondingEntry, ValidatorRecord, ValidatorSetSnapshot,
+    ValidatorStatus,
 };
 pub use state_root::{
     acceptance_root, compose_trident_state_root, finalized_tip_commitment, utxo_commitment,
@@ -74,7 +76,8 @@ pub use headers::{header_key, load_header, store_header, store_header_into};
 pub use marks::{default_token_marks, TokenMark};
 pub use monetary::{
     issued_within_cap, AssetMonetaryPolicy, EmissionKind, TridentMonetaryPolicy,
-    DRC_MAX_SUPPLY_BASE, OVL_MAX_SUPPLY_BASE, TLT_MAX_SUPPLY_BASE,
+    DRC_MAX_SUPPLY_BASE, DRC_WORKING_RESERVE_BASE, OVL_MAX_SUPPLY_BASE, OVL_WORKING_RESERVE_BASE,
+    TLT_MAX_SUPPLY_BASE, WORKING_EPOCH_RESERVE_DRIP,
 };
 pub use network::{
     daa_config_mainnet, daa_config_testnet, ChainParams, GenesisArtifact, GenesisConsensusPolicy,

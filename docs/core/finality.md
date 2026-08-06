@@ -45,16 +45,16 @@ Checkpoint bodies bind this root (no longer provisional zero).
 | Source | Status |
 | --- | --- |
 | Slash proceeds → reward pool → epoch distribute | Wired |
-| Staking reserve drip (`stake/reserve_remaining`) | Scaffold; genesis `reserve_base_units` still 0 |
-| `credit_fee_share_to_reward_pool` | Hook for Phase 4 execution/payment fee attribution |
+| Staking reserve drip (`stake/reserve_remaining`) | Working testnet defaults (10% of max); epoch drip wired |
+| `credit_fee_share_to_reward_pool` | Called for Accepted OVL/DRC account-transfer fees in block apply |
 
 Never from TLT PoW mint.
 
 ## Still deferred
 
-- Stake / account txs in the DAG block body + acceptance pipeline  
-- Non-zero reserve economics (ceremony)  
-- Live OVL execution / DRC payment fee share call sites  
+- Compact-block / mempool inclusion for account + stake lanes (templates still UTXO-first)  
+- Ceremony-frozen reserve economics (replace working defaults)  
+- Full OVL execution / DRC payment modules beyond account-transfer fee share  
 - Gov/treasury roots in state root (Phase 5)  
 - Validator signing daemon  
 

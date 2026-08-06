@@ -32,6 +32,7 @@ enum Inner {
 }
 
 /// A single mutation in a [`WriteBatch`].
+#[derive(Clone)]
 enum WriteOp {
     Put(ColumnFamily, Vec<u8>, Vec<u8>),
     Delete(ColumnFamily, Vec<u8>),
@@ -44,7 +45,7 @@ enum WriteOp {
 /// in-memory backend all ops are applied under one lock. Use this to commit consensus
 /// state transitions (UTXO changes + journal + issued supply, etc.) as a single unit so a
 /// crash cannot leave the store half-updated.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct WriteBatch {
     ops: Vec<WriteOp>,
 }
@@ -94,6 +95,28 @@ impl StateStore {
             inner: Inner::Cow {
                 base,
                 delta: Arc::new(Mutex::new(HashMap::new())),
+            },
+        }
+    }
+
+    /// COW overlay over this store's backend (cheap Arc clone of the inner handle).
+    ///
+    /// Used inside multi-lane block apply so sequential account/stake ops see prior
+    /// Accepted mutations without committing the consensus [`WriteBatch`] early.
+    pub fn cow_overlay(&self) -> Self {
+        Self::open_cow_overlay(Arc::new(Self {
+            inner: self.clone_inner(),
+        }))
+    }
+
+    fn clone_inner(&self) -> Inner {
+        match &self.inner {
+            Inner::Memory(map) => Inner::Memory(Arc::clone(map)),
+            #[cfg(feature = "rocksdb")]
+            Inner::Rocks(db) => Inner::Rocks(Arc::clone(db)),
+            Inner::Cow { base, delta } => Inner::Cow {
+                base: Arc::clone(base),
+                delta: Arc::clone(delta),
             },
         }
     }

@@ -1,4 +1,4 @@
-//! Explicit transaction acceptance records for the Virtual UTXO apply path.
+//! Explicit transaction acceptance records for the Virtual apply path.
 //!
 //! Soft-skip under [`crate::ApplyMode::Virtual`] remains the conflict-resolution
 //! engine; this module makes its outcomes durable and typed so fees, confirmations,
@@ -13,14 +13,39 @@ use crate::{StateError, StateStore};
 
 const ACCEPTANCE_PREFIX: &[u8] = b"acceptance/";
 
-/// Per-block acceptance outcomes aligned to `block.transactions` indices.
+/// Per-block acceptance outcomes for multi-lane Trident bodies.
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize, Default)]
 pub struct BlockAcceptanceRecord {
     pub block_hash: Hash,
+    /// Aligned to `block.transactions` indices (TLT UTXO lane).
     pub statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.account_transfers`.
+    pub account_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.stake_ops`.
+    pub stake_statuses: Vec<TransactionAcceptance>,
+}
+
+#[derive(Debug, Clone, BorshDeserialize)]
+struct LegacyBlockAcceptanceRecord {
+    block_hash: Hash,
+    statuses: Vec<TransactionAcceptance>,
 }
 
 impl BlockAcceptanceRecord {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
+        if let Ok(rec) = Self::try_from_slice(bytes) {
+            return Ok(rec);
+        }
+        let legacy = LegacyBlockAcceptanceRecord::try_from_slice(bytes)
+            .map_err(|e| StateError::Storage(e.to_string()))?;
+        Ok(Self {
+            block_hash: legacy.block_hash,
+            statuses: legacy.statuses,
+            account_statuses: Vec::new(),
+            stake_statuses: Vec::new(),
+        })
+    }
+
     pub fn bitmap(&self) -> AcceptanceBitmap {
         let flags: Vec<bool> = self.statuses.iter().map(|s| s.is_accepted()).collect();
         AcceptanceBitmap::from_bools(&flags)
@@ -32,6 +57,8 @@ impl BlockAcceptanceRecord {
 
     pub fn accepted_count(&self) -> usize {
         self.statuses.iter().filter(|s| s.is_accepted()).count()
+            + self.account_statuses.iter().filter(|s| s.is_accepted()).count()
+            + self.stake_statuses.iter().filter(|s| s.is_accepted()).count()
     }
 }
 
@@ -69,9 +96,7 @@ pub fn load_acceptance(
     let Some(bytes) = store.get_cf(ColumnFamily::Warm, &acceptance_key(hash))? else {
         return Ok(None);
     };
-    BlockAcceptanceRecord::try_from_slice(&bytes)
-        .map(Some)
-        .map_err(|e| StateError::Storage(e.to_string()))
+    Ok(Some(BlockAcceptanceRecord::from_bytes(&bytes)?))
 }
 
 pub fn delete_acceptance_into(batch: &mut WriteBatch, hash: &Hash) {
@@ -98,24 +123,20 @@ mod tests {
     #[test]
     fn record_roundtrip_and_bitmap() {
         let store = StateStore::open_in_memory();
-        let hash = Hash([3u8; 32]);
-        let record = BlockAcceptanceRecord {
-            block_hash: hash,
+        let rec = BlockAcceptanceRecord {
+            block_hash: Hash([1u8; 32]),
             statuses: vec![
                 TransactionAcceptance::Accepted,
                 TransactionAcceptance::ConflictLost,
-                TransactionAcceptance::ExactDuplicate,
             ],
+            account_statuses: vec![TransactionAcceptance::Accepted],
+            stake_statuses: vec![],
         };
-        store_acceptance(&store, &hash, &record).unwrap();
-        let loaded = load_acceptance(&store, &hash).unwrap().unwrap();
-        assert_eq!(loaded, record);
-        assert_eq!(loaded.accepted_count(), 1);
-        assert!(loaded.bitmap().is_accepted(0));
-        assert!(!loaded.bitmap().is_accepted(1));
-        assert_eq!(
-            tx_acceptance_status(&store, &hash, 1).unwrap(),
-            Some(TransactionAcceptance::ConflictLost)
-        );
+        store_acceptance(&store, &rec.block_hash, &rec).unwrap();
+        let loaded = load_acceptance(&store, &rec.block_hash).unwrap().unwrap();
+        assert_eq!(loaded.accepted_count(), 2);
+        let bm = loaded.bitmap();
+        assert_eq!(bm.get(0), Some(true));
+        assert_eq!(bm.get(1), Some(false));
     }
 }

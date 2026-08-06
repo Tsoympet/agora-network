@@ -2,7 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Hash, Transaction};
+use crate::{AccountTransfer, Hash, SignedStakeTx, Transaction};
 
 /// Block header for Agora's BlockDAG tips.
 ///
@@ -26,17 +26,34 @@ impl BlockHeader {
     }
 }
 
-/// Full block: header + transactions.
+/// Full block: header + multi-lane body (TLT UTXO + OVL/DRC account + stake).
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct Block {
     pub header: BlockHeader,
+    /// TLT UTXO lane (coinbase + transfers).
     pub transactions: Vec<Transaction>,
+    /// OVL/DRC liquid account transfers (Trident).
+    #[serde(default)]
+    pub account_transfers: Vec<AccountTransfer>,
+    /// OVL/DRC staking ops (Trident).
+    #[serde(default)]
+    pub stake_ops: Vec<SignedStakeTx>,
 }
 
 impl Block {
+    /// Construct a UTXO-only block (empty account/stake lanes).
+    pub fn utxo(header: BlockHeader, transactions: Vec<Transaction>) -> Self {
+        Self {
+            header,
+            transactions,
+            account_transfers: Vec::new(),
+            stake_ops: Vec::new(),
+        }
+    }
+
     pub fn id(&self) -> Hash {
         self.header.hash()
     }
@@ -64,5 +81,27 @@ impl Block {
                 .collect();
         }
         level[0]
+    }
+
+    /// Body commitment for `header.tx_root`.
+    ///
+    /// UTXO-only blocks keep the legacy merkle root. When account/stake lanes are
+    /// non-empty, commit a domain-separated multi-lane root.
+    pub fn compute_body_root(&self) -> Hash {
+        if self.account_transfers.is_empty() && self.stake_ops.is_empty() {
+            return Self::compute_tx_root(&self.transactions);
+        }
+        let account_ids: Vec<Hash> = self
+            .account_transfers
+            .iter()
+            .map(AccountTransfer::transfer_id)
+            .collect();
+        let stake_ids: Vec<Hash> = self.stake_ops.iter().map(SignedStakeTx::stake_tx_id).collect();
+        Hash::hash_borsh(&(
+            b"agora-block-body-v2",
+            Self::compute_tx_root(&self.transactions),
+            account_ids,
+            stake_ids,
+        ))
     }
 }
