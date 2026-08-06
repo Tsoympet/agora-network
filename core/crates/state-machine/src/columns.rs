@@ -36,6 +36,15 @@ impl ColumnFamily {
     }
 }
 
+/// Explicit datadir schema version (u32 LE in [`meta_keys::SCHEMA_VERSION`]).
+///
+/// - `1` — pre-Trident L1 UTXO (genesis v2)
+/// - `2` — Trident acceptance records + per-asset supply keys + OVL/DRC accounts
+/// - `3` — staking + finality Meta keys
+/// - `4` — state-root commitments + staking reserve remaining + signed stake ops
+/// - `5` — multi-lane block body (account/stake) + working non-zero staking reserves
+pub const SCHEMA_VERSION: u32 = 5;
+
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {
     pub const GENESIS_HASH: &[u8] = b"meta/genesis_hash";
@@ -54,4 +63,8 @@ pub mod meta_keys {
     /// transition + virtual-tip meta commit atomically. Present across a crash means
     /// recovery should finish (or redo) the reorg toward this tip.
     pub const PENDING_VIRTUAL: &[u8] = b"meta/pending_virtual";
+    /// Datadir schema version (`u32` LE). Missing key ⇒ treat as schema 1.
+    pub const SCHEMA_VERSION: &[u8] = b"meta/schema_version";
+    /// Per-asset issued supply prefix: `meta/issued_supply/<asset_wire_byte>`.
+    pub const ISSUED_SUPPLY_ASSET_PREFIX: &[u8] = b"meta/issued_supply/";
 }

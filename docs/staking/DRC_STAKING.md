@@ -1,6 +1,6 @@
 # DRC Staking
 
-**Maturity:** Scaffold. Independent of OVL staking.
+**Maturity:** Experimental (`agora-state-machine::staking` with `StakingParams::drc_default`). Independent of OVL staking. RPCs: `agora_getValidatorSet` / `agora_getValidator` / `agora_getRewardPool` / **`agora_submitStakeTx`**.
 
 ## Purpose
 
@@ -20,4 +20,6 @@ Same surface as OVL staking (registration, bond/delegate, epochs, unbonding, com
 
 ## Rewards
 
-From predetermined DRC staking/community emissions, DRC payment fee share, and slashing proceeds — never from TLT PoW mint. DRC is not a stablecoin by virtue of staking.
+**v1 (wired):** slash proceeds credit `stake/reward_pool/DRC` and distribute pro-rata on epoch advance (commission + self/delegator split).
+
+**Reserve drip / fee share:** same path as OVL (working non-zero `reserve_remaining`, Accepted DRC account fees → reward pool). Never from TLT PoW mint. DRC is not a stablecoin by virtue of staking.

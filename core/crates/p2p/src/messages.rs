@@ -1,4 +1,4 @@
-use agora_types::{Block, BlockHeader, Hash, Transaction};
+use agora_types::{Block, BlockHeader, CheckpointAttestation, Hash, Transaction};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::ibd::short_ids_for_block;
@@ -21,6 +21,8 @@ pub enum NetworkMessage {
     GetBlock {
         hash: Hash,
     },
+    /// Trident dual-PoS checkpoint attestation (OVL or DRC validator).
+    CheckpointAttestation(CheckpointAttestation),
 }
 
 impl NetworkMessage {
@@ -67,5 +69,23 @@ mod tests {
             hash: header.hash(),
         };
         assert_eq!(NetworkMessage::decode(&get.encode()).unwrap(), get);
+
+        let att = NetworkMessage::CheckpointAttestation(CheckpointAttestation {
+            body: agora_types::CheckpointBody {
+                chain_id: "c".into(),
+                genesis_hash: Hash::ZERO,
+                consensus_policy_hash: Hash::ZERO,
+                state_transition_version: "v".into(),
+                blue_score: 1,
+                block_hash: Hash([1u8; 32]),
+                state_root: Hash::ZERO,
+                validator_epoch: 0,
+            },
+            set: agora_types::NativeAssetId::OVL,
+            validator: agora_types::Address([2u8; 20]),
+            public_key: vec![0; 33],
+            signature: vec![0; 64],
+        });
+        assert_eq!(NetworkMessage::decode(&att.encode()).unwrap(), att);
     }
 }

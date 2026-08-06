@@ -1,6 +1,6 @@
 # Hybrid PoW + Dual PoS Finality
 
-**Maturity:** Scaffold (specification). Implementation lands in Phases 3+.
+**Maturity:** Experimental. Library gadget + node admit reorg guard + PoW certificate note + attestation admit/RPC/gossip. Not public-testnet ready.
 
 ## Roles
 

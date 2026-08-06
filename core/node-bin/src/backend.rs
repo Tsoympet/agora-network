@@ -14,10 +14,14 @@ use agora_p2p::{
 };
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
+    apply_signed_stake_tx, build_snapshot, load_epoch, load_reward_pool, load_validator,
     lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth, ColumnFamily,
-    StateStore, TxAuthContext,
+    StateStore, StakingParams, TxAuthContext, WriteBatch,
 };
-use agora_types::{Address, Amount, Block, Hash, OutPoint, Transaction, TxOut};
+use agora_types::{
+    Address, Amount, Block, CheckpointAttestation, Hash, NativeAssetId, OutPoint, SignedStakeTx,
+    Transaction, TxOut,
+};
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
 
@@ -29,6 +33,16 @@ fn min_relay_fee() -> u64 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MIN_RELAY_FEE)
+}
+
+fn parse_stake_asset(asset: &str) -> Result<NativeAssetId, RpcError> {
+    match asset.trim().to_ascii_uppercase().as_str() {
+        "OVL" | "OVOLOS" => Ok(NativeAssetId::OVL),
+        "DRC" | "DRACHMA" => Ok(NativeAssetId::DRC),
+        other => Err(RpcError::InvalidParams(format!(
+            "staking asset must be OVL or DRC, got {other}"
+        ))),
+    }
 }
 
 /// UTXO + network-bound signature + mempool reservation checks, then admit.
@@ -228,19 +242,40 @@ impl RpcBackend for NodeBackend {
         let Some(tx) = block.transactions.get(index as usize) else {
             return Ok(TxLookup::unknown(*tx_id));
         };
+        let acceptance = agora_state_machine::tx_acceptance_status(self.store.as_ref(), &block_id, index)
+            .ok()
+            .flatten();
         match self
             .chain
             .lock()
             .ok()
             .and_then(|g| g.confirmations(&block_id))
         {
-            Some(confirmations) => Ok(TxLookup::confirmed(
-                tx.clone(),
-                block_id,
-                index,
-                confirmations,
-            )),
-            None => Ok(TxLookup::orphaned(tx.clone(), block_id, index)),
+            Some(confirmations) => {
+                // Explicit acceptance wins over block color. Missing record =
+                // legacy pre-acceptance blocks (treat as confirmed when blue).
+                if let Some(status) = acceptance {
+                    if !status.is_accepted() {
+                        return Ok(TxLookup::orphaned(tx.clone(), block_id, index)
+                            .with_acceptance(status.as_str()));
+                    }
+                    return Ok(TxLookup::confirmed(tx.clone(), block_id, index, confirmations)
+                        .with_acceptance(status.as_str()));
+                }
+                Ok(TxLookup::confirmed(
+                    tx.clone(),
+                    block_id,
+                    index,
+                    confirmations,
+                ))
+            }
+            None => {
+                let mut lookup = TxLookup::orphaned(tx.clone(), block_id, index);
+                if let Some(status) = acceptance {
+                    lookup.acceptance = Some(status.as_str().into());
+                }
+                Ok(lookup)
+            }
         }
     }
 
@@ -409,6 +444,14 @@ impl RpcBackend for NodeBackend {
                 crate::admit::AdmitError::BadTxRoot => {
                     RpcError::Rejected("tx_root mismatch".into())
                 }
+                crate::admit::AdmitError::FinalityReorg { finalized, abandoned } => {
+                    RpcError::Rejected(format!(
+                        "reorg beyond finality: abandoned {abandoned} <= finalized {finalized}"
+                    ))
+                }
+                crate::admit::AdmitError::InvalidAttestation(msg) => {
+                    RpcError::Rejected(format!("attestation: {msg}"))
+                }
                 other => RpcError::Internal(other.to_string()),
             })?;
         if let Ok(mut pool) = self.mempool.lock() {
@@ -420,6 +463,163 @@ impl RpcBackend for NodeBackend {
             let _ = net.publish_message(NetworkMessage::BlockAnnounce { hash: id });
         }
         Ok(id)
+    }
+
+    fn get_finality(&self, block_hash: &Hash) -> Result<Value, RpcError> {
+        let chain = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?;
+        let cert = chain
+            .finality_certificate(block_hash)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let finalized_tip = chain
+            .finalized_blue_score()
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        match cert {
+            Some(c) => Ok(json!({
+                "block_hash": c.body.block_hash.to_hex(),
+                "blue_score": c.body.blue_score,
+                "state": c.state.as_str(),
+                "pow_work_met": c.pow_work_met,
+                "ovl_signed_stake": c.ovl_signed_stake,
+                "ovl_active_stake": c.ovl_active_stake,
+                "drc_signed_stake": c.drc_signed_stake,
+                "drc_active_stake": c.drc_active_stake,
+                "finalized": c.state.is_finalized(),
+                "finalized_tip_blue_score": finalized_tip,
+            })),
+            None => Ok(json!({
+                "block_hash": block_hash.to_hex(),
+                "state": "Proposed",
+                "pow_work_met": false,
+                "finalized": false,
+                "finalized_tip_blue_score": finalized_tip,
+            })),
+        }
+    }
+
+    fn get_finalized_tip(&self) -> Result<Value, RpcError> {
+        let chain = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?;
+        let score = chain
+            .finalized_blue_score()
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({ "blue_score": score }))
+    }
+
+    fn submit_attestation(&mut self, attestation: Value) -> Result<Value, RpcError> {
+        let att: CheckpointAttestation = serde_json::from_value(attestation)
+            .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+        let cert = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .admit_attestation(att.clone())
+            .map_err(|e| match e {
+                crate::admit::AdmitError::InvalidAttestation(msg) => {
+                    RpcError::Rejected(format!("attestation: {msg}"))
+                }
+                other => RpcError::Rejected(other.to_string()),
+            })?;
+        if let Some(net) = &self.net {
+            let _ = net.publish_message(NetworkMessage::CheckpointAttestation(att));
+        }
+        Ok(json!({
+            "block_hash": cert.body.block_hash.to_hex(),
+            "state": cert.state.as_str(),
+            "finalized": cert.state.is_finalized(),
+            "ovl_signed_stake": cert.ovl_signed_stake,
+            "drc_signed_stake": cert.drc_signed_stake,
+        }))
+    }
+
+    fn get_validator_set(&self, asset: &str, epoch: Option<u64>) -> Result<Value, RpcError> {
+        let asset = parse_stake_asset(asset)?;
+        let epoch = match epoch {
+            Some(e) => e,
+            None => load_epoch(self.store.as_ref(), asset)
+                .map_err(|e| RpcError::Internal(e.to_string()))?,
+        };
+        let snap = build_snapshot(self.store.as_ref(), asset, epoch)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "asset": asset.ticker(),
+            "epoch": snap.epoch,
+            "total_active_stake": snap.total_active_stake,
+            "commitment": snap.commitment().to_hex(),
+            "validators": snap.validators.iter().map(|(a, p)| json!({
+                "operator": a.to_bech32(),
+                "voting_power": p,
+            })).collect::<Vec<_>>(),
+        }))
+    }
+
+    fn get_validator(&self, asset: &str, operator: &Address) -> Result<Value, RpcError> {
+        let asset = parse_stake_asset(asset)?;
+        let Some(val) = load_validator(self.store.as_ref(), asset, operator)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        else {
+            return Err(RpcError::NotFound(format!(
+                "validator {}/{}",
+                asset.ticker(),
+                operator.to_bech32()
+            )));
+        };
+        Ok(json!({
+            "asset": asset.ticker(),
+            "operator": val.operator.to_bech32(),
+            "withdrawal": val.withdrawal.to_bech32(),
+            "self_bond": val.self_bond,
+            "delegated": val.delegated,
+            "commission_bps": val.commission_bps,
+            "status": format!("{:?}", val.status),
+            "jailed_until_epoch": val.jailed_until_epoch,
+        }))
+    }
+
+    fn get_reward_pool(&self, asset: &str) -> Result<Value, RpcError> {
+        let asset = parse_stake_asset(asset)?;
+        let amount = load_reward_pool(self.store.as_ref(), asset)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "asset": asset.ticker(),
+            "amount": amount,
+        }))
+    }
+
+    fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError> {
+        // Lab helper: applies immediately. Consensus path is `block.stake_ops` in
+        // the DAG body + Virtual acceptance (templates still UTXO-first).
+        let tx: SignedStakeTx = serde_json::from_value(stake_tx)
+            .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+        let params = match tx.asset {
+            NativeAssetId::OVL => StakingParams::ovl_default(),
+            NativeAssetId::DRC => StakingParams::drc_default(),
+            NativeAssetId::TLT => {
+                return Err(RpcError::Rejected("TLT cannot be staked".into()));
+            }
+        };
+        let auth = self.tx_auth();
+        let mut batch = WriteBatch::new();
+        apply_signed_stake_tx(self.store.as_ref(), &mut batch, &tx, &auth, &params)
+            .map_err(|e| RpcError::Rejected(e.to_string()))?;
+        self.store
+            .write_batch(batch)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "stake_tx_id": tx.stake_tx_id().to_hex(),
+            "kind": tx.kind.as_str(),
+            "asset": tx.asset.ticker(),
+            "actor": tx.actor.to_bech32(),
+            "validator": tx.validator.to_bech32(),
+            "amount": tx.amount,
+            "nonce": tx.nonce,
+            "path": "immediate",
+            "note": "consensus inclusion is block.stake_ops; this RPC is a lab shortcut",
+        }))
     }
 
     fn get_constitution(&self) -> Result<Value, RpcError> {
@@ -601,7 +801,7 @@ mod tests {
     use super::*;
     use crate::admit::ChainState;
     use agora_consensus::{PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
-    use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
+    use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction_bound, Bip44Path};
     use agora_state_machine::{ColumnFamily, GenesisBuilder};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
     use borsh::BorshDeserialize;
@@ -690,11 +890,13 @@ mod tests {
         };
         let premine_txid = genesis_block.transactions[0].tx_id();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(
+            ChainState::bootstrap_with(
                 store.clone(),
                 genesis,
-                PowAlgorithm::RandomX,
-                0,
+                crate::admit::ChainBootConfig {
+                    chain_id: "agora-dev".into(),
+                    ..crate::admit::ChainBootConfig::default()
+                },
                 crate::storage_policy::StoragePolicy::default(),
             )
             .unwrap(),
@@ -725,7 +927,7 @@ mod tests {
             }],
             1,
         );
-        sign_transaction(&mut bad, &from).unwrap();
+        sign_transaction_bound(&mut bad, &from, "agora-dev", &genesis).unwrap();
         assert!(backend.submit_transaction(bad).is_err());
 
         let premine = Amount::from_whole(10_000_000).unwrap();
@@ -751,13 +953,13 @@ mod tests {
             ],
             2,
         );
-        sign_transaction(&mut good, &from).unwrap();
+        sign_transaction_bound(&mut good, &from, "agora-dev", &genesis).unwrap();
         let id = backend.submit_transaction(good.clone()).unwrap();
         assert_eq!(id, good.tx_id());
         // Second spend of the same outpoint must fail while the first is reserved.
         let mut conflict = good.clone();
         conflict.nonce = 3;
-        sign_transaction(&mut conflict, &from).unwrap();
+        sign_transaction_bound(&mut conflict, &from, "agora-dev", &genesis).unwrap();
         assert!(backend.submit_transaction(conflict).is_err());
     }
 
@@ -783,11 +985,13 @@ mod tests {
         };
         let premine_txid = genesis_block.transactions[0].tx_id();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(
+            ChainState::bootstrap_with(
                 store.clone(),
                 genesis,
-                PowAlgorithm::RandomX,
-                0,
+                crate::admit::ChainBootConfig {
+                    chain_id: "agora-dev".into(),
+                    ..crate::admit::ChainBootConfig::default()
+                },
                 crate::storage_policy::StoragePolicy::default(),
             )
             .unwrap(),
@@ -828,7 +1032,7 @@ mod tests {
             ],
             7,
         );
-        sign_transaction(&mut transfer, &from).unwrap();
+        sign_transaction_bound(&mut transfer, &from, "agora-dev", &genesis).unwrap();
         let tx_id = backend.submit_transaction(transfer.clone()).unwrap();
 
         let pending = backend.get_transaction(&tx_id).unwrap();
@@ -866,6 +1070,7 @@ mod tests {
 
         let confirmed = backend.get_transaction(&tx_id).unwrap();
         assert_eq!(confirmed.status.as_str(), "confirmed");
+        assert_eq!(confirmed.acceptance.as_deref(), Some("Accepted"));
         assert_eq!(confirmed.block_id, Some(block_id));
         assert_eq!(confirmed.index, Some(1));
     }
@@ -884,11 +1089,13 @@ mod tests {
             .ignite(&store)
             .unwrap();
         let chain = Arc::new(Mutex::new(
-            ChainState::bootstrap(
+            ChainState::bootstrap_with(
                 store.clone(),
                 genesis,
-                PowAlgorithm::RandomX,
-                0,
+                crate::admit::ChainBootConfig {
+                    chain_id: "agora-dev".into(),
+                    ..crate::admit::ChainBootConfig::default()
+                },
                 crate::storage_policy::StoragePolicy::default(),
             )
             .unwrap(),
@@ -949,7 +1156,7 @@ mod tests {
             }],
             1,
         );
-        sign_transaction(&mut spend, &funded).unwrap();
+        sign_transaction_bound(&mut spend, &funded, "agora-dev", &genesis).unwrap();
         backend.submit_transaction(spend).unwrap();
         let mut block = backend.get_block_template().unwrap();
         assert_eq!(block.transactions.len(), 2);

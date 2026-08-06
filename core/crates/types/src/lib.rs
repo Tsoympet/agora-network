@@ -2,19 +2,32 @@
 //!
 //! Consensus-critical encoding uses `borsh`. Client bindings are generated with `ts-rs`.
 
+mod acceptance;
+mod account;
 mod amount;
+mod asset;
 mod block;
+mod finality;
 mod hash;
 mod hrp;
+mod stake;
 mod transaction;
 
+pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
+pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
 pub use amount::Amount;
+pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{Block, BlockHeader};
+pub use finality::{
+    CheckpointAttestation, CheckpointBody, CheckpointState, FinalityCertificate,
+    CHECKPOINT_ATTESTATION_DOMAIN,
+};
 pub use hash::Hash;
 pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
 };
+pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 
 #[cfg(test)]
@@ -86,6 +99,8 @@ mod tests {
         let block = Block {
             header: header.clone(),
             transactions: vec![tx],
+            account_transfers: vec![],
+            stake_ops: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -109,5 +124,15 @@ mod ts_export {
         Transaction::export_all().expect("export Transaction");
         BlockHeader::export_all().expect("export BlockHeader");
         Block::export_all().expect("export Block");
+        NativeAssetId::export_all().expect("export NativeAssetId");
+        NativeAmount::export_all().expect("export NativeAmount");
+        AssetTxOut::export_all().expect("export AssetTxOut");
+        TransactionAcceptance::export_all().expect("export TransactionAcceptance");
+        AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
+        AccountTransfer::export_all().expect("export AccountTransfer");
+        CheckpointState::export_all().expect("export CheckpointState");
+        CheckpointBody::export_all().expect("export CheckpointBody");
+        CheckpointAttestation::export_all().expect("export CheckpointAttestation");
+        FinalityCertificate::export_all().expect("export FinalityCertificate");
     }
 }

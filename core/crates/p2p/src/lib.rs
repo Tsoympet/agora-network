@@ -20,7 +20,9 @@ mod topics;
 
 pub use config::NetworkConfig;
 pub use fingerprint::{
-    fingerprint_topic_tag, network_fingerprint, PROTOCOL_VERSION, STATE_TRANSITION_VERSION,
+    fingerprint_topic_tag, network_fingerprint, trident_network_fingerprint, PROTOCOL_VERSION,
+    STATE_TRANSITION_VERSION, TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_NET_FP_DOMAIN,
+    TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION, TRIDENT_TX_SIGNING_VERSION,
     TX_SIGNING_VERSION,
 };
 pub use error::P2pError;

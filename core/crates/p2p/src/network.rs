@@ -251,6 +251,9 @@ impl NetworkNode {
         gossipsub
             .subscribe(&topics.blocks())
             .map_err(|e| P2pError::Gossip(e.to_string()))?;
+        gossipsub
+            .subscribe(&topics.attestations())
+            .map_err(|e| P2pError::Gossip(e.to_string()))?;
 
         let getblock = request_response::cbor::Behaviour::new(
             [(topics.getblock_protocol(), ProtocolSupport::Full)],
@@ -351,6 +354,9 @@ impl NetworkNode {
         match message {
             NetworkMessage::Transaction(_) => {
                 self.publish(self.topics.transactions(), message.encode())
+            }
+            NetworkMessage::CheckpointAttestation(_) => {
+                self.publish(self.topics.attestations(), message.encode())
             }
             NetworkMessage::Block(_)
             | NetworkMessage::BlockAnnounce { .. }

@@ -81,6 +81,8 @@ impl GenesisBuilder {
                 tx_root,
             },
             transactions: vec![coinbase],
+            account_transfers: vec![],
+            stake_ops: vec![],
         }
     }
 
@@ -124,6 +126,33 @@ impl GenesisBuilder {
             meta_keys::ISSUED_SUPPLY,
             &self.supply.premine.as_base_units().to_le_bytes(),
         )?;
+        // Trident schema: per-asset supply keys + schema version (TLT issued = premine).
+        let mut supply_batch = crate::store::WriteBatch::new();
+        crate::supply::put_max_supply_into(
+            &mut supply_batch,
+            agora_types::NativeAssetId::TLT,
+            self.supply.max_supply.as_base_units(),
+        );
+        crate::supply::put_issued_supply_into(
+            &mut supply_batch,
+            agora_types::NativeAssetId::TLT,
+            self.supply.premine.as_base_units(),
+        );
+        // Trident multi-asset caps, issued counters, staking reserves, schema.
+        // Re-apply TLT issued=premine after ignite (ignite sets genesis_allocation).
+        let policy = crate::monetary::TridentMonetaryPolicy::default();
+        crate::supply::ignite_trident_supply(&mut supply_batch, &policy)?;
+        crate::supply::put_issued_supply_into(
+            &mut supply_batch,
+            agora_types::NativeAssetId::TLT,
+            self.supply.premine.as_base_units(),
+        );
+        crate::supply::put_max_supply_into(
+            &mut supply_batch,
+            agora_types::NativeAssetId::TLT,
+            self.supply.max_supply.as_base_units(),
+        );
+        store.write_batch(supply_batch)?;
 
         let tips = vec![genesis_hash];
         let tips_bytes = borsh::to_vec(&tips).map_err(|e| StateError::Storage(e.to_string()))?;
@@ -231,6 +260,29 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(issued, premine);
+    }
+
+    #[test]
+    fn genesis_ignites_working_staking_reserves() {
+        use agora_types::NativeAssetId;
+        use crate::{
+            load_schema_version, load_staking_reserve_remaining, DRC_WORKING_RESERVE_BASE,
+            OVL_WORKING_RESERVE_BASE, SCHEMA_VERSION,
+        };
+
+        let store = StateStore::open_in_memory();
+        GenesisBuilder::default().ignite(&store).unwrap();
+        assert_eq!(load_schema_version(&store).unwrap(), SCHEMA_VERSION);
+        assert_eq!(
+            load_staking_reserve_remaining(&store, NativeAssetId::OVL).unwrap(),
+            OVL_WORKING_RESERVE_BASE
+        );
+        assert_eq!(
+            load_staking_reserve_remaining(&store, NativeAssetId::DRC).unwrap(),
+            DRC_WORKING_RESERVE_BASE
+        );
+        assert!(OVL_WORKING_RESERVE_BASE > 0);
+        assert!(DRC_WORKING_RESERVE_BASE > 0);
     }
 
     #[test]

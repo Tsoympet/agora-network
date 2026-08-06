@@ -48,6 +48,8 @@ pub struct TxLookup {
     pub fee: Option<u64>,
     /// Blue-score depth vs best tip (`tip − block + 1`) when confirmed; else `None`.
     pub confirmations: Option<u64>,
+    /// Explicit acceptance status (`Accepted` / `ConflictLost` / …). Never infer from color alone.
+    pub acceptance: Option<String>,
     pub transaction: Option<Transaction>,
 }
 
@@ -101,6 +103,7 @@ impl TxLookup {
             index: None,
             fee: None,
             confirmations: None,
+            acceptance: None,
             transaction: None,
         }
     }
@@ -113,6 +116,7 @@ impl TxLookup {
             index: None,
             fee,
             confirmations: None,
+            acceptance: None,
             transaction: Some(tx),
         }
     }
@@ -125,6 +129,7 @@ impl TxLookup {
             index: Some(index),
             fee: None,
             confirmations: Some(confirmations.max(1)),
+            acceptance: Some("Accepted".into()),
             transaction: Some(tx),
         }
     }
@@ -137,8 +142,14 @@ impl TxLookup {
             index: Some(index),
             fee: None,
             confirmations: None,
+            acceptance: None,
             transaction: Some(tx),
         }
+    }
+
+    pub fn with_acceptance(mut self, acceptance: impl Into<String>) -> Self {
+        self.acceptance = Some(acceptance.into());
+        self
     }
 }
 
@@ -169,6 +180,16 @@ pub trait RpcBackend: Send {
     }
     /// Admit a mined block after PoW verification (node) or local insert (tests).
     fn submit_block(&mut self, block: Block) -> Result<Hash, RpcError>;
+
+    // --- Trident finality / staking ---
+    fn get_finality(&self, block_hash: &Hash) -> Result<Value, RpcError>;
+    fn get_finalized_tip(&self) -> Result<Value, RpcError>;
+    fn submit_attestation(&mut self, attestation: Value) -> Result<Value, RpcError>;
+    fn get_validator_set(&self, asset: &str, epoch: Option<u64>) -> Result<Value, RpcError>;
+    fn get_validator(&self, asset: &str, operator: &Address) -> Result<Value, RpcError>;
+    fn get_reward_pool(&self, asset: &str) -> Result<Value, RpcError>;
+    /// Admit a secp256k1-signed stake tx (bond/delegate/unbond/withdraw). Never mint-like.
+    fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError>;
 
     // --- Civic governance / community ---
     fn get_constitution(&self) -> Result<Value, RpcError>;
@@ -452,6 +473,8 @@ impl RpcBackend for InMemoryBackend {
                 tx_root: Hash::ZERO,
             },
             transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
         })
     }
 
@@ -459,6 +482,51 @@ impl RpcBackend for InMemoryBackend {
         let id = block.id();
         self.insert_block(block);
         Ok(id)
+    }
+
+    fn get_finality(&self, _block_hash: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "state": "Proposed",
+            "pow_work_met": false,
+            "finalized": false,
+            "note": "in-memory backend has no finality store",
+        }))
+    }
+
+    fn get_finalized_tip(&self) -> Result<Value, RpcError> {
+        Ok(json!({ "blue_score": null }))
+    }
+
+    fn submit_attestation(&mut self, _attestation: Value) -> Result<Value, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit attestations".into(),
+        ))
+    }
+
+    fn get_validator_set(&self, asset: &str, _epoch: Option<u64>) -> Result<Value, RpcError> {
+        Ok(json!({
+            "asset": asset,
+            "validators": [],
+            "total_active_stake": 0,
+        }))
+    }
+
+    fn get_validator(&self, asset: &str, operator: &Address) -> Result<Value, RpcError> {
+        Err(RpcError::NotFound(format!(
+            "validator {}/{}",
+            asset,
+            operator.to_bech32()
+        )))
+    }
+
+    fn get_reward_pool(&self, asset: &str) -> Result<Value, RpcError> {
+        Ok(json!({ "asset": asset, "amount": 0 }))
+    }
+
+    fn submit_stake_tx(&mut self, _stake_tx: Value) -> Result<Value, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not apply stake txs".into(),
+        ))
     }
 
     fn get_constitution(&self) -> Result<Value, RpcError> {

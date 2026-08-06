@@ -21,29 +21,32 @@
       "layer": "L1",
       "max_supply": 10000000000000000,
       "decimals": 8,
-      "role": "native store of value / BlockDAG settlement",
+      "role": "L1 settlement / PoW security / base network fees",
       "native": true,
-      "pow_algorithm": "randomx"
-    },
-    {
-      "ticker": "DRC",
-      "name": "Drachma",
-      "layer": "L3",
-      "max_supply": 600000000000000000,
-      "decimals": 8,
-      "role": "native L3 PoW money / district & bridge settlements",
-      "native": true,
-      "pow_algorithm": "sha256_leading_zero"
+      "pow_algorithm": "randomx",
+      "mineable": true
     },
     {
       "ticker": "OVL",
       "name": "Ovolos",
-      "layer": "L2",
+      "layer": "L1",
       "max_supply": 2100000000000000000,
       "decimals": 8,
-      "role": "native L2 PoW money / Ovolos rollup gas",
+      "role": "L1 execution gas / OVL validators / builder economy",
       "native": true,
-      "pow_algorithm": "sha256_leading_zero"
+      "pow_algorithm": "none",
+      "mineable": false
+    },
+    {
+      "ticker": "DRC",
+      "name": "Drachma",
+      "layer": "L1",
+      "max_supply": 600000000000000000,
+      "decimals": 8,
+      "role": "L1 payments / DRC validators / community economy",
+      "native": true,
+      "pow_algorithm": "none",
+      "mineable": false
     }
   ],
   "consensus": {

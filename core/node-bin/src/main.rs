@@ -984,6 +984,34 @@ async fn main() {
                             }
                         }
                     }
+                    NetworkMessage::CheckpointAttestation(att) => {
+                        let block = att.body.block_hash;
+                        match chain.lock() {
+                            Ok(mut guard) => match guard.admit_attestation(att) {
+                                Ok(cert) => {
+                                    info!(
+                                        %peer,
+                                        %topic,
+                                        block = %block.to_hex(),
+                                        state = cert.state.as_str(),
+                                        "attestation gossip admitted"
+                                    );
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        %peer,
+                                        %topic,
+                                        block = %block.to_hex(),
+                                        error = %err,
+                                        "attestation gossip rejected"
+                                    );
+                                }
+                            },
+                            Err(_) => {
+                                warn!(%peer, %topic, "chain lock poisoned on attestation");
+                            }
+                        }
+                    }
                 },
             }
         }

@@ -381,6 +381,8 @@ mod tests {
                 tx_root: Hash::ZERO,
             },
             transactions: vec![included.clone()],
+            account_transfers: vec![],
+            stake_ops: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
