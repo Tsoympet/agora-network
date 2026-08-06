@@ -99,7 +99,8 @@ pub fn apply_account_transfer(
     apply_account_transfer_checked(store, tx, Some(auth), batch, journal)
 }
 
-fn apply_account_transfer_checked(
+/// Like [`apply_account_transfer`] with optional auth (tests / unsigned fixtures).
+pub(crate) fn apply_account_transfer_checked(
     store: &StateStore,
     tx: &AccountTransfer,
     auth: Option<&TxAuthContext>,
@@ -144,19 +145,24 @@ fn apply_account_transfer_checked(
             tx.nonce, from.nonce
         )));
     }
-    // Recipient overflow before debit.
+    // Recipient overflow before debit. Fee is same-asset and never credited to `to`.
     let new_to = to
         .balance
         .checked_add(tx.amount.as_base_units())
         .ok_or_else(|| StateError::InvalidTx("recipient overflow".into()))?;
-    if from.balance < tx.amount.as_base_units() {
+    let debit = tx
+        .amount
+        .as_base_units()
+        .checked_add(tx.fee.as_base_units())
+        .ok_or_else(|| StateError::InvalidTx("amount+fee overflow".into()))?;
+    if from.balance < debit {
         return Err(StateError::InvalidTx("insufficient account balance".into()));
     }
 
     journal.before.push((tx.asset, tx.from, from.clone()));
     journal.before.push((tx.asset, tx.to, to.clone()));
 
-    from.balance -= tx.amount.as_base_units();
+    from.balance -= debit;
     from.nonce = from
         .nonce
         .checked_add(1)

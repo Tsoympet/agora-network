@@ -99,6 +99,8 @@ mod tests {
         let block = Block {
             header: header.clone(),
             transactions: vec![tx],
+            account_transfers: vec![],
+            stake_ops: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);

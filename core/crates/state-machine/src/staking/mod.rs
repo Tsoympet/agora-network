@@ -28,7 +28,7 @@ pub struct StakingParams {
     pub max_commission_bps: u16,
     /// Max share of active stake one validator may hold (bps of total).
     pub max_concentration_bps: u16,
-    /// Per-epoch drip from staking reserve into the reward pool (0 until ceremony).
+    /// Per-epoch drip from staking reserve into the reward pool (working testnet default).
     pub epoch_reserve_drip: u64,
 }
 
@@ -41,7 +41,7 @@ impl StakingParams {
             unbonding_period_epochs: 7,
             max_commission_bps: 5_000,
             max_concentration_bps: 3_000, // 30%
-            epoch_reserve_drip: 0,
+            epoch_reserve_drip: crate::monetary::WORKING_EPOCH_RESERVE_DRIP,
         }
     }
 
@@ -53,7 +53,7 @@ impl StakingParams {
             unbonding_period_epochs: 7,
             max_commission_bps: 5_000,
             max_concentration_bps: 3_000,
-            epoch_reserve_drip: 0,
+            epoch_reserve_drip: crate::monetary::WORKING_EPOCH_RESERVE_DRIP,
         }
     }
 
@@ -159,6 +159,47 @@ fn unbonding_prefix(asset: NativeAssetId) -> Vec<u8> {
     k.push(asset.wire_byte());
     k.push(b'/');
     k
+}
+
+fn unbonding_key(asset: NativeAssetId, op: &Address) -> Vec<u8> {
+    let mut key = unbonding_prefix(asset);
+    key.extend_from_slice(&op.0);
+    key
+}
+
+/// Meta keys a signed stake op may mutate (for reorg journals).
+///
+/// Actor liquid balances are journaled separately via [`crate::UtxoJournal::account_before`]
+/// so interleaved account-transfer + stake restores stay well-ordered.
+pub fn stake_meta_keys_touched(tx: &SignedStakeTx) -> Vec<Vec<u8>> {
+    let mut keys = vec![
+        validator_key(tx.asset, &tx.validator),
+        delegation_key(tx.asset, &tx.actor, &tx.validator),
+        unbonding_key(tx.asset, &tx.actor),
+        reward_pool_key(tx.asset),
+    ];
+    if tx.actor != tx.validator {
+        keys.push(validator_key(tx.asset, &tx.actor));
+        keys.push(unbonding_key(tx.asset, &tx.validator));
+    }
+    keys
+}
+
+/// Meta key for the OVL/DRC staking reward pool (fee-share / slash sink).
+pub fn reward_pool_meta_key(asset: NativeAssetId) -> Vec<u8> {
+    reward_pool_key(asset)
+}
+
+/// Snapshot current Meta values for `keys` (`None` = absent).
+pub fn snapshot_meta_keys(
+    store: &StateStore,
+    keys: &[Vec<u8>],
+) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>, StateError> {
+    let mut out = Vec::with_capacity(keys.len());
+    for key in keys {
+        out.push((key.clone(), store.get_cf(ColumnFamily::Meta, key)?));
+    }
+    Ok(out)
 }
 
 fn epoch_key(asset: NativeAssetId) -> Vec<u8> {
@@ -545,8 +586,7 @@ pub fn begin_unbond_self(
         amount,
         release_epoch: epoch.saturating_add(params.unbonding_period_epochs),
     };
-    let mut key = unbonding_prefix(params.asset);
-    key.extend_from_slice(&operator.0);
+    let key = unbonding_key(params.asset, &operator);
     let bytes = borsh::to_vec(&entry).map_err(|e| StateError::Storage(e.to_string()))?;
     batch.put_cf(ColumnFamily::Meta, &key, &bytes);
     Ok(())
@@ -561,8 +601,7 @@ pub fn withdraw_unbonded(
 ) -> Result<u64, StateError> {
     params.validate_asset()?;
     let epoch = load_epoch(store, params.asset)?;
-    let mut key = unbonding_prefix(params.asset);
-    key.extend_from_slice(&owner.0);
+    let key = unbonding_key(params.asset, &owner);
     let Some(bytes) = store.get_cf(ColumnFamily::Meta, &key)? else {
         return Ok(0);
     };

@@ -65,6 +65,8 @@ mod tests {
                 tx_root: Hash::ZERO,
             },
             transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
         };
         let id = block.id();
         store_orphan(&store, &block).unwrap();

@@ -2,7 +2,7 @@
   "network": "testnet",
   "version": 3,
   "schema": "agora-trident-genesis-v3",
-  "maturity": "scaffold-draft",
+  "maturity": "experimental-working-defaults",
   "chain_name": "Agora Trident",
   "chain_id": "agora-trident-testnet-1",
   "timestamp_ms": 0,
@@ -45,11 +45,13 @@
       "mineable": false,
       "pow_algorithm": null,
       "genesis_allocation": 0,
-      "staking_reward_reserve": 0,
+      "staking_reward_reserve": 210000000000000000,
       "treasury_allocation": 0,
       "emission": {
         "kind": "staking_reserve",
-        "notes": "Filled at freeze ceremony; never PoW minted"
+        "reserve_base_units": 210000000000000000,
+        "epoch_reserve_drip": 1000000000,
+        "notes": "Working testnet default (10% of max). Not ceremony-frozen; never PoW minted"
       },
       "role": "L1 execution gas / OVL validators / builder economy"
     },
@@ -61,11 +63,13 @@
       "mineable": false,
       "pow_algorithm": null,
       "genesis_allocation": 0,
-      "staking_reward_reserve": 0,
+      "staking_reward_reserve": 60000000000000000,
       "treasury_allocation": 0,
       "emission": {
         "kind": "staking_community_reserve",
-        "notes": "Filled at freeze ceremony; never PoW minted; not a stablecoin"
+        "reserve_base_units": 60000000000000000,
+        "epoch_reserve_drip": 1000000000,
+        "notes": "Working testnet default (10% of max). Not ceremony-frozen; never PoW minted; not a stablecoin"
       },
       "role": "L1 payments / DRC validators / community economy"
     }
@@ -110,7 +114,7 @@
   "initial_allocations": [],
   "notes": [
     "DRAFT ONLY — genesis_hash and fingerprint must be computed by deterministic serialization at freeze.",
-    "Allocation and reserve fields are placeholders for the genesis ceremony.",
+    "OVL/DRC staking_reward_reserve values are working testnet defaults (10% of max), not ceremony-frozen.",
     "Does not claim public-testnet or mainnet readiness."
   ]
 }

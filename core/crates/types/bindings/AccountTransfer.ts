@@ -8,6 +8,10 @@ import type { NativeAssetId } from "./NativeAssetId";
  */
 export type AccountTransfer = { version: number, asset: NativeAssetId, from: Address, to: Address, amount: Amount, 
 /**
+ * Explicit same-asset fee (credited to staking reward pool when Accepted).
+ */
+fee: Amount, 
+/**
  * Sender account nonce (must match current on-chain nonce).
  */
 nonce: bigint, public_key: Array<number>, signature: Array<number>, };

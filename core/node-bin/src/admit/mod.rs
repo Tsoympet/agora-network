@@ -468,8 +468,8 @@ impl ChainState {
         transactions.push(coinbase);
         transactions.extend(included.iter().cloned());
         let tx_root = Block::compute_tx_root(&transactions);
-        Ok(Block {
-            header: BlockHeader {
+        Ok(Block::utxo(
+            BlockHeader {
                 version: 1,
                 parents,
                 timestamp_ms,
@@ -478,7 +478,7 @@ impl ChainState {
                 tx_root,
             },
             transactions,
-        })
+        ))
     }
 
     /// Template time: `max(local_now, max_parent_ts + 1, MTP + 1)`.
@@ -663,7 +663,7 @@ impl ChainState {
             });
         }
 
-        if block.header.tx_root != Block::compute_tx_root(&block.transactions) {
+        if block.header.tx_root != block.compute_body_root() {
             return Err(AdmitError::BadTxRoot);
         }
 
@@ -1811,6 +1811,8 @@ impl ChainState {
                 fees,
                 subsidy,
                 coinbase_total,
+                account_before: journal.account_before,
+                stake_meta_before: journal.stake_meta_before,
             };
             let bytes =
                 borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
