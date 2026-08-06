@@ -10,6 +10,7 @@ mod block;
 mod finality;
 mod hash;
 mod hrp;
+mod stake;
 mod transaction;
 
 pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
@@ -26,6 +27,7 @@ pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
 };
+pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 
 #[cfg(test)]

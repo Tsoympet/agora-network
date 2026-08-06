@@ -77,12 +77,13 @@ Transaction index (`cf_warm`): key `tx/` ‖ `tx_id`, value `block_id` ‖ `inde
 
 ## Trident staking + finality store (Phase 3+)
 
-Meta CF keys (additive; `SCHEMA_VERSION = 3`):
+Meta CF keys (additive; `SCHEMA_VERSION = 4`):
 
-- `stake/val|del|unbond|epoch|snap|reward_pool/…` — independent OVL/DRC staking + slash pool
+- `stake/val|del|unbond|epoch|snap|reward_pool|reserve_remaining/…` — staking + slash/reward + reserve
 - `finality/cert|idx|last_att/…`, `finality/tip_blue_score` — certificates, signer index, tip
+- `compose_trident_state_root` — canonical multi-asset commitment for checkpoint bodies
 
-Node admit enforces reorg-beyond-finality; RPC/P2P admit attestations. See [`finality.md`](finality.md).
+Node admit enforces reorg-beyond-finality; RPC/P2P admit attestations; `agora_submitStakeTx` applies signed stake ops. See [`finality.md`](finality.md).
 
 ## Storage backends
 

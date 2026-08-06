@@ -3,7 +3,8 @@
 use agora_types::{Amount, NativeAssetId};
 
 use crate::columns::{meta_keys, ColumnFamily, SCHEMA_VERSION};
-use crate::monetary::{TridentMonetaryPolicy, TLT_MAX_SUPPLY_BASE};
+use crate::monetary::{EmissionKind, TridentMonetaryPolicy, TLT_MAX_SUPPLY_BASE};
+use crate::staking::init_staking_reserve_into;
 use crate::store::WriteBatch;
 use crate::{StateError, StateStore};
 
@@ -143,6 +144,9 @@ pub fn ignite_trident_supply(
             return Err(StateError::SupplyCapExceeded);
         }
         put_issued_supply_into(batch, asset, issued);
+        if let EmissionKind::StakingReserve { reserve_base_units } = p.emission {
+            init_staking_reserve_into(batch, asset, reserve_base_units)?;
+        }
     }
     put_schema_version_into(batch, SCHEMA_VERSION);
     Ok(())

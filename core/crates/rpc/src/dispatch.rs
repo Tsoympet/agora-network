@@ -168,6 +168,21 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let asset = param_string(&req.params, "asset")?;
                 self.backend.get_reward_pool(&asset)
             }
+            RpcMethod::SubmitStakeTx => {
+                let stake_tx = req
+                    .params
+                    .get("stake_tx")
+                    .cloned()
+                    .or_else(|| {
+                        if req.params.is_object() {
+                            Some(req.params.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or_else(|| RpcError::InvalidParams("missing stake_tx object".into()))?;
+                self.backend.submit_stake_tx(stake_tx)
+            }
             RpcMethod::GetConstitution => self.backend.get_constitution(),
             RpcMethod::GetGovernance => self.backend.get_governance(),
             RpcMethod::ListProposals => {

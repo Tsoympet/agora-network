@@ -4,12 +4,17 @@
 //! never share stake or combine via prices.
 
 use agora_consensus::{SlashPolicy, ValidatorEvidence};
-use agora_types::{Address, CheckpointAttestation, Hash, NativeAssetId};
+use agora_crypto::verify_stake_tx_bound;
+use agora_types::{
+    Address, CheckpointAttestation, Hash, NativeAssetId, SignedStakeTx, StakeOpKind,
+};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::accounts::{load_account, put_account_into};
+use crate::apply::TxAuthContext;
 use crate::columns::ColumnFamily;
 use crate::store::WriteBatch;
+use crate::supply::{load_issued_supply, load_max_supply, put_issued_supply_into};
 use crate::{StateError, StateStore};
 
 /// Staking parameters for one validator set (OVL or DRC).
@@ -23,6 +28,8 @@ pub struct StakingParams {
     pub max_commission_bps: u16,
     /// Max share of active stake one validator may hold (bps of total).
     pub max_concentration_bps: u16,
+    /// Per-epoch drip from staking reserve into the reward pool (0 until ceremony).
+    pub epoch_reserve_drip: u64,
 }
 
 impl StakingParams {
@@ -34,6 +41,7 @@ impl StakingParams {
             unbonding_period_epochs: 7,
             max_commission_bps: 5_000,
             max_concentration_bps: 3_000, // 30%
+            epoch_reserve_drip: 0,
         }
     }
 
@@ -45,6 +53,7 @@ impl StakingParams {
             unbonding_period_epochs: 7,
             max_commission_bps: 5_000,
             max_concentration_bps: 3_000,
+            epoch_reserve_drip: 0,
         }
     }
 
@@ -170,6 +179,98 @@ fn reward_pool_key(asset: NativeAssetId) -> Vec<u8> {
     let mut k = b"stake/reward_pool/".to_vec();
     k.push(asset.wire_byte());
     k
+}
+
+fn staking_reserve_key(asset: NativeAssetId) -> Vec<u8> {
+    let mut k = b"stake/reserve_remaining/".to_vec();
+    k.push(asset.wire_byte());
+    k
+}
+
+pub fn load_staking_reserve_remaining(
+    store: &StateStore,
+    asset: NativeAssetId,
+) -> Result<u64, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &staking_reserve_key(asset))? else {
+        return Ok(0);
+    };
+    if bytes.len() != 8 {
+        return Ok(0);
+    }
+    let mut arr = [0u8; 8];
+    arr.copy_from_slice(&bytes);
+    Ok(u64::from_le_bytes(arr))
+}
+
+pub fn put_staking_reserve_remaining_into(
+    batch: &mut WriteBatch,
+    asset: NativeAssetId,
+    amount: u64,
+) {
+    batch.put_cf(
+        ColumnFamily::Meta,
+        &staking_reserve_key(asset),
+        &amount.to_le_bytes(),
+    );
+}
+
+/// Initialize remaining staking reserve from genesis monetary policy (OVL/DRC only).
+pub fn init_staking_reserve_into(
+    batch: &mut WriteBatch,
+    asset: NativeAssetId,
+    reserve_base_units: u64,
+) -> Result<(), StateError> {
+    if !matches!(asset, NativeAssetId::OVL | NativeAssetId::DRC) {
+        return Err(StateError::InvalidTx("staking reserve only for OVL/DRC".into()));
+    }
+    put_staking_reserve_remaining_into(batch, asset, reserve_base_units);
+    Ok(())
+}
+
+/// Move `amount` from staking reserve → reward pool and bump issued supply.
+///
+/// Never touches TLT. No-op when amount is 0 or reserve is empty.
+pub fn drip_staking_reserve(
+    store: &StateStore,
+    batch: &mut WriteBatch,
+    asset: NativeAssetId,
+    amount: u64,
+) -> Result<u64, StateError> {
+    if amount == 0 {
+        return Ok(0);
+    }
+    if !matches!(asset, NativeAssetId::OVL | NativeAssetId::DRC) {
+        return Err(StateError::InvalidTx("cannot drip TLT staking reserve".into()));
+    }
+    let remaining = load_staking_reserve_remaining(store, asset)?;
+    let drip = amount.min(remaining);
+    if drip == 0 {
+        return Ok(0);
+    }
+    let issued = load_issued_supply(store, asset)?;
+    let max = load_max_supply(store, asset)?;
+    let next_issued = issued
+        .checked_add(drip)
+        .ok_or_else(|| StateError::InvalidTx("issued overflow".into()))?;
+    if next_issued > max {
+        return Err(StateError::SupplyCapExceeded);
+    }
+    put_staking_reserve_remaining_into(batch, asset, remaining - drip);
+    put_issued_supply_into(batch, asset, next_issued);
+    credit_reward_pool_into(store, batch, asset, drip)?;
+    Ok(drip)
+}
+
+/// Fee-share sink for future OVL execution / DRC payment modules.
+///
+/// Call only for Accepted fee attribution in the same asset — never divert TLT miner fees.
+pub fn credit_fee_share_to_reward_pool(
+    store: &StateStore,
+    batch: &mut WriteBatch,
+    asset: NativeAssetId,
+    amount: u64,
+) -> Result<u64, StateError> {
+    credit_reward_pool_into(store, batch, asset, amount)
 }
 
 /// Slash / fee proceeds held for epoch distribution (never TLT).
@@ -514,19 +615,116 @@ pub fn build_snapshot(
     })
 }
 
-/// Advance epoch, persist snapshot, and distribute any reward-pool proceeds.
+/// Advance epoch, optional reserve drip, persist snapshot, distribute rewards.
 pub fn advance_epoch(
     store: &StateStore,
     batch: &mut WriteBatch,
     asset: NativeAssetId,
 ) -> Result<ValidatorSetSnapshot, StateError> {
+    advance_epoch_with_params(store, batch, &params_for_asset(asset))
+}
+
+fn params_for_asset(asset: NativeAssetId) -> StakingParams {
+    match asset {
+        NativeAssetId::OVL => StakingParams::ovl_default(),
+        NativeAssetId::DRC => StakingParams::drc_default(),
+        NativeAssetId::TLT => StakingParams::ovl_default(), // unused; validate fails
+    }
+}
+
+pub fn advance_epoch_with_params(
+    store: &StateStore,
+    batch: &mut WriteBatch,
+    params: &StakingParams,
+) -> Result<ValidatorSetSnapshot, StateError> {
+    params.validate_asset()?;
+    let asset = params.asset;
+    let dripped = if params.epoch_reserve_drip > 0 {
+        drip_staking_reserve(store, batch, asset, params.epoch_reserve_drip)?
+    } else {
+        0
+    };
     let next = load_epoch(store, asset)?.saturating_add(1);
     let snap = build_snapshot(store, asset, next)?;
     put_epoch_into(batch, asset, next);
     let bytes = borsh::to_vec(&snap).map_err(|e| StateError::Storage(e.to_string()))?;
     batch.put_cf(ColumnFamily::Meta, &snapshot_key(asset, next), &bytes);
-    let _distributed = distribute_reward_pool(store, batch, asset, &snap)?;
+    let pool = load_reward_pool(store, asset)?.saturating_add(dripped);
+    let _distributed = distribute_reward_pool_amount(store, batch, asset, &snap, pool)?;
     Ok(snap)
+}
+
+/// Apply a network-bound signed stake transaction (bond/delegate/unbond/withdraw).
+///
+/// Final account put (balance + bumped nonce) wins over helper writes in the same batch.
+pub fn apply_signed_stake_tx(
+    store: &StateStore,
+    batch: &mut WriteBatch,
+    tx: &SignedStakeTx,
+    auth: &TxAuthContext,
+    params: &StakingParams,
+) -> Result<(), StateError> {
+    params.validate_asset()?;
+    if tx.asset != params.asset {
+        return Err(StateError::InvalidTx("stake asset mismatch".into()));
+    }
+    verify_stake_tx_bound(tx, &auth.chain_id, &auth.genesis)
+        .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+
+    let acct = load_account(store, tx.asset, &tx.actor)?;
+    if acct.nonce != tx.nonce {
+        return Err(StateError::InvalidTx(format!(
+            "bad stake nonce: got {} expected {}",
+            tx.nonce, acct.nonce
+        )));
+    }
+
+    let mut after = acct.clone();
+    match tx.kind {
+        StakeOpKind::Bond => {
+            if tx.actor != tx.validator {
+                return Err(StateError::InvalidTx("bond actor must equal validator".into()));
+            }
+            bond_validator(
+                store,
+                batch,
+                params,
+                tx.actor,
+                tx.consensus_pubkey.clone(),
+                tx.withdrawal,
+                tx.amount,
+                tx.commission_bps,
+                tx.metadata_hash,
+            )?;
+            after.balance = after
+                .balance
+                .checked_sub(tx.amount)
+                .ok_or_else(|| StateError::InvalidTx("insufficient liquid stake funds".into()))?;
+        }
+        StakeOpKind::Delegate => {
+            delegate(store, batch, params, tx.actor, tx.validator, tx.amount)?;
+            after.balance = after
+                .balance
+                .checked_sub(tx.amount)
+                .ok_or_else(|| StateError::InvalidTx("insufficient liquid stake funds".into()))?;
+        }
+        StakeOpKind::UnbondSelf => {
+            begin_unbond_self(store, batch, params, tx.actor)?;
+        }
+        StakeOpKind::Withdraw => {
+            let credited = withdraw_unbonded(store, batch, params, tx.actor)?;
+            after.balance = after
+                .balance
+                .checked_add(credited)
+                .ok_or_else(|| StateError::InvalidTx("balance overflow".into()))?;
+        }
+    }
+    after.nonce = tx
+        .nonce
+        .checked_add(1)
+        .ok_or_else(|| StateError::InvalidTx("nonce overflow".into()))?;
+    put_account_into(batch, tx.asset, &tx.actor, &after)?;
+    Ok(())
 }
 
 /// Pro-rata reward-pool drip to bonded validators (commission + self/delegator split).
@@ -538,9 +736,20 @@ pub fn distribute_reward_pool(
     asset: NativeAssetId,
     snap: &ValidatorSetSnapshot,
 ) -> Result<u64, StateError> {
+    let pool = load_reward_pool(store, asset)?;
+    distribute_reward_pool_amount(store, batch, asset, snap, pool)
+}
+
+/// Like [`distribute_reward_pool`] but with an explicit pool total (for pending batch drips).
+pub fn distribute_reward_pool_amount(
+    store: &StateStore,
+    batch: &mut WriteBatch,
+    asset: NativeAssetId,
+    snap: &ValidatorSetSnapshot,
+    pool: u64,
+) -> Result<u64, StateError> {
     use std::collections::BTreeMap;
 
-    let pool = load_reward_pool(store, asset)?;
     if pool == 0 || snap.total_active_stake == 0 {
         return Ok(0);
     }
@@ -698,12 +907,15 @@ pub fn validator_key_matches(
 mod tests {
     use agora_consensus::{detect_double_checkpoint, SlashPolicy};
     use agora_crypto::{
-        derive_bip44, seed_from_mnemonic, sign_checkpoint_attestation, Bip44Path,
+        derive_bip44, seed_from_mnemonic, sign_checkpoint_attestation, sign_stake_tx_bound,
+        Bip44Path,
     };
-    use agora_types::{Amount, CheckpointBody, Hash, NativeAssetId};
+    use agora_types::{Amount, CheckpointBody, Hash, NativeAssetId, SignedStakeTx};
 
     use super::*;
     use crate::accounts::credit_account_into;
+    use crate::apply::TxAuthContext;
+    use crate::supply::{load_issued_supply, put_issued_supply_into, put_max_supply_into};
     use crate::StateStore;
 
     const PHRASE: &str =
@@ -999,5 +1211,74 @@ mod tests {
                 .balance,
             100
         );
+    }
+
+    #[test]
+    fn signed_stake_tx_bond_bumps_nonce() {
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let op = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        fund(&store, NativeAssetId::OVL, &op.address(), 1_000);
+        let genesis = Hash([3u8; 32]);
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis,
+        };
+        let params = StakingParams {
+            min_self_bond: 100,
+            ..StakingParams::ovl_default()
+        };
+        let mut tx = SignedStakeTx::unsigned_bond(
+            NativeAssetId::OVL,
+            op.address(),
+            200,
+            op.public_key_bytes().to_vec(),
+            op.address(),
+            50,
+            0,
+        );
+        sign_stake_tx_bound(&mut tx, &op, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        apply_signed_stake_tx(&store, &mut batch, &tx, &auth, &params).unwrap();
+        store.write_batch(batch).unwrap();
+        assert_eq!(
+            load_validator(&store, NativeAssetId::OVL, &op.address())
+                .unwrap()
+                .unwrap()
+                .self_bond,
+            200
+        );
+        let acct = load_account(&store, NativeAssetId::OVL, &op.address()).unwrap();
+        assert_eq!(acct.balance, 800);
+        assert_eq!(acct.nonce, 1);
+    }
+
+    #[test]
+    fn reserve_drip_credits_pool_and_issued() {
+        let store = StateStore::open_in_memory();
+        let mut batch = WriteBatch::new();
+        put_max_supply_into(&mut batch, NativeAssetId::OVL, 1_000_000);
+        put_issued_supply_into(&mut batch, NativeAssetId::OVL, 0);
+        init_staking_reserve_into(&mut batch, NativeAssetId::OVL, 1_000).unwrap();
+        store.write_batch(batch).unwrap();
+        assert_eq!(
+            load_staking_reserve_remaining(&store, NativeAssetId::OVL).unwrap(),
+            1_000
+        );
+        let mut batch = WriteBatch::new();
+        let dripped = drip_staking_reserve(&store, &mut batch, NativeAssetId::OVL, 250).unwrap();
+        store.write_batch(batch).unwrap();
+        assert_eq!(dripped, 250);
+        assert_eq!(
+            load_staking_reserve_remaining(&store, NativeAssetId::OVL).unwrap(),
+            750
+        );
+        assert_eq!(load_reward_pool(&store, NativeAssetId::OVL).unwrap(), 250);
+        assert_eq!(load_issued_supply(&store, NativeAssetId::OVL).unwrap(), 250);
+        // Fee-share alias.
+        let mut batch = WriteBatch::new();
+        credit_fee_share_to_reward_pool(&store, &mut batch, NativeAssetId::OVL, 10).unwrap();
+        store.write_batch(batch).unwrap();
+        assert_eq!(load_reward_pool(&store, NativeAssetId::OVL).unwrap(), 260);
     }
 }

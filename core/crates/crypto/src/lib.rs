@@ -10,6 +10,7 @@ mod bip44;
 mod error;
 mod keys;
 mod mnemonic;
+mod stake;
 mod transaction;
 
 pub use account::{
@@ -23,6 +24,7 @@ pub use bip44::{
 pub use error::CryptoError;
 pub use keys::{KeyPair, PublicKeyBytes, SignatureBytes};
 pub use mnemonic::{generate_mnemonic, seed_fingerprint, seed_from_mnemonic};
+pub use stake::{sign_stake_tx_bound, verify_stake_tx_bound};
 pub use transaction::{
     sign_transaction, sign_transaction_bound, signature_from_slice, signer_address,
     verify_transaction, verify_transaction_bound,

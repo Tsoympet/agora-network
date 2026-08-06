@@ -10,8 +10,8 @@ use agora_consensus::{
 };
 use agora_crypto::verify_checkpoint_attestation;
 use agora_state_machine::{
-    apply_evidence, build_snapshot, load_attestation_index, load_certificate,
-    load_finalized_blue_score, load_last_attestation, put_attestation_index_into,
+    apply_evidence, build_snapshot, compose_trident_state_root, load_attestation_index,
+    load_certificate, load_finalized_blue_score, load_last_attestation, put_attestation_index_into,
     put_certificate_into, put_last_attestation_into, signed_stake_for, validator_key_matches,
     WriteBatch, TRIDENT_STATE_TRANSITION_VERSION,
 };
@@ -213,6 +213,8 @@ impl ChainState {
         let epoch_drc = agora_state_machine::load_epoch(self.store.as_ref(), NativeAssetId::DRC)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
         let validator_epoch = epoch_ovl.max(epoch_drc);
+        let state_root = compose_trident_state_root(self.store.as_ref(), &block_hash)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
         Ok(CheckpointBody {
             chain_id,
             genesis_hash: self.genesis,
@@ -220,8 +222,7 @@ impl ChainState {
             state_transition_version: TRIDENT_STATE_TRANSITION_VERSION.into(),
             blue_score,
             block_hash,
-            // Provisional until multi-asset state-root commitment lands.
-            state_root: Hash::ZERO,
+            state_root,
             validator_epoch,
         })
     }
