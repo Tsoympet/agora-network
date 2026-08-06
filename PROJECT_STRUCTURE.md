@@ -2,6 +2,8 @@
 
 Workspace boundaries for the Agora Network monorepo. Do not place code outside its owning layer without updating this file.
 
+**Architecture target:** [Agora Trident L1](docs/architecture/TRIDENT_L1.md) — one hybrid L1 with TLT/OVL/DRC native. Layer crates below are historical lab/reuse sources until retirement.
+
 ```
 agora-network/
 ├── apps/                   # Client applications
@@ -19,16 +21,17 @@ agora-network/
 │   │   ├── rpc/            # HTTP JSON-RPC methods + dispatcher
 │   │   ├── crypto/         # BIP-39/44 Wallet, secp256k1 Signatures
 │   │   ├── governance/     # Constitution, ranks, chambers, proposals, √ voting
-│   │   ├── ovolos-rollup/  # L2 optimistic rollup (EVM batches + OVL)
-│   │   ├── bridge-sdk/     # L3 Bridge-in-a-Box for District Chains + DRC
-│   │   ├── intent-engine/  # L4 intent orchestration (bridge + AMM)
-│   │   ├── layers-runtime/ # Composes L2/L3/L4 for operators
-│   │   └── miner-sidecar/  # Standalone Binary for CPU Mining
-│   ├── layers-bin/         # agora-layers JSON-RPC operator binary
+│   │   ├── ovolos-rollup/  # Lab: former L2 OVL/revm (reuse → L1 execution)
+│   │   ├── bridge-sdk/     # Lab: former L3 DRC payments (reuse → L1 payments)
+│   │   ├── intent-engine/  # Lab: L4 intent orchestration
+│   │   ├── layers-runtime/ # Lab: composes layer crates for operators
+│   │   └── miner-sidecar/  # Standalone Binary for CPU Mining (TLT)
+│   ├── layers-bin/         # agora-layers lab JSON-RPC (not canonical money)
 │   └── node-bin/           # Main entry point for the L1 node
 ├── docs/                   # Architectural & Scaling Blueprints
+│   ├── architecture/       # Trident L1 design freeze
 │   ├── core/               # One markdown file per major core module
-│   └── scaling/            # L2/L3/L4 overview
+│   └── scaling/            # Historical layer overview (deprecated locus)
 ├── infrastructure/         # External services
 │   ├── dns-seeder/         # Node discovery phonebook
 │   ├── stratum-pool/       # ASIC Mining aggregation

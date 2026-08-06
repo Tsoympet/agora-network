@@ -1,82 +1,48 @@
 # Canonical genesis
 
-Agora freezes a genesis document **per layer** so peers share the same economic root.
-Each mark is **native PoW money on its own layer**:
+## Trident L1 (target)
 
-| Layer | Mark | PoW | Artifact (testnet) | Artifact (mainnet) |
-| --- | --- | --- | --- | --- |
-| **L1** BlockDAG | **TLT** | RandomX | [`testnet.genesis.json`](testnet.genesis.json) | [`mainnet.genesis.draft.json`](mainnet.genesis.draft.json) |
-| **L2** Ovolos rollup | **OVL** | sha256_leading_zero | [`ovolos.testnet.genesis.json`](ovolos.testnet.genesis.json) | [`ovolos.mainnet.genesis.draft.json`](ovolos.mainnet.genesis.draft.json) |
-| **L3** Drachma bridge | **DRC** | sha256_leading_zero | [`drachma.testnet.genesis.json`](drachma.testnet.genesis.json) | [`drachma.mainnet.genesis.draft.json`](drachma.mainnet.genesis.draft.json) |
+Agora Trident freezes **one** genesis document for the hybrid L1 with three native assets.
 
-`dev` has no frozen L1 file (env-driven). Layer runtimes default to embedded testnet OVL/DRC genesis when no file is set.
+| Network | Artifact | Status |
+| --- | --- | --- |
+| Trident testnet | [`trident.testnet.genesis.draft.json`](trident.testnet.genesis.draft.json) | **Draft** (not frozen; Phase 1+) |
+| Trident mainnet | TBD | Not bootable until human freeze |
 
-## Token economy (whole units @ 8 decimals)
+See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../migration/OVL_DRC_TO_L1.md`](../migration/OVL_DRC_TO_L1.md).
 
-| Ticker | Name | Layer | Max supply | Native? | PoW | Role |
-| --- | --- | --- | --- | --- | --- | --- |
-| **TLT** | Talanton | L1 | **100,000,000** | yes | RandomX | BlockDAG UTXO settlement |
-| **OVL** | Ovolos | L2 | **21,000,000,000** | yes | sha256_leading_zero | Rollup gas / L2 coinbase |
-| **DRC** | Drachma | L3 | **6,000,000,000** | yes | sha256_leading_zero | District & bridge / L3 coinbase |
+Working supply caps (8 decimals): TLT 100M · OVL 21B · DRC 6B whole units. Only **TLT** is mineable.
 
-Only **TLT** is an L1 UTXO asset id (`cf_utxo` / RandomX emission). **OVL** and **DRC** are native on their layers with their own PoW seals, coinbase emission, caps, premine, and parent L1 hash — they are **not** L1 UTXO asset ids.
+## Historical artifacts (pre-Trident)
 
-L1 / L2 / L3 emission mirrors Bitcoin-shaped policy: 50 units initial reward, halvings every
-210,000 score/height, 10% testnet premine.
+These remain for reproducibility of the layered lab stack. They are **not** the Trident monetary root.
 
-Testnet layer premines (10% of mark cap) use the same treasury pubkey hash as L1
-testnet (`ff9ec96f…`).
+| Layer (historical) | Mark | Artifact (testnet) | Artifact (mainnet draft) |
+| --- | --- | --- | --- |
+| L1 BlockDAG | TLT | [`testnet.genesis.json`](testnet.genesis.json) **frozen v2** | [`mainnet.genesis.draft.json`](mainnet.genesis.draft.json) |
+| L2 Ovolos lab | OVL | [`ovolos.testnet.genesis.json`](ovolos.testnet.genesis.json) | [`ovolos.mainnet.genesis.draft.json`](ovolos.mainnet.genesis.draft.json) |
+| L3 Drachma lab | DRC | [`drachma.testnet.genesis.json`](drachma.testnet.genesis.json) | [`drachma.mainnet.genesis.draft.json`](drachma.mainnet.genesis.draft.json) |
+
+Frozen L1 testnet v2 genesis hash:
+
+```text
+afe59232cd20a16bd56948044149d2b8013e63f3694c113074fef75ab0cb9b98
+```
+
+Trident requires genesis **v3**, a new `chain_id`, and a new network fingerprint — peers do not silently upgrade from v2.
 
 ## Wallet identity (L1 addresses)
 
-| Network | Bech32m HRP | Example | BIP-44 coin type |
-| --- | --- | --- | --- |
-| mainnet | `agora` | `agora1…` | `8888` (provisional SLIP-0044) |
-| testnet | `agoratest` | `agoratest1…` | `8888` (same until SLIP assign) |
-| dev | `agoradev` | `agoradev1…` | `8888` |
-
-## L1 constants
-
-Embedded in `agora-state-machine`:
-
-- `TESTNET_GENESIS_HASH_HEX`
-- `TESTNET_PREMINE_ADDRESS_HEX`
-- `TESTNET_GENESIS_TIMESTAMP_MS` = `1785715200000` (2026-08-03T00:00:00.000Z)
-- `TESTNET_GENESIS_BITS` = `0`
-
-## L2 / L3 constants (frozen in docs + Rust, genesis v2)
-
-| Mark | Testnet `genesis_hash` | Loader |
+| Network | Bech32m HRP | BIP-44 coin type |
 | --- | --- | --- |
-| OVL | `538a5d0f…b86d` | `OvolosGenesis` / `AGORA_OVL_GENESIS_FILE` |
-| DRC | `e9b8ce67…d01b` | `DrachmaGenesis` / `AGORA_DRC_GENESIS_FILE` |
+| mainnet | `agora` | `8888` (provisional SLIP-0044) |
+| testnet | `agoratest` | `8888` |
+| dev | `agoradev` | `8888` |
 
-Both documents pin `parent_l1_genesis_hash` to the L1 testnet Block 0 hash and set
-`native=true`, `pow_algorithm=sha256_leading_zero`, `pow_bits=8`.
+Trident wallets use one seed with **separated derivation roles** per asset/validator function (Phase 1+).
 
-## CLI
+## CLI (current L1 v2)
 
 ```bash
-# L1
-cargo run -p agora-node -- genesis dump --network testnet
-cargo run -p agora-node -- genesis verify --network testnet --file docs/genesis/testnet.genesis.json
-
-# L2 / L3 runtime (loads layer genesis; mine via agora_layers_mineOvlBlock / mineDrcBlock)
-AGORA_OVL_GENESIS_FILE=docs/genesis/ovolos.testnet.genesis.json \
-AGORA_DRC_GENESIS_FILE=docs/genesis/drachma.testnet.genesis.json \
-  cargo run -p agora-layers
+cargo run -p agora-node -- genesis verify --network testnet
 ```
-
-## Node / layers boot
-
-| Env | Default | Meaning |
-| --- | --- | --- |
-| `AGORA_NETWORK` | `dev` | L1 `dev` / `testnet` / `mainnet` |
-| `AGORA_GENESIS_FILE` | unset | Load L1 genesis JSON |
-| `AGORA_OVL_GENESIS_FILE` | embedded testnet | Load Ovolos L2 genesis JSON |
-| `AGORA_DRC_GENESIS_FILE` | embedded testnet | Load Drachma L3 genesis JSON |
-
-## Mainnet freeze
-
-See [`docs/governance/MAINNET_GENESIS_FREEZE.md`](../governance/MAINNET_GENESIS_FREEZE.md).
-Freeze order: L1 Talanton → L2 Ovolos → L3 Drachma (each pins the parent L1 hash).
