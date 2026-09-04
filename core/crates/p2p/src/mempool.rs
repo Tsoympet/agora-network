@@ -44,10 +44,7 @@ impl Mempool {
     }
 
     pub fn len(&self) -> usize {
-        self.txs.len()
-            + self.account_txs.len()
-            + self.stake_txs.len()
-            + self.execution_txs.len()
+        self.txs.len() + self.account_txs.len() + self.stake_txs.len() + self.execution_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -523,8 +520,8 @@ mod tests {
     }
 
     #[test]
-    fn account_and_stake_share_nonce_reservation() {
-        use agora_types::{AccountTransfer, NativeAssetId, SignedStakeTx};
+    fn account_stake_and_execution_share_nonce_reservation() {
+        use agora_types::{AccountTransfer, NativeAssetId, OvlExecutionTx, SignedStakeTx};
 
         let actor = agora_types::Address([3; 20]);
         let mut account = AccountTransfer::unsigned_with_fee(
@@ -541,11 +538,21 @@ mod tests {
         let mut stake = SignedStakeTx::unsigned_unbond_self(NativeAssetId::OVL, actor, 0);
         stake.public_key = vec![2; 33];
         stake.signature = vec![3; 64];
+        let execution = OvlExecutionTx::unsigned(
+            actor,
+            agora_types::Address([5; 20]),
+            Amount::ZERO,
+            21_000,
+            1,
+            0,
+            vec![],
+        );
 
         let mut pool = Mempool::new(4);
         let account_id = pool.admit_account(account.clone()).unwrap();
         assert!(pool.account_reserved(NativeAssetId::OVL, &actor));
         assert!(pool.admit_stake(stake).is_err());
+        assert!(pool.admit_execution(execution).is_err());
 
         let block = Block {
             header: BlockHeader {

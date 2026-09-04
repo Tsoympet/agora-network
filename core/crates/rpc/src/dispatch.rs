@@ -1,6 +1,4 @@
-use agora_types::{
-    AccountTransfer, Address, Amount, Block, Hash, OvlExecutionTx, Transaction,
-};
+use agora_types::{AccountTransfer, Address, Amount, Block, Hash, OvlExecutionTx, Transaction};
 use serde_json::{json, Value};
 
 use crate::backend::RpcBackend;
@@ -300,6 +298,7 @@ fn block_to_explorer_json(block: &Block) -> Value {
         "tx_count": block.transactions.len(),
         "account_transfer_count": block.account_transfers.len(),
         "stake_op_count": block.stake_ops.len(),
+        "ovl_execution_count": block.ovl_executions.len(),
         "transactions": transactions,
     })
 }

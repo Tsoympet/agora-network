@@ -909,8 +909,8 @@ mod tests {
     use crate::admit::ChainState;
     use agora_consensus::{PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
     use agora_crypto::{
-        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound, sign_transaction_bound,
-        Bip44Path,
+        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound, sign_ovl_execution_bound,
+        sign_transaction_bound, Bip44Path,
     };
     use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
@@ -978,6 +978,63 @@ mod tests {
             template.header.tx_root,
             Block::compute_tx_root(&template.transactions)
         );
+    }
+
+    #[test]
+    fn ovl_execution_enters_template_lane() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let bob = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::OVL,
+            &alice.address(),
+            Amount::from_base_units(50_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            mempool,
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+        let mut tx = OvlExecutionTx::unsigned(
+            alice.address(),
+            bob.address(),
+            Amount::from_base_units(1_000),
+            agora_state_machine::OVL_INTRINSIC_GAS,
+            1,
+            0,
+            vec![],
+        );
+        sign_ovl_execution_bound(&mut tx, &alice, "agora-dev", &genesis).unwrap();
+
+        let id = backend.submit_ovl_execution(tx.clone()).unwrap();
+        assert_eq!(id, tx.tx_id());
+        let template = backend.get_block_template().unwrap();
+        assert_eq!(template.ovl_executions, vec![tx]);
+        assert_eq!(template.header.tx_root, template.compute_body_root());
     }
 
     #[test]

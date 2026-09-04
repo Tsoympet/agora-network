@@ -26,7 +26,7 @@ impl BlockHeader {
     }
 }
 
-/// Full block: header + multi-lane body (TLT UTXO + OVL/DRC account + stake).
+/// Full block: header + multi-lane body (TLT UTXO + OVL/DRC account/stake + OVL execution).
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
@@ -89,12 +89,15 @@ impl Block {
 
     /// Body commitment for `header.tx_root`.
     ///
-    /// UTXO-only blocks keep the legacy merkle root. When account/stake lanes are
-    /// non-empty, commit a domain-separated multi-lane root.
+    /// UTXO-only blocks keep the legacy merkle root; account/stake-only bodies
+    /// retain v2; OVL execution bodies use the v3 domain.
     pub fn compute_body_root(&self) -> Hash {
         if !self.ovl_executions.is_empty() {
-            let execution_ids: Vec<Hash> =
-                self.ovl_executions.iter().map(OvlExecutionTx::tx_id).collect();
+            let execution_ids: Vec<Hash> = self
+                .ovl_executions
+                .iter()
+                .map(OvlExecutionTx::tx_id)
+                .collect();
             return Hash::hash_borsh(&(
                 b"agora-block-body-v3",
                 self.compute_body_root_v2(),
@@ -113,7 +116,11 @@ impl Block {
             .iter()
             .map(AccountTransfer::transfer_id)
             .collect();
-        let stake_ids: Vec<Hash> = self.stake_ops.iter().map(SignedStakeTx::stake_tx_id).collect();
+        let stake_ids: Vec<Hash> = self
+            .stake_ops
+            .iter()
+            .map(SignedStakeTx::stake_tx_id)
+            .collect();
         Hash::hash_borsh(&(
             b"agora-block-body-v2",
             Self::compute_tx_root(&self.transactions),

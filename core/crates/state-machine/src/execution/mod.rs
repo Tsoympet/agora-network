@@ -6,7 +6,7 @@
 //! or unsigned compact transaction is accepted.
 
 use agora_crypto::verify_ovl_execution_bound;
-use agora_types::{Amount, Hash, NativeAssetId, OvlExecutionTx};
+use agora_types::{Hash, NativeAssetId, OvlExecutionTx};
 
 use crate::accounts::{load_account, put_account_into, AccountJournal};
 use crate::apply::TxAuthContext;
@@ -105,9 +105,7 @@ pub fn apply_ovl_execution(
     journal
         .before
         .push((NativeAssetId::OVL, tx.from, from.clone()));
-    journal
-        .before
-        .push((NativeAssetId::OVL, tx.to, to.clone()));
+    journal.before.push((NativeAssetId::OVL, tx.to, to.clone()));
     from.balance -= debit;
     from.nonce = from
         .nonce
@@ -127,9 +125,7 @@ pub fn apply_ovl_execution(
 
 #[cfg(test)]
 mod tests {
-    use agora_crypto::{
-        derive_bip44, seed_from_mnemonic, sign_ovl_execution_bound, Bip44Path,
-    };
+    use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_ovl_execution_bound, Bip44Path};
     use agora_types::{Address, Amount, Hash, OvlExecutionTx};
 
     use super::*;
@@ -171,8 +167,7 @@ mod tests {
         sign_ovl_execution_bound(&mut tx, &alice, &auth.chain_id, &auth.genesis).unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
-        let receipt =
-            apply_ovl_execution(&store, &tx, &auth, &mut batch, &mut journal).unwrap();
+        let receipt = apply_ovl_execution(&store, &tx, &auth, &mut batch, &mut journal).unwrap();
         store.write_batch(batch).unwrap();
 
         assert_eq!(receipt.gas_used, OVL_INTRINSIC_GAS);
