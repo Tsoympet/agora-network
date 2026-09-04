@@ -1,8 +1,13 @@
-# Public testnet operations
+# Historical v2 public testnet operations
 
-Agora **testnet** is RandomX-only (`ChainParams::testnet`). Genesis Block 0 stays
+These instructions describe the frozen v2 TLT testnet, not the UNFROZEN
+Trident v3 draft. Agora **testnet** is RandomX-only (`ChainParams::testnet`). Genesis Block 0 stays
 easy (`bits: 0`, hash `afe59232…`) so the frozen root is unchanged; **post-genesis**
 templates floor at `daa_min_level = 8` leading-zero bits.
+
+Offline v3 draft/freeze-readiness commands are documented in
+[`../genesis/README.md`](../genesis/README.md). They cannot boot Trident, and
+their existence does not make Trident Public testnet ready.
 
 ## Quick start (Docker)
 

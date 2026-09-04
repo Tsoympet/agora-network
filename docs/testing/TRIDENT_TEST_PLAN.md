@@ -28,6 +28,28 @@ Fee-paying duplicate/conflicting siblings; exact duplicates; invalid missing inp
 
 Crash during block / finality / stake / treasury / grant milestone commit; restart recovery; snapshot export/import; migration repeatability; supply invariant after restart.
 
+## Genesis freeze-readiness (offline)
+
+The v3 verifier is **Scaffold** tooling. It validates a draft without blessing
+it and separately provides a fail-closed freeze-readiness gate:
+
+```bash
+cargo run -p agora-node -- genesis trident verify \
+  --file docs/genesis/trident.testnet.genesis.draft.json \
+  --mode draft
+
+! cargo run -p agora-node -- genesis trident verify \
+  --file docs/genesis/trident.testnet.genesis.draft.json \
+  --mode freeze-ready
+```
+
+The second command is expected to fail while the checked-in artifact contains
+human-owned `UNFROZEN`, zero, provisional, allocation, and validator-set
+placeholders. CI must retain both outcomes. A future ceremony candidate may
+drop the `!` only after its recorded hashes and fingerprint recompute exactly.
+This gate does not load v3 into a node and does not establish Public testnet
+readiness.
+
 ## Integration
 
 Miner proposes; OVL+DRC attest; checkpoint finalizes; wallet sends three assets; OVL gas spend; DRC merchant payment; governance after timelock; grant milestone payment; multi-node convergence.
