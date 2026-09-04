@@ -18,3 +18,7 @@ Completion may create Passport attestations and may distribute OVL or DRC reward
 ## Auditable on-chain (or cryptographically logged)
 
 Proposal creation, votes, grant approvals, treasury payments, milestone acceptance — even if discussion is off-chain.
+
+The canonical scaffold validates ordered milestone evidence and Mission
+lifecycle transitions and commits records in the community root. These records
+do not move treasury funds until signed consensus disbursement is implemented.

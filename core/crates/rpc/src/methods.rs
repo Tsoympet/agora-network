@@ -29,6 +29,7 @@ pub enum RpcMethod {
     GetValidator,
     GetRewardPool,
     GetProtocolTreasuries,
+    GetCommunityRegistry,
     SubmitStakeTx,
     // Civic governance + community (EOS forum / Ecclesia ballot)
     GetConstitution,
@@ -75,6 +76,7 @@ impl RpcMethod {
             Self::GetValidator => "agora_getValidator",
             Self::GetRewardPool => "agora_getRewardPool",
             Self::GetProtocolTreasuries => "agora_getProtocolTreasuries",
+            Self::GetCommunityRegistry => "agora_getCommunityRegistry",
             Self::SubmitStakeTx => "agora_submitStakeTx",
             Self::GetConstitution => "agora_getConstitution",
             Self::GetGovernance => "agora_getGovernance",
@@ -120,6 +122,7 @@ impl RpcMethod {
             "agora_getValidator" => Some(Self::GetValidator),
             "agora_getRewardPool" => Some(Self::GetRewardPool),
             "agora_getProtocolTreasuries" => Some(Self::GetProtocolTreasuries),
+            "agora_getCommunityRegistry" => Some(Self::GetCommunityRegistry),
             "agora_submitStakeTx" => Some(Self::SubmitStakeTx),
             "agora_getConstitution" => Some(Self::GetConstitution),
             "agora_getGovernance" => Some(Self::GetGovernance),

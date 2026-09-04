@@ -15,7 +15,10 @@ use agora_p2p::{
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
     apply_account_transfer, apply_drc_payment, apply_ovl_execution, apply_signed_stake_tx,
-    build_snapshot, governance_treasury_root, load_canonical_governance_policy, load_epoch,
+    build_snapshot, canonical_community_root, governance_treasury_root,
+    list_grants as list_canonical_grants, list_hubs as list_canonical_hubs,
+    list_missions as list_canonical_missions, list_passport_attestations,
+    load_canonical_community_summary, load_canonical_governance_policy, load_epoch,
     load_protocol_treasuries, load_reward_pool, load_validator, lookup_tx_location, meta_keys,
     outpoint_key, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, StakingParams,
     StateStore, TxAuthContext, WriteBatch,
@@ -776,6 +779,36 @@ impl RpcBackend for NodeBackend {
         }))
     }
 
+    fn get_community_registry(&self, limit: usize) -> Result<Value, RpcError> {
+        let summary = load_canonical_community_summary(self.store.as_ref())
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let root = canonical_community_root(self.store.as_ref())
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let hubs = list_canonical_hubs(self.store.as_ref(), limit)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let passports = list_passport_attestations(self.store.as_ref(), limit)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let grants = list_canonical_grants(self.store.as_ref(), limit)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let missions = list_canonical_missions(self.store.as_ref(), limit)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "maturity": "Scaffold",
+            "consensus_mutations_active": false,
+            "root": root.to_hex(),
+            "counts": {
+                "hubs": summary.hub_count,
+                "passport_attestations": summary.passport_count,
+                "grants": summary.grant_count,
+                "missions": summary.mission_count,
+            },
+            "hubs": hubs,
+            "passport_attestations": passports,
+            "grants": grants,
+            "missions": missions,
+        }))
+    }
+
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError> {
         let tx: SignedStakeTx =
             serde_json::from_value(stake_tx).map_err(|e| RpcError::InvalidParams(e.to_string()))?;
@@ -1029,6 +1062,42 @@ mod tests {
         assert_eq!(treasuries[1]["asset"], "OVL");
         assert_eq!(treasuries[2]["asset"], "DRC");
         assert!(treasuries.iter().all(|t| t["balance"] == 0));
+    }
+
+    #[test]
+    fn community_registry_rpc_is_canonical_read_only_state() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            Arc::new(Mutex::new(Mempool::new(8))),
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+
+        let value = backend.get_community_registry(10).unwrap();
+        assert_eq!(value["maturity"], "Scaffold");
+        assert_eq!(value["consensus_mutations_active"], false);
+        assert_eq!(value["counts"]["hubs"], 0);
+        assert_eq!(value["counts"]["passport_attestations"], 0);
+        assert_eq!(value["counts"]["grants"], 0);
+        assert_eq!(value["counts"]["missions"], 0);
+        assert!(value["root"].as_str().is_some_and(|root| root.len() == 64));
     }
 
     #[test]

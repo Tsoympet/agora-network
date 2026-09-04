@@ -97,6 +97,7 @@ effective = isqrt(capped)
 | Node Meta CF persistence (`meta/governance`) | yes — **local**, not consensus-derived |
 | Canonical authorization policy commitment | yes — genesis/state-root scaffold |
 | TLT/OVL/DRC protocol treasury identities + zero balances | yes — canonical read-only scaffold |
+| Hub/Passport/Grant/Mission schemas + bounded root | yes — canonical read-only scaffold |
 | JSON-RPC civic methods | yes — **trusted caller** prototype |
 | Explorer ballot panel + desktop vote UI | yes (drives local RPC) |
 | Signed votes / locked deposits / block replication | **not yet** |

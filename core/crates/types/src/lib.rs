@@ -11,6 +11,7 @@ mod execution;
 mod finality;
 mod hash;
 mod hrp;
+mod passport;
 mod payment;
 mod stake;
 mod transaction;
@@ -31,6 +32,7 @@ pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
 };
+pub use passport::{PassportAttestation, PassportCategory, PASSPORT_ATTESTATION_DOMAIN};
 pub use payment::{DrcPaymentOutboxEvent, DrcPaymentTx, DRC_PAYMENT_SIGNING_DOMAIN};
 pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
@@ -147,5 +149,7 @@ mod ts_export {
         CheckpointBody::export_all().expect("export CheckpointBody");
         CheckpointAttestation::export_all().expect("export CheckpointAttestation");
         FinalityCertificate::export_all().expect("export FinalityCertificate");
+        PassportCategory::export_all().expect("export PassportCategory");
+        PassportAttestation::export_all().expect("export PassportAttestation");
     }
 }

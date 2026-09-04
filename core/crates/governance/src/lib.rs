@@ -15,6 +15,7 @@
 mod authorization;
 mod chamber;
 mod community;
+mod community_protocol;
 mod constitution;
 mod engine;
 mod error;
@@ -35,6 +36,10 @@ pub use authorization::{
 };
 pub use chamber::VotingChamber;
 pub use community::{CommunityBoard, ConstitutionAck, ForumTopic, TopicCategory};
+pub use community_protocol::{
+    CommunityProtocolError, GrantKind, GrantMilestone, GrantRecord, GrantStatus,
+    HubAccreditationStatus, HubKind, HubRecord, MilestoneStatus, MissionRecord, MissionStatus,
+};
 pub use constitution::{
     constitution_v1_hash_hex, hash_constitution_body, EnactedConstitution, CONSTITUTION_V1_BODY,
     CONSTITUTION_V1_ID,
