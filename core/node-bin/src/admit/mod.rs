@@ -436,16 +436,17 @@ impl ChainState {
         payout: Address,
         transfers: &[Transaction],
     ) -> Result<Block, AdmitError> {
-        self.block_template_lanes(payout, transfers, &[], &[])
+        self.block_template_lanes(payout, transfers, &[], &[], &[])
     }
 
-    /// Build a mining template with all three Trident body lanes.
+    /// Build a mining template with Trident body lanes.
     pub fn block_template_lanes(
         &self,
         payout: Address,
         transfers: &[Transaction],
         account_transfers: &[agora_types::AccountTransfer],
         stake_ops: &[agora_types::SignedStakeTx],
+        ovl_executions: &[agora_types::OvlExecutionTx],
     ) -> Result<Block, AdmitError> {
         let parents = self.select_template_parents()?;
         let timestamp_ms = self.template_timestamp_ms(&parents)?;
@@ -490,6 +491,7 @@ impl ChainState {
             transactions,
             account_transfers: account_transfers.to_vec(),
             stake_ops: stake_ops.to_vec(),
+            ovl_executions: ovl_executions.to_vec(),
         };
         block.header.tx_root = block.compute_body_root();
         Ok(block)

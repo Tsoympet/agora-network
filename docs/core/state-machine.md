@@ -83,7 +83,7 @@ Meta CF keys (additive; `SCHEMA_VERSION = 4`):
 - `finality/cert|idx|last_att/…`, `finality/tip_blue_score` — certificates, signer index, tip
 - `compose_trident_state_root` — canonical multi-asset commitment for checkpoint bodies
 
-Node admit enforces reorg-beyond-finality; RPC/P2P admit attestations; account and stake operations enter the mempool, gossip, templates, and Virtual acceptance lanes. See [`finality.md`](finality.md).
+Node admit enforces reorg-beyond-finality; RPC/P2P admit attestations; account, stake, and signed OVL execution operations enter mempool, gossip, templates, and Virtual acceptance lanes. The initial execution boundary activates intrinsic-gas EOA calls only. See [`ovl-execution.md`](ovl-execution.md) and [`finality.md`](finality.md).
 
 ## Storage backends
 

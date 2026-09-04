@@ -14,13 +14,14 @@ use agora_p2p::{
 };
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
-    apply_account_transfer, apply_signed_stake_tx, build_snapshot, load_epoch, load_reward_pool,
-    load_validator, lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth,
-    AccountJournal, ColumnFamily, StakingParams, StateStore, TxAuthContext, WriteBatch,
+    apply_account_transfer, apply_ovl_execution, apply_signed_stake_tx, build_snapshot, load_epoch,
+    load_reward_pool, load_validator, lookup_tx_location, meta_keys, outpoint_key,
+    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, StakingParams, StateStore,
+    TxAuthContext, WriteBatch,
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, Hash, NativeAssetId, OutPoint,
-    SignedStakeTx, Transaction, TxOut,
+    OvlExecutionTx, SignedStakeTx, Transaction, TxOut,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -122,6 +123,29 @@ pub(crate) fn admit_stake_tx(
     apply_signed_stake_tx(store, &mut batch, &tx, auth, &params)
         .map_err(|e| RpcError::Rejected(format!("stake: {e}")))?;
     pool.admit_stake(tx)
+        .map_err(|e| RpcError::Rejected(e.to_string()))
+}
+
+/// Validate and reserve a signed OVL execution envelope.
+pub(crate) fn admit_ovl_execution(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: OvlExecutionTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(NativeAssetId::OVL, &tx.from) {
+        return Err(RpcError::Rejected(
+            "OVL account already has a pending nonce".into(),
+        ));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_ovl_execution(store, &tx, auth, &mut batch, &mut journal)
+        .map_err(|e| RpcError::Rejected(format!("OVL execution: {e}")))?;
+    pool.admit_execution(tx)
         .map_err(|e| RpcError::Rejected(e.to_string()))
 }
 
@@ -424,6 +448,16 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_ovl_execution(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::OvlExecution(tx))
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+        }
+        Ok(id)
+    }
+
     fn get_balance(&self, address: &Address) -> Amount {
         self.utxo_balance(address).unwrap_or(Amount::ZERO)
     }
@@ -472,7 +506,7 @@ impl RpcBackend for NodeBackend {
     }
 
     fn get_block_template(&self) -> Result<Block, RpcError> {
-        let (transfers, account_transfers, stake_ops) = {
+        let (transfers, account_transfers, stake_ops, ovl_executions) = {
             let pool = self
                 .mempool
                 .lock()
@@ -481,6 +515,7 @@ impl RpcBackend for NodeBackend {
                 pool.select_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_account_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_stake_ops(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_ovl_executions(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         self.chain
@@ -491,6 +526,7 @@ impl RpcBackend for NodeBackend {
                 &transfers,
                 &account_transfers,
                 &stake_ops,
+                &ovl_executions,
             )
             .map_err(|e| RpcError::Internal(e.to_string()))
     }
@@ -873,8 +909,8 @@ mod tests {
     use crate::admit::ChainState;
     use agora_consensus::{PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
     use agora_crypto::{
-        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound, sign_transaction_bound,
-        Bip44Path,
+        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound, sign_ovl_execution_bound,
+        sign_transaction_bound, Bip44Path,
     };
     use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
@@ -942,6 +978,63 @@ mod tests {
             template.header.tx_root,
             Block::compute_tx_root(&template.transactions)
         );
+    }
+
+    #[test]
+    fn ovl_execution_enters_template_lane() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let bob = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::OVL,
+            &alice.address(),
+            Amount::from_base_units(50_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            mempool,
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+        let mut tx = OvlExecutionTx::unsigned(
+            alice.address(),
+            bob.address(),
+            Amount::from_base_units(1_000),
+            agora_state_machine::OVL_INTRINSIC_GAS,
+            1,
+            0,
+            vec![],
+        );
+        sign_ovl_execution_bound(&mut tx, &alice, "agora-dev", &genesis).unwrap();
+
+        let id = backend.submit_ovl_execution(tx.clone()).unwrap();
+        assert_eq!(id, tx.tx_id());
+        let template = backend.get_block_template().unwrap();
+        assert_eq!(template.ovl_executions, vec![tx]);
+        assert_eq!(template.header.tx_root, template.compute_body_root());
     }
 
     #[test]

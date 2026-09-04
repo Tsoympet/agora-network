@@ -25,8 +25,9 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | `Address` | 20-byte account payload (secp256k1-derived); display as Bech32m `agora1…` / `agoratest1…` / `agoradev1…` |
 | `OutPoint` / `TxIn` / `TxOut` | UTXO references and outputs |
 | `Transaction` | Signed transfer (`public_key` + `signature`) |
+| `OvlExecutionTx` | Signed, chain-bound OVL value/execution envelope with gas limits |
 | `TransactionBody` | Signable subset (no auth material) |
-| `BlockHeader` / `Block` | Multi-parent DAG header + txs |
+| `BlockHeader` / `Block` | Multi-parent DAG header + UTXO/account/stake/OVL execution lanes |
 
 See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../assets/NATIVE_ASSETS.md`](../assets/NATIVE_ASSETS.md).
 

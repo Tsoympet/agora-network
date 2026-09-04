@@ -23,6 +23,8 @@ pub struct BlockAcceptanceRecord {
     pub account_statuses: Vec<TransactionAcceptance>,
     /// Aligned to `block.stake_ops`.
     pub stake_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.ovl_executions`.
+    pub execution_statuses: Vec<TransactionAcceptance>,
 }
 
 #[derive(Debug, Clone, BorshDeserialize)]
@@ -31,10 +33,27 @@ struct LegacyBlockAcceptanceRecord {
     statuses: Vec<TransactionAcceptance>,
 }
 
+#[derive(Debug, Clone, BorshDeserialize)]
+struct MultiLaneV2AcceptanceRecord {
+    block_hash: Hash,
+    statuses: Vec<TransactionAcceptance>,
+    account_statuses: Vec<TransactionAcceptance>,
+    stake_statuses: Vec<TransactionAcceptance>,
+}
+
 impl BlockAcceptanceRecord {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(rec) = Self::try_from_slice(bytes) {
             return Ok(rec);
+        }
+        if let Ok(v2) = MultiLaneV2AcceptanceRecord::try_from_slice(bytes) {
+            return Ok(Self {
+                block_hash: v2.block_hash,
+                statuses: v2.statuses,
+                account_statuses: v2.account_statuses,
+                stake_statuses: v2.stake_statuses,
+                execution_statuses: Vec::new(),
+            });
         }
         let legacy = LegacyBlockAcceptanceRecord::try_from_slice(bytes)
             .map_err(|e| StateError::Storage(e.to_string()))?;
@@ -43,6 +62,7 @@ impl BlockAcceptanceRecord {
             statuses: legacy.statuses,
             account_statuses: Vec::new(),
             stake_statuses: Vec::new(),
+            execution_statuses: Vec::new(),
         })
     }
 
@@ -59,6 +79,11 @@ impl BlockAcceptanceRecord {
         self.statuses.iter().filter(|s| s.is_accepted()).count()
             + self.account_statuses.iter().filter(|s| s.is_accepted()).count()
             + self.stake_statuses.iter().filter(|s| s.is_accepted()).count()
+            + self
+                .execution_statuses
+                .iter()
+                .filter(|s| s.is_accepted())
+                .count()
     }
 }
 
@@ -131,6 +156,7 @@ mod tests {
             ],
             account_statuses: vec![TransactionAcceptance::Accepted],
             stake_statuses: vec![],
+            execution_statuses: vec![],
         };
         store_acceptance(&store, &rec.block_hash, &rec).unwrap();
         let loaded = load_acceptance(&store, &rec.block_hash).unwrap().unwrap();

@@ -54,7 +54,7 @@ Never from TLT PoW mint.
 
 - Versioned compact short IDs for account + stake lanes (current non-empty lane blocks use full-body gossip)  
 - Ceremony-frozen reserve economics (replace working defaults)  
-- Full OVL execution / DRC payment modules beyond account-transfer fee share  
+- Deterministic OVL contract VM/storage (signed intrinsic-gas EOA boundary is active) and full DRC payment module  
 - Gov/treasury roots in state root (Phase 5)  
 - Validator signing daemon  
 

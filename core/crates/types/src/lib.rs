@@ -7,6 +7,7 @@ mod account;
 mod amount;
 mod asset;
 mod block;
+mod execution;
 mod finality;
 mod hash;
 mod hrp;
@@ -18,6 +19,7 @@ pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
 pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{Block, BlockHeader};
+pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
     CheckpointAttestation, CheckpointBody, CheckpointState, FinalityCertificate,
     CHECKPOINT_ATTESTATION_DOMAIN,
@@ -101,6 +103,7 @@ mod tests {
             transactions: vec![tx],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -130,6 +133,7 @@ mod ts_export {
         TransactionAcceptance::export_all().expect("export TransactionAcceptance");
         AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
         AccountTransfer::export_all().expect("export AccountTransfer");
+        OvlExecutionTx::export_all().expect("export OvlExecutionTx");
         CheckpointState::export_all().expect("export CheckpointState");
         CheckpointBody::export_all().expect("export CheckpointBody");
         CheckpointAttestation::export_all().expect("export CheckpointAttestation");

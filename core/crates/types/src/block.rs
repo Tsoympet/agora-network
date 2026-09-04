@@ -2,7 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{AccountTransfer, Hash, SignedStakeTx, Transaction};
+use crate::{AccountTransfer, Hash, OvlExecutionTx, SignedStakeTx, Transaction};
 
 /// Block header for Agora's BlockDAG tips.
 ///
@@ -26,7 +26,7 @@ impl BlockHeader {
     }
 }
 
-/// Full block: header + multi-lane body (TLT UTXO + OVL/DRC account + stake).
+/// Full block: header + multi-lane body (TLT UTXO + OVL/DRC account/stake + OVL execution).
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
@@ -41,6 +41,9 @@ pub struct Block {
     /// OVL/DRC staking ops (Trident).
     #[serde(default)]
     pub stake_ops: Vec<SignedStakeTx>,
+    /// Signed, gas-metered OVL execution envelopes.
+    #[serde(default)]
+    pub ovl_executions: Vec<OvlExecutionTx>,
 }
 
 impl Block {
@@ -51,6 +54,7 @@ impl Block {
             transactions,
             account_transfers: Vec::new(),
             stake_ops: Vec::new(),
+            ovl_executions: Vec::new(),
         }
     }
 
@@ -85,9 +89,25 @@ impl Block {
 
     /// Body commitment for `header.tx_root`.
     ///
-    /// UTXO-only blocks keep the legacy merkle root. When account/stake lanes are
-    /// non-empty, commit a domain-separated multi-lane root.
+    /// UTXO-only blocks keep the legacy merkle root; account/stake-only bodies
+    /// retain v2; OVL execution bodies use the v3 domain.
     pub fn compute_body_root(&self) -> Hash {
+        if !self.ovl_executions.is_empty() {
+            let execution_ids: Vec<Hash> = self
+                .ovl_executions
+                .iter()
+                .map(OvlExecutionTx::tx_id)
+                .collect();
+            return Hash::hash_borsh(&(
+                b"agora-block-body-v3",
+                self.compute_body_root_v2(),
+                execution_ids,
+            ));
+        }
+        self.compute_body_root_v2()
+    }
+
+    fn compute_body_root_v2(&self) -> Hash {
         if self.account_transfers.is_empty() && self.stake_ops.is_empty() {
             return Self::compute_tx_root(&self.transactions);
         }
@@ -96,7 +116,11 @@ impl Block {
             .iter()
             .map(AccountTransfer::transfer_id)
             .collect();
-        let stake_ids: Vec<Hash> = self.stake_ops.iter().map(SignedStakeTx::stake_tx_id).collect();
+        let stake_ids: Vec<Hash> = self
+            .stake_ops
+            .iter()
+            .map(SignedStakeTx::stake_tx_id)
+            .collect();
         Hash::hash_borsh(&(
             b"agora-block-body-v2",
             Self::compute_tx_root(&self.transactions),
