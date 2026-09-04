@@ -268,11 +268,11 @@ mod tests {
 
     #[test]
     fn genesis_ignites_working_staking_reserves() {
-        use agora_types::NativeAssetId;
         use crate::{
             load_schema_version, load_staking_reserve_remaining, DRC_WORKING_RESERVE_BASE,
             OVL_WORKING_RESERVE_BASE, SCHEMA_VERSION,
         };
+        use agora_types::NativeAssetId;
 
         let store = StateStore::open_in_memory();
         GenesisBuilder::default().ignite(&store).unwrap();

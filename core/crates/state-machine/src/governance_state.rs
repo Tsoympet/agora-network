@@ -5,8 +5,8 @@
 //! intentionally stored under a different key and excluded from this root.
 
 use agora_governance::{
-    authorization_for_class, hash_constitution_body, ProposalAuthorization, ProposalClass,
-    trident_policy_catalog, CONSTITUTION_V1_BODY, CONSTITUTION_V1_ID,
+    authorization_for_class, hash_constitution_body, trident_policy_catalog, ProposalAuthorization,
+    ProposalClass, CONSTITUTION_V1_BODY, CONSTITUTION_V1_ID,
 };
 use agora_types::{Amount, Hash, TreasuryBalance, TreasuryId};
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -58,21 +58,14 @@ fn treasury_key(treasury: TreasuryId) -> Vec<u8> {
     key
 }
 
-fn put_treasury_into(
-    batch: &mut WriteBatch,
-    treasury: &TreasuryBalance,
-) -> Result<(), StateError> {
+fn put_treasury_into(batch: &mut WriteBatch, treasury: &TreasuryBalance) -> Result<(), StateError> {
     if treasury.treasury.asset() != treasury.asset {
         return Err(StateError::InvalidTx(
             "protocol treasury asset mismatch".into(),
         ));
     }
     let bytes = borsh::to_vec(treasury).map_err(|e| StateError::Storage(e.to_string()))?;
-    batch.put_cf(
-        ColumnFamily::Meta,
-        &treasury_key(treasury.treasury),
-        &bytes,
-    );
+    batch.put_cf(ColumnFamily::Meta, &treasury_key(treasury.treasury), &bytes);
     Ok(())
 }
 
@@ -108,8 +101,8 @@ pub fn load_protocol_treasury(
         return TreasuryBalance::new(treasury, treasury.asset(), Amount::ZERO)
             .map_err(StateError::InvalidTx);
     };
-    let balance = TreasuryBalance::try_from_slice(&bytes)
-        .map_err(|e| StateError::Storage(e.to_string()))?;
+    let balance =
+        TreasuryBalance::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))?;
     if balance.treasury != treasury || balance.asset != treasury.asset() {
         return Err(StateError::Storage(
             "corrupt protocol treasury asset identity".into(),
@@ -118,9 +111,7 @@ pub fn load_protocol_treasury(
     Ok(balance)
 }
 
-pub fn load_protocol_treasuries(
-    store: &StateStore,
-) -> Result<Vec<TreasuryBalance>, StateError> {
+pub fn load_protocol_treasuries(store: &StateStore) -> Result<Vec<TreasuryBalance>, StateError> {
     TreasuryId::ALL
         .iter()
         .copied()

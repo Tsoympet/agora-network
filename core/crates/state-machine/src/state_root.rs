@@ -54,7 +54,11 @@ pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
 pub fn acceptance_root(store: &StateStore, tip_block: &Hash) -> Result<Hash, StateError> {
     match load_acceptance(store, tip_block)? {
         Some(rec) => Ok(Hash::hash_borsh(&(b"acceptance-v2", &rec))),
-        None => Ok(Hash::hash_borsh(&(b"acceptance-v2", tip_block, &[] as &[u8]))),
+        None => Ok(Hash::hash_borsh(&(
+            b"acceptance-v2",
+            tip_block,
+            &[] as &[u8],
+        ))),
     }
 }
 

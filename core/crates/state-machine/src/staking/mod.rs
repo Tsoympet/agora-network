@@ -59,9 +59,7 @@ impl StakingParams {
 
     fn validate_asset(&self) -> Result<(), StateError> {
         if !matches!(self.asset, NativeAssetId::OVL | NativeAssetId::DRC) {
-            return Err(StateError::InvalidTx(
-                "staking only for OVL or DRC".into(),
-            ));
+            return Err(StateError::InvalidTx("staking only for OVL or DRC".into()));
         }
         Ok(())
     }
@@ -262,7 +260,9 @@ pub fn init_staking_reserve_into(
     reserve_base_units: u64,
 ) -> Result<(), StateError> {
     if !matches!(asset, NativeAssetId::OVL | NativeAssetId::DRC) {
-        return Err(StateError::InvalidTx("staking reserve only for OVL/DRC".into()));
+        return Err(StateError::InvalidTx(
+            "staking reserve only for OVL/DRC".into(),
+        ));
     }
     put_staking_reserve_remaining_into(batch, asset, reserve_base_units);
     Ok(())
@@ -281,7 +281,9 @@ pub fn drip_staking_reserve(
         return Ok(0);
     }
     if !matches!(asset, NativeAssetId::OVL | NativeAssetId::DRC) {
-        return Err(StateError::InvalidTx("cannot drip TLT staking reserve".into()));
+        return Err(StateError::InvalidTx(
+            "cannot drip TLT staking reserve".into(),
+        ));
     }
     let remaining = load_staking_reserve_remaining(store, asset)?;
     let drip = amount.min(remaining);
@@ -364,11 +366,7 @@ pub fn load_epoch(store: &StateStore, asset: NativeAssetId) -> Result<u64, State
 }
 
 pub fn put_epoch_into(batch: &mut WriteBatch, asset: NativeAssetId, epoch: u64) {
-    batch.put_cf(
-        ColumnFamily::Meta,
-        &epoch_key(asset),
-        &epoch.to_le_bytes(),
-    );
+    batch.put_cf(ColumnFamily::Meta, &epoch_key(asset), &epoch.to_le_bytes());
 }
 
 pub fn load_validator(
@@ -407,7 +405,9 @@ fn debit_liquid(
 ) -> Result<(), StateError> {
     let mut acct = load_account(store, asset, owner)?;
     if acct.balance < amount {
-        return Err(StateError::InvalidTx("insufficient liquid stake funds".into()));
+        return Err(StateError::InvalidTx(
+            "insufficient liquid stake funds".into(),
+        ));
     }
     acct.balance -= amount;
     put_account_into(batch, asset, owner, &acct)
@@ -448,7 +448,9 @@ pub fn bond_validator(
         return Err(StateError::InvalidTx("commission too high".into()));
     }
     if consensus_pubkey.len() != 33 {
-        return Err(StateError::InvalidTx("consensus pubkey must be 33 bytes".into()));
+        return Err(StateError::InvalidTx(
+            "consensus pubkey must be 33 bytes".into(),
+        ));
     }
     if let Some(existing) = load_validator(store, params.asset, &operator)? {
         if matches!(existing.status, ValidatorStatus::Tombstoned) {
@@ -519,13 +521,12 @@ pub fn delegate(
         .ok_or_else(|| StateError::InvalidTx("delegated overflow".into()))?;
     put_validator_into(batch, params.asset, &val)?;
 
-    let mut del = load_delegation(store, params.asset, &delegator, &validator)?.unwrap_or(
-        DelegationRecord {
+    let mut del =
+        load_delegation(store, params.asset, &delegator, &validator)?.unwrap_or(DelegationRecord {
             delegator,
             validator,
             amount: 0,
-        },
-    );
+        });
     del.amount = del
         .amount
         .checked_add(amount)
@@ -539,8 +540,10 @@ fn load_delegation(
     delegator: &Address,
     validator: &Address,
 ) -> Result<Option<DelegationRecord>, StateError> {
-    let Some(bytes) =
-        store.get_cf(ColumnFamily::Meta, &delegation_key(asset, delegator, validator))?
+    let Some(bytes) = store.get_cf(
+        ColumnFamily::Meta,
+        &delegation_key(asset, delegator, validator),
+    )?
     else {
         return Ok(None);
     };
@@ -722,7 +725,9 @@ pub fn apply_signed_stake_tx(
     match tx.kind {
         StakeOpKind::Bond => {
             if tx.actor != tx.validator {
-                return Err(StateError::InvalidTx("bond actor must equal validator".into()));
+                return Err(StateError::InvalidTx(
+                    "bond actor must equal validator".into(),
+                ));
             }
             bond_validator(
                 store,
@@ -799,8 +804,8 @@ pub fn distribute_reward_pool_amount(
         if *power == 0 {
             continue;
         }
-        let share = ((u128::from(pool) * u128::from(*power)) / u128::from(snap.total_active_stake))
-            as u64;
+        let share =
+            ((u128::from(pool) * u128::from(*power)) / u128::from(snap.total_active_stake)) as u64;
         if share == 0 {
             continue;
         }
@@ -810,8 +815,8 @@ pub fn distribute_reward_pool_amount(
         let commission = ((u128::from(share) * u128::from(val.commission_bps)) / 10_000) as u64;
         let after_commission = share.saturating_sub(commission);
         let bonded = val.self_bond.saturating_add(val.delegated).max(1);
-        let op_stake_share =
-            ((u128::from(after_commission) * u128::from(val.self_bond)) / u128::from(bonded)) as u64;
+        let op_stake_share = ((u128::from(after_commission) * u128::from(val.self_bond))
+            / u128::from(bonded)) as u64;
         let mut to_operator = commission.saturating_add(op_stake_share);
         let mut del_paid = 0u64;
         let mut del_credits: Vec<(Address, u64)> = Vec::new();
@@ -919,10 +924,7 @@ pub fn apply_evidence(
 }
 
 /// Sum voting power of validators that signed (by address) within a snapshot.
-pub fn signed_stake_for(
-    snapshot: &ValidatorSetSnapshot,
-    signers: &[Address],
-) -> u64 {
+pub fn signed_stake_for(snapshot: &ValidatorSetSnapshot, signers: &[Address]) -> u64 {
     let mut total = 0u64;
     for s in signers {
         total = total.saturating_add(snapshot.power_of(s));
@@ -938,8 +940,7 @@ pub fn validator_key_matches(
     let Some(val) = load_validator(store, att.set, &att.validator)? else {
         return Ok(false);
     };
-    Ok(val.consensus_pubkey == att.public_key
-        && matches!(val.status, ValidatorStatus::Bonded))
+    Ok(val.consensus_pubkey == att.public_key && matches!(val.status, ValidatorStatus::Bonded))
 }
 
 #[cfg(test)]

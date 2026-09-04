@@ -11,15 +11,7 @@ pub const ACCOUNT_TX_SIGNING_DOMAIN: &[u8] = b"agora-trident-account-tx-v2";
 
 /// Signed account-to-account transfer for OVL or DRC.
 #[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    Debug,
-    BorshSerialize,
-    BorshDeserialize,
-    Serialize,
-    Deserialize,
-    TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct AccountTransfer {

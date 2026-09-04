@@ -157,8 +157,10 @@ pub fn load_last_attestation(
     validator: &Address,
     epoch: u64,
 ) -> Result<Option<CheckpointAttestation>, StateError> {
-    let Some(bytes) =
-        store.get_cf(ColumnFamily::Meta, &last_attestation_key(set, validator, epoch))?
+    let Some(bytes) = store.get_cf(
+        ColumnFamily::Meta,
+        &last_attestation_key(set, validator, epoch),
+    )?
     else {
         return Ok(None);
     };

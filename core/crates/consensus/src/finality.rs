@@ -116,7 +116,7 @@ pub fn assert_reorg_allowed(
 
 #[cfg(test)]
 mod tests {
-    use agora_types::{Hash, CheckpointBody};
+    use agora_types::{CheckpointBody, Hash};
 
     use super::*;
 

@@ -108,9 +108,7 @@ pub(crate) fn apply_account_transfer_checked(
     journal: &mut AccountJournal,
 ) -> Result<(), StateError> {
     if tx.asset == NativeAssetId::TLT {
-        return Err(StateError::InvalidTx(
-            "cannot account-transfer TLT".into(),
-        ));
+        return Err(StateError::InvalidTx("cannot account-transfer TLT".into()));
     }
     if !matches!(tx.asset, NativeAssetId::OVL | NativeAssetId::DRC) {
         return Err(StateError::InvalidTx("unknown native asset".into()));
@@ -174,7 +172,10 @@ pub(crate) fn apply_account_transfer_checked(
     Ok(())
 }
 
-pub fn revert_account_journal_into(batch: &mut WriteBatch, journal: &AccountJournal) -> Result<(), StateError> {
+pub fn revert_account_journal_into(
+    batch: &mut WriteBatch,
+    journal: &AccountJournal,
+) -> Result<(), StateError> {
     // Restore in reverse so last-writer wins for duplicate addresses.
     for (asset, address, state) in journal.before.iter().rev() {
         put_account_into(batch, *asset, address, state)?;
@@ -220,7 +221,7 @@ pub fn account_root(store: &StateStore, asset: NativeAssetId) -> Result<Hash, St
         }
         Ok(())
     })?;
-    entries.sort_by(|a, b| a.0.0.cmp(&b.0.0));
+    entries.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
     Ok(Hash::hash_borsh(&(asset.wire_byte(), &entries)))
 }
 
@@ -309,7 +310,9 @@ mod tests {
             Amount::from_base_units(1),
             0,
         );
-        assert!(apply_account_transfer_checked(&store, &tx, None, &mut batch, &mut journal).is_err());
+        assert!(
+            apply_account_transfer_checked(&store, &tx, None, &mut batch, &mut journal).is_err()
+        );
     }
 
     #[test]

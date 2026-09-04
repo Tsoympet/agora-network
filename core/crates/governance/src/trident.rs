@@ -18,9 +18,7 @@ pub enum TridentChamber {
     SecurityCouncil,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub enum TridentProposalClass {
     TechnicalExecutionUpgrade,
     PaymentModuleUpgrade,
@@ -42,9 +40,7 @@ pub enum TimelockClass {
     EmergencyExpiry,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct TridentApprovalMatrix {
     pub required_chambers: Vec<TridentChamber>,
     pub post_action_ratification: Vec<TridentChamber>,
@@ -70,9 +66,7 @@ pub fn trident_approval_matrix(class: &TridentProposalClass) -> TridentApprovalM
     use TridentProposalClass::*;
 
     match class {
-        TechnicalExecutionUpgrade => {
-            standard(vec![OvlTechnical, Ecclesia, MinerSignaling])
-        }
+        TechnicalExecutionUpgrade => standard(vec![OvlTechnical, Ecclesia, MinerSignaling]),
         PaymentModuleUpgrade => standard(vec![DrcCommunity, Ecclesia]),
         ConsensusUpgrade => TridentApprovalMatrix {
             required_chambers: vec![OvlTechnical, DrcCommunity, MinerSignaling, Ecclesia],
@@ -106,12 +100,7 @@ pub fn trident_approval_matrix(class: &TridentProposalClass) -> TridentApprovalM
         },
         EmergencySecurityAction => TridentApprovalMatrix {
             required_chambers: vec![SecurityCouncil],
-            post_action_ratification: vec![
-                OvlTechnical,
-                DrcCommunity,
-                Ecclesia,
-                MinerSignaling,
-            ],
+            post_action_ratification: vec![OvlTechnical, DrcCommunity, Ecclesia, MinerSignaling],
             timelock: TimelockClass::EmergencyExpiry,
             automatic_expiry: true,
             ..standard(Vec::new())
@@ -172,8 +161,7 @@ mod tests {
             vec![TridentChamber::DrcCommunity, TridentChamber::Ecclesia]
         );
 
-        let emergency =
-            trident_approval_matrix(&TridentProposalClass::EmergencySecurityAction);
+        let emergency = trident_approval_matrix(&TridentProposalClass::EmergencySecurityAction);
         assert_eq!(
             emergency.required_chambers,
             vec![TridentChamber::SecurityCouncil]
