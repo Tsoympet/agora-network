@@ -1,6 +1,6 @@
 # Trident testnet operations and security readiness
 
-**Maturity:** Scaffold.  
+**Maturity:** Scaffold.
 **Launch decision:** **NO-GO** for a public Trident testnet.
 
 This runbook defines the evidence required to change that decision. It does not
