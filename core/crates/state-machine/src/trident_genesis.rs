@@ -770,9 +770,11 @@ mod tests {
         artifact.assets.tlt.treasury_allocation = 1;
         artifact.assets.ovl.genesis_allocation = 1;
         artifact.assets.ovl.staking_reward_reserve = 1;
+        artifact.assets.ovl.emission.reserve_base_units = Some(1);
         artifact.assets.ovl.treasury_allocation = 1;
         artifact.assets.drc.genesis_allocation = 1;
         artifact.assets.drc.staking_reward_reserve = 1;
+        artifact.assets.drc.emission.reserve_base_units = Some(1);
         artifact.assets.drc.treasury_allocation = 1;
         artifact.treasuries.tlt_security.allocation = 1;
         artifact.treasuries.ovl_builder.allocation = 1;
