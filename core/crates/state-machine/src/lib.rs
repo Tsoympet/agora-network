@@ -43,13 +43,13 @@ pub use network::{
     GenesisWalletPolicy, NetworkId, DEFAULT_GHOSTDAG_K, TESTNET_GENESIS_BITS,
     TESTNET_GENESIS_HASH_HEX, TESTNET_GENESIS_TIMESTAMP_MS, TESTNET_PREMINE_ADDRESS_HEX,
 };
+pub use orphans::{delete_orphan, list_orphans, load_orphan, orphan_key, store_orphan};
+pub use store::{StateStore, WriteBatch};
 pub use trident_genesis::{
     TridentFinalityPolicy, TridentGenesisArtifact, TridentValidatorGenesis,
     TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA, TRIDENT_NET_FP_DOMAIN,
     TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION, TRIDENT_TX_SIGNING_VERSION,
 };
-pub use orphans::{delete_orphan, list_orphans, load_orphan, orphan_key, store_orphan};
-pub use store::{StateStore, WriteBatch};
 pub use tx_index::{
     decode_tx_location, encode_tx_location, index_block_transactions,
     index_block_transactions_into, list_tx_inclusions, lookup_tx_location, set_primary_tx_location,

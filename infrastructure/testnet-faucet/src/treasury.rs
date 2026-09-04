@@ -100,14 +100,13 @@ async fn node_signing_identity(rpc_url: &str) -> Result<(String, Hash), String> 
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .or_else(|| {
-            value
-                .get("network")
-                .and_then(|v| v.as_str())
-                .map(|net| match net.to_ascii_lowercase().as_str() {
+            value.get("network").and_then(|v| v.as_str()).map(|net| {
+                match net.to_ascii_lowercase().as_str() {
                     "mainnet" => "agora-mainnet-1".into(),
                     "testnet" => "agora-testnet-1".into(),
                     _ => "agora-dev".into(),
-                })
+                }
+            })
         })
         .ok_or_else(|| "getNodeInfo missing chain_id/network".to_string())?;
     let genesis_hex = value
