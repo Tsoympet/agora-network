@@ -22,3 +22,5 @@ Proposal creation, votes, grant approvals, treasury payments, milestone acceptan
 The canonical scaffold validates ordered milestone evidence and Mission
 lifecycle transitions and commits records in the community root. These records
 do not move treasury funds until signed consensus disbursement is implemented.
+DRC Community grants require cleared, content-addressed COI evidence before
+canonical registration.

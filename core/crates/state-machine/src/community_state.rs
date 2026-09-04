@@ -5,7 +5,7 @@
 
 use agora_crypto::verify_passport_attestation_bound;
 use agora_governance::{GrantRecord, HubAccreditationStatus, HubRecord, MissionRecord};
-use agora_types::{Address, Amount, Hash, PassportAttestation};
+use agora_types::{Address, Amount, Hash, PassportAttestation, TreasuryId};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::columns::ColumnFamily;
@@ -195,6 +195,16 @@ pub fn register_hub_into(
             "active hub requires a canonical accreditation proposal",
         ));
     }
+    if hub.status == HubAccreditationStatus::Active
+        && (hub.treasury_multisig == Address::ZERO
+            || hub.election_term_epochs == 0
+            || hub.reporting_interval_epochs == 0
+            || hub.coi_disclosure_root == Hash::ZERO)
+    {
+        return Err(invalid(
+            "active hub requires multisig, terms, reporting, and COI commitment",
+        ));
+    }
 
     let key = record_key(HUB_PREFIX, &hub.id);
     ensure_absent(store, &key, "hub")?;
@@ -323,7 +333,7 @@ pub fn register_grant_into(
             "grant registration requires pristine approved state",
         ));
     }
-    let canonical = GrantRecord::new(
+    let _validated_shape = GrantRecord::new(
         grant.id,
         grant.proposal_id,
         grant.treasury,
@@ -334,10 +344,18 @@ pub fn register_grant_into(
         grant.milestones.clone(),
     )
     .map_err(|error| invalid(error.to_string()))?;
-    if &canonical != grant {
+    if grant.treasury == TreasuryId::DrcCommunity
+        && (grant.conflict_review != agora_governance::ConflictReviewStatus::Cleared
+            || grant.coi_disclosure_hash == Hash::ZERO)
+    {
         return Err(invalid(
-            "new grant must satisfy constructor invariants without released funds",
+            "DRC community grant requires cleared COI evidence",
         ));
+    }
+    if grant.treasury != TreasuryId::DrcCommunity
+        && grant.conflict_review != agora_governance::ConflictReviewStatus::NotRequired
+    {
+        return Err(invalid("non-community grant has invalid COI state"));
     }
 
     let key = record_key(GRANT_PREFIX, &grant.id);
@@ -416,6 +434,11 @@ mod tests {
             classification: "Geographic".into(),
             charter_hash: Hash([id.wrapping_add(1); 32]),
             coordinators: vec![coordinator],
+            treasury_multisig: Address([id.wrapping_add(2); 20]),
+            election_term_epochs: 12,
+            reporting_interval_epochs: 3,
+            coi_disclosure_root: Hash([id.wrapping_add(3); 32]),
+            deliverables_root: Hash([id.wrapping_add(4); 32]),
             accreditation_proposal_id: 1,
             status: HubAccreditationStatus::Active,
         }
@@ -549,7 +572,7 @@ mod tests {
         ];
         let treasuries_before = load_protocol_treasuries(&store).unwrap();
 
-        let grant = GrantRecord::new(
+        let mut grant = GrantRecord::new(
             Hash([5; 32]),
             7,
             TreasuryId::DrcCommunity,
@@ -560,6 +583,9 @@ mod tests {
             vec![],
         )
         .unwrap();
+        grant
+            .record_conflict_review(true, Hash([11; 32]))
+            .unwrap();
         let mission = MissionRecord {
             id: Hash([8; 32]),
             sponsor: Address([9; 20]),

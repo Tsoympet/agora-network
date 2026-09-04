@@ -30,6 +30,11 @@ pub struct HubRecord {
     pub classification: String,
     pub charter_hash: Hash,
     pub coordinators: Vec<Address>,
+    pub treasury_multisig: Address,
+    pub election_term_epochs: u64,
+    pub reporting_interval_epochs: u64,
+    pub coi_disclosure_root: Hash,
+    pub deliverables_root: Hash,
     pub accreditation_proposal_id: u64,
     pub status: HubAccreditationStatus,
 }
@@ -62,6 +67,16 @@ pub enum MilestoneStatus {
     Accepted,
 }
 
+#[derive(
+    Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
+)]
+pub enum ConflictReviewStatus {
+    NotRequired,
+    Pending,
+    Cleared,
+    Flagged,
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct GrantMilestone {
     pub index: u32,
@@ -80,6 +95,8 @@ pub struct GrantRecord {
     pub released: Amount,
     pub kind: GrantKind,
     pub status: GrantStatus,
+    pub conflict_review: ConflictReviewStatus,
+    pub coi_disclosure_hash: Hash,
     pub milestones: Vec<GrantMilestone>,
 }
 
@@ -143,8 +160,33 @@ impl GrantRecord {
             released: Amount::ZERO,
             kind,
             status,
+            conflict_review: if treasury == TreasuryId::DrcCommunity {
+                ConflictReviewStatus::Pending
+            } else {
+                ConflictReviewStatus::NotRequired
+            },
+            coi_disclosure_hash: Hash::ZERO,
             milestones,
         })
+    }
+
+    pub fn record_conflict_review(
+        &mut self,
+        cleared: bool,
+        disclosure_hash: Hash,
+    ) -> Result<(), CommunityProtocolError> {
+        if self.conflict_review != ConflictReviewStatus::Pending
+            || disclosure_hash == Hash::ZERO
+        {
+            return Err(CommunityProtocolError::InvalidTransition);
+        }
+        self.coi_disclosure_hash = disclosure_hash;
+        self.conflict_review = if cleared {
+            ConflictReviewStatus::Cleared
+        } else {
+            ConflictReviewStatus::Flagged
+        };
+        Ok(())
     }
 
     /// Records protocol acceptance only; treasury movement belongs to execution.
@@ -303,6 +345,28 @@ mod tests {
     }
 
     #[test]
+    fn community_grant_requires_nonzero_conflict_review_evidence() {
+        let mut grant = GrantRecord::new(
+            Hash([7; 32]),
+            8,
+            TreasuryId::DrcCommunity,
+            Address([9; 20]),
+            Amount::from_base_units(10),
+            GrantKind::Micro,
+            GrantStatus::Approved,
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(grant.conflict_review, ConflictReviewStatus::Pending);
+        assert!(grant.record_conflict_review(true, Hash::ZERO).is_err());
+        grant
+            .record_conflict_review(true, Hash([10; 32]))
+            .unwrap();
+        assert_eq!(grant.conflict_review, ConflictReviewStatus::Cleared);
+        assert_eq!(grant.coi_disclosure_hash, Hash([10; 32]));
+    }
+
+    #[test]
     fn mission_enforces_assignment_and_completion_transitions() {
         let mut mission = MissionRecord {
             id: Hash([1; 32]),
@@ -337,6 +401,11 @@ mod tests {
             classification: "Geographic".into(),
             charter_hash: Hash([2; 32]),
             coordinators: vec![Address([3; 20])],
+            treasury_multisig: Address([4; 20]),
+            election_term_epochs: 12,
+            reporting_interval_epochs: 3,
+            coi_disclosure_root: Hash([5; 32]),
+            deliverables_root: Hash([6; 32]),
             accreditation_proposal_id: 4,
             status: HubAccreditationStatus::Pending,
         };

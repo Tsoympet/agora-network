@@ -10,7 +10,8 @@ at genesis and exposed through `agora_getCommunityRegistry`.
 
 Canonical Hub records include a stable ID, public name, geographic/specialist
 classification, charter hash, unique coordinators, accreditation proposal, and
-status. Active Hubs require a non-zero canonical accreditation proposal.
+status. Active Hubs require a canonical accreditation proposal, non-zero
+multisig address, election/reporting periods, and COI commitment.
 
 ## Passport
 
@@ -29,6 +30,8 @@ Grant schemas bind a governance proposal, one asset-fixed protocol treasury,
 beneficiary, total, and ordered milestones. Milestone acceptance requires the
 next exact deliverable hash and cannot exceed the grant cap. Mission schemas
 enforce Open → Assigned → Completed transitions with completion evidence.
+DRC Community grants cannot enter the canonical registry without a cleared,
+non-zero conflict-of-interest disclosure.
 
 These transitions record eligibility and completion only. They do not move
 treasury funds; signed consensus disbursement remains a later phase.
