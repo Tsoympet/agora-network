@@ -115,6 +115,8 @@ mod tests {
                 tx_root,
             },
             transactions: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         }
     }
 

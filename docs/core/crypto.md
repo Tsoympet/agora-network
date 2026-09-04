@@ -16,6 +16,7 @@ Wallet and signature primitives for Agora Network.
 - String form = **Bech32m** with HRP `agora` (`Address::to_bech32` / light-client `encodeAddress`); hex still accepted at RPC/env boundaries
 - ECDSA sign / verify over SHA-256 digests
 - Transaction auth: sign `TransactionBody` borsh bytes; attach pubkey + compact signature
+- Account-transfer auth (OVL/DRC) and checkpoint attestation sign/verify (`sign_checkpoint_attestation`)
 
 ## BIP-44 notes
 

@@ -1,6 +1,6 @@
 # OVL Staking
 
-**Maturity:** Scaffold. Independent of DRC staking.
+**Maturity:** Experimental (`agora-state-machine::staking` with `StakingParams::ovl_default`). Independent of DRC staking. RPCs: `agora_getValidatorSet` / `agora_getValidator` / `agora_getRewardPool` / **`agora_submitStakeTx`**.
 
 ## Purpose
 
@@ -29,4 +29,8 @@ These are defaults for testnets; production values require governance + audit. D
 
 ## Rewards
 
-From predetermined OVL staking emissions, OVL execution fee share, and slashing proceeds — never from TLT PoW mint.
+**v1 (wired):** slash proceeds credit `stake/reward_pool/OVL` and distribute pro-rata on epoch advance (commission + self/delegator split).
+
+**Reserve drip:** `stake/reserve_remaining/OVL` initialized from working genesis `StakingReserve.reserve_base_units` (10% of max; not ceremony-frozen); `drip_staking_reserve` / `epoch_reserve_drip` wired.
+
+**Fee share:** Accepted OVL `AccountTransfer.fee` credits the reward pool via `credit_fee_share_to_reward_pool` — never divert TLT miner fees.

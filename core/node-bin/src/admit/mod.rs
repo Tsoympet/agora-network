@@ -1,6 +1,8 @@
 //! Block admission: parent-contextual DAA + PoW → full blue_order UTXO proof →
 //! atomic DAG persist → virtual UTXO reorg.
 //!
+//! Finality hooks live in [`finality`].
+//!
 //! **Conflict model:** before any durable mutation, the node proves that
 //! `blue_order(candidate)` (selected-parent blues + newly accepted merge-set
 //! blues + the candidate) is a valid *virtual* UTXO transition. Blue-block
@@ -11,6 +13,8 @@
 //!
 //! Live `cf_utxo` follows blues of `order_past(virtual_tip)` (tip by cumulative
 //! blue work). Consensus `header.bits` come from the selected-parent DAA window.
+
+mod finality;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -88,6 +92,10 @@ pub enum AdmitError {
     ImmatureCoinbase(String),
     #[error("supply cap exceeded")]
     SupplyCapExceeded,
+    #[error("reorg beyond finality: abandoned blue_score {abandoned} <= finalized {finalized}")]
+    FinalityReorg { finalized: u64, abandoned: u64 },
+    #[error("invalid attestation: {0}")]
+    InvalidAttestation(String),
 }
 
 /// Shared chain state mutated by RPC submit and gossip admission.
@@ -104,6 +112,8 @@ pub struct ChainState {
     limits: ConsensusLimits,
     /// When set, transfer signatures must be network-bound to this identity.
     auth: Option<TxAuthContext>,
+    /// Canonical consensus-policy hash bound into checkpoint bodies.
+    consensus_policy_hash: Hash,
 }
 
 /// Runtime consensus knobs loaded from [`agora_state_machine::ChainParams`].
@@ -116,6 +126,8 @@ pub struct ChainBootConfig {
     pub emission: EmissionSchedule,
     /// `agora-testnet-1` / … — required for bound tx signatures in production.
     pub chain_id: String,
+    /// Bound into Trident checkpoint bodies (from [`agora_state_machine::GenesisConsensusPolicy`]).
+    pub consensus_policy_hash: Hash,
 }
 
 impl Default for ChainBootConfig {
@@ -130,12 +142,16 @@ impl Default for ChainBootConfig {
             ghostdag: GhostdagConfig::default(),
             emission: EmissionSchedule::default(),
             chain_id: String::new(),
+            consensus_policy_hash: Hash::ZERO,
         }
     }
 }
 
 impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
     fn from(params: &agora_state_machine::ChainParams) -> Self {
+        let policy = agora_state_machine::GenesisArtifact::from_params(params);
+        let consensus_policy_hash =
+            Hash::from_hex(&policy.consensus_policy_hash).unwrap_or(Hash::ZERO);
         Self {
             pow: params.pow_algorithm,
             initial_bits: params.bits,
@@ -143,6 +159,7 @@ impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
             ghostdag: params.ghostdag_config(),
             emission: params.emission.clone(),
             chain_id: params.network.chain_id().into(),
+            consensus_policy_hash,
         }
     }
 }
@@ -199,6 +216,7 @@ impl ChainState {
             storage,
             limits: ConsensusLimits::default(),
             auth,
+            consensus_policy_hash: boot.consensus_policy_hash,
         };
         // Fresh / upgraded datadirs: ensure virtual tip meta exists.
         if chain.load_virtual_tip()?.is_none() {
@@ -418,6 +436,19 @@ impl ChainState {
         payout: Address,
         transfers: &[Transaction],
     ) -> Result<Block, AdmitError> {
+        self.block_template_lanes(payout, transfers, &[], &[], &[], &[])
+    }
+
+    /// Build a mining template with Trident body lanes.
+    pub fn block_template_lanes(
+        &self,
+        payout: Address,
+        transfers: &[Transaction],
+        account_transfers: &[agora_types::AccountTransfer],
+        stake_ops: &[agora_types::SignedStakeTx],
+        ovl_executions: &[agora_types::OvlExecutionTx],
+        drc_payments: &[agora_types::DrcPaymentTx],
+    ) -> Result<Block, AdmitError> {
         let parents = self.select_template_parents()?;
         let timestamp_ms = self.template_timestamp_ms(&parents)?;
         let bits = self.expected_bits_for_parents(&parents)?;
@@ -449,18 +480,23 @@ impl ChainState {
         let mut transactions = Vec::with_capacity(1 + included.len());
         transactions.push(coinbase);
         transactions.extend(included.iter().cloned());
-        let tx_root = Block::compute_tx_root(&transactions);
-        Ok(Block {
+        let mut block = Block {
             header: BlockHeader {
                 version: 1,
                 parents,
                 timestamp_ms,
                 bits,
                 nonce: 0,
-                tx_root,
+                tx_root: Hash::ZERO,
             },
             transactions,
-        })
+            account_transfers: account_transfers.to_vec(),
+            stake_ops: stake_ops.to_vec(),
+            ovl_executions: ovl_executions.to_vec(),
+            drc_payments: drc_payments.to_vec(),
+        };
+        block.header.tx_root = block.compute_body_root();
+        Ok(block)
     }
 
     /// Template time: `max(local_now, max_parent_ts + 1, MTP + 1)`.
@@ -645,7 +681,7 @@ impl ChainState {
             });
         }
 
-        if block.header.tx_root != Block::compute_tx_root(&block.transactions) {
+        if block.header.tx_root != block.compute_body_root() {
             return Err(AdmitError::BadTxRoot);
         }
 
@@ -680,6 +716,13 @@ impl ChainState {
             }
         };
 
+        // Finality frontier: reject tip changes that abandon a finalized blue.
+        if let Err(err) = self.guard_reorg_vs_finality(old_virtual, new_virtual) {
+            self.ghostdag.remove(&id);
+            let _ = self.dag.remove_tip(&id);
+            return Err(err);
+        }
+
         // Single batch: body/header/tx-index/tips/ghostdag (+ pending marker).
         if let Err(err) = self.persist_block_atomic(&block, id, new_virtual) {
             self.ghostdag.remove(&id);
@@ -689,6 +732,11 @@ impl ChainState {
 
         // UTXO reorg (own crash-recovery via pending_virtual).
         self.reorg_utxo_to_virtual(old_virtual, new_virtual)?;
+
+        // PoW leg of Trident finality for the new virtual tip (PoS may still be pending).
+        if let Err(err) = self.note_pow_on_virtual_tip(new_virtual) {
+            debug!(error = %err, "finality pow note skipped");
+        }
 
         // Cached mining difficulty tracks the virtual tip only — never a side-block path.
         if new_virtual != old_virtual {
@@ -808,6 +856,12 @@ impl ChainState {
                 overlay
                     .delete_cf(ColumnFamily::Warm, &utxo_diff_key(hash))
                     .map_err(|e| AdmitError::Storage(e.to_string()))?;
+                overlay
+                    .delete_cf(
+                        ColumnFamily::Warm,
+                        &agora_state_machine::acceptance_key(hash),
+                    )
+                    .map_err(|e| AdmitError::Storage(e.to_string()))?;
             }
         }
 
@@ -829,17 +883,23 @@ impl ChainState {
             let blue_score = self.ghostdag.blue_score(hash).unwrap_or(1);
             let scheduled = self.emission.reward_at_blue_score(blue_score);
             let emission = scheduled.min(max.saturating_sub(issued.min(max)));
-            let (journal, mut batch) =
+            let mut applied =
                 apply_block_batched_virtual(&overlay, &body, emission, self.auth.as_ref())
                     .map_err(|e| AdmitError::Utxo(e.to_string()))?;
-            if issued.saturating_add(journal.subsidy) > max {
+            if issued.saturating_add(applied.journal.subsidy) > max {
                 return Err(AdmitError::SupplyCapExceeded);
             }
-            issued = issued.saturating_add(journal.subsidy);
-            let bytes = borsh::to_vec(&journal).map_err(|e| AdmitError::Storage(e.to_string()))?;
-            batch.put_cf(ColumnFamily::Warm, &utxo_diff_key(hash), &bytes);
+            issued = issued.saturating_add(applied.journal.subsidy);
+            let bytes =
+                borsh::to_vec(&applied.journal).map_err(|e| AdmitError::Storage(e.to_string()))?;
+            applied
+                .batch
+                .put_cf(ColumnFamily::Warm, &utxo_diff_key(hash), &bytes);
+            applied.acceptance.block_hash = *hash;
+            agora_state_machine::put_acceptance_into(&mut applied.batch, hash, &applied.acceptance)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
             overlay
-                .write_batch(batch)
+                .write_batch(applied.batch)
                 .map_err(|e| AdmitError::Storage(e.to_string()))?;
         }
         Ok(())
@@ -1329,31 +1389,36 @@ impl ChainState {
         let emission = self.clamp_emission(scheduled)?;
         // Atomic commit: UTXO changes + revert journal + issued-supply update land as a
         // single WriteBatch so a crash cannot leave UTXOs and supply out of sync.
-        let (journal, mut batch) =
+        let mut applied =
             apply_block_batched_virtual(self.store.as_ref(), &block, emission, self.auth.as_ref())
                 .map_err(|e| AdmitError::Utxo(e.to_string()))?;
-        if journal.subsidy > emission {
+        if applied.journal.subsidy > emission {
             return Err(AdmitError::Utxo(format!(
                 "coinbase subsidy {} exceeds clamped emission {emission}",
-                journal.subsidy
+                applied.journal.subsidy
             )));
         }
         let max = self.load_max_supply()?;
         let issued = self.load_issued_supply()?;
-        if issued.saturating_add(journal.subsidy) > max {
+        if issued.saturating_add(applied.journal.subsidy) > max {
             return Err(AdmitError::SupplyCapExceeded);
         }
-        let subsidy = journal.subsidy;
+        let subsidy = applied.journal.subsidy;
         let journal_bytes =
-            borsh::to_vec(&journal).map_err(|e| AdmitError::Storage(e.to_string()))?;
-        batch.put_cf(ColumnFamily::Warm, &utxo_diff_key(&hash), &journal_bytes);
-        batch.put_cf(
-            ColumnFamily::Meta,
-            meta_keys::ISSUED_SUPPLY,
-            &issued.saturating_add(subsidy).to_le_bytes(),
+            borsh::to_vec(&applied.journal).map_err(|e| AdmitError::Storage(e.to_string()))?;
+        applied
+            .batch
+            .put_cf(ColumnFamily::Warm, &utxo_diff_key(&hash), &journal_bytes);
+        applied.acceptance.block_hash = hash;
+        agora_state_machine::put_acceptance_into(&mut applied.batch, &hash, &applied.acceptance)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        agora_state_machine::put_issued_supply_into(
+            &mut applied.batch,
+            agora_types::NativeAssetId::TLT,
+            issued.saturating_add(subsidy),
         );
         self.store
-            .write_batch(batch)
+            .write_batch(applied.batch)
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
         Ok(())
     }
@@ -1381,6 +1446,7 @@ impl ChainState {
             revert_journal_batched(&journal).map_err(|e| AdmitError::Utxo(e.to_string()))?;
         batch.append(revert);
         batch.delete_cf(ColumnFamily::Warm, &utxo_diff_key(&hash));
+        agora_state_machine::delete_acceptance_into(batch, &hash);
         Ok(Some(subsidy))
     }
 
@@ -1752,6 +1818,9 @@ impl ChainState {
                 fees,
                 subsidy,
                 coinbase_total,
+                account_before: journal.account_before,
+                stake_meta_before: journal.stake_meta_before,
+                payment_meta_before: journal.payment_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

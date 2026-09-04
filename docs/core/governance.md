@@ -95,7 +95,36 @@ effective = isqrt(capped)
 | Ranks / chambers / proposal engine | yes (in-process) |
 | Community board (forum + acks) | yes (local) |
 | Node Meta CF persistence (`meta/governance`) | yes — **local**, not consensus-derived |
+| Canonical authorization policy commitment | yes — genesis/state-root scaffold |
+| TLT/OVL/DRC protocol treasury identities + zero balances | yes — canonical read-only scaffold |
+| Hub/Passport/Grant/Mission schemas + bounded root | yes — canonical read-only scaffold |
 | JSON-RPC civic methods | yes — **trusted caller** prototype |
 | Explorer ballot panel + desktop vote UI | yes (drives local RPC) |
-| Signed votes / UTXO deposits / state roots | **not yet** |
+| Signed votes / locked deposits / block replication | **not yet** |
 | L2/L3 operator sets as Ecclesia ranks | out of scope |
+
+## Canonical Phase 5a scaffold
+
+`agora-state-machine` now initializes a separate
+`governance/consensus/policy` record plus three fixed-denomination treasuries:
+
+| Treasury | Asset |
+| --- | --- |
+| `tlt_security` | TLT |
+| `ovl_builder` | OVL |
+| `drc_community` | DRC |
+
+Their authorization policy and balances commit into the Trident state root.
+`agora_getProtocolTreasuries` exposes this read-only state.
+
+The committed policy catalog includes the Trident OVL Technical, DRC Community,
+Ecclesia, miner-signaling, and limited Security Council paths from
+`AGORA_CONSTITUTION.md`. It records multi-chamber upgrade requirements,
+treasury-specific chambers, grant milestone/COI requirements, extended
+timelocks, and mandatory emergency expiry/post-action ratification.
+
+No unsigned civic RPC can mutate these records. Existing `meta/governance`
+proposal/forum endpoints remain `administrative_local` and excluded from the
+canonical governance root. Signed block-replicated governance operations,
+deposits, votes, treasury funding, and spend execution are still required
+before this can be called on-chain governance.

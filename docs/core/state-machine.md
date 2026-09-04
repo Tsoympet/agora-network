@@ -75,6 +75,16 @@ Outpoint keys are `tx_id || index_le` (36 bytes), same as genesis.
 
 Transaction index (`cf_warm`): key `tx/` ‖ `tx_id`, value `block_id` ‖ `index` LE — written on genesis ignite and every `persist_block` for `agora_getTransaction`.
 
+## Trident staking + finality store (Phase 3+)
+
+Meta CF keys (additive; `SCHEMA_VERSION = 4`):
+
+- `stake/val|del|unbond|epoch|snap|reward_pool|reserve_remaining/…` — staking + slash/reward + reserve
+- `finality/cert|idx|last_att/…`, `finality/tip_blue_score` — certificates, signer index, tip
+- `compose_trident_state_root` — canonical multi-asset commitment for checkpoint bodies
+
+Node admit enforces reorg-beyond-finality. Account, stake, OVL execution, and native DRC payments enter consensus lanes. DRC payment metadata, governance/treasuries, and the bounded Hub/Passport/Grant/Mission registry commit in the state root. Local unsigned civic/community RPC state remains excluded. See [`community-registry.md`](community-registry.md), [`ovl-execution.md`](ovl-execution.md), [`drc-payments.md`](drc-payments.md), [`governance.md`](governance.md), and [`finality.md`](finality.md).
+
 ## Storage backends
 
 - [`StateStore::open_in_memory`] — ephemeral map for unit tests / portable CI

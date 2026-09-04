@@ -238,6 +238,7 @@ version = "0.1.0"
 dependencies = [
  "agora-consensus",
  "agora-crypto",
+ "agora-governance",
  "agora-types",
  "borsh",
  "hex",

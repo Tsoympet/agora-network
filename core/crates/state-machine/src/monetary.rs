@@ -12,6 +12,13 @@ pub const TLT_MAX_SUPPLY_BASE: u64 = 10_000_000_000_000_000; // 100M
 pub const OVL_MAX_SUPPLY_BASE: u64 = 2_100_000_000_000_000_000; // 21B
 pub const DRC_MAX_SUPPLY_BASE: u64 = 600_000_000_000_000_000; // 6B
 
+/// Working (not ceremony-frozen) staking reserves — 10% of max supply.
+pub const OVL_WORKING_RESERVE_BASE: u64 = OVL_MAX_SUPPLY_BASE / 10; // 2.1B
+pub const DRC_WORKING_RESERVE_BASE: u64 = DRC_MAX_SUPPLY_BASE / 10; // 600M
+
+/// Working per-epoch drip into the reward pool (10 whole units @ 8 decimals).
+pub const WORKING_EPOCH_RESERVE_DRIP: u64 = 1_000_000_000;
+
 /// Emission / distribution schedule kind for one native asset.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,9 +69,10 @@ impl AssetMonetaryPolicy {
             mineable: false,
             genesis_allocation: 0,
             treasury_allocation: 0,
-            // Reserve left for ceremony; must remain ≤ max_supply - genesis - treasury.
+            // Working testnet default: 10% of max as staking reserve.
+            // Not ceremony-frozen — mainnet/public testnet freeze revises via genesis artifact.
             emission: EmissionKind::StakingReserve {
-                reserve_base_units: 0,
+                reserve_base_units: OVL_WORKING_RESERVE_BASE,
             },
         }
     }
@@ -77,8 +85,9 @@ impl AssetMonetaryPolicy {
             mineable: false,
             genesis_allocation: 0,
             treasury_allocation: 0,
+            // Working testnet default: 10% of max as staking/community reserve.
             emission: EmissionKind::StakingReserve {
-                reserve_base_units: 0,
+                reserve_base_units: DRC_WORKING_RESERVE_BASE,
             },
         }
     }
@@ -186,6 +195,20 @@ mod tests {
             Amount::from_base_units(p.tlt.genesis_allocation),
             p.tlt.max_supply_amount()
         ));
+        match p.ovl.emission {
+            EmissionKind::StakingReserve { reserve_base_units } => {
+                assert_eq!(reserve_base_units, OVL_WORKING_RESERVE_BASE);
+                assert!(reserve_base_units > 0);
+            }
+            _ => panic!("OVL must use staking reserve"),
+        }
+        match p.drc.emission {
+            EmissionKind::StakingReserve { reserve_base_units } => {
+                assert_eq!(reserve_base_units, DRC_WORKING_RESERVE_BASE);
+                assert!(reserve_base_units > 0);
+            }
+            _ => panic!("DRC must use staking reserve"),
+        }
     }
 
     #[test]
