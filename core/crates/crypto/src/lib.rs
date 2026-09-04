@@ -8,6 +8,7 @@ mod address;
 mod attestation;
 mod bip44;
 mod error;
+mod execution;
 mod keys;
 mod mnemonic;
 mod stake;
@@ -22,6 +23,7 @@ pub use bip44::{
     derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,
 };
 pub use error::CryptoError;
+pub use execution::{sign_ovl_execution_bound, verify_ovl_execution_bound};
 pub use keys::{KeyPair, PublicKeyBytes, SignatureBytes};
 pub use mnemonic::{generate_mnemonic, seed_fingerprint, seed_from_mnemonic};
 pub use stake::{sign_stake_tx_bound, verify_stake_tx_bound};

@@ -8,6 +8,7 @@ mod accounts;
 mod apply;
 mod columns;
 mod error;
+mod execution;
 mod finality_store;
 mod genesis;
 mod ghostdag_store;
@@ -68,6 +69,10 @@ pub use supply::{
     put_schema_version_into, verify_supply_invariants,
 };
 pub use error::StateError;
+pub use execution::{
+    apply_ovl_execution, execution_fee, OvlExecutionReceipt, OVL_EXECUTION_VERSION,
+    OVL_INTRINSIC_GAS,
+};
 pub use genesis::{GenesisBuilder, SupplyCaps};
 pub use ghostdag_store::{
     ghostdag_key, load_ghostdag_record, store_ghostdag_record, GhostdagRecord,
