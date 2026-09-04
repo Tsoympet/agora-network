@@ -15,10 +15,10 @@ use agora_p2p::{
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
     apply_account_transfer, apply_drc_payment, apply_ovl_execution, apply_signed_stake_tx,
-    build_snapshot, load_epoch, load_reward_pool, load_validator, lookup_tx_location, meta_keys,
-    outpoint_key, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily,
-    governance_treasury_root, load_canonical_governance_policy, load_protocol_treasuries,
-    StakingParams, StateStore, TxAuthContext, WriteBatch,
+    build_snapshot, governance_treasury_root, load_canonical_governance_policy, load_epoch,
+    load_protocol_treasuries, load_reward_pool, load_validator, lookup_tx_location, meta_keys,
+    outpoint_key, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, StakingParams,
+    StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcPaymentTx, Hash,
@@ -993,6 +993,43 @@ mod tests {
 
     const PHRASE: &str =
         "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    #[test]
+    fn protocol_treasuries_rpc_is_canonical_read_only_state() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            Arc::new(Mutex::new(Mempool::new(8))),
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+
+        let value = backend.get_protocol_treasuries().unwrap();
+        assert_eq!(value["maturity"], "Scaffold");
+        assert_eq!(value["consensus_mutations_active"], false);
+        let treasuries = value["treasuries"].as_array().unwrap();
+        assert_eq!(treasuries.len(), 3);
+        assert_eq!(treasuries[0]["asset"], "TLT");
+        assert_eq!(treasuries[1]["asset"], "OVL");
+        assert_eq!(treasuries[2]["asset"], "DRC");
+        assert!(treasuries.iter().all(|t| t["balance"] == 0));
+    }
 
     #[test]
     fn account_transfer_enters_template_lane() {

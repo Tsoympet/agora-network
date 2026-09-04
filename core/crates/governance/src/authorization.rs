@@ -46,6 +46,7 @@ pub struct ProposalAuthorization {
     pub chamber: VotingChamber,
     pub requires_tamias_sponsor: bool,
     pub required_archon_assents: u8,
+    pub basileus_assent_suffices: bool,
     pub requires_timelock: bool,
 }
 
@@ -82,6 +83,7 @@ pub const fn authorization_for_class(class: ProposalClass) -> ProposalAuthorizat
             ProposalClass::ConstitutionAmendment => 2,
             _ => 0,
         },
+        basileus_assent_suffices: matches!(class, ProposalClass::ConstitutionAmendment),
         // The v1 Constitution defines Passed → Timelock → Executed for every class,
         // including emergency actions; it does not authorize a bypass.
         requires_timelock: true,
@@ -113,6 +115,10 @@ mod tests {
                 chamber,
                 requires_tamias_sponsor,
                 required_archon_assents,
+                basileus_assent_suffices: matches!(
+                    &kind,
+                    ProposalKind::ConstitutionAmendment { .. }
+                ),
                 requires_timelock: true,
             }
         );

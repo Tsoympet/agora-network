@@ -293,9 +293,9 @@ impl GovernanceState {
                 .iter()
                 .filter(|a| self.offices.is_any_archon(**a))
                 .count();
-            // Constitution v1 permits one Basileus assent as an alternative to
-            // the matrix's Archon Collegium threshold.
-            if !basileus_ok && archon_count < usize::from(authorization.required_archon_assents) {
+            let special_assent = authorization.basileus_assent_suffices && basileus_ok;
+            if !special_assent && archon_count < usize::from(authorization.required_archon_assents)
+            {
                 return Err(GovernanceError::MissingArchonAssent);
             }
         }
