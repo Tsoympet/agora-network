@@ -28,7 +28,10 @@ enum Inner {
     #[cfg(feature = "rocksdb")]
     Rocks(Arc<rocksdb::DB>),
     /// Copy-on-write view over another store: reads fall through; writes stay in `delta`.
-    Cow { base: Arc<StateStore>, delta: CowDelta },
+    Cow {
+        base: Arc<StateStore>,
+        delta: CowDelta,
+    },
 }
 
 /// A single mutation in a [`WriteBatch`].
@@ -243,10 +246,8 @@ impl StateStore {
                 Ok(out)
             }
             Inner::Cow { base, delta } => {
-                let mut map: HashMap<Vec<u8>, Vec<u8>> = base
-                    .scan_prefix(cf, prefix)?
-                    .into_iter()
-                    .collect();
+                let mut map: HashMap<Vec<u8>, Vec<u8>> =
+                    base.scan_prefix(cf, prefix)?.into_iter().collect();
                 let guard = delta
                     .lock()
                     .map_err(|_| StateError::Storage("lock poisoned".into()))?;
@@ -404,14 +405,23 @@ mod tests {
         let base = Arc::new(StateStore::open_in_memory());
         base.put_cf(ColumnFamily::Utxo, b"a", b"1").unwrap();
         let overlay = StateStore::open_cow_overlay(base.clone());
-        assert_eq!(overlay.get_cf(ColumnFamily::Utxo, b"a").unwrap(), Some(b"1".to_vec()));
+        assert_eq!(
+            overlay.get_cf(ColumnFamily::Utxo, b"a").unwrap(),
+            Some(b"1".to_vec())
+        );
         overlay.put_cf(ColumnFamily::Utxo, b"a", b"2").unwrap();
         overlay.put_cf(ColumnFamily::Utxo, b"b", b"3").unwrap();
         overlay.delete_cf(ColumnFamily::Utxo, b"a").unwrap();
         assert_eq!(overlay.get_cf(ColumnFamily::Utxo, b"a").unwrap(), None);
-        assert_eq!(overlay.get_cf(ColumnFamily::Utxo, b"b").unwrap(), Some(b"3".to_vec()));
+        assert_eq!(
+            overlay.get_cf(ColumnFamily::Utxo, b"b").unwrap(),
+            Some(b"3".to_vec())
+        );
         // Base unchanged.
-        assert_eq!(base.get_cf(ColumnFamily::Utxo, b"a").unwrap(), Some(b"1".to_vec()));
+        assert_eq!(
+            base.get_cf(ColumnFamily::Utxo, b"a").unwrap(),
+            Some(b"1".to_vec())
+        );
         assert_eq!(base.get_cf(ColumnFamily::Utxo, b"b").unwrap(), None);
     }
 

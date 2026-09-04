@@ -22,11 +22,7 @@ pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v1";
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
 
 /// Canonical network fingerprint hash (pre-Trident / genesis v2).
-pub fn network_fingerprint(
-    chain_id: &str,
-    genesis: &Hash,
-    consensus_policy_hash: &Hash,
-) -> Hash {
+pub fn network_fingerprint(chain_id: &str, genesis: &Hash, consensus_policy_hash: &Hash) -> Hash {
     Hash::hash_borsh(&(
         b"agora-net-fp-v1",
         PROTOCOL_VERSION,
