@@ -73,7 +73,7 @@ async fn mine_one_round(
     let raw = template
         .result
         .ok_or_else(|| format!("template error: {:?}", template.error))?;
-    let mut tmpl: TemplateResponse = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+    let tmpl: TemplateResponse = serde_json::from_value(raw).map_err(|e| e.to_string())?;
     let epoch = tmpl.randomx_epoch;
     let mut block = tmpl.block;
 

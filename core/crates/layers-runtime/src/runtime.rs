@@ -9,7 +9,7 @@ use agora_intent_engine::{
 };
 use agora_ovolos_rollup::{
     decode_evm_tx, Batch, BatchCommitment, BatchStatus, EvmExecutor, EvmTx, FraudProof, OvlBlock,
-    OvolosGenesis, OvolosRollup, RevmExecutor, OVOLOS_POW_ALGORITHM,
+    OvolosGenesis, OvolosRollup, RevmExecutor, RollupCheckpoint, OVOLOS_POW_ALGORITHM,
 };
 use agora_types::{Address, Amount, Hash};
 use serde::Serialize;
@@ -24,6 +24,27 @@ pub struct LayersRuntimeConfig {
     pub hub_id: Option<String>,
     pub ovolos_genesis: OvolosGenesis,
     pub drachma_genesis: DrachmaGenesis,
+}
+
+pub struct LockAndMintRequest<'a> {
+    pub source_hub: &'a str,
+    pub dest_district: &'a str,
+    pub sender: Address,
+    pub recipient: Address,
+    pub amount: Amount,
+    pub nonce: u64,
+    pub destination_tag: u32,
+}
+
+pub struct DrcPathPayment<'a> {
+    pub hub: &'a str,
+    pub source_district: &'a str,
+    pub dest_district: &'a str,
+    pub sender: Address,
+    pub recipient: Address,
+    pub amount: Amount,
+    pub nonce: u64,
+    pub destination_tag: u32,
 }
 
 impl Default for LayersRuntimeConfig {
@@ -329,37 +350,31 @@ impl LayersRuntime {
         amount: Amount,
         nonce: u64,
     ) -> Result<Hash, LayersError> {
-        self.lock_and_mint_tagged(
+        self.lock_and_mint_tagged(LockAndMintRequest {
             source_hub,
             dest_district,
             sender,
             recipient,
             amount,
             nonce,
-            0,
-        )
+            destination_tag: 0,
+        })
     }
 
     pub fn lock_and_mint_tagged(
         &mut self,
-        source_hub: &str,
-        dest_district: &str,
-        sender: Address,
-        recipient: Address,
-        amount: Amount,
-        nonce: u64,
-        destination_tag: u32,
+        request: LockAndMintRequest<'_>,
     ) -> Result<Hash, LayersError> {
         self.intents
             .bridge_mut()
             .lock_and_mint_tagged(
-                source_hub,
-                dest_district,
-                sender,
-                recipient,
-                amount,
-                nonce,
-                destination_tag,
+                request.source_hub,
+                request.dest_district,
+                request.sender,
+                request.recipient,
+                request.amount,
+                request.nonce,
+                request.destination_tag,
             )
             .map_err(|e| LayersError::Bridge(e.to_string()))
     }
@@ -413,52 +428,28 @@ impl LayersRuntime {
     /// Cross-district path payment via hub (XRP path-payment class).
     pub fn path_pay_drc(
         &mut self,
-        hub: &str,
-        source_district: &str,
-        dest_district: &str,
-        sender: Address,
-        recipient: Address,
-        amount: Amount,
-        nonce: u64,
-        destination_tag: u32,
+        payment: DrcPathPayment<'_>,
     ) -> Result<(Hash, Hash), LayersError> {
-        self.path_pay_drc_deliver(
-            hub,
-            source_district,
-            dest_district,
-            sender,
-            recipient,
-            amount,
-            nonce,
-            destination_tag,
-            Amount::ZERO,
-        )
+        self.path_pay_drc_deliver(payment, Amount::ZERO)
     }
 
     /// Path payment with XRPL-class deliverMin.
     pub fn path_pay_drc_deliver(
         &mut self,
-        hub: &str,
-        source_district: &str,
-        dest_district: &str,
-        sender: Address,
-        recipient: Address,
-        amount: Amount,
-        nonce: u64,
-        destination_tag: u32,
+        payment: DrcPathPayment<'_>,
         deliver_min: Amount,
     ) -> Result<(Hash, Hash), LayersError> {
         self.intents
             .bridge_mut()
             .path_pay_deliver(
-                hub,
-                source_district,
-                dest_district,
-                sender,
-                recipient,
-                amount,
-                nonce,
-                destination_tag,
+                payment.hub,
+                payment.source_district,
+                payment.dest_district,
+                payment.sender,
+                payment.recipient,
+                payment.amount,
+                payment.nonce,
+                payment.destination_tag,
                 deliver_min,
             )
             .map_err(|e| LayersError::Bridge(e.to_string()))
@@ -656,15 +647,15 @@ impl LayersRuntime {
         };
         let head = parse_hash(&cp.head_state_root)?;
         let tip = parse_hash(&cp.ovl_tip_hash)?;
-        self.rollup.restore_checkpoint(
-            head,
-            cp.next_sequence,
-            tip,
-            cp.ovl_tip_height,
-            cp.ovl_balances,
-            cp.ovl_minted,
-            cp.sequencer_bonds,
-        );
+        self.rollup.restore_checkpoint(RollupCheckpoint {
+            head_state_root: head,
+            next_sequence: cp.next_sequence,
+            tip_hash: tip,
+            tip_height: cp.ovl_tip_height,
+            ovl_balances: cp.ovl_balances,
+            ovl_minted: cp.ovl_minted,
+            sequencer_bonds: cp.sequencer_bonds,
+        });
         let snaps = cp
             .revm_snapshots
             .into_iter()

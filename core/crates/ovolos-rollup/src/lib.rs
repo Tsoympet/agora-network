@@ -32,7 +32,7 @@ pub use pow::{
     leading_zero_bits, mine_ovl_block, verify_pow, OvlBlock, OvlBlockHeader, OvlEmission,
     OVOLOS_POW_ALGORITHM,
 };
-pub use rollup::{OvolosRollup, RollupConfig};
+pub use rollup::{OvolosRollup, RollupCheckpoint, RollupConfig};
 pub use sequencer::{SequencerSet, DEFAULT_SEQUENCER_MIN_BOND, SEQUENCER_BOND_ESCROW};
 pub use types::{Batch, BatchStatus, EvmTx, FraudProof};
 

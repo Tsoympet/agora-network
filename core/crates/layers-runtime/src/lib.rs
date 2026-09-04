@@ -15,4 +15,6 @@ pub use migration::{
     MigrationError, MigrationSnapshot,
 };
 pub use persist::LayersCheckpoint;
-pub use runtime::{LayerInfo, LayersRuntime, LayersRuntimeConfig};
+pub use runtime::{
+    DrcPathPayment, LayerInfo, LayersRuntime, LayersRuntimeConfig, LockAndMintRequest,
+};

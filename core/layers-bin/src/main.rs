@@ -11,7 +11,9 @@ use std::sync::Arc;
 
 use agora_bridge_sdk::DrachmaGenesis;
 use agora_intent_engine::Intent;
-use agora_layers_runtime::{LayersRuntime, LayersRuntimeConfig};
+use agora_layers_runtime::{
+    DrcPathPayment, LayersRuntime, LayersRuntimeConfig, LockAndMintRequest,
+};
 use agora_ovolos_rollup::{Batch, BatchCommitment, EvmTx, FraudProof, OvolosGenesis};
 use agora_types::{Address, Amount, Hash};
 use serde::Deserialize;
@@ -277,15 +279,15 @@ async fn dispatch(
         "agora_layers_lockAndMint" => {
             let p: BridgeParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
             let id = rt
-                .lock_and_mint_tagged(
-                    &p.source,
-                    &p.dest,
-                    parse_addr(&p.sender)?,
-                    parse_addr(&p.recipient)?,
-                    Amount::from_base_units(p.amount),
-                    p.nonce,
-                    p.destination_tag.unwrap_or(0),
-                )
+                .lock_and_mint_tagged(LockAndMintRequest {
+                    source_hub: &p.source,
+                    dest_district: &p.dest,
+                    sender: parse_addr(&p.sender)?,
+                    recipient: parse_addr(&p.recipient)?,
+                    amount: Amount::from_base_units(p.amount),
+                    nonce: p.nonce,
+                    destination_tag: p.destination_tag.unwrap_or(0),
+                })
                 .map_err(|e| e.to_string())?;
             Ok(json!({
                 "message_id": id.to_hex(),
@@ -484,14 +486,16 @@ async fn dispatch(
             let p: PathPayParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
             let (unlock_id, mint_id) = rt
                 .path_pay_drc_deliver(
-                    &p.hub,
-                    &p.source,
-                    &p.dest,
-                    parse_addr(&p.sender)?,
-                    parse_addr(&p.recipient)?,
-                    Amount::from_base_units(p.amount),
-                    p.nonce,
-                    p.destination_tag.unwrap_or(0),
+                    DrcPathPayment {
+                        hub: &p.hub,
+                        source_district: &p.source,
+                        dest_district: &p.dest,
+                        sender: parse_addr(&p.sender)?,
+                        recipient: parse_addr(&p.recipient)?,
+                        amount: Amount::from_base_units(p.amount),
+                        nonce: p.nonce,
+                        destination_tag: p.destination_tag.unwrap_or(0),
+                    },
                     Amount::from_base_units(p.deliver_min.unwrap_or(0)),
                 )
                 .map_err(|e| e.to_string())?;
