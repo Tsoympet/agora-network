@@ -262,11 +262,15 @@ mod tests {
 
     #[test]
     fn finality_rejects_admin_bypass_and_price_combine() {
-        let mut f = TridentFinalityPolicy::default();
-        f.admin_bypass = true;
+        let f = TridentFinalityPolicy {
+            admin_bypass: true,
+            ..TridentFinalityPolicy::default()
+        };
         assert!(f.validate().is_err());
-        f.admin_bypass = false;
-        f.combine_stakes_by_price = true;
+        let f = TridentFinalityPolicy {
+            combine_stakes_by_price: true,
+            ..TridentFinalityPolicy::default()
+        };
         assert!(f.validate().is_err());
     }
 

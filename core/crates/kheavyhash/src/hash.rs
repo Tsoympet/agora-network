@@ -26,14 +26,16 @@ impl Hash {
     #[inline(always)]
     pub fn iter_le_u64(&self) -> impl ExactSizeIterator<Item = u64> + '_ {
         self.0
-            .chunks_exact(8)
-            .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|chunk| u64::from_le_bytes(*chunk))
     }
 
     #[inline(always)]
     pub fn from_le_u64(arr: [u64; 4]) -> Self {
         let mut out = [0u8; 32];
-        for (chunk, word) in out.chunks_exact_mut(8).zip(arr.iter()) {
+        for (chunk, word) in out.as_chunks_mut::<8>().0.iter_mut().zip(arr) {
             chunk.copy_from_slice(&word.to_le_bytes());
         }
         Self(out)
