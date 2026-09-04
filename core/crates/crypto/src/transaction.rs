@@ -148,10 +148,9 @@ mod tests {
     fn bound_signing_vector_abandon_external0() {
         let seed = seed_from_mnemonic(PHRASE, "").expect("seed");
         let kp = derive_bip44(&seed, &Bip44Path::external(0)).expect("derive");
-        let genesis = Hash::from_hex(
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        )
-        .unwrap();
+        let genesis =
+            Hash::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+                .unwrap();
         let mut tx = Transaction::unsigned(
             1,
             vec![TxIn {
@@ -179,7 +178,10 @@ mod tests {
             );
             sign_transaction_bound(&mut tx, &kp, chain_id, &genesis).unwrap();
             verify_transaction_bound(&tx, chain_id, &genesis).unwrap();
-            assert_eq!(hex::encode(&tx.public_key), hex::encode(kp.public_key_bytes()));
+            assert_eq!(
+                hex::encode(&tx.public_key),
+                hex::encode(kp.public_key_bytes())
+            );
             assert_eq!(tx.signature.len(), 64);
             // Re-sign must be deterministic for the same key/preimage (RFC6979).
             let sig1 = tx.signature.clone();

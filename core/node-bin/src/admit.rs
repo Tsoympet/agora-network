@@ -764,7 +764,8 @@ impl ChainState {
             )));
         }
         let cb = coinbases[0];
-        let expected_low = coinbase_commitment_low(&block.header.parents, block.header.timestamp_ms);
+        let expected_low =
+            coinbase_commitment_low(&block.header.parents, block.header.timestamp_ms);
         let got_low = cb.nonce as u32;
         if got_low != expected_low {
             return Err(AdmitError::Utxo(format!(
@@ -1328,13 +1329,9 @@ impl ChainState {
         let emission = self.clamp_emission(scheduled)?;
         // Atomic commit: UTXO changes + revert journal + issued-supply update land as a
         // single WriteBatch so a crash cannot leave UTXOs and supply out of sync.
-        let (journal, mut batch) = apply_block_batched_virtual(
-            self.store.as_ref(),
-            &block,
-            emission,
-            self.auth.as_ref(),
-        )
-        .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        let (journal, mut batch) =
+            apply_block_batched_virtual(self.store.as_ref(), &block, emission, self.auth.as_ref())
+                .map_err(|e| AdmitError::Utxo(e.to_string()))?;
         if journal.subsidy > emission {
             return Err(AdmitError::Utxo(format!(
                 "coinbase subsidy {} exceeds clamped emission {emission}",
@@ -1756,8 +1753,7 @@ impl ChainState {
                 subsidy,
                 coinbase_total,
             };
-            let bytes =
-                borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
+            let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store
                 .put_cf(ColumnFamily::Warm, &key, &bytes)
                 .map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -2156,7 +2152,11 @@ mod tests {
                 value: Amount::from_base_units(emission),
                 address: payout,
             }],
-            coinbase_commitment_nonce(&block.header.parents, block.header.timestamp_ms, nonce as u32),
+            coinbase_commitment_nonce(
+                &block.header.parents,
+                block.header.timestamp_ms,
+                nonce as u32,
+            ),
         )];
         block.header.tx_root = Block::compute_tx_root(&block.transactions);
         let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
@@ -2421,7 +2421,11 @@ mod tests {
                 value: Amount::from_base_units(emission),
                 address: Address::ZERO,
             }],
-            coinbase_commitment_nonce(&block.header.parents, block.header.timestamp_ms, nonce as u32),
+            coinbase_commitment_nonce(
+                &block.header.parents,
+                block.header.timestamp_ms,
+                nonce as u32,
+            ),
         )];
         block.header.tx_root = Block::compute_tx_root(&block.transactions);
         let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
@@ -2708,9 +2712,7 @@ mod tests {
         c.header.parents = vec![a, b];
         c.header.bits = chain.expected_bits_for_parents(&[a, b]).unwrap();
         c.header.timestamp_ms = 72_000;
-        let blue_score = chain
-            .simulate_blue_score(&[a, b], c.header.bits)
-            .unwrap();
+        let blue_score = chain.simulate_blue_score(&[a, b], c.header.bits).unwrap();
         let emission = chain.emission.reward_at_blue_score(blue_score);
         c.transactions = vec![Transaction::unsigned(
             1,

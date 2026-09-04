@@ -24,9 +24,7 @@ pub const TRIDENT_PROTOCOL_VERSION: u32 = 1;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v1";
 
 /// Finality parameters (independent PoS quorums; no price oracle).
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct TridentFinalityPolicy {
     pub model: String,
     pub ovl_quorum_numerator: u32,
@@ -81,15 +79,7 @@ impl TridentFinalityPolicy {
 
 /// Validator bootstrap parameters (empty until ceremony / Phase 3).
 #[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-    Default,
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize, Default,
 )]
 pub struct TridentValidatorGenesis {
     pub max_validators: u32,

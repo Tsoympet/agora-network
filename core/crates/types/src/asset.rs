@@ -141,15 +141,7 @@ impl NativeAmount {
 /// Existing v2 `TxOut` remains TLT-implicit for the frozen testnet wire format.
 /// Phase 2 state transition consumes this type (or a versioned transaction body).
 #[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    Debug,
-    BorshSerialize,
-    BorshDeserialize,
-    Serialize,
-    Deserialize,
-    TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct AssetTxOut {
@@ -168,7 +160,10 @@ mod tests {
         assert_eq!(NativeAssetId::TLT.wire_byte(), 0x00);
         assert_eq!(NativeAssetId::OVL.wire_byte(), 0x01);
         assert_eq!(NativeAssetId::DRC.wire_byte(), 0x02);
-        assert_eq!(NativeAssetId::from_wire_byte(0x01), Some(NativeAssetId::OVL));
+        assert_eq!(
+            NativeAssetId::from_wire_byte(0x01),
+            Some(NativeAssetId::OVL)
+        );
         assert_eq!(NativeAssetId::from_wire_byte(0x03), None);
         assert!(NativeAssetId::TLT.is_mineable());
         assert!(!NativeAssetId::OVL.is_mineable());
