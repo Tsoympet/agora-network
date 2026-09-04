@@ -163,7 +163,7 @@ export function TridentOverview() {
             {status === "ok"
               ? unavailable > 0
                 ? `partial · ${unavailable} unavailable`
-                : "live protocol state"
+                : "read RPC connected"
               : status === "error"
                 ? "Trident RPC unavailable"
                 : "connecting"}
