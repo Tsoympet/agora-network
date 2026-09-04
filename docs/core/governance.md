@@ -116,6 +116,12 @@ effective = isqrt(capped)
 Their authorization policy and balances commit into the Trident state root.
 `agora_getProtocolTreasuries` exposes this read-only state.
 
+The committed policy catalog includes the Trident OVL Technical, DRC Community,
+Ecclesia, miner-signaling, and limited Security Council paths from
+`AGORA_CONSTITUTION.md`. It records multi-chamber upgrade requirements,
+treasury-specific chambers, grant milestone/COI requirements, extended
+timelocks, and mandatory emergency expiry/post-action ratification.
+
 No unsigned civic RPC can mutate these records. Existing `meta/governance`
 proposal/forum endpoints remain `administrative_local` and excluded from the
 canonical governance root. Signed block-replicated governance operations,

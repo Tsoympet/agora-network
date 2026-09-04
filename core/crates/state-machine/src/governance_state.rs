@@ -6,7 +6,7 @@
 
 use agora_governance::{
     authorization_for_class, hash_constitution_body, ProposalAuthorization, ProposalClass,
-    CONSTITUTION_V1_BODY, CONSTITUTION_V1_ID,
+    trident_policy_catalog, CONSTITUTION_V1_BODY, CONSTITUTION_V1_ID,
 };
 use agora_types::{Amount, Hash, TreasuryBalance, TreasuryId};
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -33,7 +33,11 @@ pub fn authorization_policy_root() -> Hash {
         .copied()
         .map(|class| (class, authorization_for_class(class)))
         .collect();
-    Hash::hash_borsh(&(b"agora-governance-authorization-v1", policies))
+    Hash::hash_borsh(&(
+        b"agora-governance-authorization-v2",
+        policies,
+        trident_policy_catalog(),
+    ))
 }
 
 impl Default for CanonicalGovernancePolicy {

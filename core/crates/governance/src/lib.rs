@@ -25,6 +25,7 @@ mod persist;
 mod proposal;
 mod quadratic;
 mod ranks;
+mod trident;
 mod views;
 mod whale;
 
@@ -52,6 +53,10 @@ pub use quadratic::{
     total_effective_power, EffectiveVote, VoterBalance,
 };
 pub use ranks::CivicRank;
+pub use trident::{
+    trident_approval_matrix, trident_policy_catalog, TimelockClass, TridentApprovalMatrix,
+    TridentChamber, TridentProposalClass,
+};
 pub use views::{
     civic_overview_json, list_proposals_json, list_topics_json, office_json, proposal_json,
     topic_json,
