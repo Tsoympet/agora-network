@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 
 use agora_crypto::parse_compressed_public_key;
-use agora_types::Hash;
+use agora_types::{Address, Hash};
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
@@ -304,6 +304,12 @@ impl TridentGenesisArtifact {
         if is_placeholder(&self.maturity) || self.maturity.contains("draft") {
             return Err("maturity still marks this artifact as a draft".into());
         }
+        if self.notes.iter().any(|note| {
+            let note = note.to_ascii_lowercase();
+            note.contains("draft") || note.contains("unfrozen") || note.contains("placeholder")
+        }) {
+            return Err("artifact notes still describe draft placeholders".into());
+        }
         if is_placeholder(&self.wallet.coin_type_status)
             || self.wallet.coin_type_status.contains("pending")
             || self.wallet.coin_type_status.contains("provisional")
@@ -466,11 +472,12 @@ impl TridentGenesisArtifact {
             if !keys.insert(key) {
                 return Err(format!("{label} validator key is duplicated"));
             }
-            if validator.withdrawal_address.trim().is_empty() || validator.self_bond == 0 {
+            if validator.self_bond == 0 {
                 return Err(format!(
                     "{label} validator withdrawal address/self bond is invalid"
                 ));
             }
+            self.validate_network_address(&validator.withdrawal_address)?;
         }
         Ok(())
     }
@@ -478,19 +485,20 @@ impl TridentGenesisArtifact {
     fn validate_populated_allocations(&self) -> Result<(), String> {
         for allocation in &self.initial_allocations {
             validate_asset_ticker(&allocation.asset)?;
-            if allocation.address.trim().is_empty() || allocation.amount == 0 {
+            if allocation.amount == 0 {
                 return Err("initial allocation has an empty address or zero amount".into());
             }
+            self.validate_network_address(&allocation.address)?;
         }
         for schedule in &self.vesting_schedules {
             validate_asset_ticker(&schedule.asset)?;
-            if schedule.address.trim().is_empty()
-                || schedule.amount == 0
+            if schedule.amount == 0
                 || schedule.start_timestamp_ms > schedule.cliff_timestamp_ms
                 || schedule.cliff_timestamp_ms > schedule.end_timestamp_ms
             {
                 return Err("vesting schedule is invalid".into());
             }
+            self.validate_network_address(&schedule.address)?;
         }
         Ok(())
     }
@@ -522,7 +530,10 @@ impl TridentGenesisArtifact {
             ("OVL", &self.treasuries.ovl_builder),
             ("DRC", &self.treasuries.drc_community),
         ] {
-            if treasury.allocation == 0 || is_placeholder(&treasury.control) {
+            if treasury.allocation == 0
+                || is_placeholder(&treasury.control)
+                || treasury.control == "multisig_or_governance"
+            {
                 return Err(format!(
                     "{ticker} treasury allocation/control is not frozen"
                 ));
@@ -599,6 +610,17 @@ impl TridentGenesisArtifact {
                     "{ticker} treasury allocation {document} does not match asset policy {policy}"
                 ));
             }
+        }
+        Ok(())
+    }
+
+    fn validate_network_address(&self, address: &str) -> Result<(), String> {
+        let prefix = format!("{}1", self.wallet.address_hrp);
+        if !address.starts_with(&prefix) || Address::parse(address).is_none() {
+            return Err(format!(
+                "address must be a valid {} Bech32m address",
+                self.wallet.address_hrp
+            ));
         }
         Ok(())
     }
@@ -707,6 +729,7 @@ mod tests {
         artifact.timestamp_ms = 1;
         artifact.bits = Some(0);
         artifact.maturity = "Scaffold".into();
+        artifact.notes.clear();
         artifact.wallet.coin_type_status = "registered".into();
         artifact.governance_constitution_hash = "11".repeat(32);
         artifact.emergency_policy_hash = "22".repeat(32);
@@ -721,6 +744,10 @@ mod tests {
         artifact.treasuries.tlt_security.allocation = 1;
         artifact.treasuries.ovl_builder.allocation = 1;
         artifact.treasuries.drc_community.allocation = 1;
+        artifact.treasuries.tlt_security.control = "governance-v1".into();
+        artifact.treasuries.ovl_builder.control = "governance-v1".into();
+        artifact.treasuries.drc_community.control = "governance-v1".into();
+        let address = Address([9; 20]).to_bech32_hrp("agoratest");
         for (ticker, amount) in [
             ("TLT", artifact.assets.tlt.genesis_allocation),
             ("OVL", 1),
@@ -728,7 +755,7 @@ mod tests {
         ] {
             artifact.initial_allocations.push(TridentInitialAllocation {
                 asset: ticker.into(),
-                address: format!("ceremony-owned-{ticker}-address"),
+                address: address.clone(),
                 amount,
             });
         }
@@ -737,7 +764,7 @@ mod tests {
             .public_key_bytes();
         let validator = TridentGenesisValidator {
             consensus_public_key: hex::encode(key),
-            withdrawal_address: "ceremony-owned-withdrawal-address".into(),
+            withdrawal_address: address,
             self_bond: 1,
         };
         for set in [&mut artifact.ovl_validators, &mut artifact.drc_validators] {
