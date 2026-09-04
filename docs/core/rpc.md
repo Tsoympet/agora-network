@@ -14,6 +14,8 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_estimateFee` | `{ min_relay_fee, suggested_fee }` for wallet coin selection |
 | `agora_submitTransaction` | UTXO-check + admit a signed tx into the mempool and gossip it |
 | `agora_submitAccountTransfer` | Validate, reserve, and gossip a signed OVL/DRC account transfer |
+| `agora_submitOvlExecution` | Validate and gossip a signed intrinsic-gas OVL execution envelope |
+| `agora_submitDrcPayment` | Validate and gossip a signed DRC payment with tag/invoice routing |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
@@ -25,6 +27,8 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_getValidatorSet` | OVL/DRC validator snapshot (`asset`, optional `epoch`) |
 | `agora_getValidator` | One validator record |
 | `agora_getRewardPool` | Slash/reward pool balance for OVL or DRC |
+| `agora_getProtocolTreasuries` | Canonical governance policy/root and asset-isolated treasury balances |
+| `agora_getCommunityRegistry` | Read canonical Hub, Passport, Grant, and Mission registry summary/records |
 | `agora_submitStakeTx` | Validate, reserve, and gossip a secp256k1-signed stake tx for block inclusion |
 | `agora_getConstitution` | Enacted constitution id, content hash, body |
 | `agora_getGovernance` | Civic overview (params, offices, counts) |

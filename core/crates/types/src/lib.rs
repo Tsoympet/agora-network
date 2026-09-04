@@ -7,17 +7,22 @@ mod account;
 mod amount;
 mod asset;
 mod block;
+mod execution;
 mod finality;
 mod hash;
 mod hrp;
+mod passport;
+mod payment;
 mod stake;
 mod transaction;
+mod treasury;
 
 pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
 pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
 pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{Block, BlockHeader};
+pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
     CheckpointAttestation, CheckpointBody, CheckpointState, FinalityCertificate,
     CHECKPOINT_ATTESTATION_DOMAIN,
@@ -27,8 +32,11 @@ pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
 };
+pub use passport::{PassportAttestation, PassportCategory, PASSPORT_ATTESTATION_DOMAIN};
+pub use payment::{DrcPaymentOutboxEvent, DrcPaymentTx, DRC_PAYMENT_SIGNING_DOMAIN};
 pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
+pub use treasury::{TreasuryBalance, TreasuryId};
 
 #[cfg(test)]
 mod tests {
@@ -101,6 +109,8 @@ mod tests {
             transactions: vec![tx],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -127,12 +137,19 @@ mod ts_export {
         NativeAssetId::export_all().expect("export NativeAssetId");
         NativeAmount::export_all().expect("export NativeAmount");
         AssetTxOut::export_all().expect("export AssetTxOut");
+        TreasuryId::export_all().expect("export TreasuryId");
+        TreasuryBalance::export_all().expect("export TreasuryBalance");
         TransactionAcceptance::export_all().expect("export TransactionAcceptance");
         AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
         AccountTransfer::export_all().expect("export AccountTransfer");
+        OvlExecutionTx::export_all().expect("export OvlExecutionTx");
+        DrcPaymentTx::export_all().expect("export DrcPaymentTx");
+        DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");
         CheckpointState::export_all().expect("export CheckpointState");
         CheckpointBody::export_all().expect("export CheckpointBody");
         CheckpointAttestation::export_all().expect("export CheckpointAttestation");
         FinalityCertificate::export_all().expect("export FinalityCertificate");
+        PassportCategory::export_all().expect("export PassportCategory");
+        PassportAttestation::export_all().expect("export PassportAttestation");
     }
 }

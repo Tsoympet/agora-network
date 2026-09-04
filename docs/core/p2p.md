@@ -30,7 +30,7 @@ Topics and the getblock protocol are scoped by `NetworkConfig::network` (from `A
 | --- | --- | --- |
 | blocks | `agora/testnet/blocks/1` | `Block` / `BlockAnnounce` / `CompactBlock` / `GetBlock` |
 | attestations | `agora/testnet/attestations/1` | `CheckpointAttestation` (Trident dual-PoS) |
-| txs | `agora/testnet/txs/1` | `Transaction` / `AccountTransfer` / `StakeTx` |
+| txs | `agora/testnet/txs/1` | UTXO, account, stake, OVL execution, and DRC payment envelopes |
 | getblock RR | `/agora/testnet/getblock/1` | CBOR `GetBlockRequest` / `GetBlockResponse` |
 
 `dev` (default) uses `agora/dev/…`. Peers on different networks never share a gossip mesh even on the same underlay.
@@ -71,7 +71,7 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 
 ## Mempool
 
-The mempool reserves UTXO outpoints and one shared account nonce per `(asset, address)`. Account transfers and stake ops therefore cannot race the same OVL/DRC nonce. Node admission runs the exact state-machine apply validator against the live store without committing before placing a lane operation in the pool.
+The mempool reserves UTXO outpoints and one shared account nonce per `(asset, address)`. Account transfers, stake ops, OVL execution, and DRC payments cannot race the same native-account nonce.
 
 `agora-node` runs `validate_mempool_tx` (live `cf_utxo` + mempool reserved set) under the same lock before admit on both RPC `agora_submitTransaction` and gossip `Transaction` messages. Missing, foreign, overspending, or already-reserved inputs are rejected at the edge. The implicit fee must be ≥ `AGORA_MIN_RELAY_FEE` (default 1); admission stores the fee for template ordering.
 

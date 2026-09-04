@@ -436,16 +436,18 @@ impl ChainState {
         payout: Address,
         transfers: &[Transaction],
     ) -> Result<Block, AdmitError> {
-        self.block_template_lanes(payout, transfers, &[], &[])
+        self.block_template_lanes(payout, transfers, &[], &[], &[], &[])
     }
 
-    /// Build a mining template with all three Trident body lanes.
+    /// Build a mining template with Trident body lanes.
     pub fn block_template_lanes(
         &self,
         payout: Address,
         transfers: &[Transaction],
         account_transfers: &[agora_types::AccountTransfer],
         stake_ops: &[agora_types::SignedStakeTx],
+        ovl_executions: &[agora_types::OvlExecutionTx],
+        drc_payments: &[agora_types::DrcPaymentTx],
     ) -> Result<Block, AdmitError> {
         let parents = self.select_template_parents()?;
         let timestamp_ms = self.template_timestamp_ms(&parents)?;
@@ -490,6 +492,8 @@ impl ChainState {
             transactions,
             account_transfers: account_transfers.to_vec(),
             stake_ops: stake_ops.to_vec(),
+            ovl_executions: ovl_executions.to_vec(),
+            drc_payments: drc_payments.to_vec(),
         };
         block.header.tx_root = block.compute_body_root();
         Ok(block)
@@ -1816,6 +1820,7 @@ impl ChainState {
                 coinbase_total,
                 account_before: journal.account_before,
                 stake_meta_before: journal.stake_meta_before,
+                payment_meta_before: journal.payment_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

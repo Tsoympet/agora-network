@@ -6,7 +6,8 @@ use agora_governance::{
     CivicSnapshot, ProposalKind, TopicCategory, VoteChoice,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, BlockHeader, DrcPaymentTx, Hash, OutPoint,
+    OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -169,6 +170,8 @@ pub trait RpcBackend: Send {
     fn estimate_fee(&self) -> Result<FeeEstimate, RpcError>;
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
     fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError>;
+    fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError>;
+    fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
     /// Live UTXO set for wallet coin selection.
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError>;
@@ -191,6 +194,8 @@ pub trait RpcBackend: Send {
     fn get_validator_set(&self, asset: &str, epoch: Option<u64>) -> Result<Value, RpcError>;
     fn get_validator(&self, asset: &str, operator: &Address) -> Result<Value, RpcError>;
     fn get_reward_pool(&self, asset: &str) -> Result<Value, RpcError>;
+    fn get_protocol_treasuries(&self) -> Result<Value, RpcError>;
+    fn get_community_registry(&self, limit: usize) -> Result<Value, RpcError>;
     /// Admit a secp256k1-signed stake tx (bond/delegate/unbond/withdraw). Never mint-like.
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError>;
 
@@ -429,6 +434,18 @@ impl RpcBackend for InMemoryBackend {
         ))
     }
 
+    fn submit_ovl_execution(&mut self, _tx: OvlExecutionTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit OVL execution".into(),
+        ))
+    }
+
+    fn submit_drc_payment(&mut self, _tx: DrcPaymentTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC payments".into(),
+        ))
+    }
+
     fn get_balance(&self, address: &Address) -> Amount {
         self.balances.get(address).copied().unwrap_or(Amount::ZERO)
     }
@@ -484,6 +501,8 @@ impl RpcBackend for InMemoryBackend {
             transactions: vec![],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         })
     }
 
@@ -530,6 +549,24 @@ impl RpcBackend for InMemoryBackend {
 
     fn get_reward_pool(&self, asset: &str) -> Result<Value, RpcError> {
         Ok(json!({ "asset": asset, "amount": 0 }))
+    }
+
+    fn get_protocol_treasuries(&self) -> Result<Value, RpcError> {
+        Ok(json!({
+            "maturity": "Scaffold",
+            "treasuries": [],
+        }))
+    }
+
+    fn get_community_registry(&self, _limit: usize) -> Result<Value, RpcError> {
+        Ok(json!({
+            "maturity": "Scaffold",
+            "consensus_mutations_active": false,
+            "hubs": [],
+            "passport_attestations": [],
+            "grants": [],
+            "missions": [],
+        }))
     }
 
     fn submit_stake_tx(&mut self, _stake_tx: Value) -> Result<Value, RpcError> {

@@ -14,13 +14,18 @@ use agora_p2p::{
 };
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
-    apply_account_transfer, apply_signed_stake_tx, build_snapshot, load_epoch, load_reward_pool,
-    load_validator, lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth,
-    AccountJournal, ColumnFamily, StakingParams, StateStore, TxAuthContext, WriteBatch,
+    apply_account_transfer, apply_drc_payment, apply_ovl_execution, apply_signed_stake_tx,
+    build_snapshot, canonical_community_root, governance_treasury_root,
+    list_grants as list_canonical_grants, list_hubs as list_canonical_hubs,
+    list_missions as list_canonical_missions, list_passport_attestations,
+    load_canonical_community_summary, load_canonical_governance_policy, load_epoch,
+    load_protocol_treasuries, load_reward_pool, load_validator, lookup_tx_location, meta_keys,
+    outpoint_key, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, StakingParams,
+    StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, CheckpointAttestation, Hash, NativeAssetId, OutPoint,
-    SignedStakeTx, Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcPaymentTx, Hash,
+    NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction, TxOut,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -122,6 +127,59 @@ pub(crate) fn admit_stake_tx(
     apply_signed_stake_tx(store, &mut batch, &tx, auth, &params)
         .map_err(|e| RpcError::Rejected(format!("stake: {e}")))?;
     pool.admit_stake(tx)
+        .map_err(|e| RpcError::Rejected(e.to_string()))
+}
+
+/// Validate and reserve a signed OVL execution envelope.
+pub(crate) fn admit_ovl_execution(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: OvlExecutionTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(NativeAssetId::OVL, &tx.from) {
+        return Err(RpcError::Rejected(
+            "OVL account already has a pending nonce".into(),
+        ));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_ovl_execution(store, &tx, auth, &mut batch, &mut journal)
+        .map_err(|e| RpcError::Rejected(format!("OVL execution: {e}")))?;
+    pool.admit_execution(tx)
+        .map_err(|e| RpcError::Rejected(e.to_string()))
+}
+
+/// Validate and reserve a signed native DRC payment.
+pub(crate) fn admit_drc_payment(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: DrcPaymentTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(NativeAssetId::DRC, &tx.from) {
+        return Err(RpcError::Rejected(
+            "DRC account already has a pending nonce".into(),
+        ));
+    }
+    if tx.fee.as_base_units() < min_relay_fee() {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {} < min relay {}",
+            tx.fee.as_base_units(),
+            min_relay_fee()
+        )));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_drc_payment(store, &tx, auth, &mut batch, &mut journal)
+        .map_err(|e| RpcError::Rejected(format!("DRC payment: {e}")))?;
+    pool.admit_payment(tx)
         .map_err(|e| RpcError::Rejected(e.to_string()))
 }
 
@@ -424,6 +482,26 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_ovl_execution(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::OvlExecution(tx))
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_drc_payment(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcPayment(tx))
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+        }
+        Ok(id)
+    }
+
     fn get_balance(&self, address: &Address) -> Amount {
         self.utxo_balance(address).unwrap_or(Amount::ZERO)
     }
@@ -472,7 +550,7 @@ impl RpcBackend for NodeBackend {
     }
 
     fn get_block_template(&self) -> Result<Block, RpcError> {
-        let (transfers, account_transfers, stake_ops) = {
+        let (transfers, account_transfers, stake_ops, ovl_executions, drc_payments) = {
             let pool = self
                 .mempool
                 .lock()
@@ -481,6 +559,8 @@ impl RpcBackend for NodeBackend {
                 pool.select_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_account_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_stake_ops(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_ovl_executions(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_payments(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         self.chain
@@ -491,6 +571,8 @@ impl RpcBackend for NodeBackend {
                 &transfers,
                 &account_transfers,
                 &stake_ops,
+                &ovl_executions,
+                &drc_payments,
             )
             .map_err(|e| RpcError::Internal(e.to_string()))
     }
@@ -672,6 +754,61 @@ impl RpcBackend for NodeBackend {
         }))
     }
 
+    fn get_protocol_treasuries(&self) -> Result<Value, RpcError> {
+        let policy = load_canonical_governance_policy(self.store.as_ref())
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let root = governance_treasury_root(self.store.as_ref())
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let treasuries = load_protocol_treasuries(self.store.as_ref())
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "maturity": "Scaffold",
+            "consensus_mutations_active": false,
+            "governance_root": root.to_hex(),
+            "policy": {
+                "version": policy.version,
+                "constitution_id": policy.constitution_id,
+                "constitution_hash": policy.constitution_hash.to_hex(),
+                "authorization_root": policy.authorization_root.to_hex(),
+            },
+            "treasuries": treasuries.iter().map(|t| json!({
+                "id": t.treasury.as_str(),
+                "asset": t.asset.ticker(),
+                "balance": t.balance.as_base_units(),
+            })).collect::<Vec<_>>(),
+        }))
+    }
+
+    fn get_community_registry(&self, limit: usize) -> Result<Value, RpcError> {
+        let summary = load_canonical_community_summary(self.store.as_ref())
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let root = canonical_community_root(self.store.as_ref())
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let hubs = list_canonical_hubs(self.store.as_ref(), limit)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let passports = list_passport_attestations(self.store.as_ref(), limit)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let grants = list_canonical_grants(self.store.as_ref(), limit)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let missions = list_canonical_missions(self.store.as_ref(), limit)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "maturity": "Scaffold",
+            "consensus_mutations_active": false,
+            "root": root.to_hex(),
+            "counts": {
+                "hubs": summary.hub_count,
+                "passport_attestations": summary.passport_count,
+                "grants": summary.grant_count,
+                "missions": summary.mission_count,
+            },
+            "hubs": hubs,
+            "passport_attestations": passports,
+            "grants": grants,
+            "missions": missions,
+        }))
+    }
+
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError> {
         let tx: SignedStakeTx =
             serde_json::from_value(stake_tx).map_err(|e| RpcError::InvalidParams(e.to_string()))?;
@@ -704,7 +841,14 @@ impl RpcBackend for NodeBackend {
     }
 
     fn get_governance(&self) -> Result<Value, RpcError> {
-        self.with_civic(|snap| Ok(civic_overview_json(snap)))
+        self.with_civic(|snap| {
+            let mut value = civic_overview_json(snap);
+            if let Some(object) = value.as_object_mut() {
+                object.insert("scope".into(), json!("administrative_local"));
+                object.insert("consensus_accepted".into(), json!(false));
+            }
+            Ok(value)
+        })
     }
 
     fn list_proposals(&self, limit: usize) -> Result<Value, RpcError> {
@@ -873,8 +1017,8 @@ mod tests {
     use crate::admit::ChainState;
     use agora_consensus::{PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
     use agora_crypto::{
-        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound, sign_transaction_bound,
-        Bip44Path,
+        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound, sign_drc_payment_bound,
+        sign_ovl_execution_bound, sign_transaction_bound, Bip44Path,
     };
     use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
@@ -882,6 +1026,79 @@ mod tests {
 
     const PHRASE: &str =
         "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    #[test]
+    fn protocol_treasuries_rpc_is_canonical_read_only_state() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            Arc::new(Mutex::new(Mempool::new(8))),
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+
+        let value = backend.get_protocol_treasuries().unwrap();
+        assert_eq!(value["maturity"], "Scaffold");
+        assert_eq!(value["consensus_mutations_active"], false);
+        let treasuries = value["treasuries"].as_array().unwrap();
+        assert_eq!(treasuries.len(), 3);
+        assert_eq!(treasuries[0]["asset"], "TLT");
+        assert_eq!(treasuries[1]["asset"], "OVL");
+        assert_eq!(treasuries[2]["asset"], "DRC");
+        assert!(treasuries.iter().all(|t| t["balance"] == 0));
+    }
+
+    #[test]
+    fn community_registry_rpc_is_canonical_read_only_state() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            Arc::new(Mutex::new(Mempool::new(8))),
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+
+        let value = backend.get_community_registry(10).unwrap();
+        assert_eq!(value["maturity"], "Scaffold");
+        assert_eq!(value["consensus_mutations_active"], false);
+        assert_eq!(value["counts"]["hubs"], 0);
+        assert_eq!(value["counts"]["passport_attestations"], 0);
+        assert_eq!(value["counts"]["grants"], 0);
+        assert_eq!(value["counts"]["missions"], 0);
+        assert!(value["root"].as_str().is_some_and(|root| root.len() == 64));
+    }
 
     #[test]
     fn account_transfer_enters_template_lane() {
@@ -942,6 +1159,120 @@ mod tests {
             template.header.tx_root,
             Block::compute_tx_root(&template.transactions)
         );
+    }
+
+    #[test]
+    fn ovl_execution_enters_template_lane() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let bob = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::OVL,
+            &alice.address(),
+            Amount::from_base_units(50_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            mempool,
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+        let mut tx = OvlExecutionTx::unsigned(
+            alice.address(),
+            bob.address(),
+            Amount::from_base_units(1_000),
+            agora_state_machine::OVL_INTRINSIC_GAS,
+            1,
+            0,
+            vec![],
+        );
+        sign_ovl_execution_bound(&mut tx, &alice, "agora-dev", &genesis).unwrap();
+
+        let id = backend.submit_ovl_execution(tx.clone()).unwrap();
+        assert_eq!(id, tx.tx_id());
+        let template = backend.get_block_template().unwrap();
+        assert_eq!(template.ovl_executions, vec![tx]);
+        assert_eq!(template.header.tx_root, template.compute_body_root());
+    }
+
+    #[test]
+    fn drc_payment_enters_template_lane() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let merchant = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &alice.address(),
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            mempool,
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+        let mut tx = DrcPaymentTx::unsigned(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(100),
+            Amount::from_base_units(1),
+            77,
+            Hash([8; 32]),
+            0,
+        );
+        sign_drc_payment_bound(&mut tx, &alice, "agora-dev", &genesis).unwrap();
+
+        let id = backend.submit_drc_payment(tx.clone()).unwrap();
+        assert_eq!(id, tx.payment_id());
+        let template = backend.get_block_template().unwrap();
+        assert_eq!(template.drc_payments, vec![tx]);
+        assert_eq!(template.header.tx_root, template.compute_body_root());
     }
 
     #[test]

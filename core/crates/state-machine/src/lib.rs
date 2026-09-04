@@ -7,15 +7,19 @@ mod acceptance;
 mod accounts;
 mod apply;
 mod columns;
+mod community_state;
 mod error;
+mod execution;
 mod finality_store;
 mod genesis;
 mod ghostdag_store;
+mod governance_state;
 mod headers;
 mod marks;
 mod monetary;
 mod network;
 mod orphans;
+mod payments;
 mod staking;
 mod state_root;
 mod store;
@@ -33,6 +37,12 @@ pub use acceptance::{
 pub use accounts::{
     account_key, account_root, apply_account_transfer, credit_account_into, genesis_credit,
     load_account, put_account_into, revert_account_journal_into, AccountJournal, AccountState,
+};
+pub use community_state::{
+    canonical_community_root, init_canonical_community_into, list_grants, list_hubs,
+    list_missions, list_passport_attestations, load_canonical_community_summary,
+    register_grant_into, register_hub_into, register_mission_into,
+    register_passport_attestation_into, CanonicalCommunitySummary, CANONICAL_COMMUNITY_VERSION,
 };
 pub use finality_store::{
     certificate_key, load_attestation_index, load_certificate, load_finalized_blue_score,
@@ -68,9 +78,23 @@ pub use supply::{
     put_schema_version_into, verify_supply_invariants,
 };
 pub use error::StateError;
+pub use execution::{
+    apply_ovl_execution, execution_fee, OvlExecutionReceipt, OVL_EXECUTION_VERSION,
+    OVL_INTRINSIC_GAS,
+};
+pub use payments::{
+    apply_drc_payment, drc_payment_root, list_drc_outbox, load_drc_outbox_event,
+    payment_invoice_key, payment_meta_keys, payment_outbox_key, payment_seen_key,
+    DrcPaymentReceipt, DRC_PAYMENT_VERSION,
+};
 pub use genesis::{GenesisBuilder, SupplyCaps};
 pub use ghostdag_store::{
     ghostdag_key, load_ghostdag_record, store_ghostdag_record, GhostdagRecord,
+};
+pub use governance_state::{
+    authorization_policy_root, governance_treasury_root, init_canonical_governance_into,
+    load_canonical_governance_policy, load_protocol_treasuries, load_protocol_treasury,
+    CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
 };
 pub use headers::{header_key, load_header, store_header, store_header_into};
 pub use marks::{default_token_marks, TokenMark};

@@ -26,3 +26,9 @@ Agora Athens, Thessaloniki, Cyprus, Europe, Developers, Miners, Validators, Merc
 | Revocation process | Documented offboarding |
 
 Accreditation and revocation are governance-auditable (Ecclesia + DRC Community per constitution matrix).
+
+The canonical scaffold validates and commits Hub identity, charter,
+coordinators, multisig, election/reporting periods, COI and deliverable roots,
+accreditation proposal, and status. Active Hub coordinators form the O(1)
+Passport issuer index; signed accreditation/revocation operations remain
+deferred.

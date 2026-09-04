@@ -83,6 +83,8 @@ impl GenesisBuilder {
             transactions: vec![coinbase],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         }
     }
 
@@ -142,6 +144,8 @@ impl GenesisBuilder {
         // Re-apply TLT issued=premine after ignite (ignite sets genesis_allocation).
         let policy = crate::monetary::TridentMonetaryPolicy::default();
         crate::supply::ignite_trident_supply(&mut supply_batch, &policy)?;
+        crate::governance_state::init_canonical_governance_into(&mut supply_batch)?;
+        crate::community_state::init_canonical_community_into(&mut supply_batch)?;
         crate::supply::put_issued_supply_into(
             &mut supply_batch,
             agora_types::NativeAssetId::TLT,

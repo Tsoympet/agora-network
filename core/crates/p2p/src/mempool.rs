@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use agora_types::{
-    AccountTransfer, Address, Block, Hash, NativeAssetId, OutPoint, SignedStakeTx, Transaction,
+    AccountTransfer, Address, Block, DrcPaymentTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
+    SignedStakeTx, Transaction,
 };
 
 use crate::P2pError;
@@ -22,6 +23,8 @@ pub struct Mempool {
     reserved: HashSet<OutPoint>,
     account_txs: HashMap<Hash, AccountTransfer>,
     stake_txs: HashMap<Hash, SignedStakeTx>,
+    execution_txs: HashMap<Hash, OvlExecutionTx>,
+    payment_txs: HashMap<Hash, DrcPaymentTx>,
     /// Account and stake lanes share the same per-asset account nonce.
     reserved_accounts: HashSet<(NativeAssetId, Address)>,
     max_size: usize,
@@ -35,13 +38,19 @@ impl Mempool {
             reserved: HashSet::new(),
             account_txs: HashMap::new(),
             stake_txs: HashMap::new(),
+            execution_txs: HashMap::new(),
+            payment_txs: HashMap::new(),
             reserved_accounts: HashSet::new(),
             max_size,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.txs.len() + self.account_txs.len() + self.stake_txs.len()
+        self.txs.len()
+            + self.account_txs.len()
+            + self.stake_txs.len()
+            + self.execution_txs.len()
+            + self.payment_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -52,6 +61,8 @@ impl Mempool {
         self.txs.contains_key(tx_id)
             || self.account_txs.contains_key(tx_id)
             || self.stake_txs.contains_key(tx_id)
+            || self.execution_txs.contains_key(tx_id)
+            || self.payment_txs.contains_key(tx_id)
     }
 
     /// Outpoints already claimed by mempool transactions.
@@ -160,6 +171,44 @@ impl Mempool {
         Ok(id)
     }
 
+    /// Admit a pre-validated OVL execution envelope.
+    pub fn admit_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, P2pError> {
+        let id = tx.tx_id();
+        if self.execution_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let key = (NativeAssetId::OVL, tx.from);
+        if !self.reserved_accounts.insert(key) {
+            return Err(P2pError::MempoolRejected(
+                "account already has a pending nonce".into(),
+            ));
+        }
+        self.execution_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    /// Admit a pre-validated native DRC payment.
+    pub fn admit_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, P2pError> {
+        let id = tx.payment_id();
+        if self.payment_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let key = (NativeAssetId::DRC, tx.from);
+        if !self.reserved_accounts.insert(key) {
+            return Err(P2pError::MempoolRejected(
+                "account already has a pending nonce".into(),
+            ));
+        }
+        self.payment_txs.insert(id, tx);
+        Ok(id)
+    }
+
     /// Drop the lowest-fee resident if its fee is strictly below `fee`.
     /// Returns true when space was made.
     fn evict_lowest_below(&mut self, fee: u64) -> bool {
@@ -264,6 +313,29 @@ impl Mempool {
         txs
     }
 
+    pub fn select_ovl_executions(&self, max: usize) -> Vec<OvlExecutionTx> {
+        let mut txs: Vec<_> = self.execution_txs.values().cloned().collect();
+        txs.sort_by(|a, b| {
+            b.max_fee_per_gas
+                .cmp(&a.max_fee_per_gas)
+                .then_with(|| a.tx_id().as_bytes().cmp(b.tx_id().as_bytes()))
+        });
+        txs.truncate(max);
+        txs
+    }
+
+    pub fn select_drc_payments(&self, max: usize) -> Vec<DrcPaymentTx> {
+        let mut txs: Vec<_> = self.payment_txs.values().cloned().collect();
+        txs.sort_by(|a, b| {
+            b.fee
+                .as_base_units()
+                .cmp(&a.fee.as_base_units())
+                .then_with(|| a.payment_id().as_bytes().cmp(b.payment_id().as_bytes()))
+        });
+        txs.truncate(max);
+        txs
+    }
+
     /// Drop included txs and any remaining pool txs that spend the same outpoints.
     pub fn evict_for_block(&mut self, block: &Block) {
         let mut spent = HashSet::new();
@@ -284,6 +356,20 @@ impl Mempool {
             let id = tx.stake_tx_id();
             if self.stake_txs.remove(&id).is_some() {
                 self.reserved_accounts.remove(&(tx.asset, tx.actor));
+            }
+        }
+        for tx in &block.ovl_executions {
+            let id = tx.tx_id();
+            if self.execution_txs.remove(&id).is_some() {
+                self.reserved_accounts
+                    .remove(&(NativeAssetId::OVL, tx.from));
+            }
+        }
+        for tx in &block.drc_payments {
+            let id = tx.payment_id();
+            if self.payment_txs.remove(&id).is_some() {
+                self.reserved_accounts
+                    .remove(&(NativeAssetId::DRC, tx.from));
             }
         }
         let drop: Vec<Hash> = self
@@ -467,6 +553,8 @@ mod tests {
             transactions: vec![included.clone()],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -478,8 +566,8 @@ mod tests {
     }
 
     #[test]
-    fn account_and_stake_share_nonce_reservation() {
-        use agora_types::{AccountTransfer, NativeAssetId, SignedStakeTx};
+    fn account_stake_and_execution_share_nonce_reservation() {
+        use agora_types::{AccountTransfer, NativeAssetId, OvlExecutionTx, SignedStakeTx};
 
         let actor = agora_types::Address([3; 20]);
         let mut account = AccountTransfer::unsigned_with_fee(
@@ -496,11 +584,21 @@ mod tests {
         let mut stake = SignedStakeTx::unsigned_unbond_self(NativeAssetId::OVL, actor, 0);
         stake.public_key = vec![2; 33];
         stake.signature = vec![3; 64];
+        let execution = OvlExecutionTx::unsigned(
+            actor,
+            agora_types::Address([5; 20]),
+            Amount::ZERO,
+            21_000,
+            1,
+            0,
+            vec![],
+        );
 
         let mut pool = Mempool::new(4);
         let account_id = pool.admit_account(account.clone()).unwrap();
         assert!(pool.account_reserved(NativeAssetId::OVL, &actor));
         assert!(pool.admit_stake(stake).is_err());
+        assert!(pool.admit_execution(execution).is_err());
 
         let block = Block {
             header: BlockHeader {
@@ -514,9 +612,41 @@ mod tests {
             transactions: vec![],
             account_transfers: vec![account],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));
         assert!(!pool.account_reserved(NativeAssetId::OVL, &actor));
+    }
+
+    #[test]
+    fn drc_payment_shares_account_nonce_reservation() {
+        use agora_types::{AccountTransfer, DrcPaymentTx, NativeAssetId};
+
+        let actor = agora_types::Address([6; 20]);
+        let recipient = agora_types::Address([7; 20]);
+        let mut account = AccountTransfer::unsigned_with_fee(
+            NativeAssetId::DRC,
+            actor,
+            recipient,
+            Amount::from_base_units(5),
+            Amount::from_base_units(1),
+            0,
+        );
+        account.public_key = vec![2; 33];
+        account.signature = vec![3; 64];
+        let payment = DrcPaymentTx::unsigned(
+            actor,
+            recipient,
+            Amount::from_base_units(5),
+            Amount::from_base_units(1),
+            0,
+            Hash::ZERO,
+            0,
+        );
+        let mut pool = Mempool::new(4);
+        pool.admit_account(account).unwrap();
+        assert!(pool.admit_payment(payment).is_err());
     }
 }

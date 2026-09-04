@@ -83,7 +83,7 @@ Meta CF keys (additive; `SCHEMA_VERSION = 4`):
 - `finality/cert|idx|last_att/…`, `finality/tip_blue_score` — certificates, signer index, tip
 - `compose_trident_state_root` — canonical multi-asset commitment for checkpoint bodies
 
-Node admit enforces reorg-beyond-finality; RPC/P2P admit attestations; account and stake operations enter the mempool, gossip, templates, and Virtual acceptance lanes. See [`finality.md`](finality.md).
+Node admit enforces reorg-beyond-finality. Account, stake, OVL execution, and native DRC payments enter consensus lanes. DRC payment metadata, governance/treasuries, and the bounded Hub/Passport/Grant/Mission registry commit in the state root. Local unsigned civic/community RPC state remains excluded. See [`community-registry.md`](community-registry.md), [`ovl-execution.md`](ovl-execution.md), [`drc-payments.md`](drc-payments.md), [`governance.md`](governance.md), and [`finality.md`](finality.md).
 
 ## Storage backends
 

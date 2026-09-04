@@ -166,6 +166,8 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getValidatorSet"
             | "agora_getValidator"
             | "agora_getRewardPool"
+            | "agora_getProtocolTreasuries"
+            | "agora_getCommunityRegistry"
     )
 }
 

@@ -20,3 +20,7 @@ Code, documentation, translation, security reports, running infrastructure, host
 ## Verification
 
 Issuers publish policies; attestations are secp256k1-signed and domain-separated (`agora-passport-attestation-v1`). Revocation lists are public. Missions completion may mint attestations (see grants doc).
+
+The canonical scaffold now defines the signed, subject-bound envelope, active-Hub
+issuer checks, issuer nonces, registry commitment, and read RPC. Revocation and
+consensus block admission remain deferred.

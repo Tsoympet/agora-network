@@ -14,6 +14,8 @@ use crate::accounts::{
     apply_account_transfer_checked, load_account, put_account_into, AccountJournal, AccountState,
 };
 use crate::columns::ColumnFamily;
+use crate::execution::apply_ovl_execution;
+use crate::payments::{apply_drc_payment, payment_meta_keys};
 use crate::staking::{
     apply_signed_stake_tx, credit_fee_share_to_reward_pool, reward_pool_meta_key,
     snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
@@ -57,6 +59,8 @@ pub struct UtxoJournal {
     pub account_before: Vec<(NativeAssetId, Address, AccountState)>,
     /// Meta key snapshots before Accepted stake ops (`None` = key absent).
     pub stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    /// DRC payment duplicate/invoice/outbox keys before Accepted payments.
+    pub payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -76,10 +80,34 @@ struct UtxoJournalV2 {
     coinbase_total: u64,
 }
 
+/// Multi-lane journal before native DRC payment metadata.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct UtxoJournalV3 {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+    fees: u64,
+    subsidy: u64,
+    coinbase_total: u64,
+    account_before: Vec<(NativeAssetId, Address, AccountState)>,
+    stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
 impl UtxoJournal {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(j) = Self::try_from_slice(bytes) {
             return Ok(j);
+        }
+        if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
+            return Ok(Self {
+                spent: v3.spent,
+                created: v3.created,
+                fees: v3.fees,
+                subsidy: v3.subsidy,
+                coinbase_total: v3.coinbase_total,
+                account_before: v3.account_before,
+                stake_meta_before: v3.stake_meta_before,
+                payment_meta_before: Vec::new(),
+            });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
             return Ok(Self {
@@ -90,6 +118,7 @@ impl UtxoJournal {
                 coinbase_total: v2.coinbase_total,
                 account_before: Vec::new(),
                 stake_meta_before: Vec::new(),
+                payment_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -102,6 +131,7 @@ impl UtxoJournal {
             coinbase_total: 0,
             account_before: Vec::new(),
             stake_meta_before: Vec::new(),
+            payment_meta_before: Vec::new(),
         })
     }
 }
@@ -289,8 +319,7 @@ fn apply_block_batched_mode(
     let mut coinbases = 0u32;
     let mut coinbase_total = 0u64;
     let mut applied_fees = 0u64;
-    let mut statuses: Vec<TransactionAcceptance> =
-        Vec::with_capacity(block.transactions.len());
+    let mut statuses: Vec<TransactionAcceptance> = Vec::with_capacity(block.transactions.len());
     let mut accepted_tx_ids: HashSet<Hash> = HashSet::new();
 
     // Pre-scan transfers that will apply so coinbase budget matches Virtual skips.
@@ -385,7 +414,7 @@ fn apply_block_batched_mode(
         0
     );
 
-    let (account_statuses, stake_statuses) =
+    let (account_statuses, execution_statuses, stake_statuses, payment_statuses) =
         apply_trident_lanes(store, block, auth, mode, &mut batch, &mut journal)?;
 
     Ok(BlockApplyResult {
@@ -395,6 +424,8 @@ fn apply_block_batched_mode(
             statuses,
             account_statuses,
             stake_statuses,
+            execution_statuses,
+            payment_statuses,
         },
         batch,
     })
@@ -411,6 +442,12 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("unknown validator")
                 || msg.contains("already bonded")
                 || msg.contains("self-transfer forbidden")
+                || msg.contains("bad OVL execution nonce")
+                || msg.contains("insufficient OVL execution balance")
+                || msg.contains("bad DRC payment nonce")
+                || msg.contains("insufficient DRC payment balance")
+                || msg.contains("duplicate DRC payment id")
+                || msg.contains("duplicate DRC merchant invoice")
         }
         _ => false,
     }
@@ -432,22 +469,42 @@ fn apply_trident_lanes(
     mode: ApplyMode,
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
-) -> Result<(Vec<TransactionAcceptance>, Vec<TransactionAcceptance>), StateError> {
-    if block.account_transfers.is_empty() && block.stake_ops.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
+) -> Result<
+    (
+        Vec<TransactionAcceptance>,
+        Vec<TransactionAcceptance>,
+        Vec<TransactionAcceptance>,
+        Vec<TransactionAcceptance>,
+    ),
+    StateError,
+> {
+    if block.account_transfers.is_empty()
+        && block.ovl_executions.is_empty()
+        && block.drc_payments.is_empty()
+        && block.stake_ops.is_empty()
+    {
+        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
     }
-    if !block.stake_ops.is_empty() && auth.is_none() {
+    if (!block.stake_ops.is_empty()
+        || !block.ovl_executions.is_empty()
+        || !block.drc_payments.is_empty())
+        && auth.is_none()
+    {
         return Err(StateError::InvalidTx(
-            "stake ops require network-bound auth".into(),
+            "stake/execution ops require network-bound auth".into(),
         ));
     }
 
     // Sequential visibility without committing the consensus batch early.
     let lane = store.cow_overlay();
     let mut account_statuses = Vec::with_capacity(block.account_transfers.len());
+    let mut execution_statuses = Vec::with_capacity(block.ovl_executions.len());
     let mut stake_statuses = Vec::with_capacity(block.stake_ops.len());
+    let mut payment_statuses = Vec::with_capacity(block.drc_payments.len());
     let mut seen_account_ids: HashSet<Hash> = HashSet::new();
     let mut seen_stake_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_execution_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_payment_ids: HashSet<Hash> = HashSet::new();
 
     for tx in &block.account_transfers {
         let id = tx.transfer_id();
@@ -456,8 +513,7 @@ fn apply_trident_lanes(
         match apply_account_transfer_checked(&lane, tx, auth, &mut op_batch, &mut acct_journal) {
             Ok(()) => {
                 if tx.fee.as_base_units() > 0 {
-                    let pool_snap =
-                        snapshot_meta_keys(&lane, &[reward_pool_meta_key(tx.asset)])?;
+                    let pool_snap = snapshot_meta_keys(&lane, &[reward_pool_meta_key(tx.asset)])?;
                     journal.stake_meta_before.extend(pool_snap);
                     credit_fee_share_to_reward_pool(
                         &lane,
@@ -483,6 +539,39 @@ fn apply_trident_lanes(
         }
     }
 
+    for tx in &block.ovl_executions {
+        let id = tx.tx_id();
+        let ctx = auth.expect("execution auth checked above");
+        let mut op_batch = WriteBatch::new();
+        let mut acct_journal = AccountJournal::default();
+        match apply_ovl_execution(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
+            Ok(receipt) => {
+                let pool_snap =
+                    snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::OVL)])?;
+                journal.stake_meta_before.extend(pool_snap);
+                credit_fee_share_to_reward_pool(
+                    &lane,
+                    &mut op_batch,
+                    NativeAssetId::OVL,
+                    receipt.fee_paid,
+                )?;
+                lane.write_batch(op_batch.clone())?;
+                batch.append(op_batch);
+                journal.account_before.extend(acct_journal.before);
+                seen_execution_ids.insert(id);
+                execution_statuses.push(TransactionAcceptance::Accepted);
+            }
+            Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                if seen_execution_ids.contains(&id) {
+                    execution_statuses.push(TransactionAcceptance::ExactDuplicate);
+                } else {
+                    execution_statuses.push(TransactionAcceptance::ConflictLost);
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
     for tx in &block.stake_ops {
         let id = tx.stake_tx_id();
         let ctx = auth.expect("stake auth checked above");
@@ -494,7 +583,9 @@ fn apply_trident_lanes(
             Ok(()) => {
                 lane.write_batch(op_batch.clone())?;
                 batch.append(op_batch);
-                journal.account_before.push((tx.asset, tx.actor, actor_before));
+                journal
+                    .account_before
+                    .push((tx.asset, tx.actor, actor_before));
                 journal.stake_meta_before.extend(snap);
                 seen_stake_ids.insert(id);
                 stake_statuses.push(TransactionAcceptance::Accepted);
@@ -510,7 +601,47 @@ fn apply_trident_lanes(
         }
     }
 
-    Ok((account_statuses, stake_statuses))
+    for tx in &block.drc_payments {
+        let id = tx.payment_id();
+        let ctx = auth.expect("payment auth checked above");
+        let meta_before = snapshot_meta_keys(&lane, &payment_meta_keys(tx))?;
+        let mut op_batch = WriteBatch::new();
+        let mut acct_journal = AccountJournal::default();
+        match apply_drc_payment(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
+            Ok(receipt) => {
+                let pool_snap =
+                    snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                journal.stake_meta_before.extend(pool_snap);
+                credit_fee_share_to_reward_pool(
+                    &lane,
+                    &mut op_batch,
+                    NativeAssetId::DRC,
+                    receipt.fee_paid,
+                )?;
+                lane.write_batch(op_batch.clone())?;
+                batch.append(op_batch);
+                journal.account_before.extend(acct_journal.before);
+                journal.payment_meta_before.extend(meta_before);
+                seen_payment_ids.insert(id);
+                payment_statuses.push(TransactionAcceptance::Accepted);
+            }
+            Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                if seen_payment_ids.contains(&id) {
+                    payment_statuses.push(TransactionAcceptance::ExactDuplicate);
+                } else {
+                    payment_statuses.push(TransactionAcceptance::ConflictLost);
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok((
+        account_statuses,
+        execution_statuses,
+        stake_statuses,
+        payment_statuses,
+    ))
 }
 
 /// Transfers that still have spendable inputs in `store` (plus in-block creates).
@@ -850,6 +981,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
             None => batch.delete_cf(ColumnFamily::Meta, key),
         }
     }
+    for (key, prior) in journal.payment_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     Ok(batch)
 }
 
@@ -966,8 +1103,8 @@ mod tests {
 
     use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
     use agora_types::{
-        TransactionAcceptance,
-        Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TxIn, TxOut,
+        Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TransactionAcceptance,
+        TxIn, TxOut,
     };
 
     use super::*;
@@ -1045,6 +1182,8 @@ mod tests {
             transactions: txs,
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -1232,6 +1371,8 @@ mod tests {
             transactions: txs,
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -1328,6 +1469,8 @@ mod tests {
             transactions: all,
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -1391,6 +1534,8 @@ mod tests {
             transactions: vec![coinbase],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -1463,6 +1608,8 @@ mod tests {
                 ],
                 account_transfers: vec![],
                 stake_ops: vec![],
+                ovl_executions: vec![],
+                drc_payments: vec![],
             },
             1,
             None,
@@ -1534,6 +1681,8 @@ mod tests {
             ],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -1623,6 +1772,8 @@ mod tests {
             ],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -1632,10 +1783,10 @@ mod tests {
 
     #[test]
     fn account_transfer_fee_credits_reward_pool_on_accept() {
-        use agora_crypto::sign_account_transfer_bound;
-        use agora_types::{AccountTransfer, NativeAssetId};
         use crate::accounts::{credit_account_into, load_account};
         use crate::staking::load_reward_pool;
+        use agora_crypto::sign_account_transfer_bound;
+        use agora_types::{AccountTransfer, NativeAssetId};
 
         let store = StateStore::open_in_memory();
         let seed = seed_from_mnemonic(PHRASE, "").unwrap();
@@ -1693,6 +1844,8 @@ mod tests {
             transactions: txs,
             account_transfers: vec![transfer],
             stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -1719,11 +1872,224 @@ mod tests {
     }
 
     #[test]
+    fn ovl_execution_accepts_credits_fee_and_reverts() {
+        use crate::accounts::{credit_account_into, load_account};
+        use crate::execution::OVL_INTRINSIC_GAS;
+        use crate::staking::load_reward_pool;
+        use agora_crypto::sign_ovl_execution_bound;
+        use agora_types::{NativeAssetId, OvlExecutionTx};
+
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let bob = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+        };
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::OVL,
+            &alice.address(),
+            Amount::from_base_units(50_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+
+        let mut execution = OvlExecutionTx::unsigned(
+            alice.address(),
+            bob.address(),
+            Amount::from_base_units(1_000),
+            OVL_INTRINSIC_GAS,
+            1,
+            0,
+            vec![],
+        );
+        sign_ovl_execution_bound(&mut execution, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            3,
+        );
+        let mut block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 3,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![coinbase],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![execution],
+            drc_payments: vec![],
+        };
+        block.header.tx_root = block.compute_body_root();
+
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        let journal = result.journal.clone();
+        assert_eq!(
+            result.acceptance.execution_statuses,
+            vec![TransactionAcceptance::Accepted]
+        );
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &alice.address())
+                .unwrap()
+                .balance,
+            28_000
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &bob.address())
+                .unwrap()
+                .balance,
+            1_000
+        );
+        assert_eq!(
+            load_reward_pool(&store, NativeAssetId::OVL).unwrap(),
+            OVL_INTRINSIC_GAS
+        );
+
+        store
+            .write_batch(revert_journal_batched(&journal).unwrap())
+            .unwrap();
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &alice.address())
+                .unwrap()
+                .balance,
+            50_000
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &bob.address())
+                .unwrap()
+                .balance,
+            0
+        );
+        assert_eq!(load_reward_pool(&store, NativeAssetId::OVL).unwrap(), 0);
+    }
+
+    #[test]
+    fn drc_payment_accepts_emits_outbox_and_reverts() {
+        use crate::accounts::{credit_account_into, load_account};
+        use crate::payments::{drc_payment_root, load_drc_outbox_event};
+        use crate::staking::load_reward_pool;
+        use agora_crypto::sign_drc_payment_bound;
+        use agora_types::{DrcPaymentTx, NativeAssetId};
+
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let merchant = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+        };
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &alice.address(),
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+
+        let mut payment = DrcPaymentTx::unsigned(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(400),
+            Amount::from_base_units(7),
+            42,
+            Hash([9; 32]),
+            0,
+        );
+        sign_drc_payment_bound(&mut payment, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let payment_id = payment.payment_id();
+        let payment_root_before = drc_payment_root(&store).unwrap();
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            4,
+        );
+        let mut block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 4,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![coinbase],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![payment],
+        };
+        block.header.tx_root = block.compute_body_root();
+
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        let journal = result.journal.clone();
+        assert_eq!(
+            result.acceptance.payment_statuses,
+            vec![TransactionAcceptance::Accepted]
+        );
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &alice.address())
+                .unwrap()
+                .balance,
+            593
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &merchant.address())
+                .unwrap()
+                .balance,
+            400
+        );
+        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 7);
+        assert!(load_drc_outbox_event(&store, &payment_id)
+            .unwrap()
+            .is_some());
+        assert_ne!(drc_payment_root(&store).unwrap(), payment_root_before);
+
+        store
+            .write_batch(revert_journal_batched(&journal).unwrap())
+            .unwrap();
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &alice.address())
+                .unwrap()
+                .balance,
+            1_000
+        );
+        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 0);
+        assert!(load_drc_outbox_event(&store, &payment_id)
+            .unwrap()
+            .is_none());
+        assert_eq!(drc_payment_root(&store).unwrap(), payment_root_before);
+    }
+
+    #[test]
     fn stake_op_in_block_body_bonds_validator() {
-        use agora_crypto::sign_stake_tx_bound;
-        use agora_types::{NativeAssetId, SignedStakeTx};
         use crate::accounts::{credit_account_into, load_account};
         use crate::staking::{load_validator, StakingParams};
+        use agora_crypto::sign_stake_tx_bound;
+        use agora_types::{NativeAssetId, SignedStakeTx};
 
         let store = StateStore::open_in_memory();
         let seed = seed_from_mnemonic(PHRASE, "").unwrap();
@@ -1782,6 +2148,8 @@ mod tests {
             transactions: vec![coinbase],
             account_transfers: vec![],
             stake_ops: vec![stake],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -1844,5 +2212,23 @@ mod tests {
             0,
         ));
         assert_ne!(multi.compute_body_root(), Block::compute_tx_root(&txs));
+    }
+
+    #[test]
+    fn pre_payment_journal_migrates_with_empty_payment_meta() {
+        let bytes = borsh::to_vec(&(
+            Vec::<(OutPoint, TxOut)>::new(),
+            Vec::<OutPoint>::new(),
+            1u64,
+            2u64,
+            3u64,
+            Vec::<(NativeAssetId, Address, AccountState)>::new(),
+            Vec::<(Vec<u8>, Option<Vec<u8>>)>::new(),
+        ))
+        .unwrap();
+        let journal = UtxoJournal::from_bytes(&bytes).unwrap();
+        assert_eq!(journal.fees, 1);
+        assert_eq!(journal.subsidy, 2);
+        assert!(journal.payment_meta_before.is_empty());
     }
 }
