@@ -99,6 +99,73 @@ export type LightNodeInfo = {
   min_relay_fee?: number;
 };
 
+/** JSON-safe base units. Nodes may encode large amounts as decimal strings. */
+export type LightAmount = number | string;
+
+export type NativeAssetTicker = "TLT" | "OVL" | "DRC";
+
+export type LightFinality = {
+  block_hash: string;
+  blue_score?: number;
+  state: string;
+  pow_work_met: boolean;
+  ovl_signed_stake?: LightAmount;
+  ovl_active_stake?: LightAmount;
+  drc_signed_stake?: LightAmount;
+  drc_active_stake?: LightAmount;
+  finalized: boolean;
+  finalized_tip_blue_score: number;
+};
+
+export type LightValidatorSet = {
+  asset: "OVL" | "DRC";
+  epoch: number;
+  total_active_stake: LightAmount;
+  commitment: string;
+  validators: Array<{
+    operator: string;
+    voting_power: LightAmount;
+  }>;
+};
+
+export type LightRewardPool = {
+  asset: "OVL" | "DRC";
+  amount: LightAmount;
+};
+
+export type LightProtocolTreasuries = {
+  maturity: string;
+  consensus_mutations_active: boolean;
+  governance_root: string;
+  policy: {
+    version: number;
+    constitution_id: string;
+    constitution_hash: string;
+    authorization_root: string;
+  };
+  treasuries: Array<{
+    id: string;
+    asset: NativeAssetTicker;
+    balance: LightAmount;
+  }>;
+};
+
+export type LightCommunityRegistry = {
+  maturity: string;
+  consensus_mutations_active: boolean;
+  root: string;
+  counts: {
+    hubs: number;
+    passport_attestations: number;
+    grants: number;
+    missions: number;
+  };
+  hubs: unknown[];
+  passport_attestations: unknown[];
+  grants: unknown[];
+  missions: unknown[];
+};
+
 export type FeeEstimate = {
   min_relay_fee: number;
   suggested_fee: number;
@@ -186,6 +253,15 @@ export type LightClient = {
   getTransaction: (txId: string) => Promise<LightTxLookup>;
   getMempool: (limit?: number) => Promise<LightMempool>;
   getNodeInfo: () => Promise<LightNodeInfo>;
+  getFinality: (blockHash: string) => Promise<LightFinality>;
+  getFinalizedTip: () => Promise<{ blue_score: number }>;
+  getValidatorSet: (
+    asset: "OVL" | "DRC",
+    epoch?: number,
+  ) => Promise<LightValidatorSet>;
+  getRewardPool: (asset: "OVL" | "DRC") => Promise<LightRewardPool>;
+  getProtocolTreasuries: () => Promise<LightProtocolTreasuries>;
+  getCommunityRegistry: (limit?: number) => Promise<LightCommunityRegistry>;
   estimateFee: () => Promise<FeeEstimate>;
   getBalance: (address: string) => Promise<LightBalance>;
   getUtxos: (address: string) => Promise<LightUtxoSet>;
@@ -262,6 +338,21 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getMempool: (limit = 128) =>
       call<LightMempool>("agora_getMempool", { limit }),
     getNodeInfo: () => call<LightNodeInfo>("agora_getNodeInfo", []),
+    getFinality: (blockHash: string) =>
+      call<LightFinality>("agora_getFinality", { hash: blockHash }),
+    getFinalizedTip: () =>
+      call<{ blue_score: number }>("agora_getFinalizedTip", []),
+    getValidatorSet: (asset, epoch) =>
+      call<LightValidatorSet>("agora_getValidatorSet", {
+        asset,
+        ...(epoch === undefined ? {} : { epoch }),
+      }),
+    getRewardPool: (asset) =>
+      call<LightRewardPool>("agora_getRewardPool", { asset }),
+    getProtocolTreasuries: () =>
+      call<LightProtocolTreasuries>("agora_getProtocolTreasuries", []),
+    getCommunityRegistry: (limit = 64) =>
+      call<LightCommunityRegistry>("agora_getCommunityRegistry", { limit }),
     estimateFee: () => call<FeeEstimate>("agora_estimateFee", []),
     getBalance: (address: string) =>
       call<LightBalance>("agora_getBalance", { address }),
