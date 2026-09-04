@@ -1,17 +1,22 @@
-//! `agora-node genesis dump|verify` — freeze and check canonical Block 0.
+//! Offline genesis inspection commands.
 
 use std::path::PathBuf;
 
-use agora_state_machine::{ChainParams, GenesisArtifact, NetworkId, TESTNET_GENESIS_HASH_HEX};
+use agora_state_machine::{
+    ChainParams, GenesisArtifact, NetworkId, TridentGenesisArtifact, TESTNET_GENESIS_HASH_HEX,
+};
 
 fn usage() -> ! {
     eprintln!(
         "Usage:
   agora-node genesis dump [--network testnet|dev] [--out PATH]
   agora-node genesis verify [--network testnet] [--file PATH]
+  agora-node genesis trident verify --file PATH --mode draft|freeze-ready
 
 Defaults: network=testnet, dump writes docs/genesis/<network>.genesis.json when --out omitted
-          and CWD is the repo root; otherwise stdout."
+          and CWD is the repo root; otherwise stdout.
+
+The Trident command is offline-only and cannot boot or freeze a v3 artifact."
     );
     std::process::exit(2);
 }
@@ -21,12 +26,107 @@ pub fn run(mut args: impl Iterator<Item = String>) -> ! {
     match cmd.as_str() {
         "dump" => dump(args),
         "verify" => verify(args),
+        "trident" => trident(args),
         "help" | "-h" | "--help" => usage(),
         other => {
             eprintln!("unknown genesis subcommand: {other}");
             usage();
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum TridentValidationMode {
+    Draft,
+    FreezeReady,
+}
+
+fn trident(mut args: impl Iterator<Item = String>) -> ! {
+    match args.next().as_deref() {
+        Some("verify") => trident_verify(args),
+        Some(other) => {
+            eprintln!("unknown Trident genesis subcommand: {other}");
+            usage();
+        }
+        None => usage(),
+    }
+}
+
+fn trident_verify(mut args: impl Iterator<Item = String>) -> ! {
+    let mut file = None;
+    let mut mode = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--file" | "-f" => {
+                file = Some(PathBuf::from(args.next().unwrap_or_else(|| usage())));
+            }
+            "--mode" => {
+                let value = args.next().unwrap_or_else(|| usage());
+                mode = Some(match value.as_str() {
+                    "draft" => TridentValidationMode::Draft,
+                    "freeze-ready" => TridentValidationMode::FreezeReady,
+                    _ => {
+                        eprintln!("invalid Trident verification mode: {value}");
+                        usage();
+                    }
+                });
+            }
+            other => {
+                eprintln!("unknown Trident verification flag: {other}");
+                usage();
+            }
+        }
+    }
+
+    let file = file.unwrap_or_else(|| {
+        eprintln!("Trident verification requires --file");
+        usage();
+    });
+    let mode = mode.unwrap_or_else(|| {
+        eprintln!("Trident verification requires explicit --mode draft|freeze-ready");
+        usage();
+    });
+    let raw = match std::fs::read_to_string(&file) {
+        Ok(raw) => raw,
+        Err(error) => {
+            eprintln!("read {}: {error}", file.display());
+            std::process::exit(1);
+        }
+    };
+    let artifact = match TridentGenesisArtifact::from_json(&raw) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            eprintln!("FAIL: parse Trident artifact: {error}");
+            std::process::exit(1);
+        }
+    };
+    let result = match mode {
+        TridentValidationMode::Draft => artifact.validate_draft(),
+        TridentValidationMode::FreezeReady => artifact.validate_freeze_ready(),
+    };
+    if let Err(error) = result {
+        eprintln!("FAIL: {error}");
+        std::process::exit(1);
+    }
+
+    println!("network: {}", artifact.network);
+    println!(
+        "computed_genesis_identity: {}",
+        artifact.consensus_identity_hash().to_hex()
+    );
+    println!(
+        "computed_network_fingerprint: {}",
+        artifact.compute_network_fingerprint().to_hex()
+    );
+    match mode {
+        TridentValidationMode::Draft => {
+            println!("DRAFT VALID: offline structure checks passed; NOT FREEZE-READY");
+        }
+        TridentValidationMode::FreezeReady => {
+            println!("FREEZE-READY CHECKS PASSED: this command did not freeze or boot the artifact");
+        }
+    }
+    std::process::exit(0);
 }
 
 fn parse_flags(mut args: impl Iterator<Item = String>) -> (NetworkId, Option<PathBuf>) {
