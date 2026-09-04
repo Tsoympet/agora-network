@@ -79,6 +79,43 @@ async fn two_nodes_exchange_signed_transaction() {
     handle_b.shutdown();
 }
 
+#[tokio::test]
+async fn duplicate_and_self_dials_do_not_corrupt_disconnect_tracking() {
+    let (handle_a, mut events_a, node_a) =
+        NetworkNode::build(&NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"))
+            .expect("node a");
+    let (handle_b, mut events_b, node_b) =
+        NetworkNode::build(&NetworkConfig::default().with_listen("/ip4/127.0.0.1/tcp/0"))
+            .expect("node b");
+
+    let task_a = tokio::spawn(node_a.run());
+    let task_b = tokio::spawn(node_b.run());
+
+    let addr_a = wait_listening(&mut events_a).await;
+    let addr_b = wait_listening(&mut events_b).await;
+    handle_b
+        .dial(&dial_addr(&addr_a, handle_a.peer_id()).to_string())
+        .expect("dial a");
+    wait_connected(&mut events_a).await;
+    wait_connected(&mut events_b).await;
+
+    handle_a
+        .dial(&dial_addr(&addr_b, handle_b.peer_id()).to_string())
+        .expect("duplicate dial b");
+    handle_a
+        .dial(&dial_addr(&addr_a, handle_a.peer_id()).to_string())
+        .expect("self dial a");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    handle_b.shutdown();
+    task_b.await.expect("node b task");
+    wait_disconnected(&mut events_a).await;
+    assert!(!task_a.is_finished(), "node a panicked on peer disconnect");
+
+    handle_a.shutdown();
+    task_a.await.expect("node a task");
+}
+
 async fn wait_listening(
     events: &mut tokio::sync::mpsc::UnboundedReceiver<NetworkEvent>,
 ) -> libp2p::Multiaddr {
@@ -107,4 +144,18 @@ async fn wait_connected(events: &mut tokio::sync::mpsc::UnboundedReceiver<Networ
     })
     .await
     .expect("connect timeout");
+}
+
+async fn wait_disconnected(events: &mut tokio::sync::mpsc::UnboundedReceiver<NetworkEvent>) {
+    timeout(Duration::from_secs(5), async {
+        loop {
+            match events.recv().await {
+                Some(NetworkEvent::PeerDisconnected(_)) => break,
+                Some(_) => continue,
+                None => panic!("closed"),
+            }
+        }
+    })
+    .await
+    .expect("disconnect timeout");
 }
