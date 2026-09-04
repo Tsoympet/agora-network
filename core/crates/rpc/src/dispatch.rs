@@ -160,9 +160,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                             None
                         }
                     })
-                    .ok_or_else(|| {
-                        RpcError::InvalidParams("missing attestation object".into())
-                    })?;
+                    .ok_or_else(|| RpcError::InvalidParams("missing attestation object".into()))?;
                 self.backend.submit_attestation(att)
             }
             RpcMethod::GetValidatorSet => {

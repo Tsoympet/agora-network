@@ -307,7 +307,7 @@ impl Mempool {
 #[cfg(test)]
 mod tests {
     use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
-    use agora_types::{Amount, Hash, OutPoint, Transaction, TxIn, TxOut};
+    use agora_types::{Amount, BlockHeader, Hash, OutPoint, Transaction, TxIn, TxOut};
 
     use super::*;
 
@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn evict_for_block_drops_included_and_conflicts() {
-        use agora_types::{Block, BlockHeader};
+        use agora_types::Block;
 
         let mut pool = Mempool::new(16);
         let included = signed_spend(0, 1);
@@ -475,5 +475,48 @@ mod tests {
             tx_id: Hash::ZERO,
             index: 0,
         }));
+    }
+
+    #[test]
+    fn account_and_stake_share_nonce_reservation() {
+        use agora_types::{AccountTransfer, NativeAssetId, SignedStakeTx};
+
+        let actor = agora_types::Address([3; 20]);
+        let mut account = AccountTransfer::unsigned_with_fee(
+            NativeAssetId::OVL,
+            actor,
+            agora_types::Address([4; 20]),
+            Amount::from_base_units(5),
+            Amount::from_base_units(1),
+            0,
+        );
+        account.public_key = vec![2; 33];
+        account.signature = vec![3; 64];
+
+        let mut stake = SignedStakeTx::unsigned_unbond_self(NativeAssetId::OVL, actor, 0);
+        stake.public_key = vec![2; 33];
+        stake.signature = vec![3; 64];
+
+        let mut pool = Mempool::new(4);
+        let account_id = pool.admit_account(account.clone()).unwrap();
+        assert!(pool.account_reserved(NativeAssetId::OVL, &actor));
+        assert!(pool.admit_stake(stake).is_err());
+
+        let block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
+            account_transfers: vec![account],
+            stake_ops: vec![],
+        };
+        pool.evict_for_block(&block);
+        assert!(!pool.contains(&account_id));
+        assert!(!pool.account_reserved(NativeAssetId::OVL, &actor));
     }
 }

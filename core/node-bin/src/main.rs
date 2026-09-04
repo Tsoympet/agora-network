@@ -17,9 +17,10 @@ use std::time::Duration;
 use agora_consensus::PowAlgorithm;
 use agora_p2p::{
     dial_addr, drain_orphans_after, fetch_seeder_peers_best_effort, load_or_generate_identity,
-    merge_bootstrap_peers, reconstruct_compact_block, validate_header_chain, GetHeadersRequest,
-    Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage, NetworkNode, OrphanPool,
-    FetchReason, PeerId, PendingFetches, ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
+    merge_bootstrap_peers, reconstruct_compact_block, validate_header_chain, FetchReason,
+    GetHeadersRequest, Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage,
+    NetworkNode, OrphanPool, PeerId, PendingFetches, ReconstructError, SeederBook,
+    MAX_HEADERS_PER_RESPONSE,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{
@@ -29,9 +30,7 @@ use agora_types::{Address, Block, Hash};
 use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
-use crate::backend::{
-    admit_account_transfer, admit_stake_tx, admit_transaction, NodeBackend,
-};
+use crate::backend::{admit_account_transfer, admit_stake_tx, admit_transaction, NodeBackend};
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::storage_policy::StoragePolicy;
 

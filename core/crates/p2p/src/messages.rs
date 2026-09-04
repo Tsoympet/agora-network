@@ -9,8 +9,6 @@ use crate::ibd::short_ids_for_block;
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum NetworkMessage {
     Transaction(Transaction),
-    AccountTransfer(AccountTransfer),
-    StakeTx(SignedStakeTx),
     Block(Block),
     /// Hash-only tip signal; peers that lack the body issue [`Self::GetBlock`].
     BlockAnnounce {
@@ -27,6 +25,10 @@ pub enum NetworkMessage {
     },
     /// Trident dual-PoS checkpoint attestation (OVL or DRC validator).
     CheckpointAttestation(CheckpointAttestation),
+    /// Appended to preserve all pre-v2 Borsh enum discriminants.
+    AccountTransfer(AccountTransfer),
+    /// Appended to preserve all pre-v2 Borsh enum discriminants.
+    StakeTx(SignedStakeTx),
 }
 
 impl NetworkMessage {
@@ -98,5 +100,34 @@ mod tests {
             signature: vec![0; 64],
         });
         assert_eq!(NetworkMessage::decode(&att.encode()).unwrap(), att);
+    }
+
+    #[test]
+    fn multi_lane_block_uses_full_body_gossip() {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block
+            .account_transfers
+            .push(AccountTransfer::unsigned_with_fee(
+                agora_types::NativeAssetId::OVL,
+                agora_types::Address::ZERO,
+                agora_types::Address([1; 20]),
+                agora_types::Amount::from_base_units(2),
+                agora_types::Amount::from_base_units(1),
+                0,
+            ));
+        block.header.tx_root = block.compute_body_root();
+
+        let message = NetworkMessage::compact_from_block(&block);
+        assert_eq!(message, NetworkMessage::Block(block));
     }
 }
