@@ -365,6 +365,14 @@ impl NetworkNode {
             serde_json::json!({"addr": addr, "target": target.map(|peer| peer.to_string()), "self_dial": target == Some(*self.swarm.local_peer_id()), "swarm_connected": target.map(|peer| self.swarm.is_connected(&peer)), "getblock_connected": target.map(|peer| self.swarm.behaviour().getblock.is_connected(&peer)), "getheaders_connected": target.map(|peer| self.swarm.behaviour().getheaders.is_connected(&peer))}),
         );
         // #endregion
+        if target == Some(*self.swarm.local_peer_id()) {
+            debug!(%multiaddr, "ignoring self dial");
+            return Ok(());
+        }
+        if target.is_some_and(|peer| self.swarm.is_connected(&peer)) {
+            debug!(%multiaddr, "ignoring dial to connected peer");
+            return Ok(());
+        }
         self.swarm
             .dial(multiaddr)
             .map_err(|e| P2pError::Network(e.to_string()))?;
