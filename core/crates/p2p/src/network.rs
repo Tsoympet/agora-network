@@ -354,7 +354,8 @@ impl NetworkNode {
         match message {
             NetworkMessage::Transaction(_)
             | NetworkMessage::AccountTransfer(_)
-            | NetworkMessage::StakeTx(_) => {
+            | NetworkMessage::StakeTx(_)
+            | NetworkMessage::OvlExecution(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

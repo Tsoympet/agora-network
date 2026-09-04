@@ -103,6 +103,7 @@ mod tests {
             transactions: vec![tx],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);

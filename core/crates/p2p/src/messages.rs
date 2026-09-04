@@ -1,5 +1,6 @@
 use agora_types::{
-    AccountTransfer, Block, BlockHeader, CheckpointAttestation, Hash, SignedStakeTx, Transaction,
+    AccountTransfer, Block, BlockHeader, CheckpointAttestation, Hash, OvlExecutionTx,
+    SignedStakeTx, Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -29,6 +30,8 @@ pub enum NetworkMessage {
     AccountTransfer(AccountTransfer),
     /// Appended to preserve all pre-v2 Borsh enum discriminants.
     StakeTx(SignedStakeTx),
+    /// Appended in Trident protocol v3; signed OVL execution envelope.
+    OvlExecution(OvlExecutionTx),
 }
 
 impl NetworkMessage {
@@ -45,7 +48,10 @@ impl NetworkMessage {
     /// Multi-lane blocks use the full body until a versioned compact format can
     /// commit lane kinds without ambiguity.
     pub fn compact_from_block(block: &Block) -> Self {
-        if block.account_transfers.is_empty() && block.stake_ops.is_empty() {
+        if block.account_transfers.is_empty()
+            && block.stake_ops.is_empty()
+            && block.ovl_executions.is_empty()
+        {
             Self::CompactBlock {
                 header: block.header.clone(),
                 short_ids: short_ids_for_block(block),

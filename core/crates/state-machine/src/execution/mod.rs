@@ -54,6 +54,11 @@ pub fn apply_ovl_execution(
             "OVL contract creation is not active".into(),
         ));
     }
+    if tx.from == tx.to {
+        return Err(StateError::InvalidTx(
+            "OVL self-execution is forbidden".into(),
+        ));
+    }
     if !tx.data.is_empty() {
         return Err(StateError::InvalidTx(
             "OVL contract calls are not active".into(),

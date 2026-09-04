@@ -83,6 +83,7 @@ impl GenesisBuilder {
             transactions: vec![coinbase],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         }
     }
 

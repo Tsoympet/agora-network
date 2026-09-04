@@ -14,6 +14,7 @@ use crate::accounts::{
     apply_account_transfer_checked, load_account, put_account_into, AccountJournal, AccountState,
 };
 use crate::columns::ColumnFamily;
+use crate::execution::apply_ovl_execution;
 use crate::staking::{
     apply_signed_stake_tx, credit_fee_share_to_reward_pool, reward_pool_meta_key,
     snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
@@ -385,7 +386,7 @@ fn apply_block_batched_mode(
         0
     );
 
-    let (account_statuses, stake_statuses) =
+    let (account_statuses, execution_statuses, stake_statuses) =
         apply_trident_lanes(store, block, auth, mode, &mut batch, &mut journal)?;
 
     Ok(BlockApplyResult {
@@ -395,6 +396,7 @@ fn apply_block_batched_mode(
             statuses,
             account_statuses,
             stake_statuses,
+            execution_statuses,
         },
         batch,
     })
@@ -411,6 +413,8 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("unknown validator")
                 || msg.contains("already bonded")
                 || msg.contains("self-transfer forbidden")
+                || msg.contains("bad OVL execution nonce")
+                || msg.contains("insufficient OVL execution balance")
         }
         _ => false,
     }
@@ -432,22 +436,34 @@ fn apply_trident_lanes(
     mode: ApplyMode,
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
-) -> Result<(Vec<TransactionAcceptance>, Vec<TransactionAcceptance>), StateError> {
-    if block.account_transfers.is_empty() && block.stake_ops.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
+) -> Result<
+    (
+        Vec<TransactionAcceptance>,
+        Vec<TransactionAcceptance>,
+        Vec<TransactionAcceptance>,
+    ),
+    StateError,
+> {
+    if block.account_transfers.is_empty()
+        && block.ovl_executions.is_empty()
+        && block.stake_ops.is_empty()
+    {
+        return Ok((Vec::new(), Vec::new(), Vec::new()));
     }
-    if !block.stake_ops.is_empty() && auth.is_none() {
+    if (!block.stake_ops.is_empty() || !block.ovl_executions.is_empty()) && auth.is_none() {
         return Err(StateError::InvalidTx(
-            "stake ops require network-bound auth".into(),
+            "stake/execution ops require network-bound auth".into(),
         ));
     }
 
     // Sequential visibility without committing the consensus batch early.
     let lane = store.cow_overlay();
     let mut account_statuses = Vec::with_capacity(block.account_transfers.len());
+    let mut execution_statuses = Vec::with_capacity(block.ovl_executions.len());
     let mut stake_statuses = Vec::with_capacity(block.stake_ops.len());
     let mut seen_account_ids: HashSet<Hash> = HashSet::new();
     let mut seen_stake_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_execution_ids: HashSet<Hash> = HashSet::new();
 
     for tx in &block.account_transfers {
         let id = tx.transfer_id();
@@ -483,6 +499,39 @@ fn apply_trident_lanes(
         }
     }
 
+    for tx in &block.ovl_executions {
+        let id = tx.tx_id();
+        let ctx = auth.expect("execution auth checked above");
+        let mut op_batch = WriteBatch::new();
+        let mut acct_journal = AccountJournal::default();
+        match apply_ovl_execution(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
+            Ok(receipt) => {
+                let pool_snap =
+                    snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::OVL)])?;
+                journal.stake_meta_before.extend(pool_snap);
+                credit_fee_share_to_reward_pool(
+                    &lane,
+                    &mut op_batch,
+                    NativeAssetId::OVL,
+                    receipt.fee_paid,
+                )?;
+                lane.write_batch(op_batch.clone())?;
+                batch.append(op_batch);
+                journal.account_before.extend(acct_journal.before);
+                seen_execution_ids.insert(id);
+                execution_statuses.push(TransactionAcceptance::Accepted);
+            }
+            Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                if seen_execution_ids.contains(&id) {
+                    execution_statuses.push(TransactionAcceptance::ExactDuplicate);
+                } else {
+                    execution_statuses.push(TransactionAcceptance::ConflictLost);
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
     for tx in &block.stake_ops {
         let id = tx.stake_tx_id();
         let ctx = auth.expect("stake auth checked above");
@@ -510,7 +559,7 @@ fn apply_trident_lanes(
         }
     }
 
-    Ok((account_statuses, stake_statuses))
+    Ok((account_statuses, execution_statuses, stake_statuses))
 }
 
 /// Transfers that still have spendable inputs in `store` (plus in-block creates).
@@ -1045,6 +1094,7 @@ mod tests {
             transactions: txs,
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -1232,6 +1282,7 @@ mod tests {
             transactions: txs,
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -1328,6 +1379,7 @@ mod tests {
             transactions: all,
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -1391,6 +1443,7 @@ mod tests {
             transactions: vec![coinbase],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -1463,6 +1516,7 @@ mod tests {
                 ],
                 account_transfers: vec![],
                 stake_ops: vec![],
+                ovl_executions: vec![],
             },
             1,
             None,
@@ -1534,6 +1588,7 @@ mod tests {
             ],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -1623,6 +1678,7 @@ mod tests {
             ],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -1693,6 +1749,7 @@ mod tests {
             transactions: txs,
             account_transfers: vec![transfer],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -1782,6 +1839,7 @@ mod tests {
             transactions: vec![coinbase],
             account_transfers: vec![],
             stake_ops: vec![stake],
+            ovl_executions: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 

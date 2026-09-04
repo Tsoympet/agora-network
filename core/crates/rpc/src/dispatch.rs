@@ -1,4 +1,6 @@
-use agora_types::{AccountTransfer, Address, Amount, Block, Hash, Transaction};
+use agora_types::{
+    AccountTransfer, Address, Amount, Block, Hash, OvlExecutionTx, Transaction,
+};
 use serde_json::{json, Value};
 
 use crate::backend::RpcBackend;
@@ -94,6 +96,17 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
                 let id = self.backend.submit_account_transfer(tx)?;
                 Ok(json!({ "account_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitOvlExecution => {
+                let raw = req
+                    .params
+                    .get("execution")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: OvlExecutionTx = serde_json::from_value(raw)
+                    .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+                let id = self.backend.submit_ovl_execution(tx)?;
+                Ok(json!({ "execution_tx_id": id.to_hex() }))
             }
             RpcMethod::GetBalance => {
                 let address = param_address(&req.params, "address")?;
@@ -586,6 +599,7 @@ mod tests {
             transactions: vec![],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -695,6 +709,7 @@ mod tests {
             transactions: vec![tx],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -723,6 +738,7 @@ mod tests {
             transactions: vec![],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {

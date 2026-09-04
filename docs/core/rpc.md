@@ -14,6 +14,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_estimateFee` | `{ min_relay_fee, suggested_fee }` for wallet coin selection |
 | `agora_submitTransaction` | UTXO-check + admit a signed tx into the mempool and gossip it |
 | `agora_submitAccountTransfer` | Validate, reserve, and gossip a signed OVL/DRC account transfer |
+| `agora_submitOvlExecution` | Validate and gossip a signed intrinsic-gas OVL execution envelope |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |

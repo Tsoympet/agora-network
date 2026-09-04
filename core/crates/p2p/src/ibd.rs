@@ -435,6 +435,7 @@ mod tests {
             transactions: vec![tx],
             account_transfers: vec![],
             stake_ops: vec![],
+            ovl_executions: vec![],
         }
     }
 
