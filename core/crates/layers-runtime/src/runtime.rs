@@ -9,7 +9,7 @@ use agora_intent_engine::{
 };
 use agora_ovolos_rollup::{
     decode_evm_tx, Batch, BatchCommitment, BatchStatus, EvmExecutor, EvmTx, FraudProof, OvlBlock,
-    OvolosGenesis, OvolosRollup, RevmExecutor, OVOLOS_POW_ALGORITHM,
+    OvolosGenesis, OvolosRollup, RevmExecutor, RollupCheckpoint, OVOLOS_POW_ALGORITHM,
 };
 use agora_types::{Address, Amount, Hash};
 use serde::Serialize;
@@ -656,15 +656,15 @@ impl LayersRuntime {
         };
         let head = parse_hash(&cp.head_state_root)?;
         let tip = parse_hash(&cp.ovl_tip_hash)?;
-        self.rollup.restore_checkpoint(
-            head,
-            cp.next_sequence,
-            tip,
-            cp.ovl_tip_height,
-            cp.ovl_balances,
-            cp.ovl_minted,
-            cp.sequencer_bonds,
-        );
+        self.rollup.restore_checkpoint(RollupCheckpoint {
+            head_state_root: head,
+            next_sequence: cp.next_sequence,
+            tip_hash: tip,
+            tip_height: cp.ovl_tip_height,
+            ovl_balances: cp.ovl_balances,
+            ovl_minted: cp.ovl_minted,
+            sequencer_bonds: cp.sequencer_bonds,
+        });
         let snaps = cp
             .revm_snapshots
             .into_iter()
