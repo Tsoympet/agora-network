@@ -2,7 +2,7 @@ use agora_consensus::EmissionSchedule;
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 
 use crate::columns::{meta_keys, ColumnFamily};
-use crate::{StateError, StateStore};
+use crate::{StateError, StateStore, WriteBatch};
 
 /// Fixed monetary parameters written at genesis and never mutated ad hoc.
 #[derive(Debug, Clone)]
@@ -88,8 +88,12 @@ impl GenesisBuilder {
         }
     }
 
-    /// Persist genesis block bytes, tips, and supply caps.
-    pub fn ignite(&self, store: &StateStore) -> Result<Hash, StateError> {
+    /// Prepare every genesis mutation without touching storage.
+    ///
+    /// Keeping the complete ignition in one batch is a prerequisite for a future
+    /// Trident artifact loader: validation can finish before RocksDB receives an
+    /// all-or-nothing commit.
+    fn ignition_batch(&self) -> Result<(Hash, WriteBatch), StateError> {
         if self.supply.premine.as_base_units() > self.supply.max_supply.as_base_units() {
             return Err(StateError::Storage("premine exceeds max supply".into()));
         }
@@ -97,75 +101,74 @@ impl GenesisBuilder {
         let block = self.build_block();
         let genesis_hash = block.id();
         let block_bytes = borsh::to_vec(&block).map_err(|e| StateError::Storage(e.to_string()))?;
+        let mut batch = WriteBatch::new();
 
-        store.put_cf(ColumnFamily::Hot, genesis_hash.as_bytes(), &block_bytes)?;
+        batch.put_cf(ColumnFamily::Hot, genesis_hash.as_bytes(), &block_bytes);
         if self.write_archival {
-            store.put_cf(
+            batch.put_cf(
                 ColumnFamily::Archival,
                 genesis_hash.as_bytes(),
                 &block_bytes,
-            )?;
+            );
         }
-        crate::headers::store_header(store, &genesis_hash, &block.header)?;
-        crate::tx_index::index_block_transactions(store, &block)?;
-        store.put_cf(
+        crate::headers::store_header_into(&mut batch, &genesis_hash, &block.header)?;
+        crate::tx_index::index_block_transactions_into(&mut batch, &block);
+        batch.put_cf(
             ColumnFamily::Meta,
             meta_keys::GENESIS_HASH,
             genesis_hash.as_bytes(),
-        )?;
-        store.put_cf(
+        );
+        batch.put_cf(
             ColumnFamily::Meta,
             meta_keys::MAX_SUPPLY,
             &self.supply.max_supply.as_base_units().to_le_bytes(),
-        )?;
-        store.put_cf(
+        );
+        batch.put_cf(
             ColumnFamily::Meta,
             meta_keys::PREMINE,
             &self.supply.premine.as_base_units().to_le_bytes(),
-        )?;
-        store.put_cf(
+        );
+        batch.put_cf(
             ColumnFamily::Meta,
             meta_keys::ISSUED_SUPPLY,
             &self.supply.premine.as_base_units().to_le_bytes(),
-        )?;
+        );
         // Trident schema: per-asset supply keys + schema version (TLT issued = premine).
-        let mut supply_batch = crate::store::WriteBatch::new();
         crate::supply::put_max_supply_into(
-            &mut supply_batch,
+            &mut batch,
             agora_types::NativeAssetId::TLT,
             self.supply.max_supply.as_base_units(),
         );
         crate::supply::put_issued_supply_into(
-            &mut supply_batch,
+            &mut batch,
             agora_types::NativeAssetId::TLT,
             self.supply.premine.as_base_units(),
         );
         // Trident multi-asset caps, issued counters, staking reserves, schema.
         // Re-apply TLT issued=premine after ignite (ignite sets genesis_allocation).
         let policy = crate::monetary::TridentMonetaryPolicy::default();
-        crate::supply::ignite_trident_supply(&mut supply_batch, &policy)?;
-        crate::governance_state::init_canonical_governance_into(&mut supply_batch)?;
-        crate::community_state::init_canonical_community_into(&mut supply_batch)?;
+        crate::supply::ignite_trident_supply(&mut batch, &policy)?;
+        crate::governance_state::init_canonical_governance_into(&mut batch)?;
+        crate::community_state::init_canonical_community_into(&mut batch)?;
         crate::supply::put_issued_supply_into(
-            &mut supply_batch,
+            &mut batch,
             agora_types::NativeAssetId::TLT,
             self.supply.premine.as_base_units(),
         );
         crate::supply::put_max_supply_into(
-            &mut supply_batch,
+            &mut batch,
             agora_types::NativeAssetId::TLT,
             self.supply.max_supply.as_base_units(),
         );
-        store.write_batch(supply_batch)?;
 
         let tips = vec![genesis_hash];
         let tips_bytes = borsh::to_vec(&tips).map_err(|e| StateError::Storage(e.to_string()))?;
-        store.put_cf(ColumnFamily::Meta, meta_keys::TIPS, &tips_bytes)?;
-        store.put_cf(
+        batch.put_cf(ColumnFamily::Meta, meta_keys::TIPS, &tips_bytes);
+        batch.put_cf(
             ColumnFamily::Meta,
             meta_keys::VIRTUAL_TIP,
             genesis_hash.as_bytes(),
-        )?;
+        );
 
         // Genesis UTXO: coinbase output 0 (baseline for virtual chain; no journal).
         let mut utxo_key = Vec::with_capacity(36);
@@ -173,41 +176,85 @@ impl GenesisBuilder {
         utxo_key.extend_from_slice(&0u32.to_le_bytes());
         let utxo_val = borsh::to_vec(&block.transactions[0].outputs[0])
             .map_err(|e| StateError::Storage(e.to_string()))?;
-        store.put_cf(ColumnFamily::Utxo, &utxo_key, &utxo_val)?;
+        batch.put_cf(ColumnFamily::Utxo, &utxo_key, &utxo_val);
 
         let _ = &self.emission; // schedule is consulted by consensus; retained for API completeness.
+        Ok((genesis_hash, batch))
+    }
+
+    /// Persist the complete genesis state in one atomic storage commit.
+    pub fn ignite(&self, store: &StateStore) -> Result<Hash, StateError> {
+        let (genesis_hash, batch) = self.ignition_batch()?;
+        store.write_batch(batch)?;
         Ok(genesis_hash)
+    }
+
+    fn existing_genesis(store: &StateStore) -> Result<Option<Hash>, StateError> {
+        let Some(bytes) = store.get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)? else {
+            return Ok(None);
+        };
+        if bytes.len() != 32 {
+            return Err(StateError::Storage(
+                "malformed genesis hash in datadir; refusing to overwrite existing state".into(),
+            ));
+        }
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&bytes);
+        Ok(Some(Hash(hash)))
+    }
+
+    fn require_empty_datadir(store: &StateStore) -> Result<(), StateError> {
+        for cf in ColumnFamily::ALL {
+            if !store.scan_prefix(cf, &[])?.is_empty() {
+                return Err(StateError::Storage(format!(
+                    "datadir contains {} state without a genesis identity; refusing initialization",
+                    cf.name()
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Return the existing genesis hash from meta, or [`ignite`] a fresh chain.
     pub fn load_or_ignite(&self, store: &StateStore) -> Result<Hash, StateError> {
-        if let Some(bytes) = store.get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)? {
-            if bytes.len() == 32 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes);
-                return Ok(Hash(arr));
-            }
+        if let Some(hash) = Self::existing_genesis(store)? {
+            return Ok(hash);
         }
+        Self::require_empty_datadir(store)?;
         self.ignite(store)
     }
 
-    /// Like [`load_or_ignite`], then reject datadirs whose genesis ≠ `expected`.
+    /// Like [`load_or_ignite`], but validate identity before any fresh write.
     pub fn load_or_ignite_checked(
         &self,
         store: &StateStore,
         expected: Option<Hash>,
     ) -> Result<Hash, StateError> {
-        let hash = self.load_or_ignite(store)?;
+        if let Some(hash) = Self::existing_genesis(store)? {
+            if let Some(want) = expected {
+                if hash != want {
+                    return Err(StateError::Storage(format!(
+                        "genesis hash mismatch: datadir {} expected {} (wipe AGORA_DATA or change AGORA_NETWORK)",
+                        hash.to_hex(),
+                        want.to_hex()
+                    )));
+                }
+            }
+            return Ok(hash);
+        }
+
+        Self::require_empty_datadir(store)?;
+        let hash = self.build_block().id();
         if let Some(want) = expected {
             if hash != want {
                 return Err(StateError::Storage(format!(
-                    "genesis hash mismatch: datadir {} expected {} (wipe AGORA_DATA or change AGORA_NETWORK)",
+                    "genesis hash mismatch before initialization: computed {} expected {}",
                     hash.to_hex(),
                     want.to_hex()
                 )));
             }
         }
-        Ok(hash)
+        self.ignite(store)
     }
 }
 
@@ -300,6 +347,58 @@ mod tests {
             .is_some());
         assert!(store
             .get_cf(ColumnFamily::Archival, hash.as_bytes())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn checked_identity_mismatch_leaves_fresh_store_empty() {
+        let store = StateStore::open_in_memory();
+        let error = GenesisBuilder::default()
+            .load_or_ignite_checked(&store, Some(Hash([0x55; 32])))
+            .unwrap_err();
+        assert!(error.to_string().contains("before initialization"));
+        for cf in ColumnFamily::ALL {
+            assert!(store.scan_prefix(cf, &[]).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn malformed_existing_identity_is_never_overwritten() {
+        let store = StateStore::open_in_memory();
+        store
+            .put_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH, b"broken")
+            .unwrap();
+
+        let error = GenesisBuilder::default()
+            .load_or_ignite_checked(&store, None)
+            .unwrap_err();
+        assert!(error.to_string().contains("malformed genesis hash"));
+        assert_eq!(
+            store
+                .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
+                .unwrap(),
+            Some(b"broken".to_vec())
+        );
+    }
+
+    #[test]
+    fn state_without_genesis_identity_is_never_reinitialized() {
+        let store = StateStore::open_in_memory();
+        store
+            .put_cf(ColumnFamily::Utxo, b"existing", b"value")
+            .unwrap();
+
+        let error = GenesisBuilder::default().load_or_ignite(&store).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("state without a genesis identity"));
+        assert_eq!(
+            store.get_cf(ColumnFamily::Utxo, b"existing").unwrap(),
+            Some(b"value".to_vec())
+        );
+        assert!(store
+            .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
             .unwrap()
             .is_none());
     }

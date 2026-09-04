@@ -29,6 +29,12 @@ Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
 - `meta/genesis_hash`, `meta/max_supply`, `meta/premine`, `meta/tips`, `meta/virtual_tip`
 - premine UTXO into `cf_utxo` (virtual-chain baseline; no per-block journal)
 
+All of these mutations, including headers, transaction indexes, Trident supply
+defaults, canonical governance/community defaults, tips, and the UTXO, are
+prepared before storage and committed in one `WriteBatch`. Checked ignition
+compares a fresh Block 0 identity before that commit and refuses malformed
+genesis metadata or state-bearing datadirs with no genesis identity.
+
 Default caps: max supply 100,000,000 **TLT**; premine 10,000,000 **TLT** (8 decimals).
 
 Canonical networks live in `ChainParams` / `NetworkId` (`dev` | `testnet` | `mainnet`).
