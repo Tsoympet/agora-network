@@ -353,6 +353,18 @@ impl NetworkNode {
         let multiaddr: Multiaddr = addr
             .parse()
             .map_err(|e: libp2p::multiaddr::Error| P2pError::InvalidMultiaddr(e.to_string()))?;
+        let target = multiaddr.iter().find_map(|protocol| match protocol {
+            libp2p::multiaddr::Protocol::P2p(peer) => Some(peer),
+            _ => None,
+        });
+        // #region agent log
+        agent_debug_log(
+            "A,B",
+            "network.rs:dial_multiaddr",
+            "dial requested",
+            serde_json::json!({"addr": addr, "target": target.map(|peer| peer.to_string()), "self_dial": target == Some(*self.swarm.local_peer_id()), "swarm_connected": target.map(|peer| self.swarm.is_connected(&peer)), "getblock_connected": target.map(|peer| self.swarm.behaviour().getblock.is_connected(&peer)), "getheaders_connected": target.map(|peer| self.swarm.behaviour().getheaders.is_connected(&peer))}),
+        );
+        // #endregion
         self.swarm
             .dial(multiaddr)
             .map_err(|e| P2pError::Network(e.to_string()))?;
@@ -690,6 +702,9 @@ impl NetworkNode {
                             warn!(error = %error, "incoming connection failed (limits or handshake)");
                         }
                         SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                            // #region agent log
+                            agent_debug_log("A,B", "network.rs:run:outgoing_connection_error", "outgoing connection failed", serde_json::json!({"peer": peer_id.map(|peer| peer.to_string()), "error": error.to_string()}));
+                            // #endregion
                             warn!(?peer_id, error = %error, "outgoing connection failed (limits or dial)");
                         }
                         _ => {}
