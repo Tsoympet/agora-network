@@ -17,6 +17,7 @@ mod marks;
 mod monetary;
 mod network;
 mod orphans;
+mod payments;
 mod staking;
 mod state_root;
 mod store;
@@ -72,6 +73,11 @@ pub use error::StateError;
 pub use execution::{
     apply_ovl_execution, execution_fee, OvlExecutionReceipt, OVL_EXECUTION_VERSION,
     OVL_INTRINSIC_GAS,
+};
+pub use payments::{
+    apply_drc_payment, drc_payment_root, list_drc_outbox, load_drc_outbox_event,
+    payment_invoice_key, payment_meta_keys, payment_outbox_key, payment_seen_key,
+    DrcPaymentReceipt, DRC_PAYMENT_VERSION,
 };
 pub use genesis::{GenesisBuilder, SupplyCaps};
 pub use ghostdag_store::{

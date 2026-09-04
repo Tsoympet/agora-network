@@ -11,6 +11,7 @@ mod execution;
 mod finality;
 mod hash;
 mod hrp;
+mod payment;
 mod stake;
 mod transaction;
 
@@ -29,6 +30,7 @@ pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
 };
+pub use payment::{DrcPaymentOutboxEvent, DrcPaymentTx, DRC_PAYMENT_SIGNING_DOMAIN};
 pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 
@@ -104,6 +106,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -134,6 +137,8 @@ mod ts_export {
         AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
         AccountTransfer::export_all().expect("export AccountTransfer");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
+        DrcPaymentTx::export_all().expect("export DrcPaymentTx");
+        DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");
         CheckpointState::export_all().expect("export CheckpointState");
         CheckpointBody::export_all().expect("export CheckpointBody");
         CheckpointAttestation::export_all().expect("export CheckpointAttestation");

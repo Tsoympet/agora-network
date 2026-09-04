@@ -84,6 +84,7 @@ impl GenesisBuilder {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         }
     }
 

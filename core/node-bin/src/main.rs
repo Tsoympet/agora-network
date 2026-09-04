@@ -31,7 +31,8 @@ use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
-    admit_account_transfer, admit_ovl_execution, admit_stake_tx, admit_transaction, NodeBackend,
+    admit_account_transfer, admit_drc_payment, admit_ovl_execution, admit_stake_tx,
+    admit_transaction, NodeBackend,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::storage_policy::StoragePolicy;
@@ -1014,6 +1015,16 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "OVL execution gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcPayment(tx) => {
+                        match admit_drc_payment(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, payment = %id.to_hex(), "DRC payment gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC payment gossip rejected");
                             }
                         }
                     }

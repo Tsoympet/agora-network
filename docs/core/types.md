@@ -26,8 +26,9 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | `OutPoint` / `TxIn` / `TxOut` | UTXO references and outputs |
 | `Transaction` | Signed transfer (`public_key` + `signature`) |
 | `OvlExecutionTx` | Signed, chain-bound OVL value/execution envelope with gas limits |
+| `DrcPaymentTx` / `DrcPaymentOutboxEvent` | Signed DRC settlement and deterministic routing event |
 | `TransactionBody` | Signable subset (no auth material) |
-| `BlockHeader` / `Block` | Multi-parent DAG header + UTXO/account/stake/OVL execution lanes |
+| `BlockHeader` / `Block` | Multi-parent DAG header + UTXO/account/stake/execution/payment lanes |
 
 See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../assets/NATIVE_ASSETS.md`](../assets/NATIVE_ASSETS.md).
 

@@ -1,4 +1,6 @@
-use agora_types::{AccountTransfer, Address, Amount, Block, Hash, OvlExecutionTx, Transaction};
+use agora_types::{
+    AccountTransfer, Address, Amount, Block, DrcPaymentTx, Hash, OvlExecutionTx, Transaction,
+};
 use serde_json::{json, Value};
 
 use crate::backend::RpcBackend;
@@ -105,6 +107,17 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
                 let id = self.backend.submit_ovl_execution(tx)?;
                 Ok(json!({ "execution_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcPayment => {
+                let raw = req
+                    .params
+                    .get("payment")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcPaymentTx = serde_json::from_value(raw)
+                    .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+                let id = self.backend.submit_drc_payment(tx)?;
+                Ok(json!({ "payment_id": id.to_hex() }))
             }
             RpcMethod::GetBalance => {
                 let address = param_address(&req.params, "address")?;
@@ -299,6 +312,7 @@ fn block_to_explorer_json(block: &Block) -> Value {
         "account_transfer_count": block.account_transfers.len(),
         "stake_op_count": block.stake_ops.len(),
         "ovl_execution_count": block.ovl_executions.len(),
+        "drc_payment_count": block.drc_payments.len(),
         "transactions": transactions,
     })
 }
@@ -599,6 +613,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -709,6 +724,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -738,6 +754,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {

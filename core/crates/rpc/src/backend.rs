@@ -6,8 +6,8 @@ use agora_governance::{
     CivicSnapshot, ProposalKind, TopicCategory, VoteChoice,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, BlockHeader, Hash, OutPoint, OvlExecutionTx,
-    Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, BlockHeader, DrcPaymentTx, Hash, OutPoint,
+    OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -171,6 +171,7 @@ pub trait RpcBackend: Send {
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
     fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError>;
     fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError>;
+    fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
     /// Live UTXO set for wallet coin selection.
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError>;
@@ -437,6 +438,12 @@ impl RpcBackend for InMemoryBackend {
         ))
     }
 
+    fn submit_drc_payment(&mut self, _tx: DrcPaymentTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC payments".into(),
+        ))
+    }
+
     fn get_balance(&self, address: &Address) -> Amount {
         self.balances.get(address).copied().unwrap_or(Amount::ZERO)
     }
@@ -493,6 +500,7 @@ impl RpcBackend for InMemoryBackend {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         })
     }
 
