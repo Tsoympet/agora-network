@@ -6,11 +6,11 @@ import type { Hash } from "./Hash";
 /**
  * Signed account-based DRC payment.
  */
-export type DrcPaymentTx = { version: number, from: Address, to: Address, amount: Amount, fee: Amount, 
+export type DrcPaymentTx = { version: number, from: Address, to: Address, amount: Amount, fee: Amount,
 /**
  * `0` indicates that the destination does not require a tag.
  */
-destination_tag: number, 
+destination_tag: number,
 /**
  * `Hash::ZERO` indicates that the payment is not associated with an invoice.
  */

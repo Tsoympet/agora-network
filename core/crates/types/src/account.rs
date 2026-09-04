@@ -13,7 +13,6 @@ pub const ACCOUNT_TX_SIGNING_DOMAIN: &[u8] = b"agora-trident-account-tx-v2";
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
-#[ts(export)]
 pub struct AccountTransfer {
     pub version: u32,
     pub asset: NativeAssetId,

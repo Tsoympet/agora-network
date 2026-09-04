@@ -39,7 +39,6 @@ impl StakeOpKind {
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
-#[ts(export)]
 pub struct SignedStakeTx {
     pub version: u32,
     pub asset: NativeAssetId,

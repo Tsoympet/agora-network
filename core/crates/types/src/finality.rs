@@ -79,7 +79,6 @@ impl CheckpointBody {
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
-#[ts(export)]
 pub struct CheckpointAttestation {
     pub body: CheckpointBody,
     /// Which validator set this signature belongs to.

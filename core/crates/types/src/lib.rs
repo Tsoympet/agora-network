@@ -120,8 +120,35 @@ mod tests {
 /// Regenerates TypeScript bindings into `bindings/` when tests run.
 #[cfg(test)]
 mod ts_export {
+    use std::{fs, path::Path};
+
     use super::*;
     use ts_rs::TS;
+
+    const NORMALIZED_BINDINGS: &[&str] = &[
+        "AccountTransfer.ts",
+        "Block.ts",
+        "CheckpointAttestation.ts",
+        "DrcPaymentTx.ts",
+        "OvlExecutionTx.ts",
+        "SignedStakeTx.ts",
+        "Transaction.ts",
+    ];
+
+    fn normalize_generated_bindings() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings");
+        for filename in NORMALIZED_BINDINGS {
+            let path = directory.join(filename);
+            let generated = fs::read_to_string(&path).expect("read generated TypeScript binding");
+            let mut normalized = generated
+                .lines()
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n");
+            normalized.push('\n');
+            fs::write(path, normalized).expect("normalize generated TypeScript binding");
+        }
+    }
 
     #[test]
     fn export_shared_types() {
@@ -149,7 +176,9 @@ mod ts_export {
         CheckpointBody::export_all().expect("export CheckpointBody");
         CheckpointAttestation::export_all().expect("export CheckpointAttestation");
         FinalityCertificate::export_all().expect("export FinalityCertificate");
+        SignedStakeTx::export_all().expect("export SignedStakeTx");
         PassportCategory::export_all().expect("export PassportCategory");
         PassportAttestation::export_all().expect("export PassportAttestation");
+        normalize_generated_bindings();
     }
 }

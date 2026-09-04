@@ -30,7 +30,6 @@ impl BlockHeader {
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
-#[ts(export)]
 pub struct Block {
     pub header: BlockHeader,
     /// TLT UTXO lane (coinbase + transfers).

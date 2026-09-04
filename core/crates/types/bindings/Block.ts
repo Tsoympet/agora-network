@@ -9,23 +9,23 @@ import type { Transaction } from "./Transaction";
 /**
  * Full Trident body: TLT UTXO plus native account, stake, execution, and payment lanes.
  */
-export type Block = { header: BlockHeader, 
+export type Block = { header: BlockHeader,
 /**
  * TLT UTXO lane (coinbase + transfers).
  */
-transactions: Array<Transaction>, 
+transactions: Array<Transaction>,
 /**
  * OVL/DRC liquid account transfers (Trident).
  */
-account_transfers: Array<AccountTransfer>, 
+account_transfers: Array<AccountTransfer>,
 /**
  * OVL/DRC staking ops (Trident).
  */
-stake_ops: Array<SignedStakeTx>, 
+stake_ops: Array<SignedStakeTx>,
 /**
  * Signed, gas-metered OVL execution envelopes.
  */
-ovl_executions: Array<OvlExecutionTx>, 
+ovl_executions: Array<OvlExecutionTx>,
 /**
  * Signed native DRC payments with routing metadata.
  */

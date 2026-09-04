@@ -6,11 +6,11 @@ import type { NativeAssetId } from "./NativeAssetId";
 /**
  * Signed account-to-account transfer for OVL or DRC.
  */
-export type AccountTransfer = { version: number, asset: NativeAssetId, from: Address, to: Address, amount: Amount, 
+export type AccountTransfer = { version: number, asset: NativeAssetId, from: Address, to: Address, amount: Amount,
 /**
  * Explicit same-asset fee (credited to staking reward pool when Accepted).
  */
-fee: Amount, 
+fee: Amount,
 /**
  * Sender account nonce (must match current on-chain nonce).
  */

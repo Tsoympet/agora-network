@@ -147,7 +147,6 @@ pub struct TransactionBody {
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
-#[ts(export)]
 pub struct Transaction {
     pub version: u32,
     pub inputs: Vec<TxIn>,
