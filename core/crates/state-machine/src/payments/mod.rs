@@ -4,10 +4,8 @@
 //! district-chain ledger, PoW, bridge attestors, or transport cryptography.
 
 use agora_crypto::verify_drc_payment_bound;
-use agora_types::{
-    DrcPaymentOutboxEvent, DrcPaymentTx, Hash, NativeAssetId,
-};
-use borsh::{BorshDeserialize, BorshSerialize};
+use agora_types::{DrcPaymentOutboxEvent, DrcPaymentTx, Hash, NativeAssetId};
+use borsh::BorshDeserialize;
 
 use crate::accounts::{load_account, put_account_into, AccountJournal};
 use crate::apply::TxAuthContext;
@@ -164,15 +162,12 @@ pub fn apply_drc_payment(
         .checked_add(tx.amount.as_base_units())
         .ok_or_else(|| StateError::InvalidTx("DRC payment recipient overflow".into()))?;
     let event = DrcPaymentOutboxEvent::from_tx(tx);
-    let event_bytes =
-        borsh::to_vec(&event).map_err(|e| StateError::Storage(e.to_string()))?;
+    let event_bytes = borsh::to_vec(&event).map_err(|e| StateError::Storage(e.to_string()))?;
 
     journal
         .before
         .push((NativeAssetId::DRC, tx.from, from.clone()));
-    journal
-        .before
-        .push((NativeAssetId::DRC, tx.to, to.clone()));
+    journal.before.push((NativeAssetId::DRC, tx.to, to.clone()));
     from.balance -= debit;
     from.nonce = from
         .nonce
@@ -203,9 +198,7 @@ pub fn apply_drc_payment(
 
 #[cfg(test)]
 mod tests {
-    use agora_crypto::{
-        derive_bip44, seed_from_mnemonic, sign_drc_payment_bound, Bip44Path,
-    };
+    use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_drc_payment_bound, Bip44Path};
     use agora_types::{Amount, DrcPaymentTx};
 
     use super::*;
@@ -245,6 +238,7 @@ mod tests {
             0,
         );
         sign_drc_payment_bound(&mut tx, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let root_before = drc_payment_root(&store).unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         let receipt = apply_drc_payment(&store, &tx, &auth, &mut batch, &mut journal).unwrap();
@@ -268,6 +262,7 @@ mod tests {
             .unwrap();
         assert_eq!(event.destination_tag, 42);
         assert_eq!(event.invoice_id, Hash([9; 32]));
+        assert_ne!(drc_payment_root(&store).unwrap(), root_before);
     }
 
     #[test]
@@ -315,13 +310,7 @@ mod tests {
             invoice,
             1,
         );
-        sign_drc_payment_bound(
-            &mut duplicate,
-            &alice,
-            &auth.chain_id,
-            &auth.genesis,
-        )
-        .unwrap();
+        sign_drc_payment_bound(&mut duplicate, &alice, &auth.chain_id, &auth.genesis).unwrap();
         let before = load_account(&store, NativeAssetId::DRC, &alice.address()).unwrap();
         let mut rejected_batch = WriteBatch::new();
         let mut rejected_journal = AccountJournal::default();

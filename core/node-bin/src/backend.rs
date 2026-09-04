@@ -15,9 +15,9 @@ use agora_p2p::{
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
     apply_account_transfer, apply_drc_payment, apply_ovl_execution, apply_signed_stake_tx,
-    build_snapshot, load_epoch, load_reward_pool, load_validator, lookup_tx_location, meta_keys, outpoint_key,
-    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, StakingParams, StateStore,
-    TxAuthContext, WriteBatch,
+    build_snapshot, load_epoch, load_reward_pool, load_validator, lookup_tx_location, meta_keys,
+    outpoint_key, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, StakingParams,
+    StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcPaymentTx, Hash,
@@ -951,8 +951,8 @@ mod tests {
     use crate::admit::ChainState;
     use agora_consensus::{PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
     use agora_crypto::{
-        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound, sign_ovl_execution_bound,
-        sign_transaction_bound, Bip44Path,
+        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound, sign_drc_payment_bound,
+        sign_ovl_execution_bound, sign_transaction_bound, Bip44Path,
     };
     use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
@@ -1076,6 +1076,63 @@ mod tests {
         assert_eq!(id, tx.tx_id());
         let template = backend.get_block_template().unwrap();
         assert_eq!(template.ovl_executions, vec![tx]);
+        assert_eq!(template.header.tx_root, template.compute_body_root());
+    }
+
+    #[test]
+    fn drc_payment_enters_template_lane() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let merchant = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &alice.address(),
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            mempool,
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+        let mut tx = DrcPaymentTx::unsigned(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(100),
+            Amount::from_base_units(1),
+            77,
+            Hash([8; 32]),
+            0,
+        );
+        sign_drc_payment_bound(&mut tx, &alice, "agora-dev", &genesis).unwrap();
+
+        let id = backend.submit_drc_payment(tx.clone()).unwrap();
+        assert_eq!(id, tx.payment_id());
+        let template = backend.get_block_template().unwrap();
+        assert_eq!(template.drc_payments, vec![tx]);
         assert_eq!(template.header.tx_root, template.compute_body_root());
     }
 

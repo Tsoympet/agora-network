@@ -2,9 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{
-    AccountTransfer, DrcPaymentTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
-};
+use crate::{AccountTransfer, DrcPaymentTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction};
 
 /// Block header for Agora's BlockDAG tips.
 ///
@@ -99,8 +97,11 @@ impl Block {
     /// retain v2; OVL execution uses v3; DRC payments use v4.
     pub fn compute_body_root(&self) -> Hash {
         if !self.drc_payments.is_empty() {
-            let payment_ids: Vec<Hash> =
-                self.drc_payments.iter().map(DrcPaymentTx::payment_id).collect();
+            let payment_ids: Vec<Hash> = self
+                .drc_payments
+                .iter()
+                .map(DrcPaymentTx::payment_id)
+                .collect();
             return Hash::hash_borsh(&(
                 b"agora-block-body-v4",
                 self.compute_body_root_v3(),
@@ -146,5 +147,46 @@ impl Block {
             account_ids,
             stake_ids,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Address, Amount, DrcPaymentTx};
+
+    use super::*;
+
+    #[test]
+    fn drc_payment_activates_body_root_v4() {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        let legacy = block.compute_body_root();
+        block.drc_payments.push(DrcPaymentTx::unsigned(
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            9,
+            Hash([3; 32]),
+            0,
+        ));
+        assert_ne!(block.compute_body_root(), legacy);
+        assert_eq!(
+            block.compute_body_root(),
+            Hash::hash_borsh(&(
+                b"agora-block-body-v4",
+                legacy,
+                vec![block.drc_payments[0].payment_id()]
+            ))
+        );
     }
 }

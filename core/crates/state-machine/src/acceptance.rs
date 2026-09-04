@@ -100,8 +100,16 @@ impl BlockAcceptanceRecord {
 
     pub fn accepted_count(&self) -> usize {
         self.statuses.iter().filter(|s| s.is_accepted()).count()
-            + self.account_statuses.iter().filter(|s| s.is_accepted()).count()
-            + self.stake_statuses.iter().filter(|s| s.is_accepted()).count()
+            + self
+                .account_statuses
+                .iter()
+                .filter(|s| s.is_accepted())
+                .count()
+            + self
+                .stake_statuses
+                .iter()
+                .filter(|s| s.is_accepted())
+                .count()
             + self
                 .execution_statuses
                 .iter()
@@ -193,5 +201,23 @@ mod tests {
         let bm = loaded.bitmap();
         assert_eq!(bm.get(0), Some(true));
         assert_eq!(bm.get(1), Some(false));
+    }
+
+    #[test]
+    fn execution_era_record_migrates_with_empty_payment_lane() {
+        let bytes = borsh::to_vec(&(
+            Hash([2; 32]),
+            vec![TransactionAcceptance::Accepted],
+            vec![TransactionAcceptance::ConflictLost],
+            Vec::<TransactionAcceptance>::new(),
+            vec![TransactionAcceptance::Accepted],
+        ))
+        .unwrap();
+        let record = BlockAcceptanceRecord::from_bytes(&bytes).unwrap();
+        assert_eq!(
+            record.execution_statuses,
+            vec![TransactionAcceptance::Accepted]
+        );
+        assert!(record.payment_statuses.is_empty());
     }
 }

@@ -619,4 +619,34 @@ mod tests {
         assert!(!pool.contains(&account_id));
         assert!(!pool.account_reserved(NativeAssetId::OVL, &actor));
     }
+
+    #[test]
+    fn drc_payment_shares_account_nonce_reservation() {
+        use agora_types::{AccountTransfer, DrcPaymentTx, NativeAssetId};
+
+        let actor = agora_types::Address([6; 20]);
+        let recipient = agora_types::Address([7; 20]);
+        let mut account = AccountTransfer::unsigned_with_fee(
+            NativeAssetId::DRC,
+            actor,
+            recipient,
+            Amount::from_base_units(5),
+            Amount::from_base_units(1),
+            0,
+        );
+        account.public_key = vec![2; 33];
+        account.signature = vec![3; 64];
+        let payment = DrcPaymentTx::unsigned(
+            actor,
+            recipient,
+            Amount::from_base_units(5),
+            Amount::from_base_units(1),
+            0,
+            Hash::ZERO,
+            0,
+        );
+        let mut pool = Mempool::new(4);
+        pool.admit_account(account).unwrap();
+        assert!(pool.admit_payment(payment).is_err());
+    }
 }

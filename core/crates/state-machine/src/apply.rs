@@ -1978,6 +1978,110 @@ mod tests {
     }
 
     #[test]
+    fn drc_payment_accepts_emits_outbox_and_reverts() {
+        use crate::accounts::{credit_account_into, load_account};
+        use crate::payments::load_drc_outbox_event;
+        use crate::staking::load_reward_pool;
+        use agora_crypto::sign_drc_payment_bound;
+        use agora_types::{DrcPaymentTx, NativeAssetId};
+
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let merchant = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+        };
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &alice.address(),
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+
+        let mut payment = DrcPaymentTx::unsigned(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(400),
+            Amount::from_base_units(7),
+            42,
+            Hash([9; 32]),
+            0,
+        );
+        sign_drc_payment_bound(&mut payment, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let payment_id = payment.payment_id();
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            4,
+        );
+        let mut block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 4,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![coinbase],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![payment],
+        };
+        block.header.tx_root = block.compute_body_root();
+
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        let journal = result.journal.clone();
+        assert_eq!(
+            result.acceptance.payment_statuses,
+            vec![TransactionAcceptance::Accepted]
+        );
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &alice.address())
+                .unwrap()
+                .balance,
+            593
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &merchant.address())
+                .unwrap()
+                .balance,
+            400
+        );
+        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 7);
+        assert!(load_drc_outbox_event(&store, &payment_id)
+            .unwrap()
+            .is_some());
+
+        store
+            .write_batch(revert_journal_batched(&journal).unwrap())
+            .unwrap();
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &alice.address())
+                .unwrap()
+                .balance,
+            1_000
+        );
+        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 0);
+        assert!(load_drc_outbox_event(&store, &payment_id)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
     fn stake_op_in_block_body_bonds_validator() {
         use crate::accounts::{credit_account_into, load_account};
         use crate::staking::{load_validator, StakingParams};
@@ -2105,5 +2209,23 @@ mod tests {
             0,
         ));
         assert_ne!(multi.compute_body_root(), Block::compute_tx_root(&txs));
+    }
+
+    #[test]
+    fn pre_payment_journal_migrates_with_empty_payment_meta() {
+        let bytes = borsh::to_vec(&(
+            Vec::<(OutPoint, TxOut)>::new(),
+            Vec::<OutPoint>::new(),
+            1u64,
+            2u64,
+            3u64,
+            Vec::<(NativeAssetId, Address, AccountState)>::new(),
+            Vec::<(Vec<u8>, Option<Vec<u8>>)>::new(),
+        ))
+        .unwrap();
+        let journal = UtxoJournal::from_bytes(&bytes).unwrap();
+        assert_eq!(journal.fees, 1);
+        assert_eq!(journal.subsidy, 2);
+        assert!(journal.payment_meta_before.is_empty());
     }
 }
