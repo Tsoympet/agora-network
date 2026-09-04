@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use agora_types::{
-    AccountTransfer, Address, Block, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx,
-    Transaction,
+    AccountTransfer, Address, Block, DrcPaymentTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
+    SignedStakeTx, Transaction,
 };
 
 use crate::P2pError;
@@ -24,6 +24,7 @@ pub struct Mempool {
     account_txs: HashMap<Hash, AccountTransfer>,
     stake_txs: HashMap<Hash, SignedStakeTx>,
     execution_txs: HashMap<Hash, OvlExecutionTx>,
+    payment_txs: HashMap<Hash, DrcPaymentTx>,
     /// Account and stake lanes share the same per-asset account nonce.
     reserved_accounts: HashSet<(NativeAssetId, Address)>,
     max_size: usize,
@@ -38,13 +39,18 @@ impl Mempool {
             account_txs: HashMap::new(),
             stake_txs: HashMap::new(),
             execution_txs: HashMap::new(),
+            payment_txs: HashMap::new(),
             reserved_accounts: HashSet::new(),
             max_size,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.txs.len() + self.account_txs.len() + self.stake_txs.len() + self.execution_txs.len()
+        self.txs.len()
+            + self.account_txs.len()
+            + self.stake_txs.len()
+            + self.execution_txs.len()
+            + self.payment_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -56,6 +62,7 @@ impl Mempool {
             || self.account_txs.contains_key(tx_id)
             || self.stake_txs.contains_key(tx_id)
             || self.execution_txs.contains_key(tx_id)
+            || self.payment_txs.contains_key(tx_id)
     }
 
     /// Outpoints already claimed by mempool transactions.
@@ -183,6 +190,25 @@ impl Mempool {
         Ok(id)
     }
 
+    /// Admit a pre-validated native DRC payment.
+    pub fn admit_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, P2pError> {
+        let id = tx.payment_id();
+        if self.payment_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let key = (NativeAssetId::DRC, tx.from);
+        if !self.reserved_accounts.insert(key) {
+            return Err(P2pError::MempoolRejected(
+                "account already has a pending nonce".into(),
+            ));
+        }
+        self.payment_txs.insert(id, tx);
+        Ok(id)
+    }
+
     /// Drop the lowest-fee resident if its fee is strictly below `fee`.
     /// Returns true when space was made.
     fn evict_lowest_below(&mut self, fee: u64) -> bool {
@@ -298,6 +324,18 @@ impl Mempool {
         txs
     }
 
+    pub fn select_drc_payments(&self, max: usize) -> Vec<DrcPaymentTx> {
+        let mut txs: Vec<_> = self.payment_txs.values().cloned().collect();
+        txs.sort_by(|a, b| {
+            b.fee
+                .as_base_units()
+                .cmp(&a.fee.as_base_units())
+                .then_with(|| a.payment_id().as_bytes().cmp(b.payment_id().as_bytes()))
+        });
+        txs.truncate(max);
+        txs
+    }
+
     /// Drop included txs and any remaining pool txs that spend the same outpoints.
     pub fn evict_for_block(&mut self, block: &Block) {
         let mut spent = HashSet::new();
@@ -325,6 +363,13 @@ impl Mempool {
             if self.execution_txs.remove(&id).is_some() {
                 self.reserved_accounts
                     .remove(&(NativeAssetId::OVL, tx.from));
+            }
+        }
+        for tx in &block.drc_payments {
+            let id = tx.payment_id();
+            if self.payment_txs.remove(&id).is_some() {
+                self.reserved_accounts
+                    .remove(&(NativeAssetId::DRC, tx.from));
             }
         }
         let drop: Vec<Hash> = self
@@ -509,6 +554,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -567,6 +613,7 @@ mod tests {
             account_transfers: vec![account],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));

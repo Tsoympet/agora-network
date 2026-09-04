@@ -11,11 +11,12 @@ use crate::acceptance::load_acceptance;
 use crate::accounts::account_root;
 use crate::columns::ColumnFamily;
 use crate::finality_store::load_finalized_blue_score;
+use crate::payments::drc_payment_root;
 use crate::staking::{build_snapshot, load_epoch};
 use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
 
 /// Domain tag for the composed state root (versioned).
-pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v2";
+pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v3";
 
 /// Deterministic UTXO-set commitment (sorted outpoint keys).
 pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
@@ -72,6 +73,7 @@ pub fn compose_trident_state_root(
     let epoch_drc = load_epoch(store, NativeAssetId::DRC)?;
     let ovl_stake = build_snapshot(store, NativeAssetId::OVL, epoch_ovl)?.commitment();
     let drc_stake = build_snapshot(store, NativeAssetId::DRC, epoch_drc)?.commitment();
+    let drc_payments = drc_payment_root(store)?;
     let acceptance = acceptance_root(store, tip_block)?;
     let finality_tip = finalized_tip_commitment(store)?;
     // Gov/treasury roots activate in Phase 5 — keep explicit placeholder slot.
@@ -85,6 +87,7 @@ pub fn compose_trident_state_root(
         drc_accounts,
         ovl_stake,
         drc_stake,
+        drc_payments,
         acceptance,
         finality_tip,
         gov_treasury,

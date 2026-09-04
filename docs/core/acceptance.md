@@ -9,7 +9,7 @@ The acceptance layer is the sole authority for which transactions mutate state, 
 1. Pre-select transferable txs (`selectable_transfers`) — preserves soft-skip / `pending_reserve` semantics from consensus hardening PRs #76–#81.
 2. Fully validate auth even for soft-skipped transfers.
 3. Mutate UTXO **only** for `Accepted` txs.
-4. Emit `BlockAcceptanceRecord` with UTXO, account, stake, and OVL execution statuses aligned to each lane.
+4. Emit `BlockAcceptanceRecord` with UTXO, account, stake, OVL execution, and DRC payment statuses aligned to each lane.
 5. Persist `acceptance/<block_hash>` in the same atomic `WriteBatch` as `utxo_diff/<block_hash>` and issued supply.
 
 ## Statuses
@@ -23,7 +23,7 @@ The acceptance layer is the sole authority for which transactions mutate state, 
 
 ## Multi-asset
 
-TLT remains UTXO. OVL/DRC use parallel account/stake lanes; signed OVL execution envelopes use `ovl_executions`. Apply mutates only `Accepted` operations. UTXO-only bodies retain the legacy root, account/stake bodies retain v2, and execution bodies use `agora-block-body-v3`.
+TLT remains UTXO. OVL/DRC use parallel account/stake lanes; OVL execution and DRC payments have dedicated lanes. Apply mutates only `Accepted` operations. DRC payment bodies use `agora-block-body-v4`.
 
 ## RPC
 

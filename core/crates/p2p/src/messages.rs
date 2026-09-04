@@ -1,6 +1,6 @@
 use agora_types::{
-    AccountTransfer, Block, BlockHeader, CheckpointAttestation, Hash, OvlExecutionTx,
-    SignedStakeTx, Transaction,
+    AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcPaymentTx, Hash,
+    OvlExecutionTx, SignedStakeTx, Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -32,6 +32,8 @@ pub enum NetworkMessage {
     StakeTx(SignedStakeTx),
     /// Appended in Trident protocol v3; signed OVL execution envelope.
     OvlExecution(OvlExecutionTx),
+    /// Appended in Trident protocol v4; native DRC payment envelope.
+    DrcPayment(DrcPaymentTx),
 }
 
 impl NetworkMessage {
@@ -51,6 +53,7 @@ impl NetworkMessage {
         if block.account_transfers.is_empty()
             && block.stake_ops.is_empty()
             && block.ovl_executions.is_empty()
+            && block.drc_payments.is_empty()
         {
             Self::CompactBlock {
                 header: block.header.clone(),

@@ -44,7 +44,8 @@ impl ColumnFamily {
 /// - `4` — state-root commitments + staking reserve remaining + signed stake ops
 /// - `5` — multi-lane block body (account/stake) + working non-zero staking reserves
 /// - `6` — signed OVL execution lane + full multi-lane acceptance commitment
-pub const SCHEMA_VERSION: u32 = 6;
+/// - `7` — native DRC payment lane, duplicate/invoice index, and outbox
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {

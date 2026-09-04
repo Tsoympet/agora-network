@@ -15,6 +15,7 @@ use crate::accounts::{
 };
 use crate::columns::ColumnFamily;
 use crate::execution::apply_ovl_execution;
+use crate::payments::{apply_drc_payment, payment_meta_keys};
 use crate::staking::{
     apply_signed_stake_tx, credit_fee_share_to_reward_pool, reward_pool_meta_key,
     snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
@@ -58,6 +59,8 @@ pub struct UtxoJournal {
     pub account_before: Vec<(NativeAssetId, Address, AccountState)>,
     /// Meta key snapshots before Accepted stake ops (`None` = key absent).
     pub stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    /// DRC payment duplicate/invoice/outbox keys before Accepted payments.
+    pub payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -77,10 +80,34 @@ struct UtxoJournalV2 {
     coinbase_total: u64,
 }
 
+/// Multi-lane journal before native DRC payment metadata.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct UtxoJournalV3 {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+    fees: u64,
+    subsidy: u64,
+    coinbase_total: u64,
+    account_before: Vec<(NativeAssetId, Address, AccountState)>,
+    stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
 impl UtxoJournal {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(j) = Self::try_from_slice(bytes) {
             return Ok(j);
+        }
+        if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
+            return Ok(Self {
+                spent: v3.spent,
+                created: v3.created,
+                fees: v3.fees,
+                subsidy: v3.subsidy,
+                coinbase_total: v3.coinbase_total,
+                account_before: v3.account_before,
+                stake_meta_before: v3.stake_meta_before,
+                payment_meta_before: Vec::new(),
+            });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
             return Ok(Self {
@@ -91,6 +118,7 @@ impl UtxoJournal {
                 coinbase_total: v2.coinbase_total,
                 account_before: Vec::new(),
                 stake_meta_before: Vec::new(),
+                payment_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -103,6 +131,7 @@ impl UtxoJournal {
             coinbase_total: 0,
             account_before: Vec::new(),
             stake_meta_before: Vec::new(),
+            payment_meta_before: Vec::new(),
         })
     }
 }
@@ -385,7 +414,7 @@ fn apply_block_batched_mode(
         0
     );
 
-    let (account_statuses, execution_statuses, stake_statuses) =
+    let (account_statuses, execution_statuses, stake_statuses, payment_statuses) =
         apply_trident_lanes(store, block, auth, mode, &mut batch, &mut journal)?;
 
     Ok(BlockApplyResult {
@@ -396,6 +425,7 @@ fn apply_block_batched_mode(
             account_statuses,
             stake_statuses,
             execution_statuses,
+            payment_statuses,
         },
         batch,
     })
@@ -414,6 +444,10 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("self-transfer forbidden")
                 || msg.contains("bad OVL execution nonce")
                 || msg.contains("insufficient OVL execution balance")
+                || msg.contains("bad DRC payment nonce")
+                || msg.contains("insufficient DRC payment balance")
+                || msg.contains("duplicate DRC payment id")
+                || msg.contains("duplicate DRC merchant invoice")
         }
         _ => false,
     }
@@ -440,16 +474,22 @@ fn apply_trident_lanes(
         Vec<TransactionAcceptance>,
         Vec<TransactionAcceptance>,
         Vec<TransactionAcceptance>,
+        Vec<TransactionAcceptance>,
     ),
     StateError,
 > {
     if block.account_transfers.is_empty()
         && block.ovl_executions.is_empty()
+        && block.drc_payments.is_empty()
         && block.stake_ops.is_empty()
     {
-        return Ok((Vec::new(), Vec::new(), Vec::new()));
+        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
     }
-    if (!block.stake_ops.is_empty() || !block.ovl_executions.is_empty()) && auth.is_none() {
+    if (!block.stake_ops.is_empty()
+        || !block.ovl_executions.is_empty()
+        || !block.drc_payments.is_empty())
+        && auth.is_none()
+    {
         return Err(StateError::InvalidTx(
             "stake/execution ops require network-bound auth".into(),
         ));
@@ -460,9 +500,11 @@ fn apply_trident_lanes(
     let mut account_statuses = Vec::with_capacity(block.account_transfers.len());
     let mut execution_statuses = Vec::with_capacity(block.ovl_executions.len());
     let mut stake_statuses = Vec::with_capacity(block.stake_ops.len());
+    let mut payment_statuses = Vec::with_capacity(block.drc_payments.len());
     let mut seen_account_ids: HashSet<Hash> = HashSet::new();
     let mut seen_stake_ids: HashSet<Hash> = HashSet::new();
     let mut seen_execution_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_payment_ids: HashSet<Hash> = HashSet::new();
 
     for tx in &block.account_transfers {
         let id = tx.transfer_id();
@@ -559,7 +601,47 @@ fn apply_trident_lanes(
         }
     }
 
-    Ok((account_statuses, execution_statuses, stake_statuses))
+    for tx in &block.drc_payments {
+        let id = tx.payment_id();
+        let ctx = auth.expect("payment auth checked above");
+        let meta_before = snapshot_meta_keys(&lane, &payment_meta_keys(tx))?;
+        let mut op_batch = WriteBatch::new();
+        let mut acct_journal = AccountJournal::default();
+        match apply_drc_payment(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
+            Ok(receipt) => {
+                let pool_snap =
+                    snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                journal.stake_meta_before.extend(pool_snap);
+                credit_fee_share_to_reward_pool(
+                    &lane,
+                    &mut op_batch,
+                    NativeAssetId::DRC,
+                    receipt.fee_paid,
+                )?;
+                lane.write_batch(op_batch.clone())?;
+                batch.append(op_batch);
+                journal.account_before.extend(acct_journal.before);
+                journal.payment_meta_before.extend(meta_before);
+                seen_payment_ids.insert(id);
+                payment_statuses.push(TransactionAcceptance::Accepted);
+            }
+            Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                if seen_payment_ids.contains(&id) {
+                    payment_statuses.push(TransactionAcceptance::ExactDuplicate);
+                } else {
+                    payment_statuses.push(TransactionAcceptance::ConflictLost);
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok((
+        account_statuses,
+        execution_statuses,
+        stake_statuses,
+        payment_statuses,
+    ))
 }
 
 /// Transfers that still have spendable inputs in `store` (plus in-block creates).
@@ -899,6 +981,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
             None => batch.delete_cf(ColumnFamily::Meta, key),
         }
     }
+    for (key, prior) in journal.payment_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     Ok(batch)
 }
 
@@ -1095,6 +1183,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -1283,6 +1372,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -1380,6 +1470,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -1444,6 +1535,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -1517,6 +1609,7 @@ mod tests {
                 account_transfers: vec![],
                 stake_ops: vec![],
                 ovl_executions: vec![],
+                drc_payments: vec![],
             },
             1,
             None,
@@ -1589,6 +1682,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -1679,6 +1773,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -1750,6 +1845,7 @@ mod tests {
             account_transfers: vec![transfer],
             stake_ops: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -1835,6 +1931,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![],
             ovl_executions: vec![execution],
+            drc_payments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -1945,6 +2042,7 @@ mod tests {
             account_transfers: vec![],
             stake_ops: vec![stake],
             ovl_executions: vec![],
+            drc_payments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 

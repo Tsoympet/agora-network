@@ -25,6 +25,8 @@ pub struct BlockAcceptanceRecord {
     pub stake_statuses: Vec<TransactionAcceptance>,
     /// Aligned to `block.ovl_executions`.
     pub execution_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.drc_payments`.
+    pub payment_statuses: Vec<TransactionAcceptance>,
 }
 
 #[derive(Debug, Clone, BorshDeserialize)]
@@ -41,10 +43,29 @@ struct MultiLaneV2AcceptanceRecord {
     stake_statuses: Vec<TransactionAcceptance>,
 }
 
+#[derive(Debug, Clone, BorshDeserialize)]
+struct MultiLaneV3AcceptanceRecord {
+    block_hash: Hash,
+    statuses: Vec<TransactionAcceptance>,
+    account_statuses: Vec<TransactionAcceptance>,
+    stake_statuses: Vec<TransactionAcceptance>,
+    execution_statuses: Vec<TransactionAcceptance>,
+}
+
 impl BlockAcceptanceRecord {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(rec) = Self::try_from_slice(bytes) {
             return Ok(rec);
+        }
+        if let Ok(v3) = MultiLaneV3AcceptanceRecord::try_from_slice(bytes) {
+            return Ok(Self {
+                block_hash: v3.block_hash,
+                statuses: v3.statuses,
+                account_statuses: v3.account_statuses,
+                stake_statuses: v3.stake_statuses,
+                execution_statuses: v3.execution_statuses,
+                payment_statuses: Vec::new(),
+            });
         }
         if let Ok(v2) = MultiLaneV2AcceptanceRecord::try_from_slice(bytes) {
             return Ok(Self {
@@ -53,6 +74,7 @@ impl BlockAcceptanceRecord {
                 account_statuses: v2.account_statuses,
                 stake_statuses: v2.stake_statuses,
                 execution_statuses: Vec::new(),
+                payment_statuses: Vec::new(),
             });
         }
         let legacy = LegacyBlockAcceptanceRecord::try_from_slice(bytes)
@@ -63,6 +85,7 @@ impl BlockAcceptanceRecord {
             account_statuses: Vec::new(),
             stake_statuses: Vec::new(),
             execution_statuses: Vec::new(),
+            payment_statuses: Vec::new(),
         })
     }
 
@@ -81,6 +104,11 @@ impl BlockAcceptanceRecord {
             + self.stake_statuses.iter().filter(|s| s.is_accepted()).count()
             + self
                 .execution_statuses
+                .iter()
+                .filter(|s| s.is_accepted())
+                .count()
+            + self
+                .payment_statuses
                 .iter()
                 .filter(|s| s.is_accepted())
                 .count()
@@ -157,6 +185,7 @@ mod tests {
             account_statuses: vec![TransactionAcceptance::Accepted],
             stake_statuses: vec![],
             execution_statuses: vec![],
+            payment_statuses: vec![],
         };
         store_acceptance(&store, &rec.block_hash, &rec).unwrap();
         let loaded = load_acceptance(&store, &rec.block_hash).unwrap().unwrap();

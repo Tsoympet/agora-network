@@ -2,7 +2,9 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{AccountTransfer, Hash, OvlExecutionTx, SignedStakeTx, Transaction};
+use crate::{
+    AccountTransfer, DrcPaymentTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
+};
 
 /// Block header for Agora's BlockDAG tips.
 ///
@@ -26,7 +28,7 @@ impl BlockHeader {
     }
 }
 
-/// Full block: header + multi-lane body (TLT UTXO + OVL/DRC account/stake + OVL execution).
+/// Full Trident body: TLT UTXO plus native account, stake, execution, and payment lanes.
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
@@ -44,6 +46,9 @@ pub struct Block {
     /// Signed, gas-metered OVL execution envelopes.
     #[serde(default)]
     pub ovl_executions: Vec<OvlExecutionTx>,
+    /// Signed native DRC payments with routing metadata.
+    #[serde(default)]
+    pub drc_payments: Vec<DrcPaymentTx>,
 }
 
 impl Block {
@@ -55,6 +60,7 @@ impl Block {
             account_transfers: Vec::new(),
             stake_ops: Vec::new(),
             ovl_executions: Vec::new(),
+            drc_payments: Vec::new(),
         }
     }
 
@@ -90,8 +96,21 @@ impl Block {
     /// Body commitment for `header.tx_root`.
     ///
     /// UTXO-only blocks keep the legacy merkle root; account/stake-only bodies
-    /// retain v2; OVL execution bodies use the v3 domain.
+    /// retain v2; OVL execution uses v3; DRC payments use v4.
     pub fn compute_body_root(&self) -> Hash {
+        if !self.drc_payments.is_empty() {
+            let payment_ids: Vec<Hash> =
+                self.drc_payments.iter().map(DrcPaymentTx::payment_id).collect();
+            return Hash::hash_borsh(&(
+                b"agora-block-body-v4",
+                self.compute_body_root_v3(),
+                payment_ids,
+            ));
+        }
+        self.compute_body_root_v3()
+    }
+
+    fn compute_body_root_v3(&self) -> Hash {
         if !self.ovl_executions.is_empty() {
             let execution_ids: Vec<Hash> = self
                 .ovl_executions

@@ -116,6 +116,7 @@ mod tests {
             },
             transactions: vec![],
             ovl_executions: vec![],
+            drc_payments: vec![],
         }
     }
 
