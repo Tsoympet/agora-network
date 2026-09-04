@@ -13,6 +13,7 @@ agora-ovolos-rollup = { workspace = true }
 agora-bridge-sdk = { workspace = true }
 agora-intent-engine = { workspace = true }
 borsh = { workspace = true }
+hex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
-use agora_bridge_sdk::{BridgeDirection, BridgeMessage, MessageStatus, ATTESTOR_BOND_ESCROW};
+use agora_bridge_sdk::{BridgeDirection, MessageStatus, ATTESTOR_BOND_ESCROW};
 use agora_ovolos_rollup::SEQUENCER_BOND_ESCROW;
 use agora_types::{Address, Hash};
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -653,7 +653,7 @@ fn merkle_root(allocations: &[MigrationAllocation]) -> Hash {
 
 #[cfg(test)]
 mod tests {
-    use agora_bridge_sdk::BridgeCheckpoint;
+    use agora_bridge_sdk::{BridgeCheckpoint, BridgeMessage};
 
     use super::*;
 
