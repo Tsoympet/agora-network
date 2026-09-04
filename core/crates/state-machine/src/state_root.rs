@@ -2,7 +2,7 @@
 //!
 //! Composition (domain-separated), matching Phase 0 audit §5.5:
 //! UTXO ∥ OVL accounts ∥ DRC accounts ∥ OVL stake snap ∥ DRC stake snap ∥
-//! tip acceptance ∥ finalized tip ∥ gov/treasury placeholder.
+//! DRC payment state ∥ tip acceptance ∥ finalized tip ∥ governance/treasuries.
 
 use agora_types::{Hash, NativeAssetId, OutPoint, TxOut};
 use borsh::BorshDeserialize;
@@ -11,6 +11,7 @@ use crate::acceptance::load_acceptance;
 use crate::accounts::account_root;
 use crate::columns::ColumnFamily;
 use crate::finality_store::load_finalized_blue_score;
+use crate::governance_state::governance_treasury_root;
 use crate::payments::drc_payment_root;
 use crate::staking::{build_snapshot, load_epoch};
 use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
@@ -76,8 +77,7 @@ pub fn compose_trident_state_root(
     let drc_payments = drc_payment_root(store)?;
     let acceptance = acceptance_root(store, tip_block)?;
     let finality_tip = finalized_tip_commitment(store)?;
-    // Gov/treasury roots activate in Phase 5 — keep explicit placeholder slot.
-    let gov_treasury = Hash::ZERO;
+    let gov_treasury = governance_treasury_root(store)?;
 
     Ok(Hash::hash_borsh(&(
         STATE_ROOT_DOMAIN,

@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use agora_types::Address;
 use serde::{Deserialize, Serialize};
 
-use crate::chamber::{primary_chamber, VotingChamber};
 use crate::constitution::EnactedConstitution;
 use crate::office::OfficeBoard;
 use crate::params::GovernanceParams;
@@ -14,6 +13,7 @@ use crate::quadratic::{effective_votes_for, VoterBalance};
 use crate::ranks::CivicRank;
 use crate::whale::WhaleCapConfig;
 use crate::GovernanceError;
+use crate::{authorization_for, primary_chamber, VotingChamber};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GovernanceState {
@@ -135,7 +135,7 @@ impl GovernanceState {
         if p.deposit < min_deposit {
             return Err(GovernanceError::InsufficientDeposit);
         }
-        if matches!(p.kind, ProposalKind::TreasurySpend { .. }) && p.sponsors.is_empty() {
+        if authorization_for(&p.kind).requires_tamias_sponsor && p.sponsors.is_empty() {
             return Err(GovernanceError::MissingSponsorship);
         }
         // Ensure chamber mapping is valid for current board (no-op check).
@@ -281,8 +281,8 @@ impl GovernanceState {
         if p.status != ProposalStatus::Passed {
             return Err(GovernanceError::NotReadyToExecute);
         }
-        // Constitution amendments need Archon assent before timelock/execute.
-        if matches!(p.kind, ProposalKind::ConstitutionAmendment { .. }) {
+        let authorization = authorization_for(&p.kind);
+        if authorization.required_archon_assents > 0 {
             let basileus = self.offices.holders(CivicRank::ArchonBasileus);
             let basileus_ok = basileus
                 .first()
@@ -293,7 +293,9 @@ impl GovernanceState {
                 .iter()
                 .filter(|a| self.offices.is_any_archon(**a))
                 .count();
-            if !basileus_ok && archon_count < 2 {
+            // Constitution v1 permits one Basileus assent as an alternative to
+            // the matrix's Archon Collegium threshold.
+            if !basileus_ok && archon_count < usize::from(authorization.required_archon_assents) {
                 return Err(GovernanceError::MissingArchonAssent);
             }
         }

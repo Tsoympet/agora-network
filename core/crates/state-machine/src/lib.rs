@@ -12,6 +12,7 @@ mod execution;
 mod finality_store;
 mod genesis;
 mod ghostdag_store;
+mod governance_state;
 mod headers;
 mod marks;
 mod monetary;
@@ -82,6 +83,11 @@ pub use payments::{
 pub use genesis::{GenesisBuilder, SupplyCaps};
 pub use ghostdag_store::{
     ghostdag_key, load_ghostdag_record, store_ghostdag_record, GhostdagRecord,
+};
+pub use governance_state::{
+    authorization_policy_root, governance_treasury_root, init_canonical_governance_into,
+    load_canonical_governance_policy, load_protocol_treasuries, load_protocol_treasury,
+    CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
 };
 pub use headers::{header_key, load_header, store_header, store_header_into};
 pub use marks::{default_token_marks, TokenMark};

@@ -12,6 +12,7 @@
 //!
 //! See `docs/governance/CONSTITUTION.md` and `docs/governance/COMMUNITY.md`.
 
+mod authorization;
 mod chamber;
 mod community;
 mod constitution;
@@ -27,7 +28,11 @@ mod ranks;
 mod views;
 mod whale;
 
-pub use chamber::{primary_chamber, VotingChamber};
+pub use authorization::{
+    authorization_for, authorization_for_class, primary_chamber, proposal_class,
+    ProposalAuthorization, ProposalClass,
+};
+pub use chamber::VotingChamber;
 pub use community::{CommunityBoard, ConstitutionAck, ForumTopic, TopicCategory};
 pub use constitution::{
     constitution_v1_hash_hex, hash_constitution_body, EnactedConstitution, CONSTITUTION_V1_BODY,
