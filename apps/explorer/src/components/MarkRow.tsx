@@ -8,13 +8,13 @@ const marks = [
   {
     code: "DRC",
     name: "Drachma",
-    meaning: "L2+ medium · 6B max",
+    meaning: "L1 native · 6B max · payments",
     src: "/brand/drachma.png",
   },
   {
     code: "OVL",
     name: "Ovolos",
-    meaning: "L2 rollup · 21B max",
+    meaning: "L1 native · 21B max · execution gas",
     src: "/brand/ovolos.png",
   },
 ] as const;
