@@ -32,6 +32,35 @@ Crash during block / finality / stake / treasury / grant milestone commit; resta
 
 Miner proposes; OVL+DRC attest; checkpoint finalizes; wallet sends three assets; OVL gas spend; DRC merchant payment; governance after timelock; grant milestone payment; multi-node convergence.
 
+### Automated multi-node crash smoke
+
+`scripts/trident_multinode_crash.py` runs prebuilt node, RandomX miner, and DNS
+seeder binaries with unique loopback ports and temporary datadirs. It:
+
+1. waits for two nodes to become healthy and mutually connected;
+2. verifies both nodes share genesis and converge on the initial tip set;
+3. mines a block and verifies gossip convergence;
+4. sends `SIGKILL` to the recorded node-B PID;
+5. advances node A while B is offline;
+6. restarts B with the same identity and datadir; and
+7. verifies headers-first catch-up, tip convergence, and genesis stability.
+
+Run it after building the three binaries:
+
+```bash
+cargo build -p agora-node -p agora-miner-sidecar -p agora-dns-seeder
+python3 scripts/trident_multinode_crash.py --timeout 120
+```
+
+The default requires `agora_getFinality` and verifies that its response is
+bound to the live tip. The temporary `--allow-pre-trident` flag is only for the
+architecture-base CI branch, where the stacked finality RPC is not present.
+Remove that flag when this harness is rebased onto the finality implementation.
+
+The harness owns and terminates only PIDs it starts. A global deadline bounds
+all readiness, mining, and recovery waits; failures print the tail of each
+isolated process log.
+
 ## CI gates (target)
 
 Formatting; full workspace tests; clippy with warnings denied; RandomX-enabled node build/tests; RocksDB persistence tests; TypeScript tests; wallet builds; explorer build; Docker multi-node smoke; dependency/license audit (`cargo-deny`).
