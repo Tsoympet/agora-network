@@ -175,9 +175,7 @@ impl GrantRecord {
         cleared: bool,
         disclosure_hash: Hash,
     ) -> Result<(), CommunityProtocolError> {
-        if self.conflict_review != ConflictReviewStatus::Pending
-            || disclosure_hash == Hash::ZERO
-        {
+        if self.conflict_review != ConflictReviewStatus::Pending || disclosure_hash == Hash::ZERO {
             return Err(CommunityProtocolError::InvalidTransition);
         }
         self.coi_disclosure_hash = disclosure_hash;
@@ -359,9 +357,7 @@ mod tests {
         .unwrap();
         assert_eq!(grant.conflict_review, ConflictReviewStatus::Pending);
         assert!(grant.record_conflict_review(true, Hash::ZERO).is_err());
-        grant
-            .record_conflict_review(true, Hash([10; 32]))
-            .unwrap();
+        grant.record_conflict_review(true, Hash([10; 32])).unwrap();
         assert_eq!(grant.conflict_review, ConflictReviewStatus::Cleared);
         assert_eq!(grant.coi_disclosure_hash, Hash([10; 32]));
     }

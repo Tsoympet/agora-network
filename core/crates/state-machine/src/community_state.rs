@@ -348,9 +348,7 @@ pub fn register_grant_into(
         && (grant.conflict_review != agora_governance::ConflictReviewStatus::Cleared
             || grant.coi_disclosure_hash == Hash::ZERO)
     {
-        return Err(invalid(
-            "DRC community grant requires cleared COI evidence",
-        ));
+        return Err(invalid("DRC community grant requires cleared COI evidence"));
     }
     if grant.treasury != TreasuryId::DrcCommunity
         && grant.conflict_review != agora_governance::ConflictReviewStatus::NotRequired
@@ -583,9 +581,7 @@ mod tests {
             vec![],
         )
         .unwrap();
-        grant
-            .record_conflict_review(true, Hash([11; 32]))
-            .unwrap();
+        grant.record_conflict_review(true, Hash([11; 32])).unwrap();
         let mission = MissionRecord {
             id: Hash([8; 32]),
             sponsor: Address([9; 20]),
