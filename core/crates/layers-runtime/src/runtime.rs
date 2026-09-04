@@ -26,6 +26,27 @@ pub struct LayersRuntimeConfig {
     pub drachma_genesis: DrachmaGenesis,
 }
 
+pub struct LockAndMintRequest<'a> {
+    pub source_hub: &'a str,
+    pub dest_district: &'a str,
+    pub sender: Address,
+    pub recipient: Address,
+    pub amount: Amount,
+    pub nonce: u64,
+    pub destination_tag: u32,
+}
+
+pub struct DrcPathPayment<'a> {
+    pub hub: &'a str,
+    pub source_district: &'a str,
+    pub dest_district: &'a str,
+    pub sender: Address,
+    pub recipient: Address,
+    pub amount: Amount,
+    pub nonce: u64,
+    pub destination_tag: u32,
+}
+
 impl Default for LayersRuntimeConfig {
     fn default() -> Self {
         Self {
@@ -329,37 +350,31 @@ impl LayersRuntime {
         amount: Amount,
         nonce: u64,
     ) -> Result<Hash, LayersError> {
-        self.lock_and_mint_tagged(
+        self.lock_and_mint_tagged(LockAndMintRequest {
             source_hub,
             dest_district,
             sender,
             recipient,
             amount,
             nonce,
-            0,
-        )
+            destination_tag: 0,
+        })
     }
 
     pub fn lock_and_mint_tagged(
         &mut self,
-        source_hub: &str,
-        dest_district: &str,
-        sender: Address,
-        recipient: Address,
-        amount: Amount,
-        nonce: u64,
-        destination_tag: u32,
+        request: LockAndMintRequest<'_>,
     ) -> Result<Hash, LayersError> {
         self.intents
             .bridge_mut()
             .lock_and_mint_tagged(
-                source_hub,
-                dest_district,
-                sender,
-                recipient,
-                amount,
-                nonce,
-                destination_tag,
+                request.source_hub,
+                request.dest_district,
+                request.sender,
+                request.recipient,
+                request.amount,
+                request.nonce,
+                request.destination_tag,
             )
             .map_err(|e| LayersError::Bridge(e.to_string()))
     }
@@ -413,52 +428,28 @@ impl LayersRuntime {
     /// Cross-district path payment via hub (XRP path-payment class).
     pub fn path_pay_drc(
         &mut self,
-        hub: &str,
-        source_district: &str,
-        dest_district: &str,
-        sender: Address,
-        recipient: Address,
-        amount: Amount,
-        nonce: u64,
-        destination_tag: u32,
+        payment: DrcPathPayment<'_>,
     ) -> Result<(Hash, Hash), LayersError> {
-        self.path_pay_drc_deliver(
-            hub,
-            source_district,
-            dest_district,
-            sender,
-            recipient,
-            amount,
-            nonce,
-            destination_tag,
-            Amount::ZERO,
-        )
+        self.path_pay_drc_deliver(payment, Amount::ZERO)
     }
 
     /// Path payment with XRPL-class deliverMin.
     pub fn path_pay_drc_deliver(
         &mut self,
-        hub: &str,
-        source_district: &str,
-        dest_district: &str,
-        sender: Address,
-        recipient: Address,
-        amount: Amount,
-        nonce: u64,
-        destination_tag: u32,
+        payment: DrcPathPayment<'_>,
         deliver_min: Amount,
     ) -> Result<(Hash, Hash), LayersError> {
         self.intents
             .bridge_mut()
             .path_pay_deliver(
-                hub,
-                source_district,
-                dest_district,
-                sender,
-                recipient,
-                amount,
-                nonce,
-                destination_tag,
+                payment.hub,
+                payment.source_district,
+                payment.dest_district,
+                payment.sender,
+                payment.recipient,
+                payment.amount,
+                payment.nonce,
+                payment.destination_tag,
                 deliver_min,
             )
             .map_err(|e| LayersError::Bridge(e.to_string()))
