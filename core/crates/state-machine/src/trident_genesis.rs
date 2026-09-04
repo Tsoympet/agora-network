@@ -977,6 +977,8 @@ mod tests {
     #[test]
     fn populated_validator_key_must_be_compressed_secp256k1() {
         let mut artifact = TridentGenesisArtifact::from_json(DRAFT).unwrap();
+        artifact.ovl_validators.max_commission_bps = Some(2_000);
+        artifact.ovl_validators.max_concentration_bps = Some(10_000);
         artifact
             .ovl_validators
             .genesis_set
