@@ -75,9 +75,9 @@ python3 scripts/trident_multinode_crash.py --timeout 120
 ```
 
 The default requires `agora_getFinality` and verifies that its response is
-bound to the live tip. The temporary `--allow-pre-trident` flag is only for the
-architecture-base CI branch, where the stacked finality RPC is not present.
-Remove that flag when this harness is rebased onto the finality implementation.
+bound to the live tip. The temporary `--allow-pre-trident` flag remains
+available only for historical pre-integration branches; Trident CI must not use
+it once the finality implementation is present.
 
 The harness owns and terminates only PIDs it starts. A global deadline bounds
 all readiness, mining, and recovery waits; failures print the tail of each
