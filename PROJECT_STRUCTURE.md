@@ -31,6 +31,9 @@ agora-network/
 ├── docs/                   # Architectural & Scaling Blueprints
 │   ├── architecture/       # Trident L1 design freeze
 │   ├── core/               # One markdown file per major core module
+│   ├── ops/                # Network deployment and Trident readiness gates
+│   ├── security/           # Threat model and security requirements
+│   ├── testing/            # Trident validation plans and CI coverage
 │   └── scaling/            # Historical layer overview (deprecated locus)
 ├── infrastructure/         # External services
 │   ├── dns-seeder/         # Node discovery phonebook

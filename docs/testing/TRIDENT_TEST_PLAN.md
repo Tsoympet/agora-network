@@ -65,6 +65,17 @@ isolated process log.
 
 Formatting; full workspace tests; clippy with warnings denied; RandomX-enabled node build/tests; RocksDB persistence tests; TypeScript tests; wallet builds; explorer build; Docker multi-node smoke; dependency/license audit (`cargo-deny`).
 
+Current architecture-base CI blocks on formatting, portable Rust tests,
+consensus/P2P tests, core-crate clippy, dependency policy, explorer/desktop
+builds, node admission, RandomX, RocksDB reopen, deterministic partition
+recovery, the process crash smoke, and cross-language signing vectors.
+Whole-workspace clippy remains advisory, and Docker, load/soak, mobile
+packaging, and live dual-PoS finality are not yet merge gates.
+
+Passing CI is necessary but not sufficient for launch. The evidence checklist,
+operator baseline, incident procedure, and human go/no-go blockers are defined
+in [`../ops/TRIDENT_TESTNET_READINESS.md`](../ops/TRIDENT_TESTNET_READINESS.md).
+
 ## Per-phase minimum
 
 See [`../architecture/TRIDENT_PHASE0_AUDIT.md`](../architecture/TRIDENT_PHASE0_AUDIT.md) §10.

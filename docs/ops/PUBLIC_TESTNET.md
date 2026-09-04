@@ -1,5 +1,11 @@
 # Public testnet operations
 
+> **Current network boundary:** This runbook operates the frozen v2,
+> TLT-only compatibility testnet. It does not boot the unfrozen Trident v3
+> draft or provide OVL/DRC finality. Trident launch gates and the secure
+> operator baseline are tracked in
+> [`TRIDENT_TESTNET_READINESS.md`](TRIDENT_TESTNET_READINESS.md).
+
 Agora **testnet** is RandomX-only (`ChainParams::testnet`). Genesis Block 0 stays
 easy (`bits: 0`, hash `afe59232…`) so the frozen root is unchanged; **post-genesis**
 templates floor at `daa_min_level = 8` leading-zero bits.
@@ -17,6 +23,12 @@ docker compose up faucet
 ```
 
 Host RPC: `http://127.0.0.1:8545/rpc`.
+
+The Compose file publishes RPC on all container interfaces and enables the
+development funding RPC on node A. Use it only as a local smoke environment.
+Before any shared deployment, bind node RPC to a private interface, require
+`AGORA_RPC_TOKEN`, terminate TLS at a reverse proxy, and leave
+`AGORA_RPC_ALLOW_FUND` unset.
 
 ## Multi-host bootstrap
 

@@ -142,6 +142,7 @@ PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.
 - [`../migration/OVL_DRC_TO_L1.md`](../migration/OVL_DRC_TO_L1.md)
 - [`../security/THREAT_MODEL.md`](../security/THREAT_MODEL.md)
 - [`../testing/TRIDENT_TEST_PLAN.md`](../testing/TRIDENT_TEST_PLAN.md)
+- [`../ops/TRIDENT_TESTNET_READINESS.md`](../ops/TRIDENT_TESTNET_READINESS.md)
 - [`../operations/VALIDATOR_RUNBOOK.md`](../operations/VALIDATOR_RUNBOOK.md)
 - [`../operations/MINER_RUNBOOK.md`](../operations/MINER_RUNBOOK.md)
 - [`../operations/INCIDENT_RESPONSE.md`](../operations/INCIDENT_RESPONSE.md)

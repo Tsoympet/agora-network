@@ -363,6 +363,9 @@ Do not manually copy balances with undocumented scripts.
 ### Phase 7 — testnet prep
 
 Multi-node, crash, partition, load, genesis ceremony, audit prep — ops docs + CI gates.
+The launch evidence, secure operator baseline, incident procedures, and explicit
+human blockers are tracked in
+[`../ops/TRIDENT_TESTNET_READINESS.md`](../ops/TRIDENT_TESTNET_READINESS.md).
 
 ---
 
