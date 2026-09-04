@@ -5,6 +5,7 @@ import { MarkRow } from "./components/MarkRow";
 import { MempoolPanel } from "./components/MempoolPanel";
 import { NetworkBadge } from "./components/NetworkBadge";
 import { NodeStatus } from "./components/NodeStatus";
+import { TridentOverview } from "./components/TridentOverview";
 import { TxLookup } from "./components/TxLookup";
 
 export default function App() {
@@ -26,9 +27,12 @@ export default function App() {
             <NetworkBadge />
           </div>
         </div>
-        <nav className="flex items-center gap-4 agora-rise agora-rise-delay-2">
+        <nav className="hidden items-center gap-4 agora-rise agora-rise-delay-2 xl:flex">
           <a href="#live" className="agora-btn agora-btn-ghost text-sm">
             Live DAG
+          </a>
+          <a href="#trident" className="agora-btn agora-btn-ghost text-sm">
+            Trident
           </a>
           <a href="#tx" className="agora-btn agora-btn-ghost text-sm">
             Tx lookup
@@ -52,13 +56,13 @@ export default function App() {
         <section className="relative min-h-screen w-full">
           <DagField />
           <div className="relative z-10 flex min-h-screen flex-col justify-end px-6 pb-16 pt-28 md:px-10 md:pb-24">
-            <p className="agora-eyebrow agora-rise">Sovereign BlockDAG</p>
+            <p className="agora-eyebrow agora-rise">Agora Trident L1 · Scaffold</p>
             <h1 className="agora-brand mt-4 max-w-4xl text-5xl leading-[1.05] md:text-7xl agora-rise agora-rise-delay-1">
               Agora Network
             </h1>
             <p className="agora-lede mt-5 agora-rise agora-rise-delay-2">
-              Sub-second ordering across a gold-lit dag of parallel blocks—built
-              for wallets, miners, and the public square.
+              One hybrid BlockDAG. Three protocol-native assets. Independent
+              OVL and DRC quorums finalize TLT-ordered state.
             </p>
             <div className="mt-8 flex flex-wrap gap-3 agora-rise agora-rise-delay-3">
               <a className="agora-btn agora-btn-primary" href="#live">
@@ -74,6 +78,13 @@ export default function App() {
               </a>
             </div>
           </div>
+        </section>
+
+        <section
+          id="trident"
+          className="relative border-t border-[var(--agora-line)] px-6 py-20 md:px-10"
+        >
+          <TridentOverview />
         </section>
 
         <section
