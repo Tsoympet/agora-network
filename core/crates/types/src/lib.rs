@@ -14,6 +14,7 @@ mod hrp;
 mod payment;
 mod stake;
 mod transaction;
+mod treasury;
 
 pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
 pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
@@ -33,6 +34,7 @@ pub use hrp::{
 pub use payment::{DrcPaymentOutboxEvent, DrcPaymentTx, DRC_PAYMENT_SIGNING_DOMAIN};
 pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
+pub use treasury::{TreasuryBalance, TreasuryId};
 
 #[cfg(test)]
 mod tests {
@@ -133,6 +135,8 @@ mod ts_export {
         NativeAssetId::export_all().expect("export NativeAssetId");
         NativeAmount::export_all().expect("export NativeAmount");
         AssetTxOut::export_all().expect("export AssetTxOut");
+        TreasuryId::export_all().expect("export TreasuryId");
+        TreasuryBalance::export_all().expect("export TreasuryBalance");
         TransactionAcceptance::export_all().expect("export TransactionAcceptance");
         AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
         AccountTransfer::export_all().expect("export AccountTransfer");

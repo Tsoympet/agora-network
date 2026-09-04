@@ -201,6 +201,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let asset = param_string(&req.params, "asset")?;
                 self.backend.get_reward_pool(&asset)
             }
+            RpcMethod::GetProtocolTreasuries => self.backend.get_protocol_treasuries(),
             RpcMethod::SubmitStakeTx => {
                 let stake_tx = req
                     .params

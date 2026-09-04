@@ -15,7 +15,8 @@ use agora_p2p::{
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
     apply_account_transfer, apply_drc_payment, apply_ovl_execution, apply_signed_stake_tx,
-    build_snapshot, load_epoch, load_reward_pool, load_validator, lookup_tx_location, meta_keys,
+    build_snapshot, governance_treasury_root, load_canonical_governance_policy, load_epoch,
+    load_protocol_treasuries, load_reward_pool, load_validator, lookup_tx_location, meta_keys,
     outpoint_key, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, StakingParams,
     StateStore, TxAuthContext, WriteBatch,
 };
@@ -750,6 +751,31 @@ impl RpcBackend for NodeBackend {
         }))
     }
 
+    fn get_protocol_treasuries(&self) -> Result<Value, RpcError> {
+        let policy = load_canonical_governance_policy(self.store.as_ref())
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let root = governance_treasury_root(self.store.as_ref())
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let treasuries = load_protocol_treasuries(self.store.as_ref())
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "maturity": "Scaffold",
+            "consensus_mutations_active": false,
+            "governance_root": root.to_hex(),
+            "policy": {
+                "version": policy.version,
+                "constitution_id": policy.constitution_id,
+                "constitution_hash": policy.constitution_hash.to_hex(),
+                "authorization_root": policy.authorization_root.to_hex(),
+            },
+            "treasuries": treasuries.iter().map(|t| json!({
+                "id": t.treasury.as_str(),
+                "asset": t.asset.ticker(),
+                "balance": t.balance.as_base_units(),
+            })).collect::<Vec<_>>(),
+        }))
+    }
+
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError> {
         let tx: SignedStakeTx =
             serde_json::from_value(stake_tx).map_err(|e| RpcError::InvalidParams(e.to_string()))?;
@@ -782,7 +808,14 @@ impl RpcBackend for NodeBackend {
     }
 
     fn get_governance(&self) -> Result<Value, RpcError> {
-        self.with_civic(|snap| Ok(civic_overview_json(snap)))
+        self.with_civic(|snap| {
+            let mut value = civic_overview_json(snap);
+            if let Some(object) = value.as_object_mut() {
+                object.insert("scope".into(), json!("administrative_local"));
+                object.insert("consensus_accepted".into(), json!(false));
+            }
+            Ok(value)
+        })
     }
 
     fn list_proposals(&self, limit: usize) -> Result<Value, RpcError> {
@@ -960,6 +993,43 @@ mod tests {
 
     const PHRASE: &str =
         "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    #[test]
+    fn protocol_treasuries_rpc_is_canonical_read_only_state() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            Arc::new(Mutex::new(Mempool::new(8))),
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+
+        let value = backend.get_protocol_treasuries().unwrap();
+        assert_eq!(value["maturity"], "Scaffold");
+        assert_eq!(value["consensus_mutations_active"], false);
+        let treasuries = value["treasuries"].as_array().unwrap();
+        assert_eq!(treasuries.len(), 3);
+        assert_eq!(treasuries[0]["asset"], "TLT");
+        assert_eq!(treasuries[1]["asset"], "OVL");
+        assert_eq!(treasuries[2]["asset"], "DRC");
+        assert!(treasuries.iter().all(|t| t["balance"] == 0));
+    }
 
     #[test]
     fn account_transfer_enters_template_lane() {

@@ -16,6 +16,7 @@ rocksdb = ["dep:rocksdb"]
 agora-types = { workspace = true }
 agora-crypto = { workspace = true }
 agora-consensus = { workspace = true }
+agora-governance = { workspace = true }
 borsh = { workspace = true }
 hex = { workspace = true }
 serde = { workspace = true }

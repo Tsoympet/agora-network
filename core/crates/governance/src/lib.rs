@@ -12,6 +12,7 @@
 //!
 //! See `docs/governance/CONSTITUTION.md` and `docs/governance/COMMUNITY.md`.
 
+mod authorization;
 mod chamber;
 mod community;
 mod constitution;
@@ -24,10 +25,15 @@ mod persist;
 mod proposal;
 mod quadratic;
 mod ranks;
+mod trident;
 mod views;
 mod whale;
 
-pub use chamber::{primary_chamber, VotingChamber};
+pub use authorization::{
+    authorization_for, authorization_for_class, primary_chamber, proposal_class,
+    ProposalAuthorization, ProposalClass,
+};
+pub use chamber::VotingChamber;
 pub use community::{CommunityBoard, ConstitutionAck, ForumTopic, TopicCategory};
 pub use constitution::{
     constitution_v1_hash_hex, hash_constitution_body, EnactedConstitution, CONSTITUTION_V1_BODY,
@@ -47,6 +53,10 @@ pub use quadratic::{
     total_effective_power, EffectiveVote, VoterBalance,
 };
 pub use ranks::CivicRank;
+pub use trident::{
+    trident_approval_matrix, trident_policy_catalog, TimelockClass, TridentApprovalMatrix,
+    TridentChamber, TridentProposalClass,
+};
 pub use views::{
     civic_overview_json, list_proposals_json, list_topics_json, office_json, proposal_json,
     topic_json,
