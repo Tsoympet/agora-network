@@ -389,7 +389,9 @@ mod tests {
             .put_cf(ColumnFamily::Utxo, b"existing", b"value")
             .unwrap();
 
-        let error = GenesisBuilder::default().load_or_ignite(&store).unwrap_err();
+        let error = GenesisBuilder::default()
+            .load_or_ignite(&store)
+            .unwrap_err();
         assert!(error
             .to_string()
             .contains("state without a genesis identity"));
