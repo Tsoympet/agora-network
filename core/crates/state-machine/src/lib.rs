@@ -6,6 +6,7 @@
 mod acceptance;
 mod accounts;
 mod apply;
+mod block_zero;
 mod columns;
 mod community_state;
 mod error;
@@ -43,6 +44,12 @@ pub use apply::{
     apply_block_with_auth, balance_of, revert_journal, revert_journal_batched, sum_transfer_fees,
     transfer_fee, validate_mempool_tx, validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult,
     TxAuthContext, UtxoJournal,
+};
+pub use block_zero::{
+    BlockZeroAllocation, BlockZeroFinality, BlockZeroSupply, BlockZeroTreasury, BlockZeroValidator,
+    BlockZeroValidatorSet, BlockZeroVesting, TridentBlockZeroCommitment, TridentBlockZeroState,
+    TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN, TRIDENT_BLOCK_ZERO_STATE_DOMAIN,
+    TRIDENT_BLOCK_ZERO_STATE_VERSION,
 };
 pub use columns::{meta_keys, ColumnFamily, SCHEMA_VERSION};
 pub use community_state::{
