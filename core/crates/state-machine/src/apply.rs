@@ -1980,7 +1980,7 @@ mod tests {
     #[test]
     fn drc_payment_accepts_emits_outbox_and_reverts() {
         use crate::accounts::{credit_account_into, load_account};
-        use crate::payments::load_drc_outbox_event;
+        use crate::payments::{drc_payment_root, load_drc_outbox_event};
         use crate::staking::load_reward_pool;
         use agora_crypto::sign_drc_payment_bound;
         use agora_types::{DrcPaymentTx, NativeAssetId};
@@ -2016,6 +2016,7 @@ mod tests {
         );
         sign_drc_payment_bound(&mut payment, &alice, &auth.chain_id, &auth.genesis).unwrap();
         let payment_id = payment.payment_id();
+        let payment_root_before = drc_payment_root(&store).unwrap();
         let coinbase = Transaction::unsigned(
             1,
             vec![],
@@ -2065,6 +2066,7 @@ mod tests {
         assert!(load_drc_outbox_event(&store, &payment_id)
             .unwrap()
             .is_some());
+        assert_ne!(drc_payment_root(&store).unwrap(), payment_root_before);
 
         store
             .write_batch(revert_journal_batched(&journal).unwrap())
@@ -2079,6 +2081,7 @@ mod tests {
         assert!(load_drc_outbox_event(&store, &payment_id)
             .unwrap()
             .is_none());
+        assert_eq!(drc_payment_root(&store).unwrap(), payment_root_before);
     }
 
     #[test]

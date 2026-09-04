@@ -13,10 +13,10 @@ use crate::columns::ColumnFamily;
 use crate::store::WriteBatch;
 use crate::{StateError, StateStore};
 
-const PAYMENT_PREFIX: &[u8] = b"payment/drc/";
 const SEEN_PREFIX: &[u8] = b"payment/drc/seen/";
 const INVOICE_PREFIX: &[u8] = b"payment/drc/invoice/";
 const OUTBOX_PREFIX: &[u8] = b"payment/drc/outbox/";
+const PAYMENT_ROOT_KEY: &[u8] = b"payment/drc/root";
 pub const DRC_PAYMENT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +51,11 @@ pub fn payment_outbox_key(payment_id: &Hash) -> Vec<u8> {
 /// Meta keys changed by an accepted payment, for reorg snapshots.
 pub fn payment_meta_keys(tx: &DrcPaymentTx) -> Vec<Vec<u8>> {
     let id = tx.payment_id();
-    let mut keys = vec![payment_seen_key(&id), payment_outbox_key(&id)];
+    let mut keys = vec![
+        payment_seen_key(&id),
+        payment_outbox_key(&id),
+        PAYMENT_ROOT_KEY.to_vec(),
+    ];
     if tx.invoice_id != Hash::ZERO {
         keys.push(payment_invoice_key(&tx.to, &tx.invoice_id));
     }
@@ -88,10 +92,22 @@ pub fn list_drc_outbox(
     Ok(events)
 }
 
-/// Commitment to accepted payment IDs, invoices, and transport outbox events.
+/// Bounded rolling commitment to accepted payment metadata and outbox events.
 pub fn drc_payment_root(store: &StateStore) -> Result<Hash, StateError> {
-    let entries = store.scan_prefix(ColumnFamily::Meta, PAYMENT_PREFIX)?;
-    Ok(Hash::hash_borsh(&(b"agora-drc-payment-root-v1", entries)))
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, PAYMENT_ROOT_KEY)? else {
+        return Ok(Hash::hash_borsh(&(
+            b"agora-drc-payment-root-v1",
+            Hash::ZERO,
+        )));
+    };
+    if bytes.len() != 32 {
+        return Err(StateError::Storage(
+            "invalid DRC payment root length".into(),
+        ));
+    }
+    let mut root = [0u8; 32];
+    root.copy_from_slice(&bytes);
+    Ok(Hash(root))
 }
 
 /// Validate and apply one signed DRC payment.
@@ -163,6 +179,9 @@ pub fn apply_drc_payment(
         .ok_or_else(|| StateError::InvalidTx("DRC payment recipient overflow".into()))?;
     let event = DrcPaymentOutboxEvent::from_tx(tx);
     let event_bytes = borsh::to_vec(&event).map_err(|e| StateError::Storage(e.to_string()))?;
+    let prior_payment_root = drc_payment_root(store)?;
+    let next_payment_root =
+        Hash::hash_borsh(&(b"agora-drc-payment-root-v1", prior_payment_root, &event));
 
     journal
         .before
@@ -188,6 +207,11 @@ pub fn apply_drc_payment(
         ColumnFamily::Meta,
         &payment_outbox_key(&payment_id),
         &event_bytes,
+    );
+    batch.put_cf(
+        ColumnFamily::Meta,
+        PAYMENT_ROOT_KEY,
+        next_payment_root.as_bytes(),
     );
 
     Ok(DrcPaymentReceipt {

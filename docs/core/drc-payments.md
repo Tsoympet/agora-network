@@ -32,6 +32,8 @@ Acceptance debits `amount + fee`, credits the recipient amount, sends the fee
 to the DRC validator reward pool, records duplicate/invoice indexes, and writes
 an immutable `DrcPaymentOutboxEvent`. The outbox is deterministic consensus
 metadata for transport consumers; delivery state remains outside consensus.
+State-root computation uses a rolling, reorg-journaled payment commitment rather
+than rescanning the append-only outbox.
 
 ## BlockDAG integration
 
@@ -42,5 +44,6 @@ journaled for reorg restoration and included in the Trident state root.
 flow.
 
 Escrow, recurring authorization, multisig accounts, cross-district paths, and
-merchant tag registries remain separate future transitions. DRC is not a
-stablecoin by virtue of this payment module.
+merchant tag registries remain separate future transitions. Destination tags
+are recipient-local routing metadata (as on XRPL), not globally owned names.
+DRC is not a stablecoin by virtue of this payment module.
