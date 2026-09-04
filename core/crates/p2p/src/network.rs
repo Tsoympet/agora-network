@@ -24,6 +24,27 @@ use crate::{NetworkConfig, P2pError};
 type GetBlockBehaviour = request_response::cbor::Behaviour<GetBlockRequest, GetBlockResponse>;
 type GetHeadersBehaviour = request_response::cbor::Behaviour<GetHeadersRequest, GetHeadersResponse>;
 
+fn agent_debug_log(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
+    use std::io::Write;
+    let payload = serde_json::json!({
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or_default(),
+    });
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/opt/cursor/logs/debug.log")
+    {
+        let _ = writeln!(file, "{payload}");
+    }
+}
+
 #[derive(NetworkBehaviour)]
 pub struct AgoraBehaviour {
     pub gossipsub: gossipsub::Behaviour,
@@ -376,6 +397,14 @@ impl NetworkNode {
         request_id: request_response::InboundRequestId,
         block: Option<Block>,
     ) {
+        // #region agent log
+        agent_debug_log(
+            "C",
+            "network.rs:respond_get_block:entry",
+            "response command dequeued",
+            serde_json::json!({"request_id": request_id.to_string(), "channel_present": self.inbound_channels.contains_key(&request_id), "inbound_channels": self.inbound_channels.len()}),
+        );
+        // #endregion
         let Some(channel) = self.inbound_channels.remove(&request_id) else {
             warn!(%request_id, "getblock response channel missing");
             return;
@@ -384,13 +413,20 @@ impl NetworkNode {
             Some(b) => GetBlockResponse::found(b),
             None => GetBlockResponse::missing(),
         };
-        if self
+        let result = self
             .swarm
             .behaviour_mut()
             .getblock
-            .send_response(channel, response)
-            .is_err()
-        {
+            .send_response(channel, response);
+        // #region agent log
+        agent_debug_log(
+            "C",
+            "network.rs:respond_get_block:exit",
+            "response handed to behaviour",
+            serde_json::json!({"request_id": request_id.to_string(), "accepted": result.is_ok(), "inbound_channels": self.inbound_channels.len()}),
+        );
+        // #endregion
+        if result.is_err() {
             warn!(%request_id, "getblock send_response failed (channel closed)");
         }
     }
@@ -497,6 +533,14 @@ impl NetworkNode {
                     channel,
                 } => {
                     self.inbound_channels.insert(request_id, channel);
+                    // #region agent log
+                    agent_debug_log(
+                        "C",
+                        "network.rs:handle_getblock_event:request",
+                        "inbound request channel stored",
+                        serde_json::json!({"peer": peer.to_string(), "request_id": request_id.to_string(), "inbound_channels": self.inbound_channels.len()}),
+                    );
+                    // #endregion
                     let _ = self.event_tx.send(NetworkEvent::GetBlockRequest {
                         peer,
                         hash: request.hash,
@@ -540,7 +584,15 @@ impl NetworkNode {
                 error,
                 ..
             } => {
-                self.inbound_channels.remove(&request_id);
+                let removed = self.inbound_channels.remove(&request_id).is_some();
+                // #region agent log
+                agent_debug_log(
+                    "C",
+                    "network.rs:handle_getblock_event:inbound_failure",
+                    "inbound request failed",
+                    serde_json::json!({"peer": peer.to_string(), "request_id": request_id.to_string(), "error": error.to_string(), "channel_removed": removed, "inbound_channels": self.inbound_channels.len()}),
+                );
+                // #endregion
                 warn!(%peer, %request_id, error = %error, "getblock inbound failure");
             }
             request_response::Event::ResponseSent {
@@ -596,11 +648,17 @@ impl NetworkNode {
                             info!(%address, "listening");
                             let _ = self.event_tx.send(NetworkEvent::Listening(address));
                         }
-                        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                        SwarmEvent::ConnectionEstablished { peer_id, connection_id, num_established, .. } => {
+                            // #region agent log
+                            agent_debug_log("A,B", "network.rs:run:connection_established", "swarm connection established", serde_json::json!({"peer": peer_id.to_string(), "connection_id": connection_id.to_string(), "num_established": u32::from(num_established), "self_connection": peer_id == self.swarm.local_peer_id().to_owned()}));
+                            // #endregion
                             info!(%peer_id, "peer connected");
                             let _ = self.event_tx.send(NetworkEvent::PeerConnected(peer_id));
                         }
-                        SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                        SwarmEvent::ConnectionClosed { peer_id, connection_id, num_established, cause, .. } => {
+                            // #region agent log
+                            agent_debug_log("A,B,D", "network.rs:run:connection_closed", "swarm connection closed", serde_json::json!({"peer": peer_id.to_string(), "connection_id": connection_id.to_string(), "num_established": u32::from(num_established), "cause": cause.map(|error| error.to_string()), "self_connection": peer_id == self.swarm.local_peer_id().to_owned(), "outbound_getblocks": self.outbound_hashes.len(), "inbound_getblocks": self.inbound_channels.len()}));
+                            // #endregion
                             info!(%peer_id, "peer disconnected");
                             let _ = self.event_tx.send(NetworkEvent::PeerDisconnected(peer_id));
                         }
