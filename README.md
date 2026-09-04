@@ -14,7 +14,8 @@
   <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License" /></a>
   <img src="https://img.shields.io/badge/rust-stable-orange.svg" alt="Rust" />
   <img src="https://img.shields.io/badge/pow-RandomX-informational.svg" alt="PoW" />
-  <img src="https://img.shields.io/badge/testnet-frozen%20genesis-success.svg" alt="Testnet" />
+  <img src="https://img.shields.io/badge/v2%20testnet-frozen%20genesis-success.svg" alt="Frozen v2 TLT testnet genesis" />
+  <img src="https://img.shields.io/badge/Trident%20testnet-NO--GO-lightgrey.svg" alt="Trident testnet NO-GO" />
   <img src="https://img.shields.io/badge/mainnet-not%20frozen-lightgrey.svg" alt="Mainnet" />
 </p>
 
@@ -32,7 +33,14 @@
 
 See [`docs/architecture/TRIDENT_L1.md`](docs/architecture/TRIDENT_L1.md) and [`docs/assets/NATIVE_ASSETS.md`](docs/assets/NATIVE_ASSETS.md).
 
-> **Status / maturity:** Trident is in **design freeze + Phase 1 implementation**. Current `main` still runs **TLT-only L1 UTXO** plus an in-process `agora-layers` lab stack for historical OVL/DRC prototypes — **not** a deployed multi-chain network. OVL is **not** Ethereum-equivalent; DRC is **not** XRPL-equivalent. **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot. Do not use “role-complete” as a readiness claim; use the maturity levels in the Trident docs.
+> **Status / maturity:** Trident remains **Scaffold**, with implementation
+> proceeding through stacked feature branches. Current `main` still runs
+> **TLT-only L1 UTXO** plus an in-process `agora-layers` lab stack for
+> historical OVL/DRC prototypes — **not** a deployed multi-chain network. The
+> frozen testnet badge applies only to v2 TLT; public Trident testnet is
+> **NO-GO** pending the [readiness gates](docs/ops/TRIDENT_TESTNET_READINESS.md).
+> OVL is **not** Ethereum-equivalent; DRC is **not** XRPL-equivalent.
+> **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot.
 
 ## Features
 
@@ -187,6 +195,7 @@ Full workspace map: [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md)
 | [Hybrid finality](docs/consensus/HYBRID_POW_DUAL_POS.md) | PoW + dual PoS checkpoints |
 | [Native assets / monetary policy](docs/assets/NATIVE_ASSETS.md) | TLT / OVL / DRC rules |
 | [Public testnet ops](docs/ops/PUBLIC_TESTNET.md) | Docker, seeds, PoW policy, TLS |
+| [Trident testnet readiness](docs/ops/TRIDENT_TESTNET_READINESS.md) | NO-GO gates, secure operations, incident response |
 | [Path to complete chain](docs/governance/PATH_TO_COMPLETE_CHAIN.md) | Historical checklist (pre-Trident) |
 | [Constitution (Trident)](docs/governance/AGORA_CONSTITUTION.md) | Chambers + approval matrix |
 | [Genesis](docs/genesis/README.md) | Frozen testnet v2 / Trident v3 drafts |

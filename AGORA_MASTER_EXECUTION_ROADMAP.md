@@ -238,7 +238,13 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Mobile:** Expo SecureStore adapter + same unlock flow
 - [x] **Finish-line doc:** [`docs/governance/PATH_TO_COMPLETE_CHAIN.md`](docs/governance/PATH_TO_COMPLETE_CHAIN.md)
 
-## Phase 38: Public testnet readiness — done
+## Phase 38: Historical v2 TLT testnet readiness — done
+
+This phase predates Trident. It established the frozen v2 TLT-only testnet
+baseline; it does **not** establish public readiness for Trident v3, OVL/DRC
+native state, or dual-PoS finality. The Trident launch decision and remaining
+gates are tracked in
+[`docs/ops/TRIDENT_TESTNET_READINESS.md`](docs/ops/TRIDENT_TESTNET_READINESS.md).
 
 - [x] **PoW floor:** testnet `daa_min_level = 8` + boot difficulty clamp (genesis hash unchanged)
 - [x] **Durable orphans:** Warm `orphan/*` persist / restore across restart

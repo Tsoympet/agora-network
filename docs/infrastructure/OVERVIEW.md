@@ -26,14 +26,20 @@ AGORA_RPC_URL=http://127.0.0.1:8545/rpc cargo run -p agora-stratum-pool
 ## Testnet faucet
 
 - Bind: `AGORA_FAUCET_BIND` (default `127.0.0.1:18081`)
-- Drip size: `AGORA_FAUCET_DRIP` (base units; default `1000000000` = 10 AGORA)
+- Drip size: `AGORA_FAUCET_DRIP` (base units; default `1000000000` = 10 TLT)
 - Cooldown: `AGORA_FAUCET_COOLDOWN_SECS` (default `60`)
-- RPC: `AGORA_RPC_URL` (default `http://127.0.0.1:8545/rpc`) — calls `agora_fundAddress` / `agora_getBalance`
-- Node must enable `AGORA_RPC_ALLOW_FUND=1` so drips mint spendable `cf_utxo` outputs (not overlay balances)
+- Default mode: `AGORA_FAUCET_MODE=treasury` — signs ordinary spends from
+  the BIP-44 external account selected by `AGORA_FAUCET_MNEMONIC`
+- RPC: `AGORA_RPC_URL` (default `http://127.0.0.1:8545/rpc`) — treasury mode
+  calls `agora_getUtxos`, `agora_submitTransaction`, and `agora_getBalance`
+- Lab-only mode: `AGORA_FAUCET_MODE=mint` calls `agora_fundAddress` and requires
+  node `AGORA_RPC_ALLOW_FUND=1`; never enable it on a shared Trident testnet
 
 ```bash
-AGORA_RPC_ALLOW_FUND=1 cargo run -p agora-node
-AGORA_RPC_URL=http://127.0.0.1:8545/rpc cargo run -p agora-testnet-faucet
+AGORA_NETWORK=testnet cargo run -p agora-node
+AGORA_FAUCET_MODE=treasury \
+  AGORA_RPC_URL=http://127.0.0.1:8545/rpc \
+  cargo run -p agora-testnet-faucet
 curl -X POST http://127.0.0.1:18081/drip \
   -H 'content-type: application/json' \
   -d '{"address":"0102030405060708090a0b0c0d0e0f1011121314"}'

@@ -1,4 +1,11 @@
-# Mainnet genesis freeze
+# Legacy v2 mainnet genesis freeze (superseded)
+
+> **Do not execute this checklist for a Trident launch.** It describes the
+> pre-Trident v2 artifact tooling retained for historical reference. Trident
+> mainnet requires one v3 genesis with TLT, OVL, and DRC native on L1, plus the
+> same evidence classes defined by the
+> [Trident testnet readiness runbook](../ops/TRIDENT_TESTNET_READINESS.md).
+> Mainnet remains unfrozen and intentionally refuses to boot.
 
 Mainnet refuses boot until a frozen Block 0 is published. This checklist turns
 `docs/genesis/mainnet.genesis.draft.json` into a real `mainnet.genesis.json`.
@@ -13,15 +20,17 @@ Mainnet refuses boot until a frozen Block 0 is published. This checklist turns
 
 ## Economic freeze (do not reopen lightly)
 
-| Ticker | Max supply (whole) | Layer |
+| Ticker | Working max supply (whole) | Trident locus and issuance |
 | --- | --- | --- |
-| TLT | 100,000,000 | L1 native PoW (RandomX UTXO) |
-| OVL | 21,000,000,000 | L2 native PoW (sha256_leading_zero) |
-| DRC | 6,000,000,000 | L3 native PoW (sha256_leading_zero) |
+| TLT | 100,000,000 | L1 UTXO; RandomX PoW |
+| OVL | 21,000,000,000 | L1 account state; genesis + staking reserve; never mined |
+| DRC | 6,000,000,000 | L1 account state; genesis + validator/community reserve; never mined |
 
-L1 consensus only mints **TLT** UTXOs. **OVL** and **DRC** mint via their layer PoW coinbase under each layer genesis cap.
+Only **TLT** is mineable. The amounts remain working defaults until a human v3
+ceremony freezes allocations, reserves, treasuries, validator sets, and policy
+hashes.
 
-## Freeze procedure
+## Historical v2 procedure
 
 ```bash
 # 1. Set final ChainParams::mainnet() values in
