@@ -60,13 +60,16 @@ The exporter:
   district rows for reproduction;
 - separates sequencer/attestor bonds from their reserved escrow balances so
   stake is not counted twice;
+- validates historical OVL/DRC minted totals against their hard caps;
+- records per-district DRC freeze tips and commits hashes of pending L2
+  transactions;
 - commits proposed OVL/DRC allocations into a domain-separated SHA-256 Merkle
   root;
 - commits the complete audit body (allocations, district provenance, locks,
   messages, and quarantined EVM head state) into `snapshot_root`;
 - reconciles minted, ledger, proposed-claim, and retired/burned totals; and
-- reports bridge locks, pending messages, escrow mismatches, and non-empty EVM
-  head state as blockers.
+- reports bridge locks, pending messages or L2 transactions, escrow mismatches,
+  and non-empty EVM head state as blockers.
 
 The snapshot always contains `"claim_activation": false`. The tool does not
 write an L1 datadir, mint assets, generate claim transactions, choose freeze

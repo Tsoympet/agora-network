@@ -8,7 +8,7 @@ use std::fs;
 use std::path::Path;
 
 use agora_bridge_sdk::{BridgeDirection, MessageStatus, ATTESTOR_BOND_ESCROW};
-use agora_ovolos_rollup::SEQUENCER_BOND_ESCROW;
+use agora_ovolos_rollup::{OVL_MAX_SUPPLY_BASE, SEQUENCER_BOND_ESCROW};
 use agora_types::{Address, Hash};
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
@@ -97,6 +97,16 @@ pub struct MigrationSource {
     pub next_sequence: u64,
     pub ovl_tip_hash: String,
     pub ovl_tip_height: u64,
+    pub ovl_max_supply: u64,
+    pub drc_max_supply: u64,
+    pub drc_tips: Vec<DistrictTipAudit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct DistrictTipAudit {
+    pub district: String,
+    pub tip_hash: String,
+    pub tip_height: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -138,7 +148,14 @@ pub struct EvmAccountAudit {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct PendingL2TxAudit {
+    pub index: u64,
+    pub tx_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct SupplyAudit {
+    pub max_supply: u64,
     pub source_minted: u64,
     pub source_ledger: u64,
     pub proposed_claims: u64,
@@ -152,6 +169,7 @@ pub struct MigrationAudit {
     pub drc: SupplyAudit,
     pub lock_total: u64,
     pub pending_message_count: u64,
+    pub pending_l2_transaction_count: u64,
     pub quarantined_evm_account_count: u64,
     pub blockers: Vec<String>,
 }
@@ -166,6 +184,7 @@ pub struct MigrationSnapshotBody {
     pub district_balances: Vec<DistrictBalanceAudit>,
     pub locks: Vec<LockAudit>,
     pub messages: Vec<MessageAudit>,
+    pub pending_l2_transactions: Vec<PendingL2TxAudit>,
     pub quarantined_evm_accounts: Vec<EvmAccountAudit>,
     pub claim_root: String,
     pub audit: MigrationAudit,
@@ -182,6 +201,18 @@ pub fn export_migration_snapshot(
     checkpoint: &LayersCheckpoint,
 ) -> Result<MigrationSnapshot, MigrationError> {
     validate_checkpoint_header(checkpoint)?;
+    if checkpoint.ovl_minted > OVL_MAX_SUPPLY_BASE {
+        return Err(MigrationError::InvalidSource(format!(
+            "OVL minted {} exceeds max supply {OVL_MAX_SUPPLY_BASE}",
+            checkpoint.ovl_minted
+        )));
+    }
+    if checkpoint.bridge.minted > checkpoint.bridge.max_supply {
+        return Err(MigrationError::InvalidSource(format!(
+            "DRC minted {} exceeds checkpoint max supply {}",
+            checkpoint.bridge.minted, checkpoint.bridge.max_supply
+        )));
+    }
 
     let mut blockers = Vec::new();
     let mut allocations = Vec::new();
@@ -338,17 +369,26 @@ pub fn export_migration_snapshot(
             quarantined_evm_accounts.len()
         ));
     }
+    let pending_l2_transactions = pending_l2_audit(checkpoint);
+    if !pending_l2_transactions.is_empty() {
+        blockers.push(format!(
+            "{} pending L2 transactions require freeze-height resolution",
+            pending_l2_transactions.len()
+        ));
+    }
 
     let claim_root = merkle_root(&allocations);
     let audit = MigrationAudit {
         ready_for_claim_design: blockers.is_empty(),
         ovl: SupplyAudit {
+            max_supply: OVL_MAX_SUPPLY_BASE,
             source_minted: checkpoint.ovl_minted,
             source_ledger: ovl_ledger_total,
             proposed_claims: ovl_claims,
             retired_or_burned: checkpoint.ovl_minted - ovl_ledger_total,
         },
         drc: SupplyAudit {
+            max_supply: checkpoint.bridge.max_supply,
             source_minted: checkpoint.bridge.minted,
             source_ledger: drc_ledger_total,
             proposed_claims: drc_claims,
@@ -356,6 +396,7 @@ pub fn export_migration_snapshot(
         },
         lock_total,
         pending_message_count,
+        pending_l2_transaction_count: pending_l2_transactions.len() as u64,
         quarantined_evm_account_count: quarantined_evm_accounts.len() as u64,
         blockers,
     };
@@ -369,11 +410,15 @@ pub fn export_migration_snapshot(
             next_sequence: checkpoint.next_sequence,
             ovl_tip_hash: checkpoint.ovl_tip_hash.clone(),
             ovl_tip_height: checkpoint.ovl_tip_height,
+            ovl_max_supply: OVL_MAX_SUPPLY_BASE,
+            drc_max_supply: checkpoint.bridge.max_supply,
+            drc_tips: district_tip_audit(checkpoint)?,
         },
         allocations,
         district_balances,
         locks,
         messages,
+        pending_l2_transactions,
         quarantined_evm_accounts,
         claim_root: claim_root.to_hex(),
         audit,
@@ -528,7 +573,8 @@ fn verify_audit_consistency(snapshot: &MigrationSnapshot) -> Result<(), Migratio
         ("OVL", &audit.ovl, ovl_claims),
         ("DRC", &audit.drc, drc_claims),
     ] {
-        if supply.source_ledger > supply.source_minted
+        if supply.source_minted > supply.max_supply
+            || supply.source_ledger > supply.source_minted
             || supply.proposed_claims != claims
             || supply.retired_or_burned != supply.source_minted - supply.source_ledger
         {
@@ -549,6 +595,7 @@ fn verify_audit_consistency(snapshot: &MigrationSnapshot) -> Result<(), Migratio
         .count() as u64;
     if audit.lock_total != lock_total
         || audit.pending_message_count != pending
+        || audit.pending_l2_transaction_count != snapshot.body.pending_l2_transactions.len() as u64
         || audit.quarantined_evm_account_count
             != snapshot.body.quarantined_evm_accounts.len() as u64
     {
@@ -566,6 +613,7 @@ fn verify_audit_consistency(snapshot: &MigrationSnapshot) -> Result<(), Migratio
             || audit.drc.proposed_claims != audit.drc.source_ledger
             || audit.lock_total != 0
             || audit.pending_message_count != 0
+            || audit.pending_l2_transaction_count != 0
             || audit.quarantined_evm_account_count != 0)
     {
         return Err(MigrationError::Snapshot(
@@ -595,6 +643,46 @@ fn lock_audit(checkpoint: &LayersCheckpoint) -> Result<Vec<LockAudit>, Migration
     }
     locks.sort_by(|a, b| (&a.domain, &a.address, a.amount).cmp(&(&b.domain, &b.address, b.amount)));
     Ok(locks)
+}
+
+fn district_tip_audit(
+    checkpoint: &LayersCheckpoint,
+) -> Result<Vec<DistrictTipAudit>, MigrationError> {
+    let mut seen = BTreeSet::new();
+    let mut tips = Vec::new();
+    for (district, tip_hash, tip_height) in &checkpoint.bridge.tips {
+        if !seen.insert(district.clone()) {
+            return Err(MigrationError::InvalidSource(format!(
+                "duplicate DRC district tip {district}"
+            )));
+        }
+        let hash = Hash::from_hex(tip_hash).ok_or_else(|| {
+            MigrationError::InvalidSource(format!("invalid DRC tip hash for {district}"))
+        })?;
+        tips.push(DistrictTipAudit {
+            district: district.clone(),
+            tip_hash: hash.to_hex(),
+            tip_height: *tip_height,
+        });
+    }
+    tips.sort_by(|a, b| a.district.cmp(&b.district));
+    Ok(tips)
+}
+
+fn pending_l2_audit(checkpoint: &LayersCheckpoint) -> Vec<PendingL2TxAudit> {
+    checkpoint
+        .l2_mempool
+        .iter()
+        .enumerate()
+        .map(|(index, raw)| {
+            let mut bytes = b"agora-trident-migration-pending-l2-v1".to_vec();
+            bytes.extend_from_slice(raw);
+            PendingL2TxAudit {
+                index: index as u64,
+                tx_hash: Hash::hash_bytes(&bytes).to_hex(),
+            }
+        })
+        .collect()
 }
 
 fn message_audit(checkpoint: &LayersCheckpoint) -> Result<Vec<MessageAudit>, MigrationError> {
@@ -649,6 +737,17 @@ fn status_name(status: MessageStatus) -> &'static str {
 }
 
 fn evm_audit(checkpoint: &LayersCheckpoint) -> Result<Vec<EvmAccountAudit>, MigrationError> {
+    let mut roots = BTreeSet::new();
+    for (root, _) in &checkpoint.revm_snapshots {
+        let parsed = Hash::from_hex(root).ok_or_else(|| {
+            MigrationError::InvalidSource(format!("invalid EVM snapshot root {root}"))
+        })?;
+        if !roots.insert(parsed) {
+            return Err(MigrationError::InvalidSource(format!(
+                "duplicate EVM snapshot root {root}"
+            )));
+        }
+    }
     let Some((_, accounts)) = checkpoint
         .revm_snapshots
         .iter()
@@ -868,6 +967,34 @@ mod tests {
             export_migration_snapshot(&source),
             Err(MigrationError::InvalidSource(message)) if message.contains("duplicate")
         ));
+    }
+
+    #[test]
+    fn supply_caps_fail_closed() {
+        let mut ovl = checkpoint();
+        ovl.ovl_minted = OVL_MAX_SUPPLY_BASE + 1;
+        assert!(matches!(
+            export_migration_snapshot(&ovl),
+            Err(MigrationError::InvalidSource(message)) if message.contains("max supply")
+        ));
+
+        let mut drc = checkpoint();
+        drc.bridge.max_supply = drc.bridge.minted - 1;
+        assert!(matches!(
+            export_migration_snapshot(&drc),
+            Err(MigrationError::InvalidSource(message)) if message.contains("max supply")
+        ));
+    }
+
+    #[test]
+    fn pending_l2_transactions_are_committed_and_block_readiness() {
+        let mut source = checkpoint();
+        source.l2_mempool.push(vec![1, 2, 3]);
+        let snapshot = export_migration_snapshot(&source).unwrap();
+        assert_eq!(snapshot.body.pending_l2_transactions.len(), 1);
+        assert_eq!(snapshot.body.audit.pending_l2_transaction_count, 1);
+        assert!(!snapshot.body.audit.ready_for_claim_design);
+        verify_migration_snapshot(&snapshot).unwrap();
     }
 
     #[test]
