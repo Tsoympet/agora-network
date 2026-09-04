@@ -273,11 +273,17 @@ class Harness:
         self.wait_healthy("node-b", self.rpc_b)
         self.wait_connected()
 
-        genesis_a = self.node_info(self.rpc_a).get("genesis_hash")
-        genesis_b = self.node_info(self.rpc_b).get("genesis_hash")
+        info_a = self.node_info(self.rpc_a)
+        info_b = self.node_info(self.rpc_b)
+        genesis_a = info_a.get("genesis_hash")
+        genesis_b = info_b.get("genesis_hash")
         if not genesis_a or genesis_a != genesis_b:
             raise RuntimeError(f"genesis mismatch: A={genesis_a} B={genesis_b}")
         print(f"ASSERT shared_genesis=PASS hash={genesis_a}", flush=True)
+        peer_b = info_b.get("peer_id")
+        if not peer_b:
+            raise RuntimeError("node-b did not report its persistent peer id")
+        print(f"ASSERT node_b_identity_loaded=PASS peer={peer_b}", flush=True)
 
         initial = self.wait_converged("initial_tip_convergence")
         self.mine(1)
@@ -306,11 +312,16 @@ class Harness:
         recovered = self.wait_converged("restart_ibd_convergence")
         if recovered != ahead:
             raise RuntimeError("restarted node converged to an unexpected tip set")
-        if self.node_info(self.rpc_b).get("genesis_hash") != genesis_a:
+        restarted_info = self.node_info(self.rpc_b)
+        if restarted_info.get("genesis_hash") != genesis_a:
             raise RuntimeError("restarted node changed genesis")
+        if restarted_info.get("peer_id") != peer_b:
+            raise RuntimeError(
+                f"restarted node changed peer id: {peer_b} -> {restarted_info.get('peer_id')}"
+            )
         print(
             f"ASSERT crash_restart_recovery=PASS old_pid={crashed_pid} "
-            f"new_pid={restarted.pid}",
+            f"new_pid={restarted.pid} peer={peer_b}",
             flush=True,
         )
         self.assert_trident_surface(recovered[0])
