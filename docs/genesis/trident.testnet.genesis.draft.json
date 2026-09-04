@@ -8,7 +8,7 @@
   "timestamp_ms": 0,
   "genesis_hash": "UNFROZEN",
   "network_fingerprint": "UNFROZEN",
-  "state_transition_version": "agora-trident-state-v4",
+  "state_transition_version": "agora-trident-state-v5",
   "consensus_policy_version": "agora-trident-consensus-v1",
   "governance_constitution_hash": "UNFROZEN",
   "emergency_policy_hash": "UNFROZEN",

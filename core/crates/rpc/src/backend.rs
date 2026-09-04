@@ -195,6 +195,7 @@ pub trait RpcBackend: Send {
     fn get_validator(&self, asset: &str, operator: &Address) -> Result<Value, RpcError>;
     fn get_reward_pool(&self, asset: &str) -> Result<Value, RpcError>;
     fn get_protocol_treasuries(&self) -> Result<Value, RpcError>;
+    fn get_community_registry(&self, limit: usize) -> Result<Value, RpcError>;
     /// Admit a secp256k1-signed stake tx (bond/delegate/unbond/withdraw). Never mint-like.
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError>;
 
@@ -554,6 +555,17 @@ impl RpcBackend for InMemoryBackend {
         Ok(json!({
             "maturity": "Scaffold",
             "treasuries": [],
+        }))
+    }
+
+    fn get_community_registry(&self, _limit: usize) -> Result<Value, RpcError> {
+        Ok(json!({
+            "maturity": "Scaffold",
+            "consensus_mutations_active": false,
+            "hubs": [],
+            "passport_attestations": [],
+            "grants": [],
+            "missions": [],
         }))
     }
 

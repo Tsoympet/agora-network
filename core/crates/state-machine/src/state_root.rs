@@ -2,7 +2,8 @@
 //!
 //! Composition (domain-separated), matching Phase 0 audit §5.5:
 //! UTXO ∥ OVL accounts ∥ DRC accounts ∥ OVL stake snap ∥ DRC stake snap ∥
-//! DRC payment state ∥ tip acceptance ∥ finalized tip ∥ governance/treasuries.
+//! DRC payment state ∥ tip acceptance ∥ finalized tip ∥ governance/treasuries ∥
+//! canonical community registry.
 
 use agora_types::{Hash, NativeAssetId, OutPoint, TxOut};
 use borsh::BorshDeserialize;
@@ -10,6 +11,7 @@ use borsh::BorshDeserialize;
 use crate::acceptance::load_acceptance;
 use crate::accounts::account_root;
 use crate::columns::ColumnFamily;
+use crate::community_state::canonical_community_root;
 use crate::finality_store::load_finalized_blue_score;
 use crate::governance_state::governance_treasury_root;
 use crate::payments::drc_payment_root;
@@ -17,7 +19,7 @@ use crate::staking::{build_snapshot, load_epoch};
 use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
 
 /// Domain tag for the composed state root (versioned).
-pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v3";
+pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v4";
 
 /// Deterministic UTXO-set commitment (sorted outpoint keys).
 pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
@@ -78,6 +80,7 @@ pub fn compose_trident_state_root(
     let acceptance = acceptance_root(store, tip_block)?;
     let finality_tip = finalized_tip_commitment(store)?;
     let gov_treasury = governance_treasury_root(store)?;
+    let community = canonical_community_root(store)?;
 
     Ok(Hash::hash_borsh(&(
         STATE_ROOT_DOMAIN,
@@ -91,6 +94,7 @@ pub fn compose_trident_state_root(
         acceptance,
         finality_tip,
         gov_treasury,
+        community,
     )))
 }
 

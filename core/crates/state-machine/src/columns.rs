@@ -46,7 +46,8 @@ impl ColumnFamily {
 /// - `6` — signed OVL execution lane + full multi-lane acceptance commitment
 /// - `7` — native DRC payment lane, duplicate/invoice index, and outbox
 /// - `8` — canonical governance policy and asset-isolated protocol treasuries
-pub const SCHEMA_VERSION: u32 = 8;
+/// - `9` — canonical Hub, Passport, Grant, and Mission registry summary
+pub const SCHEMA_VERSION: u32 = 9;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {

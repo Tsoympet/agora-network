@@ -202,6 +202,10 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 self.backend.get_reward_pool(&asset)
             }
             RpcMethod::GetProtocolTreasuries => self.backend.get_protocol_treasuries(),
+            RpcMethod::GetCommunityRegistry => {
+                let limit = optional_limit(&req.params, 64)?;
+                self.backend.get_community_registry(limit)
+            }
             RpcMethod::SubmitStakeTx => {
                 let stake_tx = req
                     .params

@@ -7,6 +7,7 @@ mod acceptance;
 mod accounts;
 mod apply;
 mod columns;
+mod community_state;
 mod error;
 mod execution;
 mod finality_store;
@@ -36,6 +37,12 @@ pub use acceptance::{
 pub use accounts::{
     account_key, account_root, apply_account_transfer, credit_account_into, genesis_credit,
     load_account, put_account_into, revert_account_journal_into, AccountJournal, AccountState,
+};
+pub use community_state::{
+    canonical_community_root, init_canonical_community_into, list_grants, list_hubs,
+    list_missions, list_passport_attestations, load_canonical_community_summary,
+    register_grant_into, register_hub_into, register_mission_into,
+    register_passport_attestation_into, CanonicalCommunitySummary, CANONICAL_COMMUNITY_VERSION,
 };
 pub use finality_store::{
     certificate_key, load_attestation_index, load_certificate, load_finalized_blue_score,
