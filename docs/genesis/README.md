@@ -65,8 +65,12 @@ The checked-in draft must fail the second command. Freeze-ready validation
 rejects `UNFROZEN` or malformed hashes, draft/provisional policy labels,
 missing timestamp or difficulty selection, empty OVL/DRC validator sets,
 invalid compressed secp256k1 validator keys, zero reserves/treasuries, and
-allocation-total mismatches. It also requires the document's `genesis_hash`
-and `network_fingerprint` to equal independently recomputed values.
+allocation-total mismatches. Runtime-policy preparation additionally requires
+an explicit blue-score PoW threshold, validator commission/concentration
+limits, and complete TLT/staking emission schedules. It derives DAA, GHOSTDAG,
+emission, monetary, staking, finality, consensus-policy-hash, and P2P
+fingerprint values through one typed conversion. Any artifact mutation after
+hashing is rejected.
 
 Neither mode writes the document, freezes it, converts it to v2
 `ChainParams`, or starts a node. Ceremony participants must supply allocations,
@@ -75,12 +79,17 @@ them. The verifier is **Scaffold** maturity and does not establish Public
 testnet readiness.
 
 The integrated runtime is still insufficient for a safe Trident node loader.
-Genesis storage now has an atomic prepared-batch commit and rejects malformed,
-orphaned, or mismatched datadir identity before fresh writes. However, runtime
-staking parameters and the PoW finality threshold still use compiled defaults,
-and the artifact consensus identity is not yet the Block 0 hash expected by DAG
-bootstrap. Until those policy and identity paths are unified, v3 remains
-offline-only and `AGORA_GENESIS_FILE` continues to accept v2 artifacts only.
+Genesis storage has an atomic prepared-batch commit, and a freeze-ready
+artifact can now produce a complete typed policy candidate without compiled
+policy defaults. That candidate is deliberately not accepted by the node:
+`genesis_hash` still names the full artifact identity, while DAG bootstrap
+requires the hash of a concrete `Block`. The current `BlockHeader` does not
+commit a genesis state root, and `GenesisBuilder` cannot construct all
+allocations, treasury balances, validator records/snapshots, governance state,
+or vesting state from the artifact. The next prerequisite is a versioned Block
+0/state commitment format plus artifact-only atomic state seeding and
+post-write root verification. Until that exists, v3 remains offline-only and
+`AGORA_GENESIS_FILE` continues to accept v2 artifacts only.
 
 Populated `genesis_set` entries use:
 

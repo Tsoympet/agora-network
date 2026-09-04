@@ -110,7 +110,8 @@ pub use supply::{
     put_schema_version_into, verify_supply_invariants,
 };
 pub use trident_genesis::{
-    TridentFinalityPolicy, TridentGenesisArtifact, TridentValidatorGenesis,
+    TridentFinalityPolicy, TridentGenesisArtifact, TridentRuntimeFinalityPolicy,
+    TridentRuntimePolicy, TridentValidatorGenesis, TRIDENT_CONSENSUS_POLICY_DOMAIN,
     TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA, TRIDENT_NET_FP_DOMAIN,
     TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION, TRIDENT_TX_SIGNING_VERSION,
 };

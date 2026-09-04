@@ -91,6 +91,7 @@
   "finality": {
     "model": "pow_plus_dual_pos",
     "pow_work_threshold_policy": "UNFROZEN",
+    "pow_work_threshold": null,
     "ovl_quorum_numerator": 2,
     "ovl_quorum_denominator": 3,
     "drc_quorum_numerator": 2,
@@ -102,12 +103,16 @@
     "max_validators": 0,
     "min_self_bond": 0,
     "unbonding_period_checkpoints": 0,
+    "max_commission_bps": null,
+    "max_concentration_bps": null,
     "genesis_set": []
   },
   "drc_validators": {
     "max_validators": 0,
     "min_self_bond": 0,
     "unbonding_period_checkpoints": 0,
+    "max_commission_bps": null,
+    "max_concentration_bps": null,
     "genesis_set": []
   },
   "vesting_schedules": [],

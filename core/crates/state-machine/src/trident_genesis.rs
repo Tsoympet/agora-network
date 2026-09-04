@@ -6,12 +6,15 @@
 
 use std::collections::BTreeSet;
 
+use agora_consensus::{DaaConfig, EmissionSchedule, GhostdagConfig, PowAlgorithm};
 use agora_crypto::parse_compressed_public_key;
-use agora_types::{Address, Hash};
+use agora_types::{Address, Hash, NativeAssetId};
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
+use crate::monetary::{AssetMonetaryPolicy, EmissionKind, TridentMonetaryPolicy};
 use crate::network::NetworkId;
+use crate::staking::StakingParams;
 
 pub const TRIDENT_GENESIS_SCHEMA: &str = "agora-trident-genesis-v3";
 /// State-transition version committed into the Trident network fingerprint.
@@ -20,6 +23,7 @@ pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v5";
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
 pub const TRIDENT_GENESIS_ID_DOMAIN: &[u8] = b"agora-trident-genesis-identity-v1";
+pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-policy-v1";
 /// v4 adds native DRC payment gossip and block-lane settlement.
 pub const TRIDENT_PROTOCOL_VERSION: u32 = 4;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v1";
@@ -112,6 +116,9 @@ pub struct TridentPowPolicy {
 pub struct TridentFinalityPolicy {
     pub model: String,
     pub pow_work_threshold_policy: String,
+    /// Ceremony-selected threshold interpreted according to `pow_work_threshold_policy`.
+    #[serde(default)]
+    pub pow_work_threshold: Option<u64>,
     pub ovl_quorum_numerator: u32,
     pub ovl_quorum_denominator: u32,
     pub drc_quorum_numerator: u32,
@@ -170,6 +177,10 @@ pub struct TridentValidatorGenesis {
     pub max_validators: u32,
     pub min_self_bond: u64,
     pub unbonding_period_checkpoints: u64,
+    #[serde(default)]
+    pub max_commission_bps: Option<u16>,
+    #[serde(default)]
+    pub max_concentration_bps: Option<u16>,
     pub genesis_set: Vec<TridentGenesisValidator>,
 }
 
@@ -250,6 +261,38 @@ struct ConsensusIdentity<'a> {
     initial_allocations: &'a [TridentInitialAllocation],
 }
 
+/// Fully typed policy derived only from a freeze-ready Trident artifact.
+///
+/// This is intentionally not a node boot configuration: the current block/state
+/// model cannot yet derive and verify canonical Block 0 from all v3 allocations.
+#[derive(Debug, Clone)]
+pub struct TridentRuntimePolicy {
+    pub network: NetworkId,
+    pub chain_id: String,
+    pub artifact_identity: Hash,
+    pub consensus_policy_hash: Hash,
+    pub network_fingerprint: Hash,
+    pub timestamp_ms: u64,
+    pub bits: u32,
+    pub pow_algorithm: PowAlgorithm,
+    pub daa: DaaConfig,
+    pub ghostdag: GhostdagConfig,
+    pub tlt_emission: EmissionSchedule,
+    pub monetary: TridentMonetaryPolicy,
+    pub ovl_staking: StakingParams,
+    pub drc_staking: StakingParams,
+    pub finality: TridentRuntimeFinalityPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct TridentRuntimeFinalityPolicy {
+    pub min_pow_depth: u64,
+    pub ovl_quorum_numerator: u32,
+    pub ovl_quorum_denominator: u32,
+    pub drc_quorum_numerator: u32,
+    pub drc_quorum_denominator: u32,
+}
+
 impl TridentGenesisArtifact {
     pub fn validate_draft(&self) -> Result<(), String> {
         if self.version != 3 {
@@ -309,6 +352,12 @@ impl TridentGenesisArtifact {
         if is_placeholder(&self.finality.pow_work_threshold_policy) {
             return Err("pow_work_threshold_policy is still a placeholder".into());
         }
+        if self.finality.pow_work_threshold_policy != "minimum-blue-score-depth-v1" {
+            return Err("unsupported pow_work_threshold_policy".into());
+        }
+        if self.finality.pow_work_threshold.unwrap_or(0) == 0 {
+            return Err("pow_work_threshold is not selected".into());
+        }
         if is_placeholder(&self.maturity) || self.maturity.contains("draft") {
             return Err("maturity still marks this artifact as a draft".into());
         }
@@ -347,6 +396,84 @@ impl TridentGenesisArtifact {
         Ok(())
     }
 
+    /// Convert a strictly validated artifact into all currently representable
+    /// runtime policy in one place. This performs no storage or network I/O.
+    pub fn to_runtime_policy(&self) -> Result<TridentRuntimePolicy, String> {
+        self.validate_freeze_ready()?;
+
+        let initial_reward = self
+            .assets
+            .tlt
+            .emission
+            .initial_reward
+            .ok_or_else(|| "TLT emission initial_reward is not selected".to_string())?;
+        let halving_interval = self
+            .assets
+            .tlt
+            .emission
+            .halving_interval
+            .ok_or_else(|| "TLT emission halving_interval is not selected".to_string())?;
+        if initial_reward == 0 || halving_interval == 0 {
+            return Err("TLT emission policy contains zero".into());
+        }
+
+        let monetary = TridentMonetaryPolicy {
+            tlt: self.asset_runtime_policy(NativeAssetId::TLT, &self.assets.tlt)?,
+            ovl: self.asset_runtime_policy(NativeAssetId::OVL, &self.assets.ovl)?,
+            drc: self.asset_runtime_policy(NativeAssetId::DRC, &self.assets.drc)?,
+        };
+        monetary.validate()?;
+
+        let artifact_identity = self.consensus_identity_hash();
+        let consensus_policy_hash = self.consensus_policy_hash();
+        let network_fingerprint = self.compute_network_fingerprint();
+        Ok(TridentRuntimePolicy {
+            network: self.network,
+            chain_id: self.chain_id.clone(),
+            artifact_identity,
+            consensus_policy_hash,
+            network_fingerprint,
+            timestamp_ms: self.timestamp_ms,
+            bits: self.bits.expect("freeze-ready validation requires bits"),
+            pow_algorithm: PowAlgorithm::RandomX,
+            daa: DaaConfig {
+                target_block_time_ms: self.pow.target_block_time_ms,
+                window_size: self.pow.daa_window_size,
+                max_adjustment_bits: self.pow.daa_max_adjustment_bits,
+                min_level: self.pow.daa_min_level,
+                max_level: self.pow.daa_max_level,
+            },
+            ghostdag: GhostdagConfig {
+                k: self.pow.ghostdag_k,
+            },
+            tlt_emission: EmissionSchedule {
+                initial_reward,
+                halving_interval,
+            },
+            monetary,
+            ovl_staking: self.staking_runtime_policy(
+                NativeAssetId::OVL,
+                &self.ovl_validators,
+                &self.assets.ovl,
+            )?,
+            drc_staking: self.staking_runtime_policy(
+                NativeAssetId::DRC,
+                &self.drc_validators,
+                &self.assets.drc,
+            )?,
+            finality: TridentRuntimeFinalityPolicy {
+                min_pow_depth: self
+                    .finality
+                    .pow_work_threshold
+                    .expect("freeze-ready validation requires finality threshold"),
+                ovl_quorum_numerator: self.finality.ovl_quorum_numerator,
+                ovl_quorum_denominator: self.finality.ovl_quorum_denominator,
+                drc_quorum_numerator: self.finality.drc_quorum_numerator,
+                drc_quorum_denominator: self.finality.drc_quorum_denominator,
+            },
+        })
+    }
+
     pub fn consensus_identity_hash(&self) -> Hash {
         Hash::hash_borsh(&ConsensusIdentity {
             domain: TRIDENT_GENESIS_ID_DOMAIN,
@@ -376,14 +503,29 @@ impl TridentGenesisArtifact {
 
     pub fn compute_network_fingerprint(&self) -> Hash {
         let identity = self.consensus_identity_hash();
+        let policy = self.consensus_policy_hash();
         Hash::hash_borsh(&(
             TRIDENT_NET_FP_DOMAIN,
             TRIDENT_PROTOCOL_VERSION,
             self.chain_id.as_str(),
             identity.as_bytes(),
+            policy.as_bytes(),
             TRIDENT_TX_SIGNING_VERSION,
             TRIDENT_STATE_TRANSITION_VERSION,
             TRIDENT_CONSENSUS_POLICY_VERSION,
+        ))
+    }
+
+    /// Canonical digest of policy that runtime consensus must consume.
+    pub fn consensus_policy_hash(&self) -> Hash {
+        Hash::hash_borsh(&(
+            TRIDENT_CONSENSUS_POLICY_DOMAIN,
+            self.consensus_policy_version.as_str(),
+            &self.assets,
+            &self.pow,
+            &self.finality,
+            &self.ovl_validators,
+            &self.drc_validators,
         ))
     }
 
@@ -432,6 +574,11 @@ impl TridentGenesisArtifact {
             || self.assets.tlt.emission.epoch_reserve_drip.is_some()
         {
             return Err("TLT cannot have staking reserve emission fields".into());
+        }
+        if self.assets.tlt.emission.initial_reward == Some(0)
+            || self.assets.tlt.emission.halving_interval == Some(0)
+        {
+            return Err("TLT emission policy contains zero".into());
         }
         for (ticker, policy) in [("OVL", &self.assets.ovl), ("DRC", &self.assets.drc)] {
             if policy.emission.reserve_base_units != Some(policy.staking_reward_reserve) {
@@ -486,6 +633,7 @@ impl TridentGenesisArtifact {
         if validators.genesis_set.is_empty() {
             return Ok(());
         }
+        self.validate_validator_policy(label, validators)?;
         let mut keys = BTreeSet::new();
         for validator in &validators.genesis_set {
             let bytes = hex::decode(&validator.consensus_public_key)
@@ -544,6 +692,16 @@ impl TridentGenesisArtifact {
         {
             return Err("OVL and DRC staking reward reserves must be nonzero".into());
         }
+        if self.assets.tlt.emission.initial_reward.unwrap_or(0) == 0
+            || self.assets.tlt.emission.halving_interval.unwrap_or(0) == 0
+        {
+            return Err("TLT emission policy is not frozen".into());
+        }
+        for (ticker, policy) in [("OVL", &self.assets.ovl), ("DRC", &self.assets.drc)] {
+            if policy.emission.epoch_reserve_drip.unwrap_or(0) == 0 {
+                return Err(format!("{ticker} epoch reserve drip is not frozen"));
+            }
+        }
         Ok(())
     }
 
@@ -577,6 +735,7 @@ impl TridentGenesisArtifact {
         {
             return Err(format!("{label} validator policy/set is empty"));
         }
+        self.validate_validator_policy(label, validators)?;
         if validators.genesis_set.len() > validators.max_validators as usize {
             return Err(format!("{label} genesis set exceeds max_validators"));
         }
@@ -588,6 +747,82 @@ impl TridentGenesisArtifact {
             return Err(format!("{label} validator self bond is below minimum"));
         }
         Ok(())
+    }
+
+    fn validate_validator_policy(
+        &self,
+        label: &str,
+        validators: &TridentValidatorGenesis,
+    ) -> Result<(), String> {
+        let commission = validators
+            .max_commission_bps
+            .ok_or_else(|| format!("{label} max_commission_bps is not selected"))?;
+        let concentration = validators
+            .max_concentration_bps
+            .ok_or_else(|| format!("{label} max_concentration_bps is not selected"))?;
+        if commission > 10_000 || concentration == 0 || concentration > 10_000 {
+            return Err(format!("{label} validator basis-point policy is invalid"));
+        }
+        Ok(())
+    }
+
+    fn asset_runtime_policy(
+        &self,
+        asset: NativeAssetId,
+        policy: &TridentAssetPolicy,
+    ) -> Result<AssetMonetaryPolicy, String> {
+        let emission = if asset == NativeAssetId::TLT {
+            EmissionKind::PowHalving {
+                initial_reward: policy
+                    .emission
+                    .initial_reward
+                    .ok_or_else(|| "TLT initial_reward is not selected".to_string())?,
+                halving_interval: policy
+                    .emission
+                    .halving_interval
+                    .ok_or_else(|| "TLT halving_interval is not selected".to_string())?,
+            }
+        } else {
+            EmissionKind::StakingReserve {
+                reserve_base_units: policy
+                    .emission
+                    .reserve_base_units
+                    .ok_or_else(|| format!("{asset} staking reserve is not selected"))?,
+            }
+        };
+        Ok(AssetMonetaryPolicy {
+            asset,
+            max_supply: policy.max_supply,
+            decimals: policy.decimals,
+            mineable: policy.mineable,
+            genesis_allocation: policy.genesis_allocation,
+            treasury_allocation: policy.treasury_allocation,
+            emission,
+        })
+    }
+
+    fn staking_runtime_policy(
+        &self,
+        asset: NativeAssetId,
+        validators: &TridentValidatorGenesis,
+        policy: &TridentAssetPolicy,
+    ) -> Result<StakingParams, String> {
+        Ok(StakingParams {
+            asset,
+            max_validators: validators.max_validators,
+            min_self_bond: validators.min_self_bond,
+            unbonding_period_epochs: validators.unbonding_period_checkpoints,
+            max_commission_bps: validators
+                .max_commission_bps
+                .ok_or_else(|| format!("{asset} max_commission_bps is not selected"))?,
+            max_concentration_bps: validators
+                .max_concentration_bps
+                .ok_or_else(|| format!("{asset} max_concentration_bps is not selected"))?,
+            epoch_reserve_drip: policy
+                .emission
+                .epoch_reserve_drip
+                .ok_or_else(|| format!("{asset} epoch reserve drip is not selected"))?,
+        })
     }
 
     fn require_allocation_totals(&self) -> Result<(), String> {
@@ -766,7 +1001,8 @@ mod tests {
         artifact.wallet.coin_type_status = "registered".into();
         artifact.governance_constitution_hash = "11".repeat(32);
         artifact.emergency_policy_hash = "22".repeat(32);
-        artifact.finality.pow_work_threshold_policy = "fixed-cumulative-work-v1".into();
+        artifact.finality.pow_work_threshold_policy = "minimum-blue-score-depth-v1".into();
+        artifact.finality.pow_work_threshold = Some(12);
         artifact.assets.tlt.treasury_allocation = 1;
         artifact.assets.ovl.genesis_allocation = 1;
         artifact.assets.ovl.staking_reward_reserve = 1;
@@ -806,6 +1042,8 @@ mod tests {
             set.max_validators = 1;
             set.min_self_bond = 1;
             set.unbonding_period_checkpoints = 1;
+            set.max_commission_bps = Some(2_000);
+            set.max_concentration_bps = Some(10_000);
             set.genesis_set.push(validator.clone());
         }
         artifact.genesis_hash = artifact.consensus_identity_hash().to_hex();
@@ -817,5 +1055,31 @@ mod tests {
 
         artifact.network_fingerprint = artifact.compute_network_fingerprint().to_hex();
         artifact.validate_freeze_ready().unwrap();
+
+        let runtime = artifact.to_runtime_policy().unwrap();
+        assert_eq!(
+            runtime.artifact_identity,
+            artifact.consensus_identity_hash()
+        );
+        assert_eq!(
+            runtime.consensus_policy_hash,
+            artifact.consensus_policy_hash()
+        );
+        assert_eq!(
+            runtime.network_fingerprint,
+            artifact.compute_network_fingerprint()
+        );
+        assert_eq!(runtime.chain_id, artifact.chain_id);
+        assert_eq!(runtime.bits, 0);
+        assert_eq!(runtime.daa.min_level, artifact.pow.daa_min_level);
+        assert_eq!(runtime.ghostdag.k, artifact.pow.ghostdag_k);
+        assert_eq!(runtime.finality.min_pow_depth, 12);
+        assert_eq!(runtime.ovl_staking.min_self_bond, 1);
+        assert_eq!(runtime.ovl_staking.max_commission_bps, 2_000);
+        assert_eq!(runtime.drc_staking.epoch_reserve_drip, 1_000_000_000);
+
+        artifact.pow.ghostdag_k += 1;
+        let error = artifact.to_runtime_policy().unwrap_err();
+        assert!(error.contains("genesis_hash mismatch"));
     }
 }
