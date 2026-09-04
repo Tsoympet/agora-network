@@ -22,9 +22,7 @@ pub const TRIDENT_PROTOCOL_VERSION: u32 = 1;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v1";
 const UNFROZEN: &str = "UNFROZEN";
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentWalletPolicy {
     pub address_hrp: String,
@@ -34,9 +32,7 @@ pub struct TridentWalletPolicy {
     pub notes: String,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentEmissionPolicy {
     #[serde(default)]
@@ -48,9 +44,7 @@ pub struct TridentEmissionPolicy {
     pub notes: Option<String>,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentAssetPolicy {
     pub id: String,
@@ -66,9 +60,7 @@ pub struct TridentAssetPolicy {
     pub role: String,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentAssets {
     #[serde(rename = "TLT")]
@@ -79,9 +71,7 @@ pub struct TridentAssets {
     pub drc: TridentAssetPolicy,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentTreasury {
     pub asset: String,
@@ -89,9 +79,7 @@ pub struct TridentTreasury {
     pub allocation: u64,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentTreasuries {
     pub tlt_security: TridentTreasury,
@@ -99,9 +87,7 @@ pub struct TridentTreasuries {
     pub drc_community: TridentTreasury,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentPowPolicy {
     pub algorithm: String,
@@ -113,9 +99,7 @@ pub struct TridentPowPolicy {
     pub daa_max_level: u32,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentFinalityPolicy {
     pub model: String,
@@ -152,9 +136,7 @@ impl TridentFinalityPolicy {
             ),
         ] {
             if denominator == 0 || numerator == 0 || numerator > denominator {
-                return Err(format!(
-                    "invalid {label} quorum {numerator}/{denominator}"
-                ));
+                return Err(format!("invalid {label} quorum {numerator}/{denominator}"));
             }
             if u64::from(numerator) * 3 < u64::from(denominator) * 2 {
                 return Err(format!("{label} quorum must be at least two thirds"));
@@ -164,9 +146,7 @@ impl TridentFinalityPolicy {
     }
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentGenesisValidator {
     pub consensus_public_key: String,
@@ -185,9 +165,7 @@ pub struct TridentValidatorGenesis {
     pub genesis_set: Vec<TridentGenesisValidator>,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentVestingSchedule {
     pub asset: String,
@@ -198,9 +176,7 @@ pub struct TridentVestingSchedule {
     pub end_timestamp_ms: u64,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TridentInitialAllocation {
     pub asset: String,
@@ -314,7 +290,10 @@ impl TridentGenesisArtifact {
             return Err("bits is not selected".into());
         }
         for (label, value) in [
-            ("governance_constitution_hash", &self.governance_constitution_hash),
+            (
+                "governance_constitution_hash",
+                &self.governance_constitution_hash,
+            ),
             ("emergency_policy_hash", &self.emergency_policy_hash),
         ] {
             validate_frozen_hash(label, value)?;
@@ -423,8 +402,7 @@ impl TridentGenesisArtifact {
                 return Err(format!("{ticker} allocations exceed max_supply"));
             }
         }
-        if !self.assets.tlt.mineable
-            || self.assets.tlt.pow_algorithm.as_deref() != Some("randomx")
+        if !self.assets.tlt.mineable || self.assets.tlt.pow_algorithm.as_deref() != Some("randomx")
         {
             return Err("TLT must be mineable only with randomx".into());
         }
@@ -523,8 +501,9 @@ impl TridentGenesisArtifact {
             ("OVL", &self.assets.ovl),
             ("DRC", &self.assets.drc),
         ] {
-            let committed =
-                policy.genesis_allocation + policy.staking_reward_reserve + policy.treasury_allocation;
+            let committed = policy.genesis_allocation
+                + policy.staking_reward_reserve
+                + policy.treasury_allocation;
             if committed == 0 {
                 return Err(format!("{ticker} has no committed allocation"));
             }
@@ -639,11 +618,13 @@ fn validate_frozen_hash(label: &str, value: &str) -> Result<(), String> {
     }
     if value.len() != 64
         || value.starts_with("0x")
-        || value.chars().any(|character| {
-            !character.is_ascii_hexdigit() || character.is_ascii_uppercase()
-        })
+        || value
+            .chars()
+            .any(|character| !character.is_ascii_hexdigit() || character.is_ascii_uppercase())
     {
-        return Err(format!("{label} must be 64 lowercase hexadecimal characters"));
+        return Err(format!(
+            "{label} must be 64 lowercase hexadecimal characters"
+        ));
     }
     Ok(())
 }
@@ -658,8 +639,7 @@ fn is_placeholder(value: &str) -> bool {
 mod tests {
     use super::*;
 
-    const DRAFT: &str =
-        include_str!("../../../../docs/genesis/trident.testnet.genesis.draft.json");
+    const DRAFT: &str = include_str!("../../../../docs/genesis/trident.testnet.genesis.draft.json");
 
     #[test]
     fn checked_in_draft_parses_strictly_and_has_stable_identity() {
@@ -707,11 +687,14 @@ mod tests {
     #[test]
     fn populated_validator_key_must_be_compressed_secp256k1() {
         let mut artifact = TridentGenesisArtifact::from_json(DRAFT).unwrap();
-        artifact.ovl_validators.genesis_set.push(TridentGenesisValidator {
-            consensus_public_key: "00".repeat(33),
-            withdrawal_address: "agoratest1notvalidateduntil-loader-integration".into(),
-            self_bond: 1,
-        });
+        artifact
+            .ovl_validators
+            .genesis_set
+            .push(TridentGenesisValidator {
+                consensus_public_key: "00".repeat(33),
+                withdrawal_address: "agoratest1notvalidateduntil-loader-integration".into(),
+                self_bond: 1,
+            });
         assert!(artifact
             .validate_draft()
             .unwrap_err()

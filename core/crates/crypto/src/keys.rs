@@ -11,8 +11,7 @@ pub type SignatureBytes = [u8; 64];
 
 /// Validate and canonicalize a compressed secp256k1 public key.
 pub fn parse_compressed_public_key(bytes: &[u8]) -> Result<PublicKeyBytes, CryptoError> {
-    let public =
-        PublicKey::from_slice(bytes).map_err(|e| CryptoError::Secp256k1(e.to_string()))?;
+    let public = PublicKey::from_slice(bytes).map_err(|e| CryptoError::Secp256k1(e.to_string()))?;
     let compressed = public.serialize();
     if bytes != compressed {
         return Err(CryptoError::Secp256k1(

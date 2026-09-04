@@ -123,7 +123,9 @@ fn trident_verify(mut args: impl Iterator<Item = String>) -> ! {
             println!("DRAFT VALID: offline structure checks passed; NOT FREEZE-READY");
         }
         TridentValidationMode::FreezeReady => {
-            println!("FREEZE-READY CHECKS PASSED: this command did not freeze or boot the artifact");
+            println!(
+                "FREEZE-READY CHECKS PASSED: this command did not freeze or boot the artifact"
+            );
         }
     }
     std::process::exit(0);
