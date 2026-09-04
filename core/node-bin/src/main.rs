@@ -29,7 +29,9 @@ use agora_types::{Address, Block, Hash};
 use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
-use crate::backend::{admit_transaction, NodeBackend};
+use crate::backend::{
+    admit_account_transfer, admit_stake_tx, admit_transaction, NodeBackend,
+};
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::storage_policy::StoragePolicy;
 
@@ -981,6 +983,26 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "tx gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::AccountTransfer(tx) => {
+                        match admit_account_transfer(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, tx = %id.to_hex(), "account tx gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "account tx gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::StakeTx(tx) => {
+                        match admit_stake_tx(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, tx = %id.to_hex(), "stake tx gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "stake tx gossip rejected");
                             }
                         }
                     }

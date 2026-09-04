@@ -1,4 +1,6 @@
-use agora_types::{Block, BlockHeader, CheckpointAttestation, Hash, Transaction};
+use agora_types::{
+    AccountTransfer, Block, BlockHeader, CheckpointAttestation, Hash, SignedStakeTx, Transaction,
+};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::ibd::short_ids_for_block;
@@ -7,6 +9,8 @@ use crate::ibd::short_ids_for_block;
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum NetworkMessage {
     Transaction(Transaction),
+    AccountTransfer(AccountTransfer),
+    StakeTx(SignedStakeTx),
     Block(Block),
     /// Hash-only tip signal; peers that lack the body issue [`Self::GetBlock`].
     BlockAnnounce {
@@ -34,11 +38,18 @@ impl NetworkMessage {
         borsh::from_slice(bytes)
     }
 
-    /// Build a compact block gossip payload from a full block.
+    /// Build compact gossip for UTXO-only blocks.
+    ///
+    /// Multi-lane blocks use the full body until a versioned compact format can
+    /// commit lane kinds without ambiguity.
     pub fn compact_from_block(block: &Block) -> Self {
-        Self::CompactBlock {
-            header: block.header.clone(),
-            short_ids: short_ids_for_block(block),
+        if block.account_transfers.is_empty() && block.stake_ops.is_empty() {
+            Self::CompactBlock {
+                header: block.header.clone(),
+                short_ids: short_ids_for_block(block),
+            }
+        } else {
+            Self::Block(block.clone())
         }
     }
 }

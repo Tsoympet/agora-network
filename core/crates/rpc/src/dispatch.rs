@@ -1,4 +1,4 @@
-use agora_types::{Address, Amount, Block, Hash, Transaction};
+use agora_types::{AccountTransfer, Address, Amount, Block, Hash, Transaction};
 use serde_json::{json, Value};
 
 use crate::backend::RpcBackend;
@@ -83,6 +83,17 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
                 let id = self.backend.submit_transaction(tx)?;
                 Ok(json!({ "tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitAccountTransfer => {
+                let raw = req
+                    .params
+                    .get("account_transfer")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: AccountTransfer = serde_json::from_value(raw)
+                    .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+                let id = self.backend.submit_account_transfer(tx)?;
+                Ok(json!({ "account_tx_id": id.to_hex() }))
             }
             RpcMethod::GetBalance => {
                 let address = param_address(&req.params, "address")?;

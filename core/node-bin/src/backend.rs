@@ -14,13 +14,13 @@ use agora_p2p::{
 };
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
-    apply_signed_stake_tx, build_snapshot, load_epoch, load_reward_pool, load_validator,
-    lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth, ColumnFamily,
-    StateStore, StakingParams, TxAuthContext, WriteBatch,
+    apply_account_transfer, apply_signed_stake_tx, build_snapshot, load_epoch, load_reward_pool,
+    load_validator, lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth,
+    AccountJournal, ColumnFamily, StateStore, StakingParams, TxAuthContext, WriteBatch,
 };
 use agora_types::{
-    Address, Amount, Block, CheckpointAttestation, Hash, NativeAssetId, OutPoint, SignedStakeTx,
-    Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, CheckpointAttestation, Hash, NativeAssetId, OutPoint,
+    SignedStakeTx, Transaction, TxOut,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -65,6 +65,63 @@ pub(crate) fn admit_transaction(
     }
     // Auth already verified; mempool only tracks reservations / fee market.
     pool.admit_priced(tx, fee)
+        .map_err(|e| RpcError::Rejected(e.to_string()))
+}
+
+/// Validate and reserve an OVL/DRC account transfer under the mempool lock.
+pub(crate) fn admit_account_transfer(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: AccountTransfer,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(tx.asset, &tx.from) {
+        return Err(RpcError::Rejected(
+            "account already has a pending nonce".into(),
+        ));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_account_transfer(store, &tx, auth, &mut batch, &mut journal)
+        .map_err(|e| RpcError::Rejected(format!("account: {e}")))?;
+    if tx.fee.as_base_units() < min_relay_fee() {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {} < min relay {}",
+            tx.fee.as_base_units(),
+            min_relay_fee()
+        )));
+    }
+    pool.admit_account(tx)
+        .map_err(|e| RpcError::Rejected(e.to_string()))
+}
+
+/// Validate and reserve a signed stake operation under the shared account nonce.
+pub(crate) fn admit_stake_tx(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: SignedStakeTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(tx.asset, &tx.actor) {
+        return Err(RpcError::Rejected(
+            "account already has a pending nonce".into(),
+        ));
+    }
+    let params = match tx.asset {
+        NativeAssetId::OVL => StakingParams::ovl_default(),
+        NativeAssetId::DRC => StakingParams::drc_default(),
+        NativeAssetId::TLT => return Err(RpcError::Rejected("TLT cannot be staked".into())),
+    };
+    let mut batch = WriteBatch::new();
+    apply_signed_stake_tx(store, &mut batch, &tx, auth, &params)
+        .map_err(|e| RpcError::Rejected(format!("stake: {e}")))?;
+    pool.admit_stake(tx)
         .map_err(|e| RpcError::Rejected(e.to_string()))
 }
 
@@ -354,6 +411,16 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_account_transfer(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::AccountTransfer(tx))
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+        }
+        Ok(id)
+    }
+
     fn get_balance(&self, address: &Address) -> Amount {
         self.utxo_balance(address).unwrap_or(Amount::ZERO)
     }
@@ -402,15 +469,26 @@ impl RpcBackend for NodeBackend {
     }
 
     fn get_block_template(&self) -> Result<Block, RpcError> {
-        let transfers = self
-            .mempool
-            .lock()
-            .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?
-            .select_transfers(DEFAULT_TEMPLATE_TX_LIMIT);
+        let (transfers, account_transfers, stake_ops) = {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            (
+                pool.select_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_account_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_stake_ops(DEFAULT_TEMPLATE_TX_LIMIT),
+            )
+        };
         self.chain
             .lock()
             .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
-            .block_template(self.miner_address, &transfers)
+            .block_template_lanes(
+                self.miner_address,
+                &transfers,
+                &account_transfers,
+                &stake_ops,
+            )
             .map_err(|e| RpcError::Internal(e.to_string()))
     }
 
@@ -591,34 +669,23 @@ impl RpcBackend for NodeBackend {
     }
 
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError> {
-        // Lab helper: applies immediately. Consensus path is `block.stake_ops` in
-        // the DAG body + Virtual acceptance (templates still UTXO-first).
         let tx: SignedStakeTx = serde_json::from_value(stake_tx)
             .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
-        let params = match tx.asset {
-            NativeAssetId::OVL => StakingParams::ovl_default(),
-            NativeAssetId::DRC => StakingParams::drc_default(),
-            NativeAssetId::TLT => {
-                return Err(RpcError::Rejected("TLT cannot be staked".into()));
-            }
-        };
         let auth = self.tx_auth();
-        let mut batch = WriteBatch::new();
-        apply_signed_stake_tx(self.store.as_ref(), &mut batch, &tx, &auth, &params)
-            .map_err(|e| RpcError::Rejected(e.to_string()))?;
-        self.store
-            .write_batch(batch)
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let id = admit_stake_tx(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::StakeTx(tx.clone()))
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+        }
         Ok(json!({
-            "stake_tx_id": tx.stake_tx_id().to_hex(),
+            "stake_tx_id": id.to_hex(),
             "kind": tx.kind.as_str(),
             "asset": tx.asset.ticker(),
             "actor": tx.actor.to_bech32(),
             "validator": tx.validator.to_bech32(),
             "amount": tx.amount,
             "nonce": tx.nonce,
-            "path": "immediate",
-            "note": "consensus inclusion is block.stake_ops; this RPC is a lab shortcut",
+            "path": "mempool",
         }))
     }
 

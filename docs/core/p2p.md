@@ -30,7 +30,7 @@ Topics and the getblock protocol are scoped by `NetworkConfig::network` (from `A
 | --- | --- | --- |
 | blocks | `agora/testnet/blocks/1` | `Block` / `BlockAnnounce` / `CompactBlock` / `GetBlock` |
 | attestations | `agora/testnet/attestations/1` | `CheckpointAttestation` (Trident dual-PoS) |
-| txs | `agora/testnet/txs/1` | `Transaction` |
+| txs | `agora/testnet/txs/1` | `Transaction` / `AccountTransfer` / `StakeTx` |
 | getblock RR | `/agora/testnet/getblock/1` | CBOR `GetBlockRequest` / `GetBlockResponse` |
 
 `dev` (default) uses `agora/dev/…`. Peers on different networks never share a gossip mesh even on the same underlay.
@@ -39,7 +39,7 @@ Topics and the getblock protocol are scoped by `NetworkConfig::network` (from `A
 
 After a block is admitted locally, `agora-node` gossips:
 
-1. `CompactBlock { header, short_ids }` — BIP152-style short ids (first 8 bytes of each `tx_id`)
+1. `CompactBlock { header, short_ids }` for UTXO-only bodies, or a full `Block` when account/stake lanes are non-empty
 2. `BlockAnnounce { hash }` — hash-only tip signal
 
 Receivers try `reconstruct_compact_block` against the local mempool. On miss (or hash-only announce without a body), they request the body from the announcing peer over the network-scoped **`/agora/<network>/getblock/1`** protocol (libp2p request-response, CBOR). `PendingFetches` dedupes in-flight hashes. If request-response fails, the node falls back to gossip `GetBlock` / `Block`.
@@ -71,11 +71,11 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 
 ## Mempool
 
-`Mempool::admit` verifies secp256k1 signatures, rejects coinbase-shaped txs (`inputs` empty), and reserves input outpoints so two pool txs cannot double-spend. `get_by_short_id` supports compact inflation.
+The mempool reserves UTXO outpoints and one shared account nonce per `(asset, address)`. Account transfers and stake ops therefore cannot race the same OVL/DRC nonce. Node admission runs the exact state-machine apply validator against the live store without committing before placing a lane operation in the pool.
 
 `agora-node` runs `validate_mempool_tx` (live `cf_utxo` + mempool reserved set) under the same lock before admit on both RPC `agora_submitTransaction` and gossip `Transaction` messages. Missing, foreign, overspending, or already-reserved inputs are rejected at the edge. The implicit fee must be ≥ `AGORA_MIN_RELAY_FEE` (default 1); admission stores the fee for template ordering.
 
-Mining templates pull up to `DEFAULT_TEMPLATE_TX_LIMIT` (128) transfers via `select_transfers` (fee descending, then `tx_id`) after the coinbase. Coinbase value is emission plus those transfer fees. On block admit (RPC or gossip), `evict_for_block` drops included txs and any remaining conflicts on the same outpoints.
+Mining templates pull UTXO transfers plus account/stake lanes and commit all lanes with `compute_body_root`. Coinbase value remains emission plus TLT transfer fees only; OVL/DRC account fees go to their reward pools during acceptance. On block admit, `evict_for_block` drops included operations and releases reservations.
 
 ## Runtime
 
