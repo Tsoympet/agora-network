@@ -5,7 +5,9 @@ use agora_governance::{
     civic_overview_json, list_proposals_json, list_topics_json, office_json, proposal_json,
     CivicSnapshot, ProposalKind, TopicCategory, VoteChoice,
 };
-use agora_types::{Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TxOut};
+use agora_types::{
+    AccountTransfer, Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TxOut,
+};
 use serde_json::{json, Value};
 
 use crate::error::RpcError;
@@ -166,6 +168,7 @@ pub trait RpcBackend: Send {
     /// Minimum / suggested fee for wallet coin selection.
     fn estimate_fee(&self) -> Result<FeeEstimate, RpcError>;
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
+    fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
     /// Live UTXO set for wallet coin selection.
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError>;
@@ -418,6 +421,12 @@ impl RpcBackend for InMemoryBackend {
         let id = tx.tx_id();
         self.mempool.insert(id, tx);
         Ok(id)
+    }
+
+    fn submit_account_transfer(&mut self, _tx: AccountTransfer) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit account transfers".into(),
+        ))
     }
 
     fn get_balance(&self, address: &Address) -> Amount {

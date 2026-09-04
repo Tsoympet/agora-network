@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use agora_types::{Block, Hash, OutPoint, Transaction};
+use agora_types::{
+    AccountTransfer, Address, Block, Hash, NativeAssetId, OutPoint, SignedStakeTx, Transaction,
+};
 
 use crate::P2pError;
 
@@ -18,6 +20,10 @@ pub struct Mempool {
     fees: HashMap<Hash, u64>,
     /// Outpoints spent by txs currently in the pool (conflict detection).
     reserved: HashSet<OutPoint>,
+    account_txs: HashMap<Hash, AccountTransfer>,
+    stake_txs: HashMap<Hash, SignedStakeTx>,
+    /// Account and stake lanes share the same per-asset account nonce.
+    reserved_accounts: HashSet<(NativeAssetId, Address)>,
     max_size: usize,
 }
 
@@ -27,25 +33,34 @@ impl Mempool {
             txs: HashMap::new(),
             fees: HashMap::new(),
             reserved: HashSet::new(),
+            account_txs: HashMap::new(),
+            stake_txs: HashMap::new(),
+            reserved_accounts: HashSet::new(),
             max_size,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.txs.len()
+        self.txs.len() + self.account_txs.len() + self.stake_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.txs.is_empty()
+        self.len() == 0
     }
 
     pub fn contains(&self, tx_id: &Hash) -> bool {
         self.txs.contains_key(tx_id)
+            || self.account_txs.contains_key(tx_id)
+            || self.stake_txs.contains_key(tx_id)
     }
 
     /// Outpoints already claimed by mempool transactions.
     pub fn reserved(&self) -> &HashSet<OutPoint> {
         &self.reserved
+    }
+
+    pub fn account_reserved(&self, asset: NativeAssetId, address: &Address) -> bool {
+        self.reserved_accounts.contains(&(asset, *address))
     }
 
     /// Admit a transaction after secp256k1 verification and mempool conflict checks.
@@ -82,7 +97,7 @@ impl Mempool {
         if self.txs.contains_key(&id) {
             return Ok(id);
         }
-        if self.txs.len() >= self.max_size && !self.evict_lowest_below(fee) {
+        if self.len() >= self.max_size && !self.evict_lowest_below(fee) {
             return Err(P2pError::MempoolRejected(
                 "mempool full; fee too low to evict".into(),
             ));
@@ -104,6 +119,44 @@ impl Mempool {
         }
         self.fees.insert(id, fee);
         self.txs.insert(id, tx);
+        Ok(id)
+    }
+
+    /// Admit a pre-validated OVL/DRC account transfer.
+    pub fn admit_account(&mut self, tx: AccountTransfer) -> Result<Hash, P2pError> {
+        let id = tx.transfer_id();
+        if self.account_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let key = (tx.asset, tx.from);
+        if !self.reserved_accounts.insert(key) {
+            return Err(P2pError::MempoolRejected(
+                "account already has a pending nonce".into(),
+            ));
+        }
+        self.account_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    /// Admit a pre-validated OVL/DRC stake operation.
+    pub fn admit_stake(&mut self, tx: SignedStakeTx) -> Result<Hash, P2pError> {
+        let id = tx.stake_tx_id();
+        if self.stake_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let key = (tx.asset, tx.actor);
+        if !self.reserved_accounts.insert(key) {
+            return Err(P2pError::MempoolRejected(
+                "account already has a pending nonce".into(),
+            ));
+        }
+        self.stake_txs.insert(id, tx);
         Ok(id)
     }
 
@@ -192,6 +245,25 @@ impl Mempool {
             .collect()
     }
 
+    pub fn select_account_transfers(&self, max: usize) -> Vec<AccountTransfer> {
+        let mut txs: Vec<_> = self.account_txs.values().cloned().collect();
+        txs.sort_by(|a, b| {
+            b.fee
+                .as_base_units()
+                .cmp(&a.fee.as_base_units())
+                .then_with(|| a.transfer_id().as_bytes().cmp(b.transfer_id().as_bytes()))
+        });
+        txs.truncate(max);
+        txs
+    }
+
+    pub fn select_stake_ops(&self, max: usize) -> Vec<SignedStakeTx> {
+        let mut txs: Vec<_> = self.stake_txs.values().cloned().collect();
+        txs.sort_by_key(SignedStakeTx::stake_tx_id);
+        txs.truncate(max);
+        txs
+    }
+
     /// Drop included txs and any remaining pool txs that spend the same outpoints.
     pub fn evict_for_block(&mut self, block: &Block) {
         let mut spent = HashSet::new();
@@ -200,6 +272,18 @@ impl Mempool {
             included.insert(tx.tx_id());
             for input in &tx.inputs {
                 spent.insert(input.previous_outpoint);
+            }
+        }
+        for tx in &block.account_transfers {
+            let id = tx.transfer_id();
+            if self.account_txs.remove(&id).is_some() {
+                self.reserved_accounts.remove(&(tx.asset, tx.from));
+            }
+        }
+        for tx in &block.stake_ops {
+            let id = tx.stake_tx_id();
+            if self.stake_txs.remove(&id).is_some() {
+                self.reserved_accounts.remove(&(tx.asset, tx.actor));
             }
         }
         let drop: Vec<Hash> = self
@@ -223,7 +307,7 @@ impl Mempool {
 #[cfg(test)]
 mod tests {
     use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
-    use agora_types::{Amount, Hash, OutPoint, Transaction, TxIn, TxOut};
+    use agora_types::{Amount, BlockHeader, Hash, OutPoint, Transaction, TxIn, TxOut};
 
     use super::*;
 
@@ -364,7 +448,7 @@ mod tests {
 
     #[test]
     fn evict_for_block_drops_included_and_conflicts() {
-        use agora_types::{Block, BlockHeader};
+        use agora_types::Block;
 
         let mut pool = Mempool::new(16);
         let included = signed_spend(0, 1);
@@ -391,5 +475,48 @@ mod tests {
             tx_id: Hash::ZERO,
             index: 0,
         }));
+    }
+
+    #[test]
+    fn account_and_stake_share_nonce_reservation() {
+        use agora_types::{AccountTransfer, NativeAssetId, SignedStakeTx};
+
+        let actor = agora_types::Address([3; 20]);
+        let mut account = AccountTransfer::unsigned_with_fee(
+            NativeAssetId::OVL,
+            actor,
+            agora_types::Address([4; 20]),
+            Amount::from_base_units(5),
+            Amount::from_base_units(1),
+            0,
+        );
+        account.public_key = vec![2; 33];
+        account.signature = vec![3; 64];
+
+        let mut stake = SignedStakeTx::unsigned_unbond_self(NativeAssetId::OVL, actor, 0);
+        stake.public_key = vec![2; 33];
+        stake.signature = vec![3; 64];
+
+        let mut pool = Mempool::new(4);
+        let account_id = pool.admit_account(account.clone()).unwrap();
+        assert!(pool.account_reserved(NativeAssetId::OVL, &actor));
+        assert!(pool.admit_stake(stake).is_err());
+
+        let block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
+            account_transfers: vec![account],
+            stake_ops: vec![],
+        };
+        pool.evict_for_block(&block);
+        assert!(!pool.contains(&account_id));
+        assert!(!pool.account_reserved(NativeAssetId::OVL, &actor));
     }
 }

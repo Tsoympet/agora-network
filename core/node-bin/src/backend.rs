@@ -14,13 +14,13 @@ use agora_p2p::{
 };
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
-    apply_signed_stake_tx, build_snapshot, load_epoch, load_reward_pool, load_validator,
-    lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth, ColumnFamily,
-    StateStore, StakingParams, TxAuthContext, WriteBatch,
+    apply_account_transfer, apply_signed_stake_tx, build_snapshot, load_epoch, load_reward_pool,
+    load_validator, lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth,
+    AccountJournal, ColumnFamily, StakingParams, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
-    Address, Amount, Block, CheckpointAttestation, Hash, NativeAssetId, OutPoint, SignedStakeTx,
-    Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, CheckpointAttestation, Hash, NativeAssetId, OutPoint,
+    SignedStakeTx, Transaction, TxOut,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -65,6 +65,63 @@ pub(crate) fn admit_transaction(
     }
     // Auth already verified; mempool only tracks reservations / fee market.
     pool.admit_priced(tx, fee)
+        .map_err(|e| RpcError::Rejected(e.to_string()))
+}
+
+/// Validate and reserve an OVL/DRC account transfer under the mempool lock.
+pub(crate) fn admit_account_transfer(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: AccountTransfer,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(tx.asset, &tx.from) {
+        return Err(RpcError::Rejected(
+            "account already has a pending nonce".into(),
+        ));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_account_transfer(store, &tx, auth, &mut batch, &mut journal)
+        .map_err(|e| RpcError::Rejected(format!("account: {e}")))?;
+    if tx.fee.as_base_units() < min_relay_fee() {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {} < min relay {}",
+            tx.fee.as_base_units(),
+            min_relay_fee()
+        )));
+    }
+    pool.admit_account(tx)
+        .map_err(|e| RpcError::Rejected(e.to_string()))
+}
+
+/// Validate and reserve a signed stake operation under the shared account nonce.
+pub(crate) fn admit_stake_tx(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: SignedStakeTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(tx.asset, &tx.actor) {
+        return Err(RpcError::Rejected(
+            "account already has a pending nonce".into(),
+        ));
+    }
+    let params = match tx.asset {
+        NativeAssetId::OVL => StakingParams::ovl_default(),
+        NativeAssetId::DRC => StakingParams::drc_default(),
+        NativeAssetId::TLT => return Err(RpcError::Rejected("TLT cannot be staked".into())),
+    };
+    let mut batch = WriteBatch::new();
+    apply_signed_stake_tx(store, &mut batch, &tx, auth, &params)
+        .map_err(|e| RpcError::Rejected(format!("stake: {e}")))?;
+    pool.admit_stake(tx)
         .map_err(|e| RpcError::Rejected(e.to_string()))
 }
 
@@ -242,9 +299,10 @@ impl RpcBackend for NodeBackend {
         let Some(tx) = block.transactions.get(index as usize) else {
             return Ok(TxLookup::unknown(*tx_id));
         };
-        let acceptance = agora_state_machine::tx_acceptance_status(self.store.as_ref(), &block_id, index)
-            .ok()
-            .flatten();
+        let acceptance =
+            agora_state_machine::tx_acceptance_status(self.store.as_ref(), &block_id, index)
+                .ok()
+                .flatten();
         match self
             .chain
             .lock()
@@ -259,8 +317,10 @@ impl RpcBackend for NodeBackend {
                         return Ok(TxLookup::orphaned(tx.clone(), block_id, index)
                             .with_acceptance(status.as_str()));
                     }
-                    return Ok(TxLookup::confirmed(tx.clone(), block_id, index, confirmations)
-                        .with_acceptance(status.as_str()));
+                    return Ok(
+                        TxLookup::confirmed(tx.clone(), block_id, index, confirmations)
+                            .with_acceptance(status.as_str()),
+                    );
                 }
                 Ok(TxLookup::confirmed(
                     tx.clone(),
@@ -354,6 +414,16 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_account_transfer(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::AccountTransfer(tx))
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+        }
+        Ok(id)
+    }
+
     fn get_balance(&self, address: &Address) -> Amount {
         self.utxo_balance(address).unwrap_or(Amount::ZERO)
     }
@@ -402,15 +472,26 @@ impl RpcBackend for NodeBackend {
     }
 
     fn get_block_template(&self) -> Result<Block, RpcError> {
-        let transfers = self
-            .mempool
-            .lock()
-            .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?
-            .select_transfers(DEFAULT_TEMPLATE_TX_LIMIT);
+        let (transfers, account_transfers, stake_ops) = {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            (
+                pool.select_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_account_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_stake_ops(DEFAULT_TEMPLATE_TX_LIMIT),
+            )
+        };
         self.chain
             .lock()
             .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
-            .block_template(self.miner_address, &transfers)
+            .block_template_lanes(
+                self.miner_address,
+                &transfers,
+                &account_transfers,
+                &stake_ops,
+            )
             .map_err(|e| RpcError::Internal(e.to_string()))
     }
 
@@ -444,11 +525,12 @@ impl RpcBackend for NodeBackend {
                 crate::admit::AdmitError::BadTxRoot => {
                     RpcError::Rejected("tx_root mismatch".into())
                 }
-                crate::admit::AdmitError::FinalityReorg { finalized, abandoned } => {
-                    RpcError::Rejected(format!(
-                        "reorg beyond finality: abandoned {abandoned} <= finalized {finalized}"
-                    ))
-                }
+                crate::admit::AdmitError::FinalityReorg {
+                    finalized,
+                    abandoned,
+                } => RpcError::Rejected(format!(
+                    "reorg beyond finality: abandoned {abandoned} <= finalized {finalized}"
+                )),
                 crate::admit::AdmitError::InvalidAttestation(msg) => {
                     RpcError::Rejected(format!("attestation: {msg}"))
                 }
@@ -591,34 +673,23 @@ impl RpcBackend for NodeBackend {
     }
 
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError> {
-        // Lab helper: applies immediately. Consensus path is `block.stake_ops` in
-        // the DAG body + Virtual acceptance (templates still UTXO-first).
-        let tx: SignedStakeTx = serde_json::from_value(stake_tx)
-            .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
-        let params = match tx.asset {
-            NativeAssetId::OVL => StakingParams::ovl_default(),
-            NativeAssetId::DRC => StakingParams::drc_default(),
-            NativeAssetId::TLT => {
-                return Err(RpcError::Rejected("TLT cannot be staked".into()));
-            }
-        };
+        let tx: SignedStakeTx =
+            serde_json::from_value(stake_tx).map_err(|e| RpcError::InvalidParams(e.to_string()))?;
         let auth = self.tx_auth();
-        let mut batch = WriteBatch::new();
-        apply_signed_stake_tx(self.store.as_ref(), &mut batch, &tx, &auth, &params)
-            .map_err(|e| RpcError::Rejected(e.to_string()))?;
-        self.store
-            .write_batch(batch)
-            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let id = admit_stake_tx(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::StakeTx(tx.clone()))
+                .map_err(|e| RpcError::Internal(e.to_string()))?;
+        }
         Ok(json!({
-            "stake_tx_id": tx.stake_tx_id().to_hex(),
+            "stake_tx_id": id.to_hex(),
             "kind": tx.kind.as_str(),
             "asset": tx.asset.ticker(),
             "actor": tx.actor.to_bech32(),
             "validator": tx.validator.to_bech32(),
             "amount": tx.amount,
             "nonce": tx.nonce,
-            "path": "immediate",
-            "note": "consensus inclusion is block.stake_ops; this RPC is a lab shortcut",
+            "path": "mempool",
         }))
     }
 
@@ -801,13 +872,77 @@ mod tests {
     use super::*;
     use crate::admit::ChainState;
     use agora_consensus::{PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
-    use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction_bound, Bip44Path};
-    use agora_state_machine::{ColumnFamily, GenesisBuilder};
+    use agora_crypto::{
+        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound, sign_transaction_bound,
+        Bip44Path,
+    };
+    use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
     use borsh::BorshDeserialize;
 
     const PHRASE: &str =
         "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    #[test]
+    fn account_transfer_enters_template_lane() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let bob = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::OVL,
+            &alice.address(),
+            Amount::from_base_units(100),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(
+            chain,
+            store,
+            None,
+            false,
+            mempool,
+            Address::ZERO,
+            Arc::new(AtomicU32::new(0)),
+            "dev",
+            genesis,
+        );
+        let mut tx = AccountTransfer::unsigned_with_fee(
+            NativeAssetId::OVL,
+            alice.address(),
+            bob.address(),
+            Amount::from_base_units(10),
+            Amount::from_base_units(1),
+            0,
+        );
+        sign_account_transfer_bound(&mut tx, &alice, "agora-dev", &genesis).unwrap();
+
+        let id = backend.submit_account_transfer(tx.clone()).unwrap();
+        assert_eq!(id, tx.transfer_id());
+        let template = backend.get_block_template().unwrap();
+        assert_eq!(template.account_transfers, vec![tx]);
+        assert_eq!(template.header.tx_root, template.compute_body_root());
+        assert_ne!(
+            template.header.tx_root,
+            Block::compute_tx_root(&template.transactions)
+        );
+    }
 
     #[test]
     fn genesis_tips_and_admit_easy_block() {
