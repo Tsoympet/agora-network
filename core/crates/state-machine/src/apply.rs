@@ -461,6 +461,13 @@ fn params_for_stake_asset(asset: NativeAssetId) -> Result<StakingParams, StateEr
     }
 }
 
+type TridentLaneAcceptances = (
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
+);
+
 /// Apply OVL/DRC account transfers + stake ops; credit Accepted fees to reward pools.
 fn apply_trident_lanes(
     store: &StateStore,
@@ -469,15 +476,7 @@ fn apply_trident_lanes(
     mode: ApplyMode,
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
-) -> Result<
-    (
-        Vec<TransactionAcceptance>,
-        Vec<TransactionAcceptance>,
-        Vec<TransactionAcceptance>,
-        Vec<TransactionAcceptance>,
-    ),
-    StateError,
-> {
+) -> Result<TridentLaneAcceptances, StateError> {
     if block.account_transfers.is_empty()
         && block.ovl_executions.is_empty()
         && block.drc_payments.is_empty()

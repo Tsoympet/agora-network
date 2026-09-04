@@ -137,7 +137,7 @@ pub fn ignite_trident_supply(
     batch: &mut WriteBatch,
     policy: &TridentMonetaryPolicy,
 ) -> Result<(), StateError> {
-    policy.validate().map_err(|e| StateError::InvalidTx(e))?;
+    policy.validate().map_err(StateError::InvalidTx)?;
     for asset in NativeAssetId::ALL {
         let p = policy.policy(asset);
         put_max_supply_into(batch, asset, p.max_supply);

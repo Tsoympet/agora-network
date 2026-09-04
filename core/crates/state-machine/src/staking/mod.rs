@@ -188,11 +188,13 @@ pub fn reward_pool_meta_key(asset: NativeAssetId) -> Vec<u8> {
     reward_pool_key(asset)
 }
 
+pub type MetaValueSnapshot = Vec<(Vec<u8>, Option<Vec<u8>>)>;
+
 /// Snapshot current Meta values for `keys` (`None` = absent).
 pub fn snapshot_meta_keys(
     store: &StateStore,
     keys: &[Vec<u8>],
-) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>, StateError> {
+) -> Result<MetaValueSnapshot, StateError> {
     let mut out = Vec::with_capacity(keys.len());
     for key in keys {
         out.push((key.clone(), store.get_cf(ColumnFamily::Meta, key)?));
@@ -429,6 +431,7 @@ fn credit_liquid(
 }
 
 /// Register / self-bond a validator. Debits liquid account balance.
+#[allow(clippy::too_many_arguments)]
 pub fn bond_validator(
     store: &StateStore,
     batch: &mut WriteBatch,
@@ -647,7 +650,7 @@ pub fn build_snapshot(
         }
         Ok(())
     })?;
-    validators.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
+    validators.sort_by_key(|entry| entry.0 .0);
     let total_active_stake = validators.iter().map(|(_, p)| *p).sum();
     Ok(ValidatorSetSnapshot {
         epoch,

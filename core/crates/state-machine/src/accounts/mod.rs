@@ -221,7 +221,7 @@ pub fn account_root(store: &StateStore, asset: NativeAssetId) -> Result<Hash, St
         }
         Ok(())
     })?;
-    entries.sort_by(|a, b| a.0 .0.cmp(&b.0 .0));
+    entries.sort_by_key(|entry| entry.0 .0);
     Ok(Hash::hash_borsh(&(asset.wire_byte(), &entries)))
 }
 

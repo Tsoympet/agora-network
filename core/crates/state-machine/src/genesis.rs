@@ -285,8 +285,6 @@ mod tests {
             load_staking_reserve_remaining(&store, NativeAssetId::DRC).unwrap(),
             DRC_WORKING_RESERVE_BASE
         );
-        assert!(OVL_WORKING_RESERVE_BASE > 0);
-        assert!(DRC_WORKING_RESERVE_BASE > 0);
     }
 
     #[test]
