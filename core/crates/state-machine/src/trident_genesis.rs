@@ -44,6 +44,10 @@ pub struct TridentEmissionPolicy {
     pub initial_reward: Option<u64>,
     #[serde(default)]
     pub halving_interval: Option<u64>,
+    #[serde(default)]
+    pub reserve_base_units: Option<u64>,
+    #[serde(default)]
+    pub epoch_reserve_drip: Option<u64>,
     pub notes: Option<String>,
 }
 
@@ -424,6 +428,21 @@ impl TridentGenesisArtifact {
         if self.assets.tlt.staking_reward_reserve != 0 {
             return Err("TLT cannot have a staking reward reserve".into());
         }
+        if self.assets.tlt.emission.reserve_base_units.is_some()
+            || self.assets.tlt.emission.epoch_reserve_drip.is_some()
+        {
+            return Err("TLT cannot have staking reserve emission fields".into());
+        }
+        for (ticker, policy) in [("OVL", &self.assets.ovl), ("DRC", &self.assets.drc)] {
+            if policy.emission.reserve_base_units != Some(policy.staking_reward_reserve) {
+                return Err(format!(
+                    "{ticker} emission reserve must match staking_reward_reserve"
+                ));
+            }
+            if policy.emission.epoch_reserve_drip == Some(0) {
+                return Err(format!("{ticker} epoch reserve drip must be nonzero"));
+            }
+        }
         Ok(())
     }
 
@@ -708,6 +727,16 @@ mod tests {
         artifact.assets.ovl.genesis_allocation = 1;
         assert_ne!(artifact.consensus_identity_hash(), identity);
         assert_ne!(artifact.compute_network_fingerprint(), fingerprint);
+    }
+
+    #[test]
+    fn staking_emission_reserve_must_match_asset_policy() {
+        let mut artifact = TridentGenesisArtifact::from_json(DRAFT).unwrap();
+        artifact.assets.ovl.emission.reserve_base_units = Some(1);
+        assert!(artifact
+            .validate_draft()
+            .unwrap_err()
+            .contains("emission reserve must match"));
     }
 
     #[test]
