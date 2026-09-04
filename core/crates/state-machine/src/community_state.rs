@@ -319,7 +319,9 @@ pub fn register_grant_into(
             .iter()
             .any(|m| m.status != agora_governance::MilestoneStatus::Pending)
     {
-        return Err(invalid("grant registration requires pristine approved state"));
+        return Err(invalid(
+            "grant registration requires pristine approved state",
+        ));
     }
     let canonical = GrantRecord::new(
         grant.id,
