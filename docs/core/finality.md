@@ -38,7 +38,7 @@ Checkpoint bodies bind this root (no longer provisional zero).
 - Topic `agora/<scope>/attestations/1`  
 - `agora_getFinality` / `agora_getFinalizedTip` / `agora_submitAttestation`  
 - `agora_getValidatorSet` / `agora_getValidator` / `agora_getRewardPool`  
-- **`agora_submitStakeTx`** — secp256k1-signed stake ops (bearer-gated when token set; never mint-like)
+- **`agora_submitStakeTx`** — secp256k1-signed stake ops enter the mempool, gossip, and template stake lane
 
 ## Rewards
 
@@ -52,7 +52,7 @@ Never from TLT PoW mint.
 
 ## Still deferred
 
-- Compact-block / mempool inclusion for account + stake lanes (templates still UTXO-first)  
+- Versioned compact short IDs for account + stake lanes (current non-empty lane blocks use full-body gossip)  
 - Ceremony-frozen reserve economics (replace working defaults)  
 - Full OVL execution / DRC payment modules beyond account-transfer fee share  
 - Gov/treasury roots in state root (Phase 5)  

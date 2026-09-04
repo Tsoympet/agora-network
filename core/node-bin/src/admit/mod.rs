@@ -150,8 +150,8 @@ impl Default for ChainBootConfig {
 impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
     fn from(params: &agora_state_machine::ChainParams) -> Self {
         let policy = agora_state_machine::GenesisArtifact::from_params(params);
-        let consensus_policy_hash = Hash::from_hex(&policy.consensus_policy_hash)
-            .unwrap_or(Hash::ZERO);
+        let consensus_policy_hash =
+            Hash::from_hex(&policy.consensus_policy_hash).unwrap_or(Hash::ZERO);
         Self {
             pow: params.pow_algorithm,
             initial_bits: params.bits,
@@ -436,6 +436,17 @@ impl ChainState {
         payout: Address,
         transfers: &[Transaction],
     ) -> Result<Block, AdmitError> {
+        self.block_template_lanes(payout, transfers, &[], &[])
+    }
+
+    /// Build a mining template with all three Trident body lanes.
+    pub fn block_template_lanes(
+        &self,
+        payout: Address,
+        transfers: &[Transaction],
+        account_transfers: &[agora_types::AccountTransfer],
+        stake_ops: &[agora_types::SignedStakeTx],
+    ) -> Result<Block, AdmitError> {
         let parents = self.select_template_parents()?;
         let timestamp_ms = self.template_timestamp_ms(&parents)?;
         let bits = self.expected_bits_for_parents(&parents)?;
@@ -467,18 +478,21 @@ impl ChainState {
         let mut transactions = Vec::with_capacity(1 + included.len());
         transactions.push(coinbase);
         transactions.extend(included.iter().cloned());
-        let tx_root = Block::compute_tx_root(&transactions);
-        Ok(Block::utxo(
-            BlockHeader {
+        let mut block = Block {
+            header: BlockHeader {
                 version: 1,
                 parents,
                 timestamp_ms,
                 bits,
                 nonce: 0,
-                tx_root,
+                tx_root: Hash::ZERO,
             },
             transactions,
-        ))
+            account_transfers: account_transfers.to_vec(),
+            stake_ops: stake_ops.to_vec(),
+        };
+        block.header.tx_root = block.compute_body_root();
+        Ok(block)
     }
 
     /// Template time: `max(local_now, max_parent_ts + 1, MTP + 1)`.
@@ -794,7 +808,8 @@ impl ChainState {
             )));
         }
         let cb = coinbases[0];
-        let expected_low = coinbase_commitment_low(&block.header.parents, block.header.timestamp_ms);
+        let expected_low =
+            coinbase_commitment_low(&block.header.parents, block.header.timestamp_ms);
         let got_low = cb.nonce as u32;
         if got_low != expected_low {
             return Err(AdmitError::Utxo(format!(
@@ -871,18 +886,14 @@ impl ChainState {
                 return Err(AdmitError::SupplyCapExceeded);
             }
             issued = issued.saturating_add(applied.journal.subsidy);
-            let bytes = borsh::to_vec(&applied.journal)
-                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            let bytes =
+                borsh::to_vec(&applied.journal).map_err(|e| AdmitError::Storage(e.to_string()))?;
             applied
                 .batch
                 .put_cf(ColumnFamily::Warm, &utxo_diff_key(hash), &bytes);
             applied.acceptance.block_hash = *hash;
-            agora_state_machine::put_acceptance_into(
-                &mut applied.batch,
-                hash,
-                &applied.acceptance,
-            )
-            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            agora_state_machine::put_acceptance_into(&mut applied.batch, hash, &applied.acceptance)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
             overlay
                 .write_batch(applied.batch)
                 .map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -1374,13 +1385,9 @@ impl ChainState {
         let emission = self.clamp_emission(scheduled)?;
         // Atomic commit: UTXO changes + revert journal + issued-supply update land as a
         // single WriteBatch so a crash cannot leave UTXOs and supply out of sync.
-        let mut applied = apply_block_batched_virtual(
-            self.store.as_ref(),
-            &block,
-            emission,
-            self.auth.as_ref(),
-        )
-        .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        let mut applied =
+            apply_block_batched_virtual(self.store.as_ref(), &block, emission, self.auth.as_ref())
+                .map_err(|e| AdmitError::Utxo(e.to_string()))?;
         if applied.journal.subsidy > emission {
             return Err(AdmitError::Utxo(format!(
                 "coinbase subsidy {} exceeds clamped emission {emission}",
@@ -1393,18 +1400,14 @@ impl ChainState {
             return Err(AdmitError::SupplyCapExceeded);
         }
         let subsidy = applied.journal.subsidy;
-        let journal_bytes = borsh::to_vec(&applied.journal)
-            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        let journal_bytes =
+            borsh::to_vec(&applied.journal).map_err(|e| AdmitError::Storage(e.to_string()))?;
         applied
             .batch
             .put_cf(ColumnFamily::Warm, &utxo_diff_key(&hash), &journal_bytes);
         applied.acceptance.block_hash = hash;
-        agora_state_machine::put_acceptance_into(
-            &mut applied.batch,
-            &hash,
-            &applied.acceptance,
-        )
-        .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        agora_state_machine::put_acceptance_into(&mut applied.batch, &hash, &applied.acceptance)
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
         agora_state_machine::put_issued_supply_into(
             &mut applied.batch,
             agora_types::NativeAssetId::TLT,
@@ -1814,8 +1817,7 @@ impl ChainState {
                 account_before: journal.account_before,
                 stake_meta_before: journal.stake_meta_before,
             };
-            let bytes =
-                borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
+            let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store
                 .put_cf(ColumnFamily::Warm, &key, &bytes)
                 .map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -2214,7 +2216,11 @@ mod tests {
                 value: Amount::from_base_units(emission),
                 address: payout,
             }],
-            coinbase_commitment_nonce(&block.header.parents, block.header.timestamp_ms, nonce as u32),
+            coinbase_commitment_nonce(
+                &block.header.parents,
+                block.header.timestamp_ms,
+                nonce as u32,
+            ),
         )];
         block.header.tx_root = Block::compute_tx_root(&block.transactions);
         let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
@@ -2479,7 +2485,11 @@ mod tests {
                 value: Amount::from_base_units(emission),
                 address: Address::ZERO,
             }],
-            coinbase_commitment_nonce(&block.header.parents, block.header.timestamp_ms, nonce as u32),
+            coinbase_commitment_nonce(
+                &block.header.parents,
+                block.header.timestamp_ms,
+                nonce as u32,
+            ),
         )];
         block.header.tx_root = Block::compute_tx_root(&block.transactions);
         let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
@@ -2766,9 +2776,7 @@ mod tests {
         c.header.parents = vec![a, b];
         c.header.bits = chain.expected_bits_for_parents(&[a, b]).unwrap();
         c.header.timestamp_ms = 72_000;
-        let blue_score = chain
-            .simulate_blue_score(&[a, b], c.header.bits)
-            .unwrap();
+        let blue_score = chain.simulate_blue_score(&[a, b], c.header.bits).unwrap();
         let emission = chain.emission.reward_at_blue_score(blue_score);
         c.transactions = vec![Transaction::unsigned(
             1,

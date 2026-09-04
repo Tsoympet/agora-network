@@ -352,7 +352,9 @@ impl NetworkNode {
 
     fn publish_message(&mut self, message: &NetworkMessage) -> Result<(), P2pError> {
         match message {
-            NetworkMessage::Transaction(_) => {
+            NetworkMessage::Transaction(_)
+            | NetworkMessage::AccountTransfer(_)
+            | NetworkMessage::StakeTx(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {
