@@ -397,6 +397,11 @@ pub fn verify_migration_snapshot(snapshot: &MigrationSnapshot) -> Result<(), Mig
             "dry-run snapshots cannot activate claims".into(),
         ));
     }
+    if snapshot.body.maturity != "Scaffold" {
+        return Err(MigrationError::Snapshot(
+            "migration snapshot maturity must remain Scaffold".into(),
+        ));
+    }
     if snapshot
         .body
         .allocations
@@ -406,6 +411,14 @@ pub fn verify_migration_snapshot(snapshot: &MigrationSnapshot) -> Result<(), Mig
         return Err(MigrationError::Snapshot(
             "allocations must be strictly sorted and unique".into(),
         ));
+    }
+    for allocation in &snapshot.body.allocations {
+        if allocation.amount == 0 || Address::from_hex(&allocation.address).is_none() {
+            return Err(MigrationError::Snapshot(format!(
+                "invalid allocation {}/{}",
+                allocation.address, allocation.amount
+            )));
+        }
     }
     let claim_root = merkle_root(&snapshot.body.allocations).to_hex();
     if claim_root != snapshot.body.claim_root {
@@ -421,6 +434,7 @@ pub fn verify_migration_snapshot(snapshot: &MigrationSnapshot) -> Result<(), Mig
             computed,
         });
     }
+    verify_audit_consistency(snapshot)?;
     Ok(())
 }
 
@@ -504,6 +518,61 @@ fn allocation_total(
             .map(|allocation| allocation.amount),
         "allocation total",
     )
+}
+
+fn verify_audit_consistency(snapshot: &MigrationSnapshot) -> Result<(), MigrationError> {
+    let audit = &snapshot.body.audit;
+    let ovl_claims = allocation_total(&snapshot.body.allocations, MigrationAsset::Ovl)?;
+    let drc_claims = allocation_total(&snapshot.body.allocations, MigrationAsset::Drc)?;
+    for (label, supply, claims) in [
+        ("OVL", &audit.ovl, ovl_claims),
+        ("DRC", &audit.drc, drc_claims),
+    ] {
+        if supply.source_ledger > supply.source_minted
+            || supply.proposed_claims != claims
+            || supply.retired_or_burned != supply.source_minted - supply.source_ledger
+        {
+            return Err(MigrationError::Snapshot(format!(
+                "{label} audit totals are inconsistent"
+            )));
+        }
+    }
+    let lock_total = checked_sum(
+        snapshot.body.locks.iter().map(|lock| lock.amount),
+        "snapshot lock total",
+    )?;
+    let pending = snapshot
+        .body
+        .messages
+        .iter()
+        .filter(|message| matches!(message.status.as_str(), "locked" | "paid"))
+        .count() as u64;
+    if audit.lock_total != lock_total
+        || audit.pending_message_count != pending
+        || audit.quarantined_evm_account_count
+            != snapshot.body.quarantined_evm_accounts.len() as u64
+    {
+        return Err(MigrationError::Snapshot(
+            "blocker counters do not match snapshot records".into(),
+        ));
+    }
+    if audit.ready_for_claim_design != audit.blockers.is_empty() {
+        return Err(MigrationError::Snapshot(
+            "readiness must agree with the blocker list".into(),
+        ));
+    }
+    if audit.ready_for_claim_design
+        && (audit.ovl.proposed_claims != audit.ovl.source_ledger
+            || audit.drc.proposed_claims != audit.drc.source_ledger
+            || audit.lock_total != 0
+            || audit.pending_message_count != 0
+            || audit.quarantined_evm_account_count != 0)
+    {
+        return Err(MigrationError::Snapshot(
+            "ready snapshot retains unresolved value or state".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn lock_audit(checkpoint: &LayersCheckpoint) -> Result<Vec<LockAudit>, MigrationError> {
@@ -777,6 +846,27 @@ mod tests {
         assert!(matches!(
             verify_migration_snapshot(&snapshot),
             Err(MigrationError::RootMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn verify_recomputes_audit_even_when_snapshot_root_is_replaced() {
+        let mut snapshot = export_migration_snapshot(&checkpoint()).unwrap();
+        snapshot.body.audit.ovl.proposed_claims += 1;
+        snapshot.snapshot_root = Hash::hash_borsh(&snapshot.body).to_hex();
+        assert!(matches!(
+            verify_migration_snapshot(&snapshot),
+            Err(MigrationError::Snapshot(message)) if message.contains("audit totals")
+        ));
+    }
+
+    #[test]
+    fn duplicate_source_records_fail_closed() {
+        let mut source = checkpoint();
+        source.ovl_balances.push(source.ovl_balances[0]);
+        assert!(matches!(
+            export_migration_snapshot(&source),
+            Err(MigrationError::InvalidSource(message)) if message.contains("duplicate")
         ));
     }
 
