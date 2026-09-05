@@ -130,11 +130,13 @@ Do **not** use “role-complete” as a substitute for the above.
 | 7 | Devnet / testnet preparation |
 
 Genesis-loader prerequisite status: the integrated runtime can now stage and
-commit genesis storage atomically, but a Trident v3 node loader remains blocked.
-Staking parameters and the PoW finality threshold still come from compiled
-defaults, and the v3 consensus identity is not yet the Block 0 identity used by
-DAG bootstrap. One future conversion must bind every artifact policy and state
-component before networking or RPC starts.
+commit genesis storage atomically and can derive all representable runtime
+policy through one freeze-gated conversion. A Trident v3 node loader remains
+blocked because the artifact identity is not yet a concrete Block 0 hash, the
+block header does not commit the canonical genesis state root, and artifact
+allocations, treasuries, validator snapshots, governance, and vesting state
+cannot yet be seeded and verified as one artifact-only transition. Networking
+and RPC must remain disabled for v3 until that identity/state contract exists.
 
 PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.
 
