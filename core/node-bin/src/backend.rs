@@ -203,29 +203,33 @@ pub struct NodeBackend {
     genesis_hash: Hash,
 }
 
+pub struct NodeBackendConfig {
+    pub net: Option<NetworkHandle>,
+    pub allow_fund: bool,
+    pub miner_address: Address,
+    pub connected_peers: Arc<AtomicU32>,
+    pub network: String,
+    pub genesis_hash: Hash,
+}
+
 impl NodeBackend {
     pub fn new(
         chain: Arc<Mutex<ChainState>>,
         store: Arc<StateStore>,
-        net: Option<NetworkHandle>,
-        allow_fund: bool,
         mempool: Arc<Mutex<Mempool>>,
-        miner_address: Address,
-        connected_peers: Arc<AtomicU32>,
-        network: impl Into<String>,
-        genesis_hash: Hash,
+        config: NodeBackendConfig,
     ) -> Self {
         Self {
             chain,
             store,
             mempool,
-            net,
-            allow_fund,
+            net: config.net,
+            allow_fund: config.allow_fund,
             fund_nonce: 0,
-            miner_address,
-            connected_peers,
-            network: network.into(),
-            genesis_hash,
+            miner_address: config.miner_address,
+            connected_peers: config.connected_peers,
+            network: config.network,
+            genesis_hash: config.genesis_hash,
         }
     }
 
@@ -1027,6 +1031,17 @@ mod tests {
     const PHRASE: &str =
         "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
+    fn backend_config(genesis_hash: Hash) -> NodeBackendConfig {
+        NodeBackendConfig {
+            net: None,
+            allow_fund: false,
+            miner_address: Address::ZERO,
+            connected_peers: Arc::new(AtomicU32::new(0)),
+            network: "dev".into(),
+            genesis_hash,
+        }
+    }
+
     #[test]
     fn protocol_treasuries_rpc_is_canonical_read_only_state() {
         let store = Arc::new(StateStore::open_in_memory());
@@ -1044,13 +1059,8 @@ mod tests {
         let backend = NodeBackend::new(
             chain,
             store,
-            None,
-            false,
             Arc::new(Mutex::new(Mempool::new(8))),
-            Address::ZERO,
-            Arc::new(AtomicU32::new(0)),
-            "dev",
-            genesis,
+            backend_config(genesis),
         );
 
         let value = backend.get_protocol_treasuries().unwrap();
@@ -1081,13 +1091,8 @@ mod tests {
         let backend = NodeBackend::new(
             chain,
             store,
-            None,
-            false,
             Arc::new(Mutex::new(Mempool::new(8))),
-            Address::ZERO,
-            Arc::new(AtomicU32::new(0)),
-            "dev",
-            genesis,
+            backend_config(genesis),
         );
 
         let value = backend.get_community_registry(10).unwrap();
@@ -1129,17 +1134,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let mut backend = NodeBackend::new(
-            chain,
-            store,
-            None,
-            false,
-            mempool,
-            Address::ZERO,
-            Arc::new(AtomicU32::new(0)),
-            "dev",
-            genesis,
-        );
+        let mut backend = NodeBackend::new(chain, store, mempool, backend_config(genesis));
         let mut tx = AccountTransfer::unsigned_with_fee(
             NativeAssetId::OVL,
             alice.address(),
@@ -1189,17 +1184,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let mut backend = NodeBackend::new(
-            chain,
-            store,
-            None,
-            false,
-            mempool,
-            Address::ZERO,
-            Arc::new(AtomicU32::new(0)),
-            "dev",
-            genesis,
-        );
+        let mut backend = NodeBackend::new(chain, store, mempool, backend_config(genesis));
         let mut tx = OvlExecutionTx::unsigned(
             alice.address(),
             bob.address(),
@@ -1246,17 +1231,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let mut backend = NodeBackend::new(
-            chain,
-            store,
-            None,
-            false,
-            mempool,
-            Address::ZERO,
-            Arc::new(AtomicU32::new(0)),
-            "dev",
-            genesis,
-        );
+        let mut backend = NodeBackend::new(chain, store, mempool, backend_config(genesis));
         let mut tx = DrcPaymentTx::unsigned(
             alice.address(),
             merchant.address(),
@@ -1299,13 +1274,11 @@ mod tests {
         let mut backend = NodeBackend::new(
             chain.clone(),
             store,
-            None,
-            false,
             mempool,
-            miner,
-            Arc::new(AtomicU32::new(0)),
-            "dev",
-            genesis,
+            NodeBackendConfig {
+                miner_address: miner,
+                ..backend_config(genesis)
+            },
         );
         assert_eq!(backend.dag_tips(), vec![genesis]);
         assert_eq!(
@@ -1367,17 +1340,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let mut backend = NodeBackend::new(
-            chain,
-            store,
-            None,
-            false,
-            mempool,
-            Address::ZERO,
-            Arc::new(AtomicU32::new(0)),
-            "dev",
-            genesis,
-        );
+        let mut backend = NodeBackend::new(chain, store, mempool, backend_config(genesis));
 
         let mut bad = Transaction::unsigned(
             1,
@@ -1466,13 +1429,11 @@ mod tests {
         let mut backend = NodeBackend::new(
             chain,
             store,
-            None,
-            false,
             mempool.clone(),
-            miner,
-            Arc::new(AtomicU32::new(0)),
-            "dev",
-            genesis,
+            NodeBackendConfig {
+                miner_address: miner,
+                ..backend_config(genesis)
+            },
         );
 
         let premine = Amount::from_whole(10_000_000).unwrap();
@@ -1569,13 +1530,11 @@ mod tests {
         let mut backend = NodeBackend::new(
             chain,
             store.clone(),
-            None,
-            true,
             mempool,
-            Address::ZERO,
-            Arc::new(AtomicU32::new(0)),
-            "dev",
-            genesis,
+            NodeBackendConfig {
+                allow_fund: true,
+                ..backend_config(genesis)
+            },
         );
 
         let drip = Amount::from_base_units(5_000);
@@ -1654,13 +1613,12 @@ mod tests {
         let mut backend = NodeBackend::new(
             chain,
             store,
-            None,
-            true,
             mempool,
-            Address::ZERO,
-            Arc::new(AtomicU32::new(0)),
-            "mainnet",
-            genesis,
+            NodeBackendConfig {
+                allow_fund: true,
+                network: "mainnet".into(),
+                ..backend_config(genesis)
+            },
         );
         let err = backend
             .fund_address(Address([1u8; 20]), Amount::from_base_units(1))

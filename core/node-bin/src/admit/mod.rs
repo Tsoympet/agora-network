@@ -174,13 +174,20 @@ impl ChainState {
         initial_bits: u32,
         storage: StoragePolicy,
     ) -> Result<Self, AdmitError> {
-        let mut boot = ChainBootConfig::default();
-        boot.pow = algo;
-        boot.initial_bits = initial_bits;
-        boot.daa.min_level = if initial_bits == 0 {
+        let default_daa = DaaConfig::default();
+        let min_level = if initial_bits == 0 {
             0
         } else {
-            boot.daa.min_level.max(1)
+            default_daa.min_level.max(1)
+        };
+        let boot = ChainBootConfig {
+            pow: algo,
+            initial_bits,
+            daa: DaaConfig {
+                min_level,
+                ..default_daa
+            },
+            ..ChainBootConfig::default()
         };
         Self::bootstrap_with(store, genesis, boot, storage)
     }
@@ -335,7 +342,7 @@ impl ChainState {
     ) -> Result<Vec<agora_types::BlockHeader>, AdmitError> {
         use agora_p2p::{MAX_HEADERS_PER_RESPONSE, MAX_LOCATOR_HASHES};
 
-        let limit = (limit.max(1)).min(MAX_HEADERS_PER_RESPONSE) as usize;
+        let limit = limit.clamp(1, MAX_HEADERS_PER_RESPONSE) as usize;
         let locator = if locator.len() > MAX_LOCATOR_HASHES {
             &locator[..MAX_LOCATOR_HASHES]
         } else {
@@ -431,6 +438,7 @@ impl ChainState {
     /// Coinbase value is emission ([`EmissionSchedule::reward_at_blue_score`]) plus
     /// the sum of transfer fees (`in − out`) so miners collect relay fees.
     /// `tx_root` commits to coinbase followed by `transfers` so PoW binds the full body.
+    #[cfg(test)]
     pub fn block_template(
         &self,
         payout: Address,
@@ -1033,7 +1041,7 @@ impl ChainState {
     fn check_coinbase_maturity(&self, block: &Block) -> Result<(), AdmitError> {
         let bits = self
             .expected_bits_for_parents(&block.header.parents)
-            .unwrap_or_else(|_| block.header.bits);
+            .unwrap_or(block.header.bits);
         let next_score = self
             .simulate_blue_score(&block.header.parents, bits)
             .unwrap_or_else(|_| self.estimate_blue_score(&block.header.parents));

@@ -41,7 +41,7 @@ pub async fn drip_from_treasury(
     let mut selected = Vec::new();
     let mut total_in = 0u64;
     let mut sorted = utxos;
-    sorted.sort_by(|a, b| b.value.cmp(&a.value));
+    sorted.sort_by_key(|utxo| std::cmp::Reverse(utxo.value));
     for u in sorted {
         total_in = total_in.saturating_add(u.value);
         selected.push(u);

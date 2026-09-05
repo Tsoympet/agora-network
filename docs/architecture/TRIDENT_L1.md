@@ -129,6 +129,18 @@ Do **not** use “role-complete” as a substitute for the above.
 | 6 | Migration tooling + layer retirement docs |
 | 7 | Devnet / testnet preparation |
 
+Genesis-loader prerequisite status: the integrated runtime can now stage and
+commit genesis storage atomically and can derive all representable runtime
+policy through one freeze-gated conversion. The bounded Block 0 prerequisite
+now includes a pure, versioned Borsh manifest and fail-closed verifier covering
+all artifact-native state categories. It deliberately has no storage or node
+loader entry point. A Trident v3 node loader remains blocked on version-gated
+header/state-root encoding and lossless atomic mappings for UTXOs, accounts,
+treasury controls, vesting locks, validator runtime records, initial finality,
+and full datadir identity. Networking and RPC must remain disabled for v3 until
+that complete identity/state contract exists. See
+[`../core/block-zero.md`](../core/block-zero.md).
+
 PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.
 
 ---

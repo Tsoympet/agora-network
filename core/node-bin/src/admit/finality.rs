@@ -254,11 +254,12 @@ mod tests {
         GenesisBuilder::default()
             .ignite(store.as_ref())
             .expect("ignite");
-        let mut boot = ChainBootConfig::default();
-        boot.pow = PowAlgorithm::RandomX;
-        boot.initial_bits = 0;
-        boot.daa.min_level = 0;
-        boot.chain_id = "agora-dev".into();
+        let boot = ChainBootConfig {
+            pow: PowAlgorithm::RandomX,
+            initial_bits: 0,
+            chain_id: "agora-dev".into(),
+            ..ChainBootConfig::default()
+        };
         let chain =
             ChainState::bootstrap_with(store.clone(), genesis, boot, StoragePolicy::default())
                 .unwrap();
