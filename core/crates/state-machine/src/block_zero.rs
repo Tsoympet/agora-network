@@ -438,6 +438,8 @@ pub fn load_verified_trident_block_zero(
 
 const BLOCK_ZERO_PREFIX: &[u8] = b"meta/trident_block_zero/";
 
+type BlockZeroEncodedValues = Vec<(&'static [u8], Vec<u8>)>;
+
 fn storage_err(message: impl Into<String>) -> StateError {
     StateError::Storage(message.into())
 }
@@ -471,7 +473,7 @@ fn ensure_block_zero_absent(store: &StateStore) -> Result<(), StateError> {
 
 fn encode_block_zero_values(
     record: &TridentBlockZeroStorageRecord,
-) -> Result<Vec<(&'static [u8], Vec<u8>)>, StateError> {
+) -> Result<BlockZeroEncodedValues, StateError> {
     record.verify().map_err(storage_err)?;
     let record_bytes = borsh::to_vec(record).map_err(|error| storage_err(error.to_string()))?;
     let commitment_bytes =
@@ -1148,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn tampering_fails_closed_before_any_storage_api_exists() {
+    fn tampering_fails_closed_before_storage_staging() {
         let artifact = synthetic_freeze_ready_artifact();
         let mut state = TridentBlockZeroState::from_artifact(&artifact).unwrap();
         state.supplies[1].unissued -= 1;
