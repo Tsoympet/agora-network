@@ -58,10 +58,7 @@ pub fn reconstruct_compact_block(
     if root != header.tx_root {
         return Err(ReconstructError::TxRootMismatch);
     }
-    Ok(Block {
-        header,
-        transactions,
-    })
+    Ok(Block::utxo(header, transactions))
 }
 
 /// Why a block body was requested — announce fetches may apply soft age filters;
@@ -436,6 +433,10 @@ mod tests {
         Block {
             header,
             transactions: vec![tx],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         }
     }
 

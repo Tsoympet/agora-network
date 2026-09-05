@@ -151,9 +151,7 @@ jobs:
         run: |
           export LIBCLANG_PATH="$(dirname "$(find /usr/lib -name 'libclang.so*' 2>/dev/null | head -1)")"
           cargo build -p agora-node -p agora-miner-sidecar -p agora-dns-seeder
-          # Architecture-base CI proves orchestration/recovery. Remove this flag
-          # when the stacked finality RPC lands on the target branch.
-          python3 scripts/trident_multinode_crash.py --allow-pre-trident --timeout 120
+          python3 scripts/trident_multinode_crash.py --timeout 120
 
       - name: Bound signing vectors (Rust + TypeScript)
         run: |

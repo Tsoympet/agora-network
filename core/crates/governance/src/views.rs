@@ -2,11 +2,11 @@
 
 use serde_json::{json, Value};
 
-use crate::chamber::primary_chamber;
 use crate::community::{CommunityBoard, ForumTopic};
 use crate::engine::GovernanceState;
 use crate::office::OfficeSeat;
 use crate::persist::CivicSnapshot;
+use crate::primary_chamber;
 use crate::proposal::Proposal;
 
 pub fn civic_overview_json(snap: &CivicSnapshot) -> Value {

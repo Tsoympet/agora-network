@@ -6,9 +6,12 @@ mod daa;
 mod dag;
 mod emission;
 mod error;
+mod evidence;
+mod finality;
 mod ghostdag;
 mod limits;
 mod pow;
+mod quorum;
 
 pub use daa::{
     median_time_past, next_difficulty, next_difficulty_weighted, work_from_bits, DaaConfig,
@@ -17,6 +20,11 @@ pub use daa::{
 pub use dag::Dag;
 pub use emission::EmissionSchedule;
 pub use error::ConsensusError;
+pub use evidence::{detect_double_checkpoint, EvidenceKind, SlashPolicy, ValidatorEvidence};
+pub use finality::{
+    assert_reorg_allowed, evaluate_checkpoint_state, note_pow_progress, note_signed_stake,
+    pow_work_met, refresh_certificate, FinalityPowPolicy,
+};
 pub use ghostdag::{Ghostdag, GhostdagConfig, GhostdagData, GhostdagSnapshot, OrderedBlock};
 pub use limits::{
     ConsensusLimits, COINBASE_MATURITY, MAX_BLOCK_BYTES, MAX_BLOCK_PARENTS, MAX_BLOCK_TRANSACTIONS,
@@ -26,3 +34,4 @@ pub use pow::{
     hasher_for, AcceptAllPow, KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher,
     PowVerifier, RandomXPowHasher, Sha256PowHasher, RANDOMX_EPOCH_BLOCKS, RANDOMX_EPOCH_MS,
 };
+pub use quorum::has_two_thirds_quorum;

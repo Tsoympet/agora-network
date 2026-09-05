@@ -47,6 +47,10 @@ impl NetworkTopics {
         format!("agora/{}/txs/{}", self.scope(), TOPIC_VERSION)
     }
 
+    pub fn attestations_name(&self) -> String {
+        format!("agora/{}/attestations/{}", self.scope(), TOPIC_VERSION)
+    }
+
     pub fn getblock_protocol_name(&self) -> String {
         format!("/agora/{}/getblock/{}", self.scope(), TOPIC_VERSION)
     }
@@ -61,6 +65,10 @@ impl NetworkTopics {
 
     pub fn transactions(&self) -> IdentTopic {
         IdentTopic::new(self.transactions_name())
+    }
+
+    pub fn attestations(&self) -> IdentTopic {
+        IdentTopic::new(self.attestations_name())
     }
 
     pub fn getblock_protocol(&self) -> StreamProtocol {
@@ -121,10 +129,12 @@ mod tests {
         let testnet = NetworkTopics::new("testnet");
         assert_eq!(dev.blocks_name(), "agora/dev/blocks/1");
         assert_eq!(dev.transactions_name(), "agora/dev/txs/1");
+        assert_eq!(dev.attestations_name(), "agora/dev/attestations/1");
         assert_eq!(dev.getblock_protocol_name(), "/agora/dev/getblock/1");
         assert_eq!(dev.getheaders_protocol_name(), "/agora/dev/getheaders/1");
         assert_eq!(testnet.blocks_name(), "agora/testnet/blocks/1");
         assert_ne!(dev.blocks_name(), testnet.blocks_name());
+        assert_ne!(dev.attestations_name(), testnet.attestations_name());
         assert_ne!(
             dev.getblock_protocol_name(),
             testnet.getblock_protocol_name()

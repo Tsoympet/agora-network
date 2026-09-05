@@ -41,6 +41,10 @@ async fn announce_triggers_getblock_and_full_serve() {
     let block = Block {
         header: header.clone(),
         transactions: vec![],
+        account_transfers: vec![],
+        stake_ops: vec![],
+        ovl_executions: vec![],
+        drc_payments: vec![],
     };
     let hash = block.id();
 

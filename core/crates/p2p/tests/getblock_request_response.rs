@@ -40,6 +40,10 @@ async fn direct_getblock_returns_full_block() {
     let block = Block {
         header: header.clone(),
         transactions: vec![],
+        account_transfers: vec![],
+        stake_ops: vec![],
+        ovl_executions: vec![],
+        drc_payments: vec![],
     };
     let hash = block.id();
 

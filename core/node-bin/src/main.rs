@@ -30,7 +30,10 @@ use agora_types::{Address, Block, Hash};
 use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
-use crate::backend::{admit_transaction, NodeBackend};
+use crate::backend::{
+    admit_account_transfer, admit_drc_payment, admit_ovl_execution, admit_stake_tx,
+    admit_transaction, NodeBackend,
+};
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::storage_policy::StoragePolicy;
 
@@ -982,6 +985,74 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "tx gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::AccountTransfer(tx) => {
+                        match admit_account_transfer(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, tx = %id.to_hex(), "account tx gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "account tx gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::StakeTx(tx) => {
+                        match admit_stake_tx(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, tx = %id.to_hex(), "stake tx gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "stake tx gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::OvlExecution(tx) => {
+                        match admit_ovl_execution(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, tx = %id.to_hex(), "OVL execution gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "OVL execution gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcPayment(tx) => {
+                        match admit_drc_payment(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, payment = %id.to_hex(), "DRC payment gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC payment gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::CheckpointAttestation(att) => {
+                        let block = att.body.block_hash;
+                        match chain.lock() {
+                            Ok(mut guard) => match guard.admit_attestation(att) {
+                                Ok(cert) => {
+                                    info!(
+                                        %peer,
+                                        %topic,
+                                        block = %block.to_hex(),
+                                        state = cert.state.as_str(),
+                                        "attestation gossip admitted"
+                                    );
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        %peer,
+                                        %topic,
+                                        block = %block.to_hex(),
+                                        error = %err,
+                                        "attestation gossip rejected"
+                                    );
+                                }
+                            },
+                            Err(_) => {
+                                warn!(%peer, %topic, "chain lock poisoned on attestation");
                             }
                         }
                     }

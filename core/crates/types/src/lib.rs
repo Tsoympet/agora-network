@@ -3,23 +3,40 @@
 //! Consensus-critical encoding uses `borsh`. Client bindings are generated with `ts-rs`.
 
 mod acceptance;
+mod account;
 mod amount;
 mod asset;
 mod block;
+mod execution;
+mod finality;
 mod hash;
 mod hrp;
+mod passport;
+mod payment;
+mod stake;
 mod transaction;
+mod treasury;
 
 pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
+pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
 pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{Block, BlockHeader};
+pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
+pub use finality::{
+    CheckpointAttestation, CheckpointBody, CheckpointState, FinalityCertificate,
+    CHECKPOINT_ATTESTATION_DOMAIN,
+};
 pub use hash::Hash;
 pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
 };
+pub use passport::{PassportAttestation, PassportCategory, PASSPORT_ATTESTATION_DOMAIN};
+pub use payment::{DrcPaymentOutboxEvent, DrcPaymentTx, DRC_PAYMENT_SIGNING_DOMAIN};
+pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
+pub use treasury::{TreasuryBalance, TreasuryId};
 
 #[cfg(test)]
 mod tests {
@@ -90,6 +107,10 @@ mod tests {
         let block = Block {
             header: header.clone(),
             transactions: vec![tx],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -99,8 +120,35 @@ mod tests {
 /// Regenerates TypeScript bindings into `bindings/` when tests run.
 #[cfg(test)]
 mod ts_export {
+    use std::{fs, path::Path};
+
     use super::*;
     use ts_rs::TS;
+
+    const NORMALIZED_BINDINGS: &[&str] = &[
+        "AccountTransfer.ts",
+        "Block.ts",
+        "CheckpointAttestation.ts",
+        "DrcPaymentTx.ts",
+        "OvlExecutionTx.ts",
+        "SignedStakeTx.ts",
+        "Transaction.ts",
+    ];
+
+    fn normalize_generated_bindings() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings");
+        for filename in NORMALIZED_BINDINGS {
+            let path = directory.join(filename);
+            let generated = fs::read_to_string(&path).expect("read generated TypeScript binding");
+            let mut normalized = generated
+                .lines()
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n");
+            normalized.push('\n');
+            fs::write(path, normalized).expect("normalize generated TypeScript binding");
+        }
+    }
 
     #[test]
     fn export_shared_types() {
@@ -116,7 +164,21 @@ mod ts_export {
         NativeAssetId::export_all().expect("export NativeAssetId");
         NativeAmount::export_all().expect("export NativeAmount");
         AssetTxOut::export_all().expect("export AssetTxOut");
+        TreasuryId::export_all().expect("export TreasuryId");
+        TreasuryBalance::export_all().expect("export TreasuryBalance");
         TransactionAcceptance::export_all().expect("export TransactionAcceptance");
         AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
+        AccountTransfer::export_all().expect("export AccountTransfer");
+        OvlExecutionTx::export_all().expect("export OvlExecutionTx");
+        DrcPaymentTx::export_all().expect("export DrcPaymentTx");
+        DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");
+        CheckpointState::export_all().expect("export CheckpointState");
+        CheckpointBody::export_all().expect("export CheckpointBody");
+        CheckpointAttestation::export_all().expect("export CheckpointAttestation");
+        FinalityCertificate::export_all().expect("export FinalityCertificate");
+        SignedStakeTx::export_all().expect("export SignedStakeTx");
+        PassportCategory::export_all().expect("export PassportCategory");
+        PassportAttestation::export_all().expect("export PassportAttestation");
+        normalize_generated_bindings();
     }
 }
