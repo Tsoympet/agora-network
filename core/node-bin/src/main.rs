@@ -32,7 +32,7 @@ use tracing::{info, warn};
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
     admit_account_transfer, admit_drc_payment, admit_ovl_execution, admit_stake_tx,
-    admit_transaction, NodeBackend,
+    admit_transaction, NodeBackend, NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::storage_policy::StoragePolicy;
@@ -196,49 +196,53 @@ fn missing_parents(chain: &Arc<Mutex<ChainState>>, block: &Block) -> Result<Vec<
 }
 
 /// Admit a block; on missing parents park it and fetch ancestors. On success, drain orphans.
+struct BlockRelayContext<'a> {
+    chain: &'a Arc<Mutex<ChainState>>,
+    mempool: &'a Arc<Mutex<Mempool>>,
+    store: &'a StateStore,
+    net: &'a NetworkHandle,
+}
+
 fn handle_incoming_block(
-    chain: &Arc<Mutex<ChainState>>,
-    mempool: &Arc<Mutex<Mempool>>,
-    store: &StateStore,
+    context: BlockRelayContext<'_>,
     orphans: &mut OrphanPool,
     pending: &mut PendingFetches,
-    net: &NetworkHandle,
     peer: PeerId,
     block: Block,
 ) {
     let block_id = block.id();
-    match admit_gossip_block(chain, mempool, block.clone()) {
+    match admit_gossip_block(context.chain, context.mempool, block.clone()) {
         Ok(id) => {
-            score_peer(net, peer, true);
+            score_peer(context.net, peer, true);
             info!(%peer, block = %id.to_hex(), "admitted block");
-            let _ = delete_orphan(store, &id);
-            let chain_ref = chain.clone();
-            let mempool_ref = mempool.clone();
+            let _ = delete_orphan(context.store, &id);
+            let chain_ref = context.chain.clone();
+            let mempool_ref = context.mempool.clone();
             let drained = drain_orphans_after(orphans, id, |child| {
                 match admit_gossip_block(&chain_ref, &mempool_ref, child.clone()) {
                     Ok(cid) => {
-                        let _ = delete_orphan(store, &cid);
+                        let _ = delete_orphan(context.store, &cid);
                         info!(block = %cid.to_hex(), "admitted orphan");
                         Ok(cid)
                     }
                     Err(AdmitError::MissingParent(_)) => {
                         match missing_parents(&chain_ref, &child) {
                             Ok(missing) if !missing.is_empty() => {
-                                let _ = store_orphan(store, &child);
+                                let _ = store_orphan(context.store, &child);
                                 Err(Some(missing))
                             }
                             Ok(_) => {
-                                let _ = delete_orphan(store, &child.id());
+                                let _ = delete_orphan(context.store, &child.id());
                                 Err(None)
                             }
                             Err(_) => {
-                                let _ = delete_orphan(store, &child.id());
+                                let _ = delete_orphan(context.store, &child.id());
                                 Err(None)
                             }
                         }
                     }
                     Err(err) => {
-                        let _ = delete_orphan(store, &child.id());
+                        let _ = delete_orphan(context.store, &child.id());
                         warn!(error = %err, "rejected orphan");
                         Err(None)
                     }
@@ -249,15 +253,15 @@ fn handle_incoming_block(
             }
         }
         Err(AdmitError::MissingParent(_)) => {
-            let missing =
-                missing_parents(chain, &block).unwrap_or_else(|_| block.header.parents.clone());
+            let missing = missing_parents(context.chain, &block)
+                .unwrap_or_else(|_| block.header.parents.clone());
             if missing.is_empty() {
-                score_peer(net, peer, false);
+                score_peer(context.net, peer, false);
                 warn!(%peer, block = %block_id.to_hex(), "missing parent race — rejecting");
                 return;
             }
             if orphans.park(block.clone(), &missing, Some(peer)) {
-                let _ = store_orphan(store, &block);
+                let _ = store_orphan(context.store, &block);
                 info!(
                     %peer,
                     block = %block_id.to_hex(),
@@ -273,7 +277,7 @@ fn handle_incoming_block(
                 );
             }
             for parent in missing {
-                request_block_if_missing(chain, pending, net, peer, parent);
+                request_block_if_missing(context.chain, pending, context.net, peer, parent);
             }
         }
         Err(AdmitError::Duplicate(_)) => {
@@ -281,7 +285,7 @@ fn handle_incoming_block(
             pending.complete(&block_id);
         }
         Err(err) => {
-            score_peer(net, peer, false);
+            score_peer(context.net, peer, false);
             warn!(%peer, error = %err, "rejected block");
         }
     }
@@ -594,13 +598,15 @@ async fn main() {
     let backend = NodeBackend::new(
         chain.clone(),
         store.clone(),
-        Some(handle.clone()),
-        allow_fund,
         mempool.clone(),
-        miner_address,
-        connected_peers.clone(),
-        chain_params.network.as_str(),
-        genesis_hash,
+        NodeBackendConfig {
+            net: Some(handle.clone()),
+            allow_fund,
+            miner_address,
+            connected_peers: connected_peers.clone(),
+            network: chain_params.network.as_str().into(),
+            genesis_hash,
+        },
     );
     let dispatcher = Arc::new(tokio::sync::Mutex::new(RpcDispatcher::new(backend)));
     let rate_limit_per_minute = std::env::var("AGORA_RPC_RATE_LIMIT")
@@ -808,12 +814,14 @@ async fn main() {
                             continue;
                         }
                         handle_incoming_block(
-                            &chain,
-                            &mempool,
-                            orphan_store.as_ref(),
+                            BlockRelayContext {
+                                chain: &chain,
+                                mempool: &mempool,
+                                store: orphan_store.as_ref(),
+                                net: &net,
+                            },
                             &mut orphans,
                             &mut pending,
-                            &net,
                             peer,
                             block,
                         );
@@ -850,12 +858,14 @@ async fn main() {
                             continue;
                         }
                         handle_incoming_block(
-                            &chain,
-                            &mempool,
-                            orphan_store.as_ref(),
+                            BlockRelayContext {
+                                chain: &chain,
+                                mempool: &mempool,
+                                store: orphan_store.as_ref(),
+                                net: &net,
+                            },
                             &mut orphans,
                             &mut pending,
-                            &net,
                             peer,
                             block,
                         );
@@ -886,12 +896,14 @@ async fn main() {
                                     continue;
                                 }
                                 handle_incoming_block(
-                                    &chain,
-                                    &mempool,
-                                    orphan_store.as_ref(),
+                                    BlockRelayContext {
+                                        chain: &chain,
+                                        mempool: &mempool,
+                                        store: orphan_store.as_ref(),
+                                        net: &net,
+                                    },
                                     &mut orphans,
                                     &mut pending,
-                                    &net,
                                     peer,
                                     block,
                                 );

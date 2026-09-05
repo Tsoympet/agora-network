@@ -9,6 +9,12 @@ Offline v3 draft/freeze-readiness commands are documented in
 [`../genesis/README.md`](../genesis/README.md). They cannot boot Trident, and
 their existence does not make Trident Public testnet ready.
 
+Do not point `AGORA_GENESIS_FILE` at the checked-in Trident draft. Node loading
+remains v2-only while Trident runtime policy and Block 0 identity wiring are
+incomplete. Genesis initialization now fails before writing when a requested
+identity mismatches and refuses malformed or state-bearing identity-less
+datadirs, but that storage prerequisite is not a Trident boot path.
+
 ## Quick start (Docker)
 
 ```bash

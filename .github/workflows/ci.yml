@@ -60,17 +60,8 @@ jobs:
           --all-targets --no-default-features
           -- -D warnings
 
-      - name: Clippy (rest of workspace — advisory)
-        run: >
-          cargo clippy --workspace
-          --exclude agora-node
-          --exclude agora-miner-sidecar
-          --exclude agora-consensus
-          --exclude agora-stratum-pool
-          --exclude agora-dns-seeder
-          --exclude agora-testnet-faucet
-          -- -D warnings
-        continue-on-error: true
+      - name: Clippy (full workspace — blocking)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   deny:
     name: Dependency audit + licenses (cargo-deny)
@@ -95,18 +86,22 @@ jobs:
 
       - name: Install shared light-client deps
         working-directory: apps/shared
-        run: npm ci
+        run: |
+          npm ci
+          npm audit --audit-level=high
 
       - name: Explorer build
         working-directory: apps/explorer
         run: |
           npm ci
+          npm audit --audit-level=high
           npm run build
 
       - name: Desktop frontend build
         working-directory: apps/desktop
         run: |
           npm ci
+          npm audit --audit-level=high
           npm run build
 
   node:
