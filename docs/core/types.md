@@ -45,7 +45,7 @@ Frozen v2 continues to encode `BlockHeader` directly as Borsh fields in this
 order: `version`, `parents`, `timestamp_ms`, `bits`, `nonce`, `tx_root`.
 `BlockHeader::hash`, durable header storage, `Block`, PoW, compact blocks, and
 P2P messages still consume those exact bytes. A locked test covers both the
-58-byte frozen testnet header and the 134-byte Block 0 body.
+58-byte frozen testnet header and the 134-byte frozen Block encoding.
 
 `TridentHeader` is a separate Rust-only type. Its canonical bytes start with the
 fixed 32-byte `agora-trident-header-envelope-v1` domain, followed by an explicit
