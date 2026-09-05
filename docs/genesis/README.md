@@ -74,6 +74,14 @@ validator keys, policy values, and final hashes; this tooling does not invent
 them. The verifier is **Scaffold** maturity and does not establish Public
 testnet readiness.
 
+The integrated runtime is still insufficient for a safe Trident node loader.
+Genesis storage now has an atomic prepared-batch commit and rejects malformed,
+orphaned, or mismatched datadir identity before fresh writes. However, runtime
+staking parameters and the PoW finality threshold still use compiled defaults,
+and the artifact consensus identity is not yet the Block 0 hash expected by DAG
+bootstrap. Until those policy and identity paths are unified, v3 remains
+offline-only and `AGORA_GENESIS_FILE` continues to accept v2 artifacts only.
+
 Populated `genesis_set` entries use:
 
 ```json

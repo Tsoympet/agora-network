@@ -129,6 +129,13 @@ Do **not** use “role-complete” as a substitute for the above.
 | 6 | Migration tooling + layer retirement docs |
 | 7 | Devnet / testnet preparation |
 
+Genesis-loader prerequisite status: the integrated runtime can now stage and
+commit genesis storage atomically, but a Trident v3 node loader remains blocked.
+Staking parameters and the PoW finality threshold still come from compiled
+defaults, and the v3 consensus identity is not yet the Block 0 identity used by
+DAG bootstrap. One future conversion must bind every artifact policy and state
+component before networking or RPC starts.
+
 PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.
 
 ---
