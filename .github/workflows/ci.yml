@@ -60,17 +60,8 @@ jobs:
           --all-targets --no-default-features
           -- -D warnings
 
-      - name: Clippy (rest of workspace — advisory)
-        run: >
-          cargo clippy --workspace
-          --exclude agora-node
-          --exclude agora-miner-sidecar
-          --exclude agora-consensus
-          --exclude agora-stratum-pool
-          --exclude agora-dns-seeder
-          --exclude agora-testnet-faucet
-          -- -D warnings
-        continue-on-error: true
+      - name: Clippy (full workspace — blocking)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   deny:
     name: Dependency audit + licenses (cargo-deny)
