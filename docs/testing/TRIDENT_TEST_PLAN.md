@@ -50,6 +50,10 @@ drop the `!` only after its recorded hashes and fingerprint recompute exactly.
 This gate does not load v3 into a node and does not establish Public testnet
 readiness.
 
+Block 0 store tests cover in-memory staging plus RocksDB reopen, tamper, and
+no-partial-write cases for the candidate Meta envelope. They must not write
+live balances or change v2 ignition.
+
 ## Integration
 
 Miner proposes; OVL+DRC attest; checkpoint finalizes; wallet sends three assets; OVL gas spend; DRC merchant payment; governance after timelock; grant milestone payment; multi-node convergence.
