@@ -90,14 +90,14 @@ impl AttestationIndex {
     pub fn insert_ovl(&mut self, addr: Address) {
         if !self.ovl_signers.contains(&addr) {
             self.ovl_signers.push(addr);
-            self.ovl_signers.sort_by(|a, b| a.0.cmp(&b.0));
+            self.ovl_signers.sort_by_key(|address| address.0);
         }
     }
 
     pub fn insert_drc(&mut self, addr: Address) {
         if !self.drc_signers.contains(&addr) {
             self.drc_signers.push(addr);
-            self.drc_signers.sort_by(|a, b| a.0.cmp(&b.0));
+            self.drc_signers.sort_by_key(|address| address.0);
         }
     }
 
@@ -157,8 +157,10 @@ pub fn load_last_attestation(
     validator: &Address,
     epoch: u64,
 ) -> Result<Option<CheckpointAttestation>, StateError> {
-    let Some(bytes) =
-        store.get_cf(ColumnFamily::Meta, &last_attestation_key(set, validator, epoch))?
+    let Some(bytes) = store.get_cf(
+        ColumnFamily::Meta,
+        &last_attestation_key(set, validator, epoch),
+    )?
     else {
         return Ok(None);
     };

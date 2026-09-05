@@ -49,9 +49,11 @@ impl ChainState {
             }
         }
         let new_score = self.ghostdag.blue_score(&new_virtual).unwrap_or(0);
-        assert_reorg_allowed(Some(finalized), new_score).map_err(|_| AdmitError::FinalityReorg {
-            finalized,
-            abandoned: new_score,
+        assert_reorg_allowed(Some(finalized), new_score).map_err(|_| {
+            AdmitError::FinalityReorg {
+                finalized,
+                abandoned: new_score,
+            }
         })?;
         Ok(())
     }
@@ -115,8 +117,13 @@ impl ChainState {
         {
             if let Some(ev) = detect_double_checkpoint(&prev, &att) {
                 let mut batch = WriteBatch::new();
-                apply_evidence(self.store.as_ref(), &mut batch, &ev, &SlashPolicy::default())
-                    .map_err(|e| AdmitError::InvalidAttestation(e.to_string()))?;
+                apply_evidence(
+                    self.store.as_ref(),
+                    &mut batch,
+                    &ev,
+                    &SlashPolicy::default(),
+                )
+                .map_err(|e| AdmitError::InvalidAttestation(e.to_string()))?;
                 put_last_attestation_into(&mut batch, &att)
                     .map_err(|e| AdmitError::Storage(e.to_string()))?;
                 self.store
@@ -233,9 +240,7 @@ mod tests {
     use std::sync::Arc;
 
     use agora_consensus::PowAlgorithm;
-    use agora_state_machine::{
-        put_certificate_into, GenesisBuilder, StateStore, WriteBatch,
-    };
+    use agora_state_machine::{put_certificate_into, GenesisBuilder, StateStore, WriteBatch};
     use agora_types::{CheckpointState, FinalityCertificate, Hash};
 
     use crate::admit::{ChainBootConfig, ChainState};
@@ -249,11 +254,12 @@ mod tests {
         GenesisBuilder::default()
             .ignite(store.as_ref())
             .expect("ignite");
-        let mut boot = ChainBootConfig::default();
-        boot.pow = PowAlgorithm::RandomX;
-        boot.initial_bits = 0;
-        boot.daa.min_level = 0;
-        boot.chain_id = "agora-dev".into();
+        let boot = ChainBootConfig {
+            pow: PowAlgorithm::RandomX,
+            initial_bits: 0,
+            chain_id: "agora-dev".into(),
+            ..ChainBootConfig::default()
+        };
         let chain =
             ChainState::bootstrap_with(store.clone(), genesis, boot, StoragePolicy::default())
                 .unwrap();

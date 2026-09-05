@@ -7,31 +7,31 @@ import type { StakeOpKind } from "./StakeOpKind";
 /**
  * Network-bound signed stake transaction.
  */
-export type SignedStakeTx = { version: number, asset: NativeAssetId, kind: StakeOpKind, 
+export type SignedStakeTx = { version: number, asset: NativeAssetId, kind: StakeOpKind,
 /**
  * Signer / liquid debit account (must match pubkey).
  */
-actor: Address, 
+actor: Address,
 /**
  * Bond: operator (= actor). Delegate: target validator. Unbond/Withdraw: operator/owner.
  */
-validator: Address, 
+validator: Address,
 /**
  * Bond / Delegate amount; ignored for UnbondSelf / Withdraw (full self-bond / matured).
  */
-amount: bigint, 
+amount: bigint,
 /**
  * Bond only: 33-byte compressed consensus pubkey.
  */
-consensus_pubkey: Array<number>, 
+consensus_pubkey: Array<number>,
 /**
  * Bond only: withdrawal address (receives rewards / unbond credits).
  */
-withdrawal: Address, 
+withdrawal: Address,
 /**
  * Bond only: commission in basis points.
  */
-commission_bps: number, metadata_hash: Hash, 
+commission_bps: number, metadata_hash: Hash,
 /**
  * Actor account nonce (must match current on-chain nonce).
  */

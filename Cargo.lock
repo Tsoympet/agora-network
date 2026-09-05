@@ -144,6 +144,7 @@ dependencies = [
  "agora-ovolos-rollup",
  "agora-types",
  "borsh",
+ "hex",
  "serde",
  "serde_json",
  "thiserror 2.0.19",

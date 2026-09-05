@@ -5,9 +5,16 @@
 //! OVL (L2 sha256), DRC (L3 sha256). OVL/DRC are not L1 UTXO asset ids.
 
 mod error;
+mod migration;
 mod persist;
 mod runtime;
 
 pub use error::LayersError;
+pub use migration::{
+    export_migration_snapshot, load_and_verify_migration_snapshot, verify_migration_snapshot,
+    MigrationError, MigrationSnapshot,
+};
 pub use persist::LayersCheckpoint;
-pub use runtime::{LayerInfo, LayersRuntime, LayersRuntimeConfig};
+pub use runtime::{
+    DrcPathPayment, LayerInfo, LayersRuntime, LayersRuntimeConfig, LockAndMintRequest,
+};

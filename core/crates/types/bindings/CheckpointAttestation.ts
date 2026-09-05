@@ -6,7 +6,7 @@ import type { NativeAssetId } from "./NativeAssetId";
 /**
  * One validator's attestation over a checkpoint body.
  */
-export type CheckpointAttestation = { body: CheckpointBody, 
+export type CheckpointAttestation = { body: CheckpointBody,
 /**
  * Which validator set this signature belongs to.
  */

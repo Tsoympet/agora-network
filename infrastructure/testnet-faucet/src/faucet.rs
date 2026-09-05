@@ -37,7 +37,7 @@ impl Default for FaucetConfig {
 #[derive(Debug)]
 pub enum FundingTarget {
     /// Unit-test / offline ledger (not spendable on a live node).
-    Memory(InMemoryBackend),
+    Memory(Box<InMemoryBackend>),
     /// Live `agora-node` via `agora_fundAddress` (lab mint — not for public testnet).
     Node { rpc_url: String },
     /// Live node via signed spends from a treasury UTXO (public-testnet path).
@@ -57,7 +57,7 @@ impl FaucetService {
     pub fn memory(config: FaucetConfig) -> Self {
         Self {
             config,
-            target: FundingTarget::Memory(InMemoryBackend::new()),
+            target: FundingTarget::Memory(Box::new(InMemoryBackend::new())),
             last_drip: HashMap::new(),
             total_dispensed: Amount::ZERO,
         }
@@ -99,7 +99,7 @@ impl FaucetService {
     pub fn with_backend(config: FaucetConfig, backend: InMemoryBackend) -> Self {
         Self {
             config,
-            target: FundingTarget::Memory(backend),
+            target: FundingTarget::Memory(Box::new(backend)),
             last_drip: HashMap::new(),
             total_dispensed: Amount::ZERO,
         }

@@ -335,6 +335,18 @@ impl NetworkNode {
         let multiaddr: Multiaddr = addr
             .parse()
             .map_err(|e: libp2p::multiaddr::Error| P2pError::InvalidMultiaddr(e.to_string()))?;
+        let target = multiaddr.iter().find_map(|protocol| match protocol {
+            libp2p::multiaddr::Protocol::P2p(peer) => Some(peer),
+            _ => None,
+        });
+        if target == Some(*self.swarm.local_peer_id()) {
+            debug!(%multiaddr, "ignoring self dial");
+            return Ok(());
+        }
+        if target.is_some_and(|peer| self.swarm.is_connected(&peer)) {
+            debug!(%multiaddr, "ignoring dial to connected peer");
+            return Ok(());
+        }
         self.swarm
             .dial(multiaddr)
             .map_err(|e| P2pError::Network(e.to_string()))?;

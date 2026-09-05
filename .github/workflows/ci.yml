@@ -60,17 +60,8 @@ jobs:
           --all-targets --no-default-features
           -- -D warnings
 
-      - name: Clippy (rest of workspace — advisory)
-        run: >
-          cargo clippy --workspace
-          --exclude agora-node
-          --exclude agora-miner-sidecar
-          --exclude agora-consensus
-          --exclude agora-stratum-pool
-          --exclude agora-dns-seeder
-          --exclude agora-testnet-faucet
-          -- -D warnings
-        continue-on-error: true
+      - name: Clippy (full workspace — blocking)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   deny:
     name: Dependency audit + licenses (cargo-deny)
@@ -95,18 +86,22 @@ jobs:
 
       - name: Install shared light-client deps
         working-directory: apps/shared
-        run: npm ci
+        run: |
+          npm ci
+          npm audit --audit-level=high
 
       - name: Explorer build
         working-directory: apps/explorer
         run: |
           npm ci
+          npm audit --audit-level=high
           npm run build
 
       - name: Desktop frontend build
         working-directory: apps/desktop
         run: |
           npm ci
+          npm audit --audit-level=high
           npm run build
 
   node:
@@ -140,6 +135,18 @@ jobs:
         run: |
           export LIBCLANG_PATH="$(dirname "$(find /usr/lib -name 'libclang.so*' 2>/dev/null | head -1)")"
           cargo test -p agora-node --bin agora-node admit::
+
+      - name: Persistence and partition recovery
+        run: |
+          export LIBCLANG_PATH="$(dirname "$(find /usr/lib -name 'libclang.so*' 2>/dev/null | head -1)")"
+          cargo test -p agora-state-machine --features rocksdb rocksdb_persists_across_reopen
+          cargo test -p agora-consensus --test ghostdag_partition_fuzz
+
+      - name: Multi-node crash and restart smoke
+        run: |
+          export LIBCLANG_PATH="$(dirname "$(find /usr/lib -name 'libclang.so*' 2>/dev/null | head -1)")"
+          cargo build -p agora-node -p agora-miner-sidecar -p agora-dns-seeder
+          python3 scripts/trident_multinode_crash.py --timeout 120
 
       - name: Bound signing vectors (Rust + TypeScript)
         run: |

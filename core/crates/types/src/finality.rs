@@ -14,16 +14,7 @@ pub const CHECKPOINT_ATTESTATION_DOMAIN: &[u8] = b"agora-trident-checkpoint-v1";
 
 /// Lifecycle of a dual-PoS / PoW checkpoint.
 #[derive(
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Debug,
-    BorshSerialize,
-    BorshDeserialize,
-    Serialize,
-    Deserialize,
-    TS,
+    Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub enum CheckpointState {
@@ -59,15 +50,7 @@ impl CheckpointState {
 
 /// Consensus-relevant checkpoint identity (domain-separated signing body).
 #[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    Debug,
-    BorshSerialize,
-    BorshDeserialize,
-    Serialize,
-    Deserialize,
-    TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct CheckpointBody {
@@ -94,17 +77,8 @@ impl CheckpointBody {
 
 /// One validator's attestation over a checkpoint body.
 #[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    Debug,
-    BorshSerialize,
-    BorshDeserialize,
-    Serialize,
-    Deserialize,
-    TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
-#[ts(export)]
 pub struct CheckpointAttestation {
     pub body: CheckpointBody,
     /// Which validator set this signature belongs to.
@@ -116,15 +90,7 @@ pub struct CheckpointAttestation {
 
 /// Aggregated certificate (may be partial until both quorums + PoW).
 #[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    Debug,
-    BorshSerialize,
-    BorshDeserialize,
-    Serialize,
-    Deserialize,
-    TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub struct FinalityCertificate {

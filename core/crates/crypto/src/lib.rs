@@ -19,14 +19,14 @@ mod transaction;
 pub use account::{
     account_signer_address, sign_account_transfer_bound, verify_account_transfer_bound,
 };
-pub use attestation::{sign_checkpoint_attestation, verify_checkpoint_attestation};
 pub use address::address_from_pubkey;
+pub use attestation::{sign_checkpoint_attestation, verify_checkpoint_attestation};
 pub use bip44::{
     derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,
 };
 pub use error::CryptoError;
 pub use execution::{sign_ovl_execution_bound, verify_ovl_execution_bound};
-pub use keys::{KeyPair, PublicKeyBytes, SignatureBytes};
+pub use keys::{parse_compressed_public_key, KeyPair, PublicKeyBytes, SignatureBytes};
 pub use mnemonic::{generate_mnemonic, seed_fingerprint, seed_from_mnemonic};
 pub use passport::{sign_passport_attestation_bound, verify_passport_attestation_bound};
 pub use payment::{sign_drc_payment_bound, verify_drc_payment_bound};

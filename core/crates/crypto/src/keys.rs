@@ -9,6 +9,18 @@ use agora_types::Address;
 pub type PublicKeyBytes = [u8; 33];
 pub type SignatureBytes = [u8; 64];
 
+/// Validate and canonicalize a compressed secp256k1 public key.
+pub fn parse_compressed_public_key(bytes: &[u8]) -> Result<PublicKeyBytes, CryptoError> {
+    let public = PublicKey::from_slice(bytes).map_err(|e| CryptoError::Secp256k1(e.to_string()))?;
+    let compressed = public.serialize();
+    if bytes != compressed {
+        return Err(CryptoError::Secp256k1(
+            "public key must use compressed secp256k1 encoding".into(),
+        ));
+    }
+    Ok(compressed)
+}
+
 /// secp256k1 keypair used for transaction authorization.
 pub struct KeyPair {
     secret: SecretKey,
@@ -80,5 +92,18 @@ mod tests {
         let sig = kp.sign(msg).expect("sign");
         KeyPair::verify(&kp.public_key_bytes(), msg, &sig).expect("verify");
         assert_ne!(kp.address(), Address::ZERO);
+    }
+
+    #[test]
+    fn compressed_public_key_parser_rejects_uncompressed_encoding() {
+        let keypair = KeyPair::from_secret_bytes(&[7; 32]).expect("keypair");
+        let compressed = keypair.public_key_bytes();
+        assert_eq!(
+            parse_compressed_public_key(&compressed).unwrap(),
+            compressed
+        );
+
+        let public = PublicKey::from_slice(&compressed).unwrap();
+        assert!(parse_compressed_public_key(&public.serialize_uncompressed()).is_err());
     }
 }

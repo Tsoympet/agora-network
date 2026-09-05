@@ -14,16 +14,7 @@ pub const STAKE_TX_SIGNING_DOMAIN: &[u8] = b"agora-trident-stake-tx-v1";
 
 /// Kind of staking mutation.
 #[derive(
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Debug,
-    BorshSerialize,
-    BorshDeserialize,
-    Serialize,
-    Deserialize,
-    TS,
+    Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub enum StakeOpKind {
@@ -46,17 +37,8 @@ impl StakeOpKind {
 
 /// Network-bound signed stake transaction.
 #[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    Debug,
-    BorshSerialize,
-    BorshDeserialize,
-    Serialize,
-    Deserialize,
-    TS,
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
-#[ts(export)]
 pub struct SignedStakeTx {
     pub version: u32,
     pub asset: NativeAssetId,

@@ -13,7 +13,6 @@ pub const DRC_PAYMENT_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v1";
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
-#[ts(export)]
 pub struct DrcPaymentTx {
     pub version: u32,
     pub from: Address,

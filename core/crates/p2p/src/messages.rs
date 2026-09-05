@@ -1,6 +1,6 @@
 use agora_types::{
-    AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcPaymentTx, Hash,
-    OvlExecutionTx, SignedStakeTx, Transaction,
+    AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcPaymentTx, Hash, OvlExecutionTx,
+    SignedStakeTx, Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 

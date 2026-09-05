@@ -41,7 +41,7 @@ pub async fn drip_from_treasury(
     let mut selected = Vec::new();
     let mut total_in = 0u64;
     let mut sorted = utxos;
-    sorted.sort_by(|a, b| b.value.cmp(&a.value));
+    sorted.sort_by_key(|utxo| std::cmp::Reverse(utxo.value));
     for u in sorted {
         total_in = total_in.saturating_add(u.value);
         selected.push(u);
@@ -100,14 +100,13 @@ async fn node_signing_identity(rpc_url: &str) -> Result<(String, Hash), String> 
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .or_else(|| {
-            value
-                .get("network")
-                .and_then(|v| v.as_str())
-                .map(|net| match net.to_ascii_lowercase().as_str() {
+            value.get("network").and_then(|v| v.as_str()).map(|net| {
+                match net.to_ascii_lowercase().as_str() {
                     "mainnet" => "agora-mainnet-1".into(),
                     "testnet" => "agora-testnet-1".into(),
                     _ => "agora-dev".into(),
-                })
+                }
+            })
         })
         .ok_or_else(|| "getNodeInfo missing chain_id/network".to_string())?;
     let genesis_hex = value

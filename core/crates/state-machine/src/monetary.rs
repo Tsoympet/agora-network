@@ -20,9 +20,7 @@ pub const DRC_WORKING_RESERVE_BASE: u64 = DRC_MAX_SUPPLY_BASE / 10; // 600M
 pub const WORKING_EPOCH_RESERVE_DRIP: u64 = 1_000_000_000;
 
 /// Emission / distribution schedule kind for one native asset.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EmissionKind {
     /// Bitcoin-shaped PoW subsidy (TLT only).
@@ -35,9 +33,7 @@ pub enum EmissionKind {
 }
 
 /// Protocol monetary policy for one native asset.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct AssetMonetaryPolicy {
     pub asset: NativeAssetId,
     pub max_supply: u64,
@@ -139,9 +135,7 @@ impl AssetMonetaryPolicy {
 }
 
 /// Bundle of three native policies committed in genesis v3.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct TridentMonetaryPolicy {
     pub tlt: AssetMonetaryPolicy,
     pub ovl: AssetMonetaryPolicy,

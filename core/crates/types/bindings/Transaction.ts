@@ -5,11 +5,11 @@ import type { TxOut } from "./TxOut";
 /**
  * Transfer transaction used across consensus, mempool, and RPC.
  */
-export type Transaction = { version: number, inputs: Array<TxIn>, outputs: Array<TxOut>, nonce: bigint, 
+export type Transaction = { version: number, inputs: Array<TxIn>, outputs: Array<TxOut>, nonce: bigint,
 /**
  * Compressed secp256k1 public key (33 bytes) once signed; empty when unsigned.
  */
-public_key: Array<number>, 
+public_key: Array<number>,
 /**
  * Compact ECDSA signature (64 bytes) once signed; empty when unsigned.
  */

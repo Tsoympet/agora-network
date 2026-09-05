@@ -149,10 +149,7 @@ mod tests {
     fn scopes_topics_by_fingerprint() {
         let a = NetworkTopics::with_fingerprint("testnet", "aabbccddeeff0011");
         let b = NetworkTopics::with_fingerprint("testnet", "1122334455667788");
-        assert_eq!(
-            a.blocks_name(),
-            "agora/testnet/aabbccddeeff0011/blocks/1"
-        );
+        assert_eq!(a.blocks_name(), "agora/testnet/aabbccddeeff0011/blocks/1");
         assert_ne!(a.blocks_name(), b.blocks_name());
         assert_ne!(a.getblock_protocol_name(), b.getblock_protocol_name());
     }

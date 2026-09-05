@@ -13,7 +13,6 @@ pub const OVL_EXECUTION_SIGNING_DOMAIN: &[u8] = b"agora-trident-ovl-execution-v1
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
-#[ts(export)]
 pub struct OvlExecutionTx {
     pub version: u32,
     pub from: Address,

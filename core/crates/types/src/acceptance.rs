@@ -10,16 +10,7 @@ use ts_rs::TS;
 
 /// Deterministic outcome of evaluating a transaction against the acceptance layer.
 #[derive(
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Debug,
-    BorshSerialize,
-    BorshDeserialize,
-    Serialize,
-    Deserialize,
-    TS,
+    Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
 #[ts(export)]
 pub enum TransactionAcceptance {

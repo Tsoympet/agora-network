@@ -33,6 +33,18 @@ impl Default for RollupConfig {
     }
 }
 
+/// Durable rollup fields restored atomically from the layers checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RollupCheckpoint {
+    pub head_state_root: Hash,
+    pub next_sequence: u64,
+    pub tip_hash: Hash,
+    pub tip_height: u64,
+    pub ovl_balances: Vec<(Address, u64)>,
+    pub ovl_minted: u64,
+    pub sequencer_bonds: Vec<(Address, u64)>,
+}
+
 #[derive(Debug, Clone)]
 struct TrackedBatch {
     batch: Batch,
@@ -170,22 +182,14 @@ impl<E: EvmExecutor> OvolosRollup<E> {
     }
 
     /// Restore rollup tip / sequence / ledger / sequencer bonds from a durable checkpoint.
-    pub fn restore_checkpoint(
-        &mut self,
-        head_state_root: Hash,
-        next_sequence: u64,
-        tip_hash: Hash,
-        tip_height: u64,
-        ovl_balances: Vec<(Address, u64)>,
-        ovl_minted: u64,
-        sequencer_bonds: Vec<(Address, u64)>,
-    ) {
-        self.head_state_root = head_state_root;
-        self.next_sequence = next_sequence;
-        self.tip_hash = tip_hash;
-        self.tip_height = tip_height;
-        self.ovl.restore_balances(ovl_balances, ovl_minted);
-        self.sequencers.restore_bonds(sequencer_bonds);
+    pub fn restore_checkpoint(&mut self, checkpoint: RollupCheckpoint) {
+        self.head_state_root = checkpoint.head_state_root;
+        self.next_sequence = checkpoint.next_sequence;
+        self.tip_hash = checkpoint.tip_hash;
+        self.tip_height = checkpoint.tip_height;
+        self.ovl
+            .restore_balances(checkpoint.ovl_balances, checkpoint.ovl_minted);
+        self.sequencers.restore_bonds(checkpoint.sequencer_bonds);
     }
 
     pub fn pow_bits(&self) -> u32 {

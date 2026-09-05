@@ -5,7 +5,7 @@ import type { Amount } from "./Amount";
 /**
  * Signed account-based OVL value transfer or execution request.
  */
-export type OvlExecutionTx = { version: number, from: Address, 
+export type OvlExecutionTx = { version: number, from: Address,
 /**
  * `Address::ZERO` is reserved for a future contract-create operation.
  */
