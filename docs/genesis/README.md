@@ -83,17 +83,22 @@ Genesis storage has an atomic prepared-batch commit, and a freeze-ready
 artifact can now produce a complete typed policy candidate without compiled
 policy defaults. It can also prepare a versioned Block 0 commitment (manifest
 v2, including chain ID and network fingerprint) and a lossless Meta envelope
-that is overlay-verified before a future loader may append it. That candidate
-is deliberately not accepted by the node: `genesis_hash` still names the full
-artifact identity, while DAG bootstrap requires the hash of a concrete
-`Block`. The current `BlockHeader` does not commit a genesis state root, and
-`GenesisBuilder` still cannot construct live allocations, treasury balances,
-validator records/snapshots, governance state, or vesting locks from the
-artifact. Remaining blockers are version-gated header encoding, lossless
-UTXO/account/treasury/vesting/validator/finality mappings appended to the
-already-verified Block 0 batch, and datadir identity binding before P2P or
-RPC. Until those exist together, v3 remains offline-only and
-`AGORA_GENESIS_FILE` continues to accept v2 artifacts only.
+that is overlay-verified before a future loader may append it. A separate,
+domain- and version-gated `TridentHeader` can now be derived offline from the
+verified commitment plus caller-supplied timestamp, difficulty, nonce, and
+concrete-body root. It commits the canonical state root and all required
+artifact, policy, Block 0, protocol, and state-transition identities. The
+legacy `BlockHeader`, `Block`, hashes, P2P bytes, and node boot remain unchanged.
+
+That candidate is deliberately not accepted by the node: `genesis_hash` still
+names the full artifact identity, while DAG bootstrap requires the hash of a
+concrete runtime block/header. Remaining blockers are the concrete Trident
+Block 0 body and body-root rule; lossless atomic
+UTXO/account/treasury/vesting/validator/finality mappings whose recomputed live
+state root equals the offline header; complete ceremony-selected validator
+records; datadir binding of every identity; and explicit consensus, PoW,
+storage, P2P, and RPC activation gates. Until those exist together, v3 remains
+offline-only and `AGORA_GENESIS_FILE` continues to accept v2 artifacts only.
 
 Populated `genesis_set` entries use:
 

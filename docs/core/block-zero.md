@@ -44,17 +44,30 @@ inconsistent, duplicate, or mismatched records are rejected before any durable
 write. The current `GenesisBuilder` ignition path never writes these keys and
 does not consume the checked reader.
 
+## Offline header bridge
+
+`TridentBlockZeroCommitment::to_offline_trident_header` now converts a
+self-consistent commitment into the separate versioned `TridentHeader` type.
+The conversion fixes no ceremony values: callers must provide timestamp,
+difficulty, nonce, and a nonzero concrete-body root. It repeats and verifies
+the Block 0 commitment hash, artifact identity, consensus-policy hash, Trident
+protocol/state-transition versions, and state root. Block 0 parents must be
+empty. This type has no conversion to the current `Block`, no storage key, and
+no loader, mining, consensus, RPC, or P2P consumer.
+
 ## Why the loader remains disabled
 
 The abstraction still does not construct a [`agora_types::Block`], materialize
 live UTXO/account balances, or run inside `agora-node`. A partial boot path
 would be unsafe because:
 
-1. `BlockHeader` commits only `tx_root`; adding a field with derived Borsh would
-   change the frozen v2 Block 0 hash unless serialization is explicitly
-   version-gated.
-2. TLT artifact allocations still need a specified Block 0 transaction/UTXO
-   mapping, while OVL/DRC allocations need an atomic account mapping.
+1. The new header encoding is offline-only. A concrete Trident body format,
+   body-root derivation, PoW hash rule, and explicit runtime protocol gate still
+   need specification and wiring; the frozen v2 `BlockHeader`/`Block` path
+   cannot be repurposed.
+2. TLT artifact allocations still need a lossless Block 0 transaction/UTXO
+   mapping, while OVL/DRC allocations need an atomic account mapping whose
+   composed root exactly equals the header state root.
 3. Runtime treasury records do not preserve artifact treasury controls, and the
    governance store currently initializes compiled defaults rather than the
    artifact-selected constitution and emergency-policy hashes.
@@ -70,7 +83,10 @@ would be unsafe because:
    network fingerprint before P2P identity generation or any networking/RPC
    startup.
 
-The next safe change is a version-gated header encoding plus lossless live-state
-mappings that can be appended to the already-verified Block 0 batch. Commit only
-when the recomputed root equals the Block 0 header commitment. Until all steps
-exist together, `AGORA_GENESIS_FILE` remains the frozen v2 loader only.
+The next bounded prerequisite is the lossless live-state mapping and atomic
+root check: define the concrete Block 0 body/UTXOs, account and treasury
+records, vesting locks, complete validator/finality records, and append them to
+the already-verified batch only when the live composed root equals the offline
+header. Datadir identity and runtime protocol gating remain separate blockers
+after that. Until all steps exist together, `AGORA_GENESIS_FILE` remains the
+frozen v2 loader only.

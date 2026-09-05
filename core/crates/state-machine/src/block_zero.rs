@@ -10,7 +10,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use agora_crypto::{address_from_pubkey, parse_compressed_public_key};
-use agora_types::{Address, CheckpointState, Hash, NativeAssetId, TreasuryId};
+use agora_types::{
+    Address, CheckpointState, Hash, NativeAssetId, TreasuryId, TridentHeader, TridentHeaderIdentity,
+};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::columns::{meta_keys, ColumnFamily};
@@ -336,6 +338,7 @@ impl TridentBlockZeroState {
         {
             return Err("Block 0 initial finality state is inconsistent".into());
         }
+        self.commitment().verify()?;
         Ok(())
     }
 
@@ -372,6 +375,92 @@ impl TridentBlockZeroCommitment {
     pub fn hash(&self) -> Hash {
         Hash::hash_borsh(&(TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN, self))
     }
+
+    /// Verify the self-contained identities before deriving an offline header.
+    ///
+    /// Equality to a concrete manifest is additionally checked by
+    /// [`TridentBlockZeroStorageRecord::verify`].
+    pub fn verify(&self) -> Result<(), String> {
+        if self.version != TRIDENT_BLOCK_ZERO_STATE_VERSION {
+            return Err("unsupported Trident Block 0 commitment version".into());
+        }
+        if self.chain_id.trim().is_empty() {
+            return Err("Block 0 commitment chain ID must be nonempty".into());
+        }
+        if self.network_fingerprint == Hash::ZERO
+            || self.artifact_identity == Hash::ZERO
+            || self.consensus_policy_hash == Hash::ZERO
+            || self.state_root == Hash::ZERO
+        {
+            return Err("Block 0 commitment identities and state root must be nonzero".into());
+        }
+        if self.network_fingerprint
+            != expected_network_fingerprint(
+                &self.chain_id,
+                &self.artifact_identity,
+                &self.consensus_policy_hash,
+            )
+        {
+            return Err("Block 0 commitment network fingerprint is inconsistent".into());
+        }
+        Ok(())
+    }
+
+    /// Identity fields a Trident header must repeat for this Block 0.
+    pub fn trident_header_identity(&self) -> Result<TridentHeaderIdentity, String> {
+        self.verify()?;
+        let identity = TridentHeaderIdentity {
+            protocol_version: TRIDENT_PROTOCOL_VERSION,
+            state_transition_version: TRIDENT_STATE_TRANSITION_VERSION.into(),
+            block_zero_commitment: self.hash(),
+            artifact_identity: self.artifact_identity,
+            consensus_policy_hash: self.consensus_policy_hash,
+        };
+        identity.validate().map_err(|error| error.to_string())?;
+        Ok(identity)
+    }
+
+    /// Build an offline Block 0 header without defaulting ceremony-owned fields.
+    ///
+    /// The caller must supply timestamp, difficulty, nonce, and a nonzero root
+    /// for the separately specified concrete Block 0 body.
+    pub fn to_offline_trident_header(
+        &self,
+        timestamp_ms: u64,
+        bits: u32,
+        nonce: u64,
+        body_root: Hash,
+    ) -> Result<TridentHeader, String> {
+        TridentHeader::new(
+            self.trident_header_identity()?,
+            Vec::new(),
+            timestamp_ms,
+            bits,
+            nonce,
+            body_root,
+            self.state_root,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    /// Recheck a decoded offline Block 0 header against this commitment.
+    pub fn verify_offline_trident_header(
+        &self,
+        header: &TridentHeader,
+        expected_body_root: Hash,
+    ) -> Result<(), String> {
+        self.verify()?;
+        if !header.parents.is_empty() {
+            return Err("Trident Block 0 header must not have parents".into());
+        }
+        header
+            .verify_against(
+                &self.trident_header_identity()?,
+                expected_body_root,
+                self.state_root,
+            )
+            .map_err(|error| error.to_string())
+    }
 }
 
 impl TridentBlockZeroStorageRecord {
@@ -399,6 +488,7 @@ impl TridentBlockZeroStorageRecord {
             return Err("unsupported Trident Block 0 storage version".into());
         }
         self.manifest.verify()?;
+        self.commitment.verify()?;
         let expected_payload = self.manifest.verified_borsh_payload()?;
         if self.canonical_payload != expected_payload {
             return Err("Block 0 canonical payload does not match the manifest".into());
@@ -1129,6 +1219,71 @@ mod tests {
         assert_eq!(state.finality.state, CheckpointState::Proposed);
         assert!(!state.verified_borsh_payload().unwrap().is_empty());
         assert_eq!(state.commitment().hash(), state.commitment().hash());
+        state.commitment().verify().unwrap();
+    }
+
+    #[test]
+    fn verified_commitment_converts_to_an_offline_versioned_header() {
+        let state =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+        let commitment = state.commitment();
+        let body_root = Hash([0x33; 32]);
+        let header = commitment
+            .to_offline_trident_header(1, 0, 7, body_root)
+            .unwrap();
+
+        assert!(header.parents.is_empty());
+        assert_eq!(header.state_root, commitment.state_root);
+        assert_eq!(header.identity.block_zero_commitment, commitment.hash());
+        commitment
+            .verify_offline_trident_header(&header, body_root)
+            .unwrap();
+
+        let bytes = header.canonical_bytes().unwrap();
+        let decoded = TridentHeader::from_canonical_bytes(&bytes).unwrap();
+        assert_eq!(decoded, header);
+        commitment
+            .verify_offline_trident_header(&decoded, body_root)
+            .unwrap();
+    }
+
+    #[test]
+    fn block_zero_header_rejects_zero_and_mismatched_commitments() {
+        let state =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+        let commitment = state.commitment();
+        let body_root = Hash([0x44; 32]);
+        let header = commitment
+            .to_offline_trident_header(1, 0, 0, body_root)
+            .unwrap();
+
+        let mut changed = header.clone();
+        changed.state_root = Hash([0x45; 32]);
+        assert!(commitment
+            .verify_offline_trident_header(&changed, body_root)
+            .unwrap_err()
+            .contains("state root mismatch"));
+
+        let mut changed = header.clone();
+        changed.identity.consensus_policy_hash = Hash([0x46; 32]);
+        assert!(commitment
+            .verify_offline_trident_header(&changed, body_root)
+            .unwrap_err()
+            .contains("consensus policy hash mismatch"));
+
+        let mut changed = commitment.clone();
+        changed.state_root = Hash::ZERO;
+        assert!(changed
+            .to_offline_trident_header(1, 0, 0, body_root)
+            .unwrap_err()
+            .contains("must be nonzero"));
+
+        let mut changed = commitment;
+        changed.consensus_policy_hash = Hash::ZERO;
+        assert!(changed
+            .to_offline_trident_header(1, 0, 0, body_root)
+            .unwrap_err()
+            .contains("must be nonzero"));
     }
 
     #[test]

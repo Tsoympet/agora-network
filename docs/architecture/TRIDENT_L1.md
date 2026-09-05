@@ -134,12 +134,15 @@ commit genesis storage atomically and can derive all representable runtime
 policy through one freeze-gated conversion. The bounded Block 0 prerequisite
 now includes a versioned Borsh manifest (v2 binds chain ID and network
 fingerprint), a lossless Meta envelope, and fail-closed overlay verification
-before any durable candidate write. It still does not materialize live balances
-or provide a node loader entry point. A Trident v3 node loader remains blocked
-on version-gated header/state-root encoding and lossless atomic mappings for
-UTXOs, accounts, treasury controls, vesting locks, validator runtime records,
-initial finality, and full datadir identity binding at boot. Networking and RPC
-must remain disabled for v3 until that complete identity/state contract exists.
+before any durable candidate write. A separate domain- and version-gated
+Trident header now commits the Block 0/body/state/policy/version identities
+offline without changing frozen v2 bytes. It still does not materialize live
+balances or provide a node loader entry point. A Trident v3 node loader remains
+blocked on the concrete body/PoW rules, lossless atomic mappings for UTXOs,
+accounts, treasury controls, vesting locks, validator runtime records and
+initial finality, equality between the materialized live-state root and header,
+and full datadir identity binding at boot. Networking and RPC must remain
+disabled for v3 until that complete identity/state contract exists.
 See [`../core/block-zero.md`](../core/block-zero.md).
 
 PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.
