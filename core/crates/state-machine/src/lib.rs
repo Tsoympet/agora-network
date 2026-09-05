@@ -46,10 +46,11 @@ pub use apply::{
     TxAuthContext, UtxoJournal,
 };
 pub use block_zero::{
-    BlockZeroAllocation, BlockZeroFinality, BlockZeroSupply, BlockZeroTreasury, BlockZeroValidator,
-    BlockZeroValidatorSet, BlockZeroVesting, TridentBlockZeroCommitment, TridentBlockZeroState,
+    load_verified_trident_block_zero, BlockZeroAllocation, BlockZeroFinality, BlockZeroSupply,
+    BlockZeroTreasury, BlockZeroValidator, BlockZeroValidatorSet, BlockZeroVesting,
+    TridentBlockZeroCommitment, TridentBlockZeroState, TridentBlockZeroStorageRecord,
     TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN, TRIDENT_BLOCK_ZERO_STATE_DOMAIN,
-    TRIDENT_BLOCK_ZERO_STATE_VERSION,
+    TRIDENT_BLOCK_ZERO_STATE_VERSION, TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
 };
 pub use columns::{meta_keys, ColumnFamily, SCHEMA_VERSION};
 pub use community_state::{

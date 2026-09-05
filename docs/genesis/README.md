@@ -81,14 +81,18 @@ testnet readiness.
 The integrated runtime is still insufficient for a safe Trident node loader.
 Genesis storage has an atomic prepared-batch commit, and a freeze-ready
 artifact can now produce a complete typed policy candidate without compiled
-policy defaults. That candidate is deliberately not accepted by the node:
-`genesis_hash` still names the full artifact identity, while DAG bootstrap
-requires the hash of a concrete `Block`. The current `BlockHeader` does not
-commit a genesis state root, and `GenesisBuilder` cannot construct all
-allocations, treasury balances, validator records/snapshots, governance state,
-or vesting state from the artifact. The next prerequisite is a versioned Block
-0/state commitment format plus artifact-only atomic state seeding and
-post-write root verification. Until that exists, v3 remains offline-only and
+policy defaults. It can also prepare a versioned Block 0 commitment (manifest
+v2, including chain ID and network fingerprint) and a lossless Meta envelope
+that is overlay-verified before a future loader may append it. That candidate
+is deliberately not accepted by the node: `genesis_hash` still names the full
+artifact identity, while DAG bootstrap requires the hash of a concrete
+`Block`. The current `BlockHeader` does not commit a genesis state root, and
+`GenesisBuilder` still cannot construct live allocations, treasury balances,
+validator records/snapshots, governance state, or vesting locks from the
+artifact. Remaining blockers are version-gated header encoding, lossless
+UTXO/account/treasury/vesting/validator/finality mappings appended to the
+already-verified Block 0 batch, and datadir identity binding before P2P or
+RPC. Until those exist together, v3 remains offline-only and
 `AGORA_GENESIS_FILE` continues to accept v2 artifacts only.
 
 Populated `genesis_set` entries use:

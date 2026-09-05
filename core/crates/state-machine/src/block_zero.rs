@@ -1,9 +1,11 @@
 //! Canonical, artifact-only Trident Block 0 state commitment.
 //!
-//! This module intentionally does not write a datadir or construct a [`agora_types::Block`].
-//! The current header has no state-root field, and several committed records do not yet
-//! have lossless runtime-store representations. Keeping preparation pure prevents a
-//! partially seeded Trident node from reaching networking.
+//! Preparation can stage a verified Meta envelope for a future atomic loader, but it
+//! does not write the caller's datadir, materialize live balances, construct a
+//! [`agora_types::Block`], or participate in node boot. The current header has no
+//! state-root field, and several committed records still lack lossless runtime-store
+//! representations. Keeping those mappings out of this batch prevents a partially
+//! seeded Trident node from reaching networking.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -11,17 +13,43 @@ use agora_crypto::{address_from_pubkey, parse_compressed_public_key};
 use agora_types::{Address, CheckpointState, Hash, NativeAssetId, TreasuryId};
 use borsh::{BorshDeserialize, BorshSerialize};
 
+use crate::columns::{meta_keys, ColumnFamily};
+use crate::error::StateError;
+use crate::store::{StateStore, WriteBatch};
 use crate::trident_genesis::{
     TridentGenesisArtifact, TridentGenesisValidator, TridentInitialAllocation, TridentTreasury,
-    TridentValidatorGenesis, TridentVestingSchedule,
+    TridentValidatorGenesis, TridentVestingSchedule, TRIDENT_CONSENSUS_POLICY_VERSION,
+    TRIDENT_NET_FP_DOMAIN, TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION,
+    TRIDENT_TX_SIGNING_VERSION,
 };
 
 /// Version of the canonical Block 0 native-state manifest.
-pub const TRIDENT_BLOCK_ZERO_STATE_VERSION: u32 = 1;
+///
+/// Version 2 is a pre-freeze break that binds the chain ID and network
+/// fingerprint directly into the manifest and commitment.
+pub const TRIDENT_BLOCK_ZERO_STATE_VERSION: u32 = 2;
 /// Domain for the complete native-state root.
-pub const TRIDENT_BLOCK_ZERO_STATE_DOMAIN: &[u8] = b"agora-trident-block-zero-state-v1";
+pub const TRIDENT_BLOCK_ZERO_STATE_DOMAIN: &[u8] = b"agora-trident-block-zero-state-v2";
 /// Domain for the value a future Block 0 header must commit.
-pub const TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN: &[u8] = b"agora-trident-block-zero-commitment-v1";
+pub const TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN: &[u8] = b"agora-trident-block-zero-commitment-v2";
+/// Version of the lossless Meta-CF storage envelope.
+///
+/// This is independent of [`crate::SCHEMA_VERSION`]: no current boot path
+/// writes or consumes these records.
+pub const TRIDENT_BLOCK_ZERO_STORAGE_VERSION: u32 = 1;
+
+const TRIDENT_BLOCK_ZERO_META_KEYS: [&[u8]; 10] = [
+    meta_keys::TRIDENT_BLOCK_ZERO_RECORD_VERSION,
+    meta_keys::TRIDENT_BLOCK_ZERO_RECORD,
+    meta_keys::TRIDENT_BLOCK_ZERO_STATE_PAYLOAD,
+    meta_keys::TRIDENT_BLOCK_ZERO_STATE_ROOT,
+    meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT,
+    meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT_HASH,
+    meta_keys::TRIDENT_BLOCK_ZERO_ARTIFACT_IDENTITY,
+    meta_keys::TRIDENT_BLOCK_ZERO_CONSENSUS_POLICY_HASH,
+    meta_keys::TRIDENT_BLOCK_ZERO_NETWORK_FINGERPRINT,
+    meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID,
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct BlockZeroAllocation {
@@ -102,6 +130,8 @@ pub struct BlockZeroFinality {
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct TridentBlockZeroState {
     pub version: u32,
+    pub chain_id: String,
+    pub network_fingerprint: Hash,
     pub artifact_identity: Hash,
     pub consensus_policy_hash: Hash,
     pub governance_constitution_hash: Hash,
@@ -117,9 +147,29 @@ pub struct TridentBlockZeroState {
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct TridentBlockZeroCommitment {
     pub version: u32,
+    pub chain_id: String,
+    pub network_fingerprint: Hash,
     pub artifact_identity: Hash,
     pub consensus_policy_hash: Hash,
     pub state_root: Hash,
+}
+
+/// Lossless storage envelope for a candidate Block 0 manifest.
+///
+/// Redundant identities are intentional: the checked reader verifies every
+/// copy and the exact canonical payload before a future loader can append this
+/// batch to live-state writes.
+#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct TridentBlockZeroStorageRecord {
+    pub version: u32,
+    pub manifest: TridentBlockZeroState,
+    pub canonical_payload: Vec<u8>,
+    pub commitment: TridentBlockZeroCommitment,
+    pub commitment_hash: Hash,
+    pub artifact_identity: Hash,
+    pub consensus_policy_hash: Hash,
+    pub network_fingerprint: Hash,
+    pub chain_id: String,
 }
 
 impl TridentBlockZeroState {
@@ -191,6 +241,8 @@ impl TridentBlockZeroState {
 
         let state = Self {
             version: TRIDENT_BLOCK_ZERO_STATE_VERSION,
+            chain_id: artifact.chain_id.clone(),
+            network_fingerprint: parse_hash("network_fingerprint", &artifact.network_fingerprint)?,
             artifact_identity: artifact.consensus_identity_hash(),
             consensus_policy_hash: artifact.consensus_policy_hash(),
             governance_constitution_hash: parse_hash(
@@ -219,6 +271,8 @@ impl TridentBlockZeroState {
     pub fn commitment(&self) -> TridentBlockZeroCommitment {
         TridentBlockZeroCommitment {
             version: self.version,
+            chain_id: self.chain_id.clone(),
+            network_fingerprint: self.network_fingerprint,
             artifact_identity: self.artifact_identity,
             consensus_policy_hash: self.consensus_policy_hash,
             state_root: self.state_root(),
@@ -231,8 +285,23 @@ impl TridentBlockZeroState {
         if self.version != TRIDENT_BLOCK_ZERO_STATE_VERSION {
             return Err("unsupported Trident Block 0 state version".into());
         }
-        if self.artifact_identity == Hash::ZERO || self.consensus_policy_hash == Hash::ZERO {
+        if self.chain_id.trim().is_empty() {
+            return Err("Block 0 chain ID must be nonempty".into());
+        }
+        if self.artifact_identity == Hash::ZERO
+            || self.consensus_policy_hash == Hash::ZERO
+            || self.network_fingerprint == Hash::ZERO
+        {
             return Err("Block 0 identities must be nonzero".into());
+        }
+        if self.network_fingerprint
+            != expected_network_fingerprint(
+                &self.chain_id,
+                &self.artifact_identity,
+                &self.consensus_policy_hash,
+            )
+        {
+            return Err("Block 0 network fingerprint is inconsistent".into());
         }
         if !is_sorted_allocations(&self.allocations) {
             return Err("Block 0 allocations are not canonically sorted".into());
@@ -281,12 +350,382 @@ impl TridentBlockZeroState {
         }
         Ok(bytes)
     }
+
+    /// Stage the lossless Meta envelope in one batch, apply it to a copy-on-write
+    /// overlay, and reread the exact bytes before returning a future-loader batch.
+    ///
+    /// This does not write the caller's store, materialize live balances, or
+    /// construct a Block 0 header. Current v2 ignition never calls it.
+    pub fn stage_verified_store_batch(&self, store: &StateStore) -> Result<WriteBatch, StateError> {
+        ensure_block_zero_absent(store)?;
+        let record =
+            TridentBlockZeroStorageRecord::from_state(self).map_err(StateError::Storage)?;
+        let batch = encode_block_zero_batch(&record)?;
+        let overlay = store.cow_overlay();
+        overlay.write_batch(batch.clone())?;
+        reread_staged_block_zero(&overlay, &record)?;
+        Ok(batch)
+    }
 }
 
 impl TridentBlockZeroCommitment {
     pub fn hash(&self) -> Hash {
         Hash::hash_borsh(&(TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN, self))
     }
+}
+
+impl TridentBlockZeroStorageRecord {
+    pub fn from_state(state: &TridentBlockZeroState) -> Result<Self, String> {
+        let canonical_payload = state.verified_borsh_payload()?;
+        let commitment = state.commitment();
+        let commitment_hash = commitment.hash();
+        let record = Self {
+            version: TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
+            manifest: state.clone(),
+            canonical_payload,
+            commitment,
+            commitment_hash,
+            artifact_identity: state.artifact_identity,
+            consensus_policy_hash: state.consensus_policy_hash,
+            network_fingerprint: state.network_fingerprint,
+            chain_id: state.chain_id.clone(),
+        };
+        record.verify()?;
+        Ok(record)
+    }
+
+    pub fn verify(&self) -> Result<(), String> {
+        if self.version != TRIDENT_BLOCK_ZERO_STORAGE_VERSION {
+            return Err("unsupported Trident Block 0 storage version".into());
+        }
+        self.manifest.verify()?;
+        let expected_payload = self.manifest.verified_borsh_payload()?;
+        if self.canonical_payload != expected_payload {
+            return Err("Block 0 canonical payload does not match the manifest".into());
+        }
+        let expected_commitment = self.manifest.commitment();
+        if self.commitment != expected_commitment {
+            return Err("Block 0 stored commitment does not match the manifest".into());
+        }
+        if self.commitment_hash != expected_commitment.hash() {
+            return Err("Block 0 commitment hash mismatch".into());
+        }
+        if self.artifact_identity != self.manifest.artifact_identity
+            || self.consensus_policy_hash != self.manifest.consensus_policy_hash
+            || self.network_fingerprint != self.manifest.network_fingerprint
+            || self.chain_id != self.manifest.chain_id
+        {
+            return Err("Block 0 stored identities are inconsistent".into());
+        }
+        if self.commitment.chain_id != self.chain_id
+            || self.commitment.network_fingerprint != self.network_fingerprint
+            || self.commitment.artifact_identity != self.artifact_identity
+            || self.commitment.consensus_policy_hash != self.consensus_policy_hash
+        {
+            return Err("Block 0 commitment identities are inconsistent".into());
+        }
+        Ok(())
+    }
+}
+
+/// Checked reader for a future loader. Current boot never calls this.
+pub fn load_verified_trident_block_zero(
+    store: &StateStore,
+) -> Result<TridentBlockZeroStorageRecord, StateError> {
+    let values = require_block_zero_values(store)?;
+    decode_and_verify_block_zero(&values)
+}
+
+const BLOCK_ZERO_PREFIX: &[u8] = b"meta/trident_block_zero/";
+
+type BlockZeroEncodedValues = Vec<(&'static [u8], Vec<u8>)>;
+
+fn storage_err(message: impl Into<String>) -> StateError {
+    StateError::Storage(message.into())
+}
+
+fn expected_network_fingerprint(
+    chain_id: &str,
+    artifact_identity: &Hash,
+    consensus_policy_hash: &Hash,
+) -> Hash {
+    Hash::hash_borsh(&(
+        TRIDENT_NET_FP_DOMAIN,
+        TRIDENT_PROTOCOL_VERSION,
+        chain_id,
+        artifact_identity.as_bytes(),
+        consensus_policy_hash.as_bytes(),
+        TRIDENT_TX_SIGNING_VERSION,
+        TRIDENT_STATE_TRANSITION_VERSION,
+        TRIDENT_CONSENSUS_POLICY_VERSION,
+    ))
+}
+
+fn ensure_block_zero_absent(store: &StateStore) -> Result<(), StateError> {
+    if !store
+        .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)?
+        .is_empty()
+    {
+        return Err(storage_err("duplicate Trident Block 0 storage record"));
+    }
+    Ok(())
+}
+
+fn encode_block_zero_values(
+    record: &TridentBlockZeroStorageRecord,
+) -> Result<BlockZeroEncodedValues, StateError> {
+    record.verify().map_err(storage_err)?;
+    let record_bytes = borsh::to_vec(record).map_err(|error| storage_err(error.to_string()))?;
+    let commitment_bytes =
+        borsh::to_vec(&record.commitment).map_err(|error| storage_err(error.to_string()))?;
+    Ok(vec![
+        (
+            meta_keys::TRIDENT_BLOCK_ZERO_RECORD_VERSION,
+            record.version.to_le_bytes().to_vec(),
+        ),
+        (meta_keys::TRIDENT_BLOCK_ZERO_RECORD, record_bytes),
+        (
+            meta_keys::TRIDENT_BLOCK_ZERO_STATE_PAYLOAD,
+            record.canonical_payload.clone(),
+        ),
+        (
+            meta_keys::TRIDENT_BLOCK_ZERO_STATE_ROOT,
+            record.manifest.state_root().as_bytes().to_vec(),
+        ),
+        (meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT, commitment_bytes),
+        (
+            meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT_HASH,
+            record.commitment_hash.as_bytes().to_vec(),
+        ),
+        (
+            meta_keys::TRIDENT_BLOCK_ZERO_ARTIFACT_IDENTITY,
+            record.artifact_identity.as_bytes().to_vec(),
+        ),
+        (
+            meta_keys::TRIDENT_BLOCK_ZERO_CONSENSUS_POLICY_HASH,
+            record.consensus_policy_hash.as_bytes().to_vec(),
+        ),
+        (
+            meta_keys::TRIDENT_BLOCK_ZERO_NETWORK_FINGERPRINT,
+            record.network_fingerprint.as_bytes().to_vec(),
+        ),
+        (
+            meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID,
+            record.chain_id.as_bytes().to_vec(),
+        ),
+    ])
+}
+
+fn encode_block_zero_batch(
+    record: &TridentBlockZeroStorageRecord,
+) -> Result<WriteBatch, StateError> {
+    let values = encode_block_zero_values(record)?;
+    if values.len() != TRIDENT_BLOCK_ZERO_META_KEYS.len() {
+        return Err(storage_err(
+            "Block 0 staged batch is missing canonical Meta keys",
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    let mut batch = WriteBatch::new();
+    for (key, value) in values {
+        if !TRIDENT_BLOCK_ZERO_META_KEYS.contains(&key) {
+            return Err(storage_err("unexpected Block 0 Meta key in staged batch"));
+        }
+        if !seen.insert(key) {
+            return Err(storage_err("duplicate Block 0 Meta key in staged batch"));
+        }
+        batch.put_cf(ColumnFamily::Meta, key, &value);
+    }
+    if seen.len() != TRIDENT_BLOCK_ZERO_META_KEYS.len() {
+        return Err(storage_err(
+            "Block 0 staged batch is missing canonical Meta keys",
+        ));
+    }
+    Ok(batch)
+}
+
+fn require_block_zero_values(store: &StateStore) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, StateError> {
+    let scanned = store.scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)?;
+    if scanned.is_empty() {
+        return Err(storage_err("missing Trident Block 0 storage record"));
+    }
+    let values: BTreeMap<_, _> = scanned.into_iter().collect();
+    if values.len() != TRIDENT_BLOCK_ZERO_META_KEYS.len()
+        || TRIDENT_BLOCK_ZERO_META_KEYS
+            .iter()
+            .any(|key| !values.contains_key(*key))
+    {
+        return Err(storage_err(
+            "incomplete, duplicate, or unexpected Trident Block 0 storage record",
+        ));
+    }
+    Ok(values)
+}
+
+fn require_exact_bytes(
+    values: &BTreeMap<Vec<u8>, Vec<u8>>,
+    key: &[u8],
+    expected: &[u8],
+    label: &str,
+) -> Result<(), StateError> {
+    let bytes = values
+        .get(key)
+        .map(Vec::as_slice)
+        .ok_or_else(|| storage_err(format!("missing Block 0 {label}")))?;
+    if bytes != expected {
+        return Err(storage_err(format!(
+            "Block 0 {label} does not match the canonical record"
+        )));
+    }
+    Ok(())
+}
+
+fn require_hash(
+    values: &BTreeMap<Vec<u8>, Vec<u8>>,
+    key: &[u8],
+    label: &str,
+) -> Result<Hash, StateError> {
+    let bytes = values
+        .get(key)
+        .ok_or_else(|| storage_err(format!("missing Block 0 {label}")))?;
+    if bytes.len() != 32 {
+        return Err(storage_err(format!("malformed Block 0 {label}")));
+    }
+    let mut hash = [0u8; 32];
+    hash.copy_from_slice(bytes);
+    Ok(Hash(hash))
+}
+
+fn decode_and_verify_block_zero(
+    values: &BTreeMap<Vec<u8>, Vec<u8>>,
+) -> Result<TridentBlockZeroStorageRecord, StateError> {
+    let version_bytes = values
+        .get(meta_keys::TRIDENT_BLOCK_ZERO_RECORD_VERSION)
+        .ok_or_else(|| storage_err("missing Block 0 record version"))?;
+    let version_arr: [u8; 4] = version_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| storage_err("malformed Block 0 record version"))?;
+    let version = u32::from_le_bytes(version_arr);
+    if version != TRIDENT_BLOCK_ZERO_STORAGE_VERSION {
+        return Err(storage_err("unsupported Trident Block 0 storage version"));
+    }
+
+    let record_bytes = values
+        .get(meta_keys::TRIDENT_BLOCK_ZERO_RECORD)
+        .ok_or_else(|| storage_err("missing Block 0 storage record"))?;
+    let record = TridentBlockZeroStorageRecord::try_from_slice(record_bytes)
+        .map_err(|error| storage_err(format!("malformed Block 0 storage record: {error}")))?;
+    let round_tripped = borsh::to_vec(&record).map_err(|error| storage_err(error.to_string()))?;
+    if round_tripped != *record_bytes {
+        return Err(storage_err(
+            "Block 0 storage record Borsh round-trip changed the envelope",
+        ));
+    }
+    if record.version != version {
+        return Err(storage_err(
+            "Block 0 record version does not match the envelope",
+        ));
+    }
+    record.verify().map_err(storage_err)?;
+
+    require_exact_bytes(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_STATE_PAYLOAD,
+        &record.canonical_payload,
+        "canonical payload",
+    )?;
+    let payload_state = TridentBlockZeroState::try_from_slice(&record.canonical_payload)
+        .map_err(|error| storage_err(format!("malformed Block 0 canonical payload: {error}")))?;
+    if payload_state != record.manifest
+        || payload_state.state_root() != record.manifest.state_root()
+    {
+        return Err(storage_err(
+            "Block 0 canonical payload is inconsistent with the manifest",
+        ));
+    }
+
+    let commitment_bytes =
+        borsh::to_vec(&record.commitment).map_err(|error| storage_err(error.to_string()))?;
+    require_exact_bytes(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT,
+        &commitment_bytes,
+        "commitment",
+    )?;
+
+    require_exact_bytes(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_STATE_ROOT,
+        record.manifest.state_root().as_bytes(),
+        "state root",
+    )?;
+    require_exact_bytes(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT_HASH,
+        record.commitment_hash.as_bytes(),
+        "commitment hash",
+    )?;
+    require_exact_bytes(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_ARTIFACT_IDENTITY,
+        record.artifact_identity.as_bytes(),
+        "artifact identity",
+    )?;
+    require_exact_bytes(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_CONSENSUS_POLICY_HASH,
+        record.consensus_policy_hash.as_bytes(),
+        "consensus policy hash",
+    )?;
+    require_exact_bytes(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_NETWORK_FINGERPRINT,
+        record.network_fingerprint.as_bytes(),
+        "network fingerprint",
+    )?;
+    require_exact_bytes(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID,
+        record.chain_id.as_bytes(),
+        "chain ID",
+    )?;
+
+    // Independent raw-key copies must also decode to the same identities.
+    let independent_root = require_hash(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_STATE_ROOT,
+        "state root",
+    )?;
+    let independent_commitment = require_hash(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT_HASH,
+        "commitment hash",
+    )?;
+    if independent_root != record.manifest.state_root()
+        || independent_commitment != record.commitment_hash
+    {
+        return Err(storage_err("Block 0 identity copies are mismatched"));
+    }
+    Ok(record)
+}
+
+fn reread_staged_block_zero(
+    overlay: &StateStore,
+    expected: &TridentBlockZeroStorageRecord,
+) -> Result<(), StateError> {
+    let loaded = load_verified_trident_block_zero(overlay)?;
+    if loaded != *expected {
+        return Err(storage_err(
+            "Block 0 overlay reread changed the staged record",
+        ));
+    }
+    let expected_values = encode_block_zero_values(expected)?;
+    let stored = require_block_zero_values(overlay)?;
+    for (key, value) in expected_values {
+        require_exact_bytes(&stored, key, &value, "staged bytes")?;
+    }
+    Ok(())
 }
 
 fn asset_from_ticker(ticker: &str) -> Result<NativeAssetId, String> {
@@ -711,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn tampering_fails_closed_before_any_storage_api_exists() {
+    fn tampering_fails_closed_before_storage_staging() {
         let artifact = synthetic_freeze_ready_artifact();
         let mut state = TridentBlockZeroState::from_artifact(&artifact).unwrap();
         state.supplies[1].unissued -= 1;
@@ -740,5 +1179,313 @@ mod tests {
     fn checked_in_draft_cannot_prepare_block_zero() {
         let artifact = TridentGenesisArtifact::from_json(DRAFT).unwrap();
         assert!(TridentBlockZeroState::from_artifact(&artifact).is_err());
+    }
+
+    #[test]
+    fn chain_id_and_network_fingerprint_are_identity_sensitive() {
+        let artifact = synthetic_freeze_ready_artifact();
+        let baseline = TridentBlockZeroState::from_artifact(&artifact).unwrap();
+        assert_eq!(baseline.version, TRIDENT_BLOCK_ZERO_STATE_VERSION);
+        assert_eq!(baseline.chain_id, artifact.chain_id);
+        assert_eq!(
+            baseline.network_fingerprint,
+            expected_network_fingerprint(
+                &baseline.chain_id,
+                &baseline.artifact_identity,
+                &baseline.consensus_policy_hash,
+            )
+        );
+
+        let mut other_artifact = artifact.clone();
+        other_artifact.chain_id = "agora-trident-testnet-other".into();
+        other_artifact.genesis_hash = other_artifact.consensus_identity_hash().to_hex();
+        other_artifact.network_fingerprint = other_artifact.compute_network_fingerprint().to_hex();
+        let other = TridentBlockZeroState::from_artifact(&other_artifact).unwrap();
+        assert_ne!(other.chain_id, baseline.chain_id);
+        assert_ne!(other.network_fingerprint, baseline.network_fingerprint);
+        assert_ne!(other.state_root(), baseline.state_root());
+        assert_ne!(other.commitment().hash(), baseline.commitment().hash());
+
+        let mut broken = baseline.clone();
+        broken.chain_id = other.chain_id.clone();
+        assert!(broken
+            .verify()
+            .unwrap_err()
+            .contains("network fingerprint is inconsistent"));
+
+        let mut broken = baseline.clone();
+        broken.network_fingerprint = other.network_fingerprint;
+        assert!(broken
+            .verify()
+            .unwrap_err()
+            .contains("network fingerprint is inconsistent"));
+    }
+
+    fn stage_and_commit(store: &StateStore, state: &TridentBlockZeroState) -> WriteBatch {
+        let batch = state.stage_verified_store_batch(store).unwrap();
+        assert!(load_verified_trident_block_zero(store)
+            .unwrap_err()
+            .to_string()
+            .contains("missing Trident Block 0"));
+        store.write_batch(batch.clone()).unwrap();
+        batch
+    }
+
+    fn stage_error(state: &TridentBlockZeroState, store: &StateStore) -> StateError {
+        match state.stage_verified_store_batch(store) {
+            Ok(_) => panic!("expected Block 0 staging to fail closed"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn staged_record_is_verified_before_any_durable_write() {
+        let store = StateStore::open_in_memory();
+        let state =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+        let expected = TridentBlockZeroStorageRecord::from_state(&state).unwrap();
+
+        let batch = state.stage_verified_store_batch(&store).unwrap();
+        assert!(!batch.is_empty());
+        assert!(store
+            .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .scan_prefix(ColumnFamily::Utxo, &[])
+            .unwrap()
+            .is_empty());
+
+        store.write_batch(batch).unwrap();
+        let loaded = load_verified_trident_block_zero(&store).unwrap();
+        assert_eq!(loaded, expected);
+        assert_eq!(
+            loaded.canonical_payload,
+            state.verified_borsh_payload().unwrap()
+        );
+        assert_eq!(loaded.commitment_hash, state.commitment().hash());
+        assert!(store
+            .scan_prefix(ColumnFamily::Utxo, &[])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn duplicate_or_partial_records_are_rejected_without_partial_writes() {
+        let store = StateStore::open_in_memory();
+        let state =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+        stage_and_commit(&store, &state);
+        let before = store
+            .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)
+            .unwrap();
+
+        let error = stage_error(&state, &store);
+        assert!(error.to_string().contains("duplicate"));
+        assert_eq!(
+            store
+                .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)
+                .unwrap(),
+            before
+        );
+
+        store
+            .delete_cf(ColumnFamily::Meta, meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID)
+            .unwrap();
+        assert!(load_verified_trident_block_zero(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("incomplete"));
+        assert!(stage_error(&state, &store)
+            .to_string()
+            .contains("duplicate"));
+        assert!(store
+            .get_cf(ColumnFamily::Meta, meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn malformed_inconsistent_and_mismatched_records_fail_closed() {
+        let store = StateStore::open_in_memory();
+        let state =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+        stage_and_commit(&store, &state);
+
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::TRIDENT_BLOCK_ZERO_RECORD,
+                b"not-borsh",
+            )
+            .unwrap();
+        assert!(load_verified_trident_block_zero(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("malformed"));
+
+        stage_fresh_record_into(&store, &state);
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID,
+                b"agora-trident-testnet-other",
+            )
+            .unwrap();
+        assert!(load_verified_trident_block_zero(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("does not match"));
+
+        stage_fresh_record_into(&store, &state);
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT_HASH,
+                &[0x11; 32],
+            )
+            .unwrap();
+        assert!(load_verified_trident_block_zero(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("does not match"));
+
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                b"meta/trident_block_zero/extra",
+                b"unexpected",
+            )
+            .unwrap();
+        assert!(load_verified_trident_block_zero(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("unexpected"));
+    }
+
+    fn stage_fresh_record_into(store: &StateStore, state: &TridentBlockZeroState) {
+        for key in TRIDENT_BLOCK_ZERO_META_KEYS {
+            store.delete_cf(ColumnFamily::Meta, key).unwrap();
+        }
+        store
+            .delete_cf(ColumnFamily::Meta, b"meta/trident_block_zero/extra")
+            .unwrap();
+        store
+            .write_batch(state.stage_verified_store_batch(store).unwrap())
+            .unwrap();
+    }
+
+    #[test]
+    fn v2_ignition_does_not_write_block_zero_records() {
+        let store = StateStore::open_in_memory();
+        crate::GenesisBuilder::default().ignite(&store).unwrap();
+        assert!(store
+            .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)
+            .unwrap()
+            .is_empty());
+        assert!(load_verified_trident_block_zero(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("missing"));
+    }
+
+    #[cfg(feature = "rocksdb")]
+    fn temp_rocks_dir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "agora-block-zero-{}-{}-{}",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn rocksdb_reopen_preserves_verified_record_and_rejects_tamper() {
+        let dir = temp_rocks_dir("reopen");
+        let state =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+        let expected = TridentBlockZeroStorageRecord::from_state(&state).unwrap();
+        {
+            let store = StateStore::open(&dir).unwrap();
+            let batch = state.stage_verified_store_batch(&store).unwrap();
+            assert!(store
+                .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)
+                .unwrap()
+                .is_empty());
+            store.write_batch(batch).unwrap();
+        }
+        {
+            let store = StateStore::open(&dir).unwrap();
+            assert_eq!(load_verified_trident_block_zero(&store).unwrap(), expected);
+            store
+                .put_cf(
+                    ColumnFamily::Meta,
+                    meta_keys::TRIDENT_BLOCK_ZERO_NETWORK_FINGERPRINT,
+                    &[0x22; 32],
+                )
+                .unwrap();
+            assert!(load_verified_trident_block_zero(&store)
+                .unwrap_err()
+                .to_string()
+                .contains("does not match"));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn rocksdb_rejected_stage_leaves_no_partial_write() {
+        let dir = temp_rocks_dir("no-partial");
+        let state =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+        {
+            let store = StateStore::open(&dir).unwrap();
+            let _batch = state.stage_verified_store_batch(&store).unwrap();
+            store
+                .put_cf(
+                    ColumnFamily::Meta,
+                    meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID,
+                    b"stale",
+                )
+                .unwrap();
+            assert!(stage_error(&state, &store)
+                .to_string()
+                .contains("duplicate"));
+            assert_eq!(
+                store
+                    .get_cf(ColumnFamily::Meta, meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID)
+                    .unwrap(),
+                Some(b"stale".to_vec())
+            );
+            assert!(store
+                .get_cf(ColumnFamily::Meta, meta_keys::TRIDENT_BLOCK_ZERO_RECORD)
+                .unwrap()
+                .is_none());
+            assert!(store
+                .scan_prefix(ColumnFamily::Utxo, &[])
+                .unwrap()
+                .is_empty());
+        }
+        {
+            let store = StateStore::open(&dir).unwrap();
+            assert_eq!(
+                store
+                    .get_cf(ColumnFamily::Meta, meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID)
+                    .unwrap(),
+                Some(b"stale".to_vec())
+            );
+            assert!(store
+                .get_cf(ColumnFamily::Meta, meta_keys::TRIDENT_BLOCK_ZERO_RECORD)
+                .unwrap()
+                .is_none());
+            assert!(load_verified_trident_block_zero(&store).is_err());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

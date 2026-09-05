@@ -47,9 +47,14 @@ For Trident v3, `TridentGenesisArtifact::to_runtime_policy` is the single
 offline conversion into typed DAA, GHOSTDAG, emission, monetary, staking,
 finality, policy-hash, and fingerprint values. It first applies the
 freeze-readiness gate and therefore rejects placeholders, missing policy
-values, and stale artifact hashes. The node does not consume this candidate
-until Block 0 can commit and verify the complete artifact-defined state root;
-historical v2 loading remains unchanged.
+values, and stale artifact hashes. A freeze-ready artifact can also produce a
+versioned Block 0 manifest and a lossless Meta envelope
+(`meta/trident_block_zero/*`, storage version 1, independent of
+`SCHEMA_VERSION`). That envelope is staged, overlay-verified, and fail-closed
+before any durable write; `GenesisBuilder` still does not write it or seed live
+balances from it. The node does not consume this candidate until Block 0 can
+commit and verify the complete artifact-defined state root, including UTXO and
+account materialization; historical v2 loading remains unchanged.
 
 ## Virtual UTXO (Phase 28)
 
