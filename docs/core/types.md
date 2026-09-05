@@ -29,6 +29,7 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | `DrcPaymentTx` / `DrcPaymentOutboxEvent` | Signed DRC settlement and deterministic routing event |
 | `TransactionBody` | Signable subset (no auth material) |
 | `BlockHeader` / `Block` | Multi-parent DAG header + UTXO/account/stake/execution/payment lanes |
+| `TridentHeader` | Offline-only, version-gated commitment for a future Trident block path |
 
 See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../assets/NATIVE_ASSETS.md`](../assets/NATIVE_ASSETS.md).
 
@@ -37,6 +38,29 @@ See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../as
 - `Transaction::tx_id()` = SHA-256(borsh(tx))
 - `Block::id()` = SHA-256(borsh(header))
 - `Block::compute_tx_root` = pairwise merkle over tx ids
+
+## Header version boundary
+
+Frozen v2 continues to encode `BlockHeader` directly as Borsh fields in this
+order: `version`, `parents`, `timestamp_ms`, `bits`, `nonce`, `tx_root`.
+`BlockHeader::hash`, durable header storage, `Block`, PoW, compact blocks, and
+P2P messages still consume those exact bytes. A locked test covers both the
+58-byte frozen testnet header and the 134-byte Block 0 body.
+
+`TridentHeader` is a separate Rust-only type. Its canonical bytes start with the
+fixed 32-byte `agora-trident-header-envelope-v1` domain, followed by an explicit
+little-endian encoding version and a length-delimited Borsh v1 payload. The
+payload commits protocol and state-transition versions, Block 0 commitment,
+artifact and consensus-policy identities, parents, timestamp/difficulty/nonce,
+body root, and canonical state root. Decoding rejects the wrong domain, unknown
+encoding versions, malformed/trailing bytes, zero roots or identities, and
+mismatches against caller-recomputed roots and network identity.
+
+The type intentionally has no serde or `ts-rs` export: it is not shared with
+clients and is not accepted by storage, mining, consensus, RPC, or P2P. Runtime
+activation remains blocked on a concrete Trident body mapping, atomic live-state
+materialization whose recomputed root equals the header, datadir identity
+binding, and an explicit consensus/network protocol switch.
 
 ## Change process
 

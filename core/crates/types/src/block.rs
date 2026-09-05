@@ -155,6 +155,59 @@ mod tests {
 
     use super::*;
 
+    const FROZEN_V2_HEADER_BORSH_HEX: &str = concat!(
+        "0100000000000090ebc49f010000000000000000000000000000",
+        "6069a3710cacc620ebb4bdb9d3d3107c85371c17782d94cf6b6fb76fb05111bd"
+    );
+    const FROZEN_V2_BLOCK_BORSH_HEX: &str = concat!(
+        "0100000000000090ebc49f010000000000000000000000000000",
+        "6069a3710cacc620ebb4bdb9d3d3107c85371c17782d94cf6b6fb76fb05111bd",
+        "010000000100000000000000010000000080c6a47e8d0300ff9ec96f09eb154d",
+        "038a552ecae59c50204ea9a90000000000000000000000000000000000000000",
+        "00000000000000000000000000000000"
+    );
+    const FROZEN_V2_GENESIS_HASH: &str =
+        "afe59232cd20a16bd56948044149d2b8013e63f3694c113074fef75ab0cb9b98";
+
+    fn frozen_v2_testnet_block() -> Block {
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![crate::TxOut {
+                value: Amount::from_base_units(1_000_000_000_000_000),
+                address: Address::from_hex("ff9ec96f09eb154d038a552ecae59c50204ea9a9").unwrap(),
+            }],
+            0,
+        );
+        Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 1_785_715_200_000,
+                bits: 0,
+                nonce: 0,
+                tx_root: Block::compute_tx_root(std::slice::from_ref(&coinbase)),
+            },
+            vec![coinbase],
+        )
+    }
+
+    #[test]
+    fn frozen_v2_header_and_block_bytes_are_unchanged() {
+        let block = frozen_v2_testnet_block();
+        let header_bytes = borsh::to_vec(&block.header).unwrap();
+        let block_bytes = borsh::to_vec(&block).unwrap();
+
+        assert_eq!(hex::encode(&header_bytes), FROZEN_V2_HEADER_BORSH_HEX);
+        assert_eq!(hex::encode(&block_bytes), FROZEN_V2_BLOCK_BORSH_HEX);
+        assert_eq!(block.header.hash().to_hex(), FROZEN_V2_GENESIS_HASH);
+        assert_eq!(
+            borsh::from_slice::<BlockHeader>(&header_bytes).unwrap(),
+            block.header
+        );
+        assert_eq!(borsh::from_slice::<Block>(&block_bytes).unwrap(), block);
+    }
+
     #[test]
     fn drc_payment_activates_body_root_v4() {
         let mut block = Block::utxo(
