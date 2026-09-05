@@ -1229,6 +1229,13 @@ mod tests {
         batch
     }
 
+    fn stage_error(state: &TridentBlockZeroState, store: &StateStore) -> StateError {
+        match state.stage_verified_store_batch(store) {
+            Ok(_) => panic!("expected Block 0 staging to fail closed"),
+            Err(error) => error,
+        }
+    }
+
     #[test]
     fn staged_record_is_verified_before_any_durable_write() {
         let store = StateStore::open_in_memory();
@@ -1271,7 +1278,7 @@ mod tests {
             .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)
             .unwrap();
 
-        let error = state.stage_verified_store_batch(&store).unwrap_err();
+        let error = stage_error(&state, &store);
         assert!(error.to_string().contains("duplicate"));
         assert_eq!(
             store
@@ -1287,9 +1294,7 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("incomplete"));
-        assert!(state
-            .stage_verified_store_batch(&store)
-            .unwrap_err()
+        assert!(stage_error(&state, &store)
             .to_string()
             .contains("duplicate"));
         assert!(store
@@ -1447,9 +1452,7 @@ mod tests {
                     b"stale",
                 )
                 .unwrap();
-            assert!(state
-                .stage_verified_store_batch(&store)
-                .unwrap_err()
+            assert!(stage_error(&state, &store)
                 .to_string()
                 .contains("duplicate"));
             assert_eq!(
