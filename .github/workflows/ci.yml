@@ -86,18 +86,22 @@ jobs:
 
       - name: Install shared light-client deps
         working-directory: apps/shared
-        run: npm ci
+        run: |
+          npm ci
+          npm audit --audit-level=high
 
       - name: Explorer build
         working-directory: apps/explorer
         run: |
           npm ci
+          npm audit --audit-level=high
           npm run build
 
       - name: Desktop frontend build
         working-directory: apps/desktop
         run: |
           npm ci
+          npm audit --audit-level=high
           npm run build
 
   node:
