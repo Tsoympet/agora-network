@@ -71,6 +71,7 @@ mod tests {
             stake_meta_before: Vec::new(),
             payment_meta_before: Vec::new(),
             data_availability_meta_before: Vec::new(),
+            data_availability_fees: 0,
         };
         store_utxo_journal(&store, &hash, &journal).unwrap();
         let loaded = load_utxo_journal(&store, &hash).unwrap().unwrap();

@@ -55,7 +55,17 @@ Documented splits (exact BPS in genesis / consensus policy):
 | Fee class | Default primary recipient | Optional sinks |
 | --- | --- | --- |
 | TLT base | TLT miner (coinbase) | Security treasury, burn |
+| TLT DA commitment | TLT miner (same accepted fee pool) | None until a separate ceremony policy defines a split |
 | OVL execution | OVL validators (pro-rata) | Builder treasury, burn |
 | DRC payment | DRC validators (pro-rata) | Community treasury, burn |
 
 Credits apply only when the paying transaction’s acceptance status is `Accepted`.
+
+Authenticated DA authorizations do not contain TLT spend inputs. An enabled DA
+policy therefore requires each block's accepted DA minimum-fee total to be
+covered by fees from accepted TLT UTXO transfers in that same block. The normal
+coinbase entitlement credits those TLT fees once; DA accounting is a recorded
+subset, not additional issuance. Exact duplicates and replay/conflict losers
+add zero DA fee. Base, authorization-byte, and logical-state-growth rates use
+checked integer arithmetic and are ceremony-owned. The checked-in Trident draft
+keeps every DA fee and activation value disabled; no public rates are selected.

@@ -20,7 +20,7 @@ use crate::staking::{build_snapshot, load_epoch};
 use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
 
 /// Domain tag for the composed state root (versioned).
-pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v5";
+pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v6";
 
 /// Deterministic UTXO-set commitment (sorted outpoint keys).
 pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {

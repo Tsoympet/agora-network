@@ -49,7 +49,8 @@ There is no data-commitment submit or confirmation RPC. The TLT
 `agora_submitTransaction` schema has no payload field, and commitment bytes
 must not be hidden in a transfer or OVL execution call. See
 [`data-availability.md`](data-availability.md) for the block/state consensus
-lane and remaining fee, mempool, outbox, and transport prerequisites.
+lane, disabled-by-default ceremony fee policy, and remaining mempool, outbox,
+and transport prerequisites.
 
 The internal acceptance record can distinguish `Accepted`, `ExactDuplicate`,
 and `ConflictLost`, but that alone cannot truthfully report `pending` or

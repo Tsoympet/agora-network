@@ -422,7 +422,7 @@ mod tests {
         TxAuthContext {
             chain_id: "agora-community-test".into(),
             genesis: Hash([9; 32]),
-            data_availability_network_fingerprint: None,
+            data_availability: None,
         }
     }
 

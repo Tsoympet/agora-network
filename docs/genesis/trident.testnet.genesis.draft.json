@@ -8,8 +8,8 @@
   "timestamp_ms": 0,
   "genesis_hash": "UNFROZEN",
   "network_fingerprint": "UNFROZEN",
-  "state_transition_version": "agora-trident-state-v6",
-  "consensus_policy_version": "agora-trident-consensus-v2",
+  "state_transition_version": "agora-trident-state-v7",
+  "consensus_policy_version": "agora-trident-consensus-v3",
   "governance_constitution_hash": "UNFROZEN",
   "emergency_policy_hash": "UNFROZEN",
   "decimals": 8,
@@ -98,6 +98,19 @@
     "drc_quorum_denominator": 3,
     "combine_stakes_by_price": false,
     "admin_bypass": false
+  },
+  "data_availability": {
+    "version": 1,
+    "enabled": false,
+    "activation_checkpoint": null,
+    "activation_block_body_version": 5,
+    "max_commitments_per_block": 0,
+    "max_authorization_bytes_per_block": 0,
+    "base_fee_tlt": 0,
+    "fee_per_authorization_byte_tlt": 0,
+    "fee_per_state_byte_tlt": 0,
+    "allowed_sources": [],
+    "max_sequence_advance": 0
   },
   "ovl_validators": {
     "max_validators": 0,

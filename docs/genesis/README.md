@@ -69,7 +69,11 @@ per-validator commissions, missing or zero validator metadata commitments,
 zero reserves/treasuries, and allocation-total mismatches. Runtime-policy
 preparation additionally requires an explicit blue-score PoW threshold,
 validator commission/concentration limits, and complete TLT/staking emission
-schedules. It derives DAA, GHOSTDAG, emission, monetary, staking, finality,
+schedules. Enabled DA policy additionally requires a nonzero activation
+checkpoint, exact body version, bounded commitment/byte limits, nonzero checked
+TLT fee components, a sorted source allowlist, and a sequence window. Disabled
+DA remains an explicit valid policy with no latent activation values. The
+conversion derives DAA, GHOSTDAG, emission, monetary, staking, finality, DA,
 consensus-policy-hash, and P2P fingerprint values through one typed conversion.
 Any artifact mutation after hashing is rejected.
 
@@ -83,10 +87,10 @@ The integrated runtime is still insufficient for a safe Trident node loader.
 Genesis storage has an atomic prepared-batch commit, and a freeze-ready
 artifact can now produce a complete typed policy candidate without compiled
 policy defaults. It can also prepare a versioned Block 0 commitment (manifest
-v3, including chain ID, network fingerprint, and complete validator
-registrations) and a lossless Meta envelope
+v4, including chain ID, network fingerprint, complete validator registrations,
+and the disabled-by-default DA policy) and a lossless Meta envelope
 that is overlay-verified before a future loader may append it. Storage envelope
-v3 now includes a separately versioned Borsh datadir identity, persisted in the
+v4 includes a separately versioned Borsh datadir identity, persisted in the
 same atomic batch and checked byte-for-byte on reopen. That identity binds the
 chain, network fingerprint, artifact, consensus policy, Block 0 commitment,
 committed state root, header network identity, and the concrete header hash
@@ -137,6 +141,13 @@ Populated `initial_allocations` entries use `asset`, `address`, and nonzero
 `amount`, `start_timestamp_ms`, `cliff_timestamp_ms`, and `end_timestamp_ms`.
 The freeze ceremony must also add the selected top-level `bits` value; it is
 optional only while the artifact remains a draft.
+
+The checked-in draft's `data_availability` object is explicitly disabled:
+activation, limits, fees, source allowlist, and sequence window remain closed.
+Its fields are nevertheless committed into the artifact identity,
+consensus-policy hash, network fingerprint, Block 0 manifest/commitment,
+Trident header identity, and datadir identity. Synthetic tests exercise enabled
+policy; this repository does not select public values.
 
 ## CLI (frozen historical L1 v2)
 

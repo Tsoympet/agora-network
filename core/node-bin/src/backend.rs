@@ -242,7 +242,7 @@ impl NodeBackend {
         TxAuthContext {
             chain_id: chain_id.into(),
             genesis: self.genesis_hash,
-            data_availability_network_fingerprint: None,
+            data_availability: None,
         }
     }
 

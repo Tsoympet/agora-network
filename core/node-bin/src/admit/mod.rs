@@ -26,11 +26,12 @@ use agora_consensus::{
     KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher,
 };
 use agora_state_machine::{
-    apply_block_batched_virtual, ghostdag_key, index_block_transactions_into, list_tx_inclusions,
-    load_ghostdag_record, load_header, load_utxo_journal, lookup_tx_location, meta_keys,
-    revert_journal_batched, set_primary_tx_location, store_ghostdag_record, store_header,
-    store_header_into, sum_transfer_fees, utxo_diff_key, ColumnFamily, GhostdagRecord, StateStore,
-    TxAuthContext, WriteBatch,
+    apply_block_batched_virtual_at_blue_score, ghostdag_key, index_block_transactions_into,
+    list_tx_inclusions, load_ghostdag_record, load_header, load_utxo_journal, lookup_tx_location,
+    meta_keys, revert_journal_batched, set_primary_tx_location, store_ghostdag_record,
+    store_header, store_header_into, sum_transfer_fees, utxo_diff_key, ColumnFamily,
+    DataAvailabilityRuntimeConfig, GhostdagRecord, StateStore, TridentRuntimePolicy, TxAuthContext,
+    WriteBatch,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -68,6 +69,8 @@ pub enum AdmitError {
     TooManyTransactions { got: usize, max: usize },
     #[error("too many data commitments: {got} > {max}")]
     TooManyDataCommitments { got: usize, max: usize },
+    #[error("data commitment authorizations too large: {got} > {max}")]
+    DataCommitmentsTooLarge { got: usize, max: usize },
     #[error("tx {tx_index} too large: {got} > {max}")]
     TxTooLarge {
         tx_index: usize,
@@ -130,9 +133,8 @@ pub struct ChainBootConfig {
     pub chain_id: String,
     /// Bound into Trident checkpoint bodies (from [`agora_state_machine::GenesisConsensusPolicy`]).
     pub consensus_policy_hash: Hash,
-    /// `None` keeps DA inclusion fail-closed until a reviewed TLT fee policy
-    /// explicitly activates this Trident-only block lane.
-    pub data_availability_network_fingerprint: Option<Hash>,
+    /// `None` keeps DA inclusion fail-closed on legacy/v2 runtimes.
+    pub data_availability: Option<DataAvailabilityRuntimeConfig>,
 }
 
 impl Default for ChainBootConfig {
@@ -148,7 +150,7 @@ impl Default for ChainBootConfig {
             emission: EmissionSchedule::default(),
             chain_id: String::new(),
             consensus_policy_hash: Hash::ZERO,
-            data_availability_network_fingerprint: None,
+            data_availability: None,
         }
     }
 }
@@ -166,8 +168,25 @@ impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
             emission: params.emission.clone(),
             chain_id: params.network.chain_id().into(),
             consensus_policy_hash,
-            data_availability_network_fingerprint: None,
+            data_availability: None,
         }
+    }
+}
+
+impl TryFrom<&TridentRuntimePolicy> for ChainBootConfig {
+    type Error = String;
+
+    fn try_from(policy: &TridentRuntimePolicy) -> Result<Self, Self::Error> {
+        Ok(Self {
+            pow: policy.pow_algorithm,
+            initial_bits: policy.bits,
+            daa: policy.daa.clone(),
+            ghostdag: policy.ghostdag.clone(),
+            emission: policy.tlt_emission.clone(),
+            chain_id: policy.chain_id.clone(),
+            consensus_policy_hash: policy.consensus_policy_hash,
+            data_availability: Some(policy.data_availability_runtime_config()?),
+        })
     }
 }
 
@@ -229,7 +248,7 @@ impl ChainState {
             Some(TxAuthContext {
                 chain_id: boot.chain_id,
                 genesis,
-                data_availability_network_fingerprint: boot.data_availability_network_fingerprint,
+                data_availability: boot.data_availability,
             })
         };
 
@@ -916,9 +935,14 @@ impl ChainState {
             let blue_score = self.ghostdag.blue_score(hash).unwrap_or(1);
             let scheduled = self.emission.reward_at_blue_score(blue_score);
             let emission = scheduled.min(max.saturating_sub(issued.min(max)));
-            let mut applied =
-                apply_block_batched_virtual(&overlay, &body, emission, self.auth.as_ref())
-                    .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+            let mut applied = apply_block_batched_virtual_at_blue_score(
+                &overlay,
+                &body,
+                emission,
+                blue_score,
+                self.auth.as_ref(),
+            )
+            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
             if issued.saturating_add(applied.journal.subsidy) > max {
                 return Err(AdmitError::SupplyCapExceeded);
             }
@@ -976,6 +1000,23 @@ impl ChainState {
             return Err(AdmitError::TooManyDataCommitments {
                 got: block.data_commitments.len(),
                 max: self.limits.max_data_commitments,
+            });
+        }
+        let mut data_commitment_bytes = 0usize;
+        for authorization in &block.data_commitments {
+            let bytes =
+                borsh::to_vec(authorization).map_err(|e| AdmitError::Storage(e.to_string()))?;
+            data_commitment_bytes = data_commitment_bytes.checked_add(bytes.len()).ok_or(
+                AdmitError::DataCommitmentsTooLarge {
+                    got: usize::MAX,
+                    max: self.limits.max_data_commitment_bytes,
+                },
+            )?;
+        }
+        if data_commitment_bytes > self.limits.max_data_commitment_bytes {
+            return Err(AdmitError::DataCommitmentsTooLarge {
+                got: data_commitment_bytes,
+                max: self.limits.max_data_commitment_bytes,
             });
         }
         let block_bytes = borsh::to_vec(block).map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -1428,9 +1469,14 @@ impl ChainState {
         let emission = self.clamp_emission(scheduled)?;
         // Atomic commit: UTXO changes + revert journal + issued-supply update land as a
         // single WriteBatch so a crash cannot leave UTXOs and supply out of sync.
-        let mut applied =
-            apply_block_batched_virtual(self.store.as_ref(), &block, emission, self.auth.as_ref())
-                .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        let mut applied = apply_block_batched_virtual_at_blue_score(
+            self.store.as_ref(),
+            &block,
+            emission,
+            blue_score,
+            self.auth.as_ref(),
+        )
+        .map_err(|e| AdmitError::Utxo(e.to_string()))?;
         if applied.journal.subsidy > emission {
             return Err(AdmitError::Utxo(format!(
                 "coinbase subsidy {} exceeds clamped emission {emission}",
@@ -1861,6 +1907,7 @@ impl ChainState {
                 stake_meta_before: journal.stake_meta_before,
                 payment_meta_before: journal.payment_meta_before,
                 data_availability_meta_before: journal.data_availability_meta_before,
+                data_availability_fees: journal.data_availability_fees,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store
@@ -2307,6 +2354,68 @@ mod tests {
         )
         .unwrap();
         authorization
+    }
+
+    fn enabled_da_runtime(
+        fingerprint: Hash,
+        activation_checkpoint: u64,
+    ) -> DataAvailabilityRuntimeConfig {
+        DataAvailabilityRuntimeConfig::new(
+            fingerprint,
+            agora_state_machine::TridentDataAvailabilityPolicy {
+                version: agora_state_machine::DATA_AVAILABILITY_POLICY_VERSION,
+                enabled: true,
+                activation_checkpoint: Some(activation_checkpoint),
+                activation_block_body_version: agora_types::TRIDENT_BLOCK_BODY_VERSION,
+                max_commitments_per_block: 8,
+                max_authorization_bytes_per_block: 16_384,
+                base_fee_tlt: 10,
+                fee_per_authorization_byte_tlt: 2,
+                fee_per_state_byte_tlt: 3,
+                allowed_sources: vec![agora_types::DataCommitmentSource::AgoraLayersOvolosBatchLab],
+                max_sequence_advance: 64,
+            },
+        )
+        .unwrap()
+    }
+
+    fn genesis_fee_sponsor(
+        store: &StateStore,
+        genesis: Hash,
+        payer: &agora_crypto::KeyPair,
+        fee: u64,
+        nonce: u64,
+    ) -> Transaction {
+        let bytes = store
+            .get_cf(ColumnFamily::Hot, genesis.as_bytes())
+            .unwrap()
+            .unwrap();
+        let block = borsh::from_slice::<Block>(&bytes).unwrap();
+        let output = &block.transactions[0].outputs[0];
+        let mut transfer = Transaction::unsigned(
+            1,
+            vec![agora_types::TxIn {
+                previous_outpoint: agora_types::OutPoint {
+                    tx_id: block.transactions[0].tx_id(),
+                    index: 0,
+                },
+            }],
+            vec![TxOut {
+                value: Amount::from_base_units(
+                    output.value.as_base_units().checked_sub(fee).unwrap(),
+                ),
+                address: payer.address(),
+            }],
+            nonce,
+        );
+        agora_crypto::sign_transaction_bound(
+            &mut transfer,
+            payer,
+            "agora-trident-testnet-1",
+            &genesis,
+        )
+        .unwrap();
+        transfer
     }
 
     #[test]
@@ -2958,17 +3067,22 @@ mod tests {
     #[test]
     fn da_conflict_follows_blue_order_and_reorg_restores_winner() {
         use agora_state_machine::{
-            load_acceptance, load_data_commitment, load_data_commitment_nonce, meta_keys,
+            load_acceptance, load_data_commitment, load_data_commitment_nonce,
+            load_data_commitment_source_sequence, meta_keys,
         };
         use agora_types::TransactionAcceptance;
 
         let store = Arc::new(StateStore::open_in_memory());
-        let genesis = GenesisBuilder::default().ignite(store.as_ref()).unwrap();
+        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(operator.address())
+            .ignite(store.as_ref())
+            .unwrap();
         let fingerprint = Hash([9; 32]);
         let boot = ChainBootConfig {
             initial_bits: 0,
             chain_id: "agora-trident-testnet-1".into(),
-            data_availability_network_fingerprint: Some(fingerprint),
+            data_availability: Some(enabled_da_runtime(fingerprint, 1)),
             ..ChainBootConfig::default()
         };
         let mut chain = ChainState::bootstrap_with(
@@ -2978,9 +3092,10 @@ mod tests {
             StoragePolicy::default(),
         )
         .unwrap();
-        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
         let first = signed_da_authorization(&operator, &genesis, &fingerprint, 4, 0, 11);
         let conflict = signed_da_authorization(&operator, &genesis, &fingerprint, 4, 0, 12);
+        let first_sponsor = genesis_fee_sponsor(store.as_ref(), genesis, &operator, 100_000, 11);
+        let conflict_sponsor = genesis_fee_sponsor(store.as_ref(), genesis, &operator, 100_000, 12);
 
         let oversized = vec![first.clone(); chain.limits.max_data_commitments + 1];
         let oversized_block = chain
@@ -2996,12 +3111,29 @@ mod tests {
             chain.check_size_limits(&oversized_block),
             Err(AdmitError::TooManyDataCommitments { .. })
         ));
+        let hard_byte_limit = chain.limits.max_data_commitment_bytes;
+        chain.limits.max_data_commitment_bytes = borsh::to_vec(&first).unwrap().len() - 1;
+        let byte_oversized_block = chain
+            .block_template_lanes(
+                Address::ZERO,
+                BlockTemplateLanes {
+                    data_commitments: std::slice::from_ref(&first),
+                    ..BlockTemplateLanes::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            chain.check_size_limits(&byte_oversized_block),
+            Err(AdmitError::DataCommitmentsTooLarge { .. })
+        ));
+        chain.limits.max_data_commitment_bytes = hard_byte_limit;
 
         // Construct both siblings against the same pre-state before either is admitted.
         let mut first_block = chain
             .block_template_lanes(
                 Address([1; 20]),
                 BlockTemplateLanes {
+                    transfers: std::slice::from_ref(&first_sponsor),
                     data_commitments: std::slice::from_ref(&first),
                     ..BlockTemplateLanes::default()
                 },
@@ -3010,12 +3142,14 @@ mod tests {
         first_block.header.parents = vec![genesis];
         first_block.header.bits = chain.expected_bits_for_parents(&[genesis]).unwrap();
         first_block.header.timestamp_ms = 100_000;
+        first_block.transactions[0].outputs[0].value = Amount::ZERO;
         sync_coinbase_commitment_with(&mut first_block, 1);
 
         let mut conflict_block = chain
             .block_template_lanes(
                 Address([2; 20]),
                 BlockTemplateLanes {
+                    transfers: std::slice::from_ref(&conflict_sponsor),
                     data_commitments: std::slice::from_ref(&conflict),
                     ..BlockTemplateLanes::default()
                 },
@@ -3024,6 +3158,7 @@ mod tests {
         conflict_block.header.parents = vec![genesis];
         conflict_block.header.bits = chain.expected_bits_for_parents(&[genesis]).unwrap();
         conflict_block.header.timestamp_ms = 101_000;
+        conflict_block.transactions[0].outputs[0].value = Amount::ZERO;
         sync_coinbase_commitment_with(&mut conflict_block, 2);
 
         let first_hash = chain.admit_block(first_block).unwrap();
@@ -3084,6 +3219,10 @@ mod tests {
         assert_eq!(
             load_data_commitment_nonce(store.as_ref(), &operator.address()).unwrap(),
             1
+        );
+        assert_eq!(
+            load_data_commitment_source_sequence(store.as_ref(), first.commitment.source).unwrap(),
+            Some(4)
         );
 
         let restarted =

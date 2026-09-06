@@ -2,7 +2,7 @@
 //!
 //! These types define canonical bytes and operator authorization consumed by
 //! [`crate::Block::data_commitments`]. Standalone mempool/RPC submission remains
-//! disabled until Trident defines the TLT inclusion-fee policy.
+//! disabled until the separately reviewed transport and durable-status slice.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,7 @@ pub const MAX_DA_CHAIN_ID_BYTES: usize = 128;
 #[ts(export)]
 #[repr(u8)]
 #[borsh(use_discriminant = true)]
+#[serde(rename_all = "snake_case")]
 pub enum DataCommitmentSource {
     /// Historical `agora-layers` Ovolos batch data; never canonical OVL monetary state.
     AgoraLayersOvolosBatchLab = 0x00,
@@ -343,6 +344,10 @@ mod tests {
         assert_eq!(
             DataCommitmentSource::AgoraLayersOvolosBatchLab.wire_byte(),
             0
+        );
+        assert_eq!(
+            serde_json::to_string(&DataCommitmentSource::AgoraLayersOvolosBatchLab).unwrap(),
+            "\"agora_layers_ovolos_batch_lab\""
         );
     }
 }

@@ -143,7 +143,7 @@ mod tests {
         let auth = TxAuthContext {
             chain_id: "agora-dev".into(),
             genesis: Hash([1; 32]),
-            data_availability_network_fingerprint: None,
+            data_availability: None,
         };
         let mut funding = WriteBatch::new();
         credit_account_into(
@@ -207,7 +207,7 @@ mod tests {
             &TxAuthContext {
                 chain_id: "agora-dev".into(),
                 genesis: Hash::ZERO,
-                data_availability_network_fingerprint: None,
+                data_availability: None,
             },
             &mut batch,
             &mut journal,

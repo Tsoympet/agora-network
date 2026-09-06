@@ -28,21 +28,21 @@ use crate::trident_genesis::{
     TRIDENT_NET_FP_DOMAIN, TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION,
     TRIDENT_TX_SIGNING_VERSION,
 };
+use crate::TridentDataAvailabilityPolicy;
 
 /// Version of the canonical Block 0 native-state manifest.
 ///
-/// Version 3 is a pre-freeze break that adds the complete ceremony-selected
-/// validator registration records to the manifest and commitment.
-pub const TRIDENT_BLOCK_ZERO_STATE_VERSION: u32 = 3;
+/// Version 4 adds the ceremony-owned DA activation and TLT fee policy.
+pub const TRIDENT_BLOCK_ZERO_STATE_VERSION: u32 = 4;
 /// Domain for the complete native-state root.
-pub const TRIDENT_BLOCK_ZERO_STATE_DOMAIN: &[u8] = b"agora-trident-block-zero-state-v3";
+pub const TRIDENT_BLOCK_ZERO_STATE_DOMAIN: &[u8] = b"agora-trident-block-zero-state-v4";
 /// Domain for the value a future Block 0 header must commit.
-pub const TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN: &[u8] = b"agora-trident-block-zero-commitment-v3";
+pub const TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN: &[u8] = b"agora-trident-block-zero-commitment-v4";
 /// Version of the lossless Meta-CF storage envelope.
 ///
 /// This is independent of [`crate::SCHEMA_VERSION`]: no current boot path
 /// writes or consumes these records.
-pub const TRIDENT_BLOCK_ZERO_STORAGE_VERSION: u32 = 3;
+pub const TRIDENT_BLOCK_ZERO_STORAGE_VERSION: u32 = 4;
 /// Version of the Borsh identity that binds one datadir to one Trident chain.
 pub const TRIDENT_DATADIR_IDENTITY_VERSION: u32 = 1;
 
@@ -237,6 +237,7 @@ pub struct TridentBlockZeroState {
     pub network_fingerprint: Hash,
     pub artifact_identity: Hash,
     pub consensus_policy_hash: Hash,
+    pub data_availability: TridentDataAvailabilityPolicy,
     pub governance_constitution_hash: Hash,
     pub emergency_policy_hash: Hash,
     pub allocations: Vec<BlockZeroAllocation>,
@@ -377,6 +378,7 @@ impl TridentBlockZeroState {
             network_fingerprint: parse_hash("network_fingerprint", &artifact.network_fingerprint)?,
             artifact_identity: artifact.consensus_identity_hash(),
             consensus_policy_hash: artifact.consensus_policy_hash(),
+            data_availability: artifact.data_availability.clone(),
             governance_constitution_hash: parse_hash(
                 "governance_constitution_hash",
                 &artifact.governance_constitution_hash,
@@ -426,6 +428,7 @@ impl TridentBlockZeroState {
         {
             return Err("Block 0 identities must be nonzero".into());
         }
+        self.data_availability.validate_freeze_ready()?;
         if self.network_fingerprint
             != expected_network_fingerprint(
                 &self.chain_id,
@@ -1791,6 +1794,74 @@ mod tests {
             changed_metadata.commitment().hash(),
             baseline.commitment().hash()
         );
+    }
+
+    #[test]
+    fn every_da_policy_field_reaches_block_zero_header_and_datadir_identity() {
+        let baseline =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+        let project = |state: &TridentBlockZeroState| {
+            let commitment = state.commitment();
+            let header = commitment
+                .to_offline_trident_header(1, 0, 0, Hash([0x66; 32]))
+                .unwrap();
+            let datadir =
+                TridentDatadirIdentity::from_block_zero(&commitment, Some(&header)).unwrap();
+            (
+                state.state_root(),
+                commitment.hash(),
+                header.commitment_hash().unwrap(),
+                datadir.canonical_bytes().unwrap(),
+            )
+        };
+        let baseline_projection = project(&baseline);
+
+        let mut mutations = Vec::new();
+        let mut changed = baseline.clone();
+        changed.data_availability.version += 1;
+        mutations.push(changed);
+        let mut changed = baseline.clone();
+        changed.data_availability.enabled = true;
+        mutations.push(changed);
+        let mut changed = baseline.clone();
+        changed.data_availability.activation_checkpoint = Some(1);
+        mutations.push(changed);
+        let mut changed = baseline.clone();
+        changed.data_availability.activation_block_body_version += 1;
+        mutations.push(changed);
+        let mut changed = baseline.clone();
+        changed.data_availability.max_commitments_per_block = 1;
+        mutations.push(changed);
+        let mut changed = baseline.clone();
+        changed.data_availability.max_authorization_bytes_per_block = 1;
+        mutations.push(changed);
+        let mut changed = baseline.clone();
+        changed.data_availability.base_fee_tlt = 1;
+        mutations.push(changed);
+        let mut changed = baseline.clone();
+        changed.data_availability.fee_per_authorization_byte_tlt = 1;
+        mutations.push(changed);
+        let mut changed = baseline.clone();
+        changed.data_availability.fee_per_state_byte_tlt = 1;
+        mutations.push(changed);
+        let mut changed = baseline.clone();
+        changed
+            .data_availability
+            .allowed_sources
+            .push(agora_types::DataCommitmentSource::AgoraLayersOvolosBatchLab);
+        mutations.push(changed);
+        let mut changed = baseline.clone();
+        changed.data_availability.max_sequence_advance = 1;
+        mutations.push(changed);
+
+        for changed in mutations {
+            assert!(changed.verify().is_err());
+            let projection = project(&changed);
+            assert_ne!(projection.0, baseline_projection.0);
+            assert_ne!(projection.1, baseline_projection.1);
+            assert_ne!(projection.2, baseline_projection.2);
+            assert_ne!(projection.3, baseline_projection.3);
+        }
     }
 
     #[test]

@@ -45,11 +45,11 @@ rejects a datadir whose `meta/genesis_hash` ≠ the expected network hash.
 
 For Trident v3, `TridentGenesisArtifact::to_runtime_policy` is the single
 offline conversion into typed DAA, GHOSTDAG, emission, monetary, staking,
-finality, policy-hash, and fingerprint values. It first applies the
+finality, DA activation/fees, policy-hash, and fingerprint values. It first applies the
 freeze-readiness gate and therefore rejects placeholders, missing policy
 values, and stale artifact hashes. A freeze-ready artifact can also produce a
 versioned Block 0 manifest and a lossless Meta envelope
-(`meta/trident_block_zero/*`, storage version 3, independent of
+(`meta/trident_block_zero/*`, storage version 4, independent of
 `SCHEMA_VERSION`). A versioned `meta/trident_datadir_identity/*` Borsh record
 binds its chain ID, network fingerprint, artifact and policy identities, Block
 0 commitment, committed state root, header identity, and optional concrete
@@ -114,7 +114,7 @@ Transaction index (`cf_warm`): key `tx/` ‖ `tx_id`, value `block_id` ‖ `inde
 ## Trident staking + finality store (Phase 3+)
 
 Meta CF keys are additive; the authenticated DA lane raises the current
-`SCHEMA_VERSION` to `10`:
+`SCHEMA_VERSION` to `11`:
 
 - `stake/val|del|unbond|epoch|snap|reward_pool|reserve_remaining/…` — staking + slash/reward + reserve
 - `finality/cert|idx|last_att/…`, `finality/tip_blue_score` — certificates, signer index, tip
@@ -122,9 +122,9 @@ Meta CF keys are additive; the authenticated DA lane raises the current
 
 Node admit enforces reorg-beyond-finality. Account, stake, OVL execution,
 native DRC payments, and authenticated DA commitments enter versioned consensus
-lanes. DRC payment metadata, DA records/replay cursors,
+lanes. DRC payment metadata, DA records/replay/source cursors,
 governance/treasuries, and the bounded Hub/Passport/Grant/Mission registry
-commit in `agora-trident-state-root-v5`. Local unsigned civic/community RPC
+commit in `agora-trident-state-root-v6`. Local unsigned civic/community RPC
 state remains excluded. See [`community-registry.md`](community-registry.md),
 [`data-availability.md`](data-availability.md),
 [`ovl-execution.md`](ovl-execution.md),
@@ -136,17 +136,24 @@ state remains excluded. See [`community-registry.md`](community-registry.md),
 - `da/v1/commitment/<source><sequence_be>` stores the first accepted signed
   authorization for that source sequence.
 - `da/v1/operator_nonce/<address>` stores the next accepted replay nonce.
+- `da/v1/source_sequence/<source>` stores the accepted high-water sequence used
+  to bound forward gaps without scanning an unbounded keyspace.
 - Exact signed retries are `ExactDuplicate`; a different claimant for the same
   source sequence or a consumed/future nonce is `ConflictLost` under Virtual
   order.
 - Invalid structure, secp256k1 signature, chain, genesis, or fingerprint fails
   the block before storage.
-- `UtxoJournal.data_availability_meta_before` restores both key families in the
+- `UtxoJournal.data_availability_meta_before` restores all three key families in the
   same crash-safe reorg batches as the other lanes.
 
-The live node leaves DA policy activation unset because no TLT byte/state fee
-or sponsorship rule is frozen. This state consumer is therefore block-only and
-fail-closed outside explicitly activated Trident contexts.
+The state transition checks the ceremony-owned activation checkpoint, body
+version, source allowlist, sequence window, count/byte limits, and checked TLT
+fee formula. Accepted DA fees must be covered by fees from accepted same-block
+TLT UTXO transfers; the existing coinbase path credits that pool once, while
+`UtxoJournal.data_availability_fees` records the attributed subset. Duplicate
+or replay-lost commitments add zero obligation. The checked-in draft is
+explicitly disabled, and legacy/v2 node contexts leave the runtime policy
+unset, so both reject DA-bearing blocks.
 
 ## Storage backends
 

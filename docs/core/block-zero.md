@@ -6,14 +6,14 @@
 deterministic Borsh manifest that a future Trident Block 0 transition must
 materialize. Preparation is accepted only from a freeze-ready v3 artifact.
 
-Manifest version 3 is a pre-freeze break. It retains the version 2 chain ID and
-network-fingerprint binding and adds complete ceremony-selected validator
-registration fields to `TridentBlockZeroState` and
-`TridentBlockZeroCommitment`.
+Manifest version 4 is a pre-freeze break. It retains the chain/network and
+complete validator-registration bindings and adds the ceremony-owned DA
+activation, capacity, source/sequence, and TLT fee policy.
 
 The manifest commits:
 
 - chain ID and network fingerprint, together with the artifact and consensus-policy identities;
+- the explicit DA policy (disabled in the checked-in draft);
 - every TLT, OVL, and DRC initial allocation and vesting lock;
 - maximum, allocated, treasury, staking-reserve, and unissued supply buckets;
 - all three protocol treasuries, including their artifact-selected controls;
@@ -34,7 +34,7 @@ an exact Borsh round trip and rechecks the state root.
 ## Candidate storage envelope
 
 Explicit Meta keys under `meta/trident_block_zero/` hold a versioned Borsh
-envelope (`TRIDENT_BLOCK_ZERO_STORAGE_VERSION = 3`, independent of live
+envelope (`TRIDENT_BLOCK_ZERO_STORAGE_VERSION = 4`, independent of live
 `SCHEMA_VERSION`). The envelope preserves the complete manifest, canonical
 payload, commitment, commitment hash, artifact identity, consensus policy hash,
 network fingerprint, chain ID, and bound datadir identity.
@@ -45,6 +45,11 @@ artifact identity, consensus-policy hash, Block 0 commitment, committed state
 root, and the Trident header network identity. When a fully specified offline
 header is available, it also binds that header's canonical hash; no ceremony
 value is defaulted when the hash is absent.
+
+Every DA field is included in both artifact and consensus-policy hashing and in
+the manifest itself. The resulting policy hash, network fingerprint, state
+root, and Block 0 commitment propagate that identity into the versioned header
+and datadir bytes; sensitivity tests mutate each field independently.
 
 `TridentBlockZeroState::stage_verified_store_batch` places the envelope and
 identity bytes in one `WriteBatch`, applies that batch only to a copy-on-write

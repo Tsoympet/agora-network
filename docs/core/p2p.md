@@ -81,8 +81,10 @@ Mining templates pull UTXO transfers plus account/stake lanes and commit all lan
 Authenticated DA authorizations deliberately have no standalone mempool or
 `NetworkMessage` variant. Existing enum discriminants remain unchanged; full
 block propagation carries accepted candidates under Trident protocol v5 /
-state-transition v6. The current node leaves DA activation disabled until a
-reviewed TLT base-fee/sponsorship policy exists, so there is no free public
+state-transition v7. Genesis now carries a reviewed policy shape for
+checkpoint activation, capacity, source/sequence bounds, and checked TLT
+same-block sponsorship. The checked-in draft leaves that policy explicitly
+disabled and selects no public values, so there is still no standalone public
 gossip path.
 
 ## Runtime

@@ -656,7 +656,7 @@ async fn main() {
     let tx_auth = agora_state_machine::TxAuthContext {
         chain_id: chain_params.network.chain_id().into(),
         genesis: genesis_hash,
-        data_availability_network_fingerprint: None,
+        data_availability: None,
     };
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));

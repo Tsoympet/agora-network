@@ -12,18 +12,19 @@ use agora_types::{Address, Hash, NativeAssetId};
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
+use crate::data_availability::{DataAvailabilityRuntimeConfig, TridentDataAvailabilityPolicy};
 use crate::monetary::{AssetMonetaryPolicy, EmissionKind, TridentMonetaryPolicy};
 use crate::network::NetworkId;
 use crate::staking::{StakingParams, MAX_VALIDATOR_COMMISSION_BPS};
 
 pub const TRIDENT_GENESIS_SCHEMA: &str = "agora-trident-genesis-v3";
 /// State-transition version committed into the Trident network fingerprint.
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v6";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v7";
 /// Consensus-policy version string for Trident.
-pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v2";
+pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v3";
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
-pub const TRIDENT_GENESIS_ID_DOMAIN: &[u8] = b"agora-trident-genesis-identity-v2";
-pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-policy-v2";
+pub const TRIDENT_GENESIS_ID_DOMAIN: &[u8] = b"agora-trident-genesis-identity-v3";
+pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-policy-v3";
 /// v5 adds the authenticated block-only DA commitment lane.
 pub const TRIDENT_PROTOCOL_VERSION: u32 = 5;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v1";
@@ -234,6 +235,7 @@ pub struct TridentGenesisArtifact {
     pub treasuries: TridentTreasuries,
     pub pow: TridentPowPolicy,
     pub finality: TridentFinalityPolicy,
+    pub data_availability: TridentDataAvailabilityPolicy,
     pub ovl_validators: TridentValidatorGenesis,
     pub drc_validators: TridentValidatorGenesis,
     pub vesting_schedules: Vec<TridentVestingSchedule>,
@@ -261,6 +263,7 @@ struct ConsensusIdentity<'a> {
     treasuries: &'a TridentTreasuries,
     pow: &'a TridentPowPolicy,
     finality: &'a TridentFinalityPolicy,
+    data_availability: &'a TridentDataAvailabilityPolicy,
     ovl_validators: &'a TridentValidatorGenesis,
     drc_validators: &'a TridentValidatorGenesis,
     vesting_schedules: &'a [TridentVestingSchedule],
@@ -289,6 +292,7 @@ pub struct TridentRuntimePolicy {
     pub ovl_staking: StakingParams,
     pub drc_staking: StakingParams,
     pub finality: TridentRuntimeFinalityPolicy,
+    pub data_availability: TridentDataAvailabilityPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -298,6 +302,15 @@ pub struct TridentRuntimeFinalityPolicy {
     pub ovl_quorum_denominator: u32,
     pub drc_quorum_numerator: u32,
     pub drc_quorum_denominator: u32,
+}
+
+impl TridentRuntimePolicy {
+    /// Build the exact state-machine context committed by this runtime policy.
+    pub fn data_availability_runtime_config(
+        &self,
+    ) -> Result<DataAvailabilityRuntimeConfig, String> {
+        DataAvailabilityRuntimeConfig::new(self.network_fingerprint, self.data_availability.clone())
+    }
 }
 
 impl TridentGenesisArtifact {
@@ -333,6 +346,7 @@ impl TridentGenesisArtifact {
         self.validate_treasuries()?;
         self.validate_pow()?;
         self.finality.validate()?;
+        self.data_availability.validate_draft()?;
         self.validate_populated_validator_set("OVL", &self.ovl_validators)?;
         self.validate_populated_validator_set("DRC", &self.drc_validators)?;
         self.validate_populated_allocations()?;
@@ -382,6 +396,7 @@ impl TridentGenesisArtifact {
         }
         self.require_freeze_ready_assets()?;
         self.require_freeze_ready_treasuries()?;
+        self.data_availability.validate_freeze_ready()?;
         self.require_freeze_ready_validator_set("OVL", &self.ovl_validators)?;
         self.require_freeze_ready_validator_set("DRC", &self.drc_validators)?;
         self.require_allocation_totals()?;
@@ -478,6 +493,7 @@ impl TridentGenesisArtifact {
                 drc_quorum_numerator: self.finality.drc_quorum_numerator,
                 drc_quorum_denominator: self.finality.drc_quorum_denominator,
             },
+            data_availability: self.data_availability.clone(),
         })
     }
 
@@ -501,6 +517,7 @@ impl TridentGenesisArtifact {
             treasuries: &self.treasuries,
             pow: &self.pow,
             finality: &self.finality,
+            data_availability: &self.data_availability,
             ovl_validators: &self.ovl_validators,
             drc_validators: &self.drc_validators,
             vesting_schedules: &self.vesting_schedules,
@@ -531,6 +548,7 @@ impl TridentGenesisArtifact {
             &self.assets,
             &self.pow,
             &self.finality,
+            &self.data_availability,
             &self.ovl_validators,
             &self.drc_validators,
         ))
@@ -1038,15 +1056,134 @@ mod tests {
         artifact
     }
 
+    fn enable_synthetic_data_availability(artifact: &mut TridentGenesisArtifact) {
+        artifact.data_availability = TridentDataAvailabilityPolicy {
+            version: crate::DATA_AVAILABILITY_POLICY_VERSION,
+            enabled: true,
+            activation_checkpoint: Some(100),
+            activation_block_body_version: agora_types::TRIDENT_BLOCK_BODY_VERSION,
+            max_commitments_per_block: 8,
+            max_authorization_bytes_per_block: 16_384,
+            base_fee_tlt: 10,
+            fee_per_authorization_byte_tlt: 2,
+            fee_per_state_byte_tlt: 3,
+            allowed_sources: vec![agora_types::DataCommitmentSource::AgoraLayersOvolosBatchLab],
+            max_sequence_advance: 64,
+        };
+        artifact.genesis_hash = artifact.consensus_identity_hash().to_hex();
+        artifact.network_fingerprint = artifact.compute_network_fingerprint().to_hex();
+    }
+
     #[test]
     fn checked_in_draft_parses_strictly_and_has_stable_identity() {
         let artifact = TridentGenesisArtifact::from_json(DRAFT).unwrap();
         artifact.validate_draft().unwrap();
         assert_eq!(
+            artifact.data_availability,
+            TridentDataAvailabilityPolicy::disabled()
+        );
+        assert_eq!(
             artifact.consensus_identity_hash(),
             artifact.consensus_identity_hash()
         );
         assert_ne!(artifact.compute_network_fingerprint(), Hash::ZERO);
+    }
+
+    #[test]
+    fn enabled_data_availability_requires_complete_safe_policy() {
+        let disabled = synthetic_freeze_ready_artifact();
+        disabled.validate_freeze_ready().unwrap();
+        assert!(
+            !disabled
+                .to_runtime_policy()
+                .unwrap()
+                .data_availability
+                .enabled
+        );
+
+        let mut placeholder = disabled.clone();
+        placeholder.data_availability.enabled = true;
+        assert!(placeholder.data_availability.validate_draft().is_ok());
+        assert!(placeholder
+            .data_availability
+            .validate_freeze_ready()
+            .unwrap_err()
+            .contains("activation checkpoint"));
+
+        let mut enabled = disabled;
+        enable_synthetic_data_availability(&mut enabled);
+        enabled.validate_freeze_ready().unwrap();
+        let runtime = enabled.to_runtime_policy().unwrap();
+        assert_eq!(runtime.data_availability, enabled.data_availability);
+        assert!(
+            runtime
+                .data_availability_runtime_config()
+                .unwrap()
+                .policy
+                .enabled
+        );
+
+        let mut unsafe_limit = enabled.clone();
+        unsafe_limit.data_availability.max_commitments_per_block =
+            u32::try_from(agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK)
+                .unwrap()
+                .checked_add(1)
+                .unwrap();
+        assert!(unsafe_limit
+            .data_availability
+            .validate_freeze_ready()
+            .unwrap_err()
+            .contains("hard cap"));
+    }
+
+    #[test]
+    fn every_data_availability_policy_field_changes_all_artifact_identities() {
+        let mut artifact = synthetic_freeze_ready_artifact();
+        enable_synthetic_data_availability(&mut artifact);
+        let identity = artifact.consensus_identity_hash();
+        let policy = artifact.consensus_policy_hash();
+        let fingerprint = artifact.compute_network_fingerprint();
+
+        let mut mutations = Vec::new();
+        let mut changed = artifact.clone();
+        changed.data_availability.version += 1;
+        mutations.push(changed);
+        let mut changed = artifact.clone();
+        changed.data_availability.enabled = false;
+        mutations.push(changed);
+        let mut changed = artifact.clone();
+        changed.data_availability.activation_checkpoint = Some(101);
+        mutations.push(changed);
+        let mut changed = artifact.clone();
+        changed.data_availability.activation_block_body_version += 1;
+        mutations.push(changed);
+        let mut changed = artifact.clone();
+        changed.data_availability.max_commitments_per_block += 1;
+        mutations.push(changed);
+        let mut changed = artifact.clone();
+        changed.data_availability.max_authorization_bytes_per_block += 1;
+        mutations.push(changed);
+        let mut changed = artifact.clone();
+        changed.data_availability.base_fee_tlt += 1;
+        mutations.push(changed);
+        let mut changed = artifact.clone();
+        changed.data_availability.fee_per_authorization_byte_tlt += 1;
+        mutations.push(changed);
+        let mut changed = artifact.clone();
+        changed.data_availability.fee_per_state_byte_tlt += 1;
+        mutations.push(changed);
+        let mut changed = artifact.clone();
+        changed.data_availability.allowed_sources.clear();
+        mutations.push(changed);
+        let mut changed = artifact.clone();
+        changed.data_availability.max_sequence_advance += 1;
+        mutations.push(changed);
+
+        for changed in mutations {
+            assert_ne!(changed.consensus_identity_hash(), identity);
+            assert_ne!(changed.consensus_policy_hash(), policy);
+            assert_ne!(changed.compute_network_fingerprint(), fingerprint);
+        }
     }
 
     #[test]
@@ -1259,6 +1396,10 @@ mod tests {
         assert_eq!(runtime.ovl_staking.min_self_bond, 1);
         assert_eq!(runtime.ovl_staking.max_commission_bps, 2_000);
         assert_eq!(runtime.drc_staking.epoch_reserve_drip, 1_000_000_000);
+        assert_eq!(runtime.data_availability, artifact.data_availability);
+        let da_runtime = runtime.data_availability_runtime_config().unwrap();
+        assert_eq!(da_runtime.network_fingerprint, runtime.network_fingerprint);
+        assert!(!da_runtime.policy.enabled);
 
         artifact.pow.ghostdag_k += 1;
         let error = artifact.to_runtime_policy().unwrap_err();

@@ -48,7 +48,8 @@ impl ColumnFamily {
 /// - `8` — canonical governance policy and asset-isolated protocol treasuries
 /// - `9` — canonical Hub, Passport, Grant, and Mission registry summary
 /// - `10` — authenticated DA commitment/index/replay state and revert journal
-pub const SCHEMA_VERSION: u32 = 10;
+/// - `11` — DA source-sequence window and accepted TLT fee attribution
+pub const SCHEMA_VERSION: u32 = 11;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {

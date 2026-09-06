@@ -15,7 +15,8 @@
 | `7` | Native `drc_payments` lane, body-root v4, duplicate/invoice indexes, and payment outbox |
 | `8` | Canonical governance authorization policy and three asset-isolated protocol treasuries |
 | `9` | Canonical Hub, Passport, Grant, and Mission registry summary/records |
-| `10` (current) | Authenticated DA commitment/source-sequence index, operator replay cursor, acceptance, and revert snapshots |
+| `10` | Authenticated DA commitment/source-sequence index, operator replay cursor, acceptance, and revert snapshots |
+| `11` (current) | DA source-sequence high-water cursor and accepted TLT fee attribution in revert journals |
 
 Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
@@ -35,6 +36,6 @@ Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 - Governance: `governance/consensus/policy`, `governance/treasury/<id>`
 - Community: `community/v1/summary|hub|passport|grant|mission|issuer_nonce|active_issuer`
 - Data commitments: `da/v1/commitment/<source><sequence_be>`,
-  `da/v1/operator_nonce/<address>`
+  `da/v1/operator_nonce/<address>`, `da/v1/source_sequence/<source>`
 
 Atomic `WriteBatch` commit rules from PRs #76–#81 remain mandatory.

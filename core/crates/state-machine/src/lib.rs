@@ -41,10 +41,11 @@ pub use accounts::{
     load_account, put_account_into, revert_account_journal_into, AccountJournal, AccountState,
 };
 pub use apply::{
-    apply_block, apply_block_batched, apply_block_batched_virtual, apply_block_batched_with_auth,
-    apply_block_with_auth, balance_of, revert_journal, revert_journal_batched, sum_transfer_fees,
-    transfer_fee, validate_mempool_tx, validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult,
-    TxAuthContext, UtxoJournal,
+    apply_block, apply_block_batched, apply_block_batched_virtual,
+    apply_block_batched_virtual_at_blue_score, apply_block_batched_with_auth,
+    apply_block_batched_with_auth_at_blue_score, apply_block_with_auth, balance_of, revert_journal,
+    revert_journal_batched, sum_transfer_fees, transfer_fee, validate_mempool_tx,
+    validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult, TxAuthContext, UtxoJournal,
 };
 pub use block_zero::{
     ensure_legacy_v2_datadir, load_verified_trident_block_zero, verify_trident_datadir_identity,
@@ -64,8 +65,12 @@ pub use community_state::{
 };
 pub use data_availability::{
     apply_data_commitment, data_availability_root, data_commitment_key, data_commitment_nonce_key,
-    load_data_commitment, load_data_commitment_nonce, revert_data_commitment_meta_into,
-    AcceptedDataCommitment, ACCEPTED_DATA_COMMITMENT_VERSION, DATA_AVAILABILITY_ROOT_DOMAIN,
+    data_commitment_source_sequence_key, load_data_commitment, load_data_commitment_nonce,
+    load_data_commitment_source_sequence, revert_data_commitment_meta_into, AcceptedDataCommitment,
+    DataAvailabilityFeeQuote, DataAvailabilityRuntimeConfig, DataCommitmentApplyOutcome,
+    TridentDataAvailabilityPolicy, ACCEPTED_DATA_COMMITMENT_VERSION,
+    DATA_AVAILABILITY_POLICY_DOMAIN, DATA_AVAILABILITY_POLICY_VERSION,
+    DATA_AVAILABILITY_ROOT_DOMAIN,
 };
 pub use error::StateError;
 pub use execution::{

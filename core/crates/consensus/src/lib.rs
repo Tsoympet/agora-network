@@ -28,8 +28,8 @@ pub use finality::{
 pub use ghostdag::{Ghostdag, GhostdagConfig, GhostdagData, GhostdagSnapshot, OrderedBlock};
 pub use limits::{
     ConsensusLimits, COINBASE_MATURITY, MAX_BLOCK_BYTES, MAX_BLOCK_PARENTS, MAX_BLOCK_TRANSACTIONS,
-    MAX_DATA_COMMITMENTS_PER_BLOCK, MAX_TIMESTAMP_AHEAD_MS, MAX_TX_BYTES, MAX_TX_INPUTS,
-    MAX_TX_OUTPUTS,
+    MAX_DATA_COMMITMENTS_PER_BLOCK, MAX_DATA_COMMITMENT_BYTES_PER_BLOCK, MAX_TIMESTAMP_AHEAD_MS,
+    MAX_TX_BYTES, MAX_TX_INPUTS, MAX_TX_OUTPUTS,
 };
 pub use pow::{
     hasher_for, AcceptAllPow, KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher,

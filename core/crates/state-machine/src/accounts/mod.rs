@@ -246,7 +246,7 @@ mod tests {
         let auth = TxAuthContext {
             chain_id: "agora-trident-testnet-1".into(),
             genesis,
-            data_availability_network_fingerprint: None,
+            data_availability: None,
         };
 
         let mut batch = WriteBatch::new();
