@@ -8,7 +8,8 @@ OVL stake selects the **technical validator set** that signs Trident finality ch
 
 ## Features
 
-- Validator registration (consensus public key, withdrawal address, metadata)
+- Validator registration (secp256k1 consensus public key, withdrawal address,
+  commission, nonzero 32-byte metadata commitment)
 - Self-bond + delegation
 - Activation, epochs, validator-set snapshots
 - Unbonding period + withdrawal
@@ -16,6 +17,12 @@ OVL stake selects the **technical validator set** that signs Trident finality ch
 - Jailing, slashing, tombstoning (severe equivocation)
 - Maximum validator count, minimum stake, delegation concentration controls
 - Deterministic quorum: `3 * signed >= 2 * active` (integer)
+
+Genesis entries must select commission explicitly at or below both the
+validator-set maximum and the 10,000 bps global bound. Zero percent is valid
+when explicitly selected; a missing value is not. The Block 0 conversion
+preserves all registration fields in the existing asset-scoped
+`ValidatorRecord` key/value without writing live state.
 
 ## Conservative slash defaults (initial)
 

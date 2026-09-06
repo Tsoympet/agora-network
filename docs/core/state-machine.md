@@ -49,7 +49,7 @@ finality, policy-hash, and fingerprint values. It first applies the
 freeze-readiness gate and therefore rejects placeholders, missing policy
 values, and stale artifact hashes. A freeze-ready artifact can also produce a
 versioned Block 0 manifest and a lossless Meta envelope
-(`meta/trident_block_zero/*`, storage version 2, independent of
+(`meta/trident_block_zero/*`, storage version 3, independent of
 `SCHEMA_VERSION`). A versioned `meta/trident_datadir_identity/*` Borsh record
 binds its chain ID, network fingerprint, artifact and policy identities, Block
 0 commitment, committed state root, header identity, and optional concrete
@@ -57,6 +57,13 @@ header hash. Both records are staged, overlay-verified, and committed in the
 same atomic batch. Checked reopen requires canonical byte-for-byte equality
 between the independent identity record, the copy inside the envelope, and any
 expected identity supplied by a future Trident startup.
+
+Epoch-zero validators include ceremony-selected commission and nonzero 32-byte
+metadata commitments. `BlockZeroValidatorSet::to_runtime_validator_entries`
+checks exact policy equality, preserves the secp256k1 consensus/withdrawal
+identities, and derives the existing asset-scoped `stake/val/` key plus
+canonical `ValidatorRecord` bytes. This is a pure conversion surface; it does
+not materialize live staking state.
 
 `GenesisBuilder` still does not seed live balances from this candidate. Its
 legacy load paths now reject every complete or partial Trident marker before

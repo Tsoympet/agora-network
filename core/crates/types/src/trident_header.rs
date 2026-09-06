@@ -301,7 +301,7 @@ mod tests {
         TridentHeader::new(
             TridentHeaderIdentity {
                 protocol_version: 4,
-                state_transition_version: "agora-trident-state-v5".into(),
+                state_transition_version: "agora-trident-state-v6".into(),
                 block_zero_commitment: Hash([0x11; 32]),
                 artifact_identity: Hash([0x22; 32]),
                 consensus_policy_hash: Hash([0x33; 32]),

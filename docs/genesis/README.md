@@ -64,13 +64,14 @@ cargo run -p agora-node -- genesis trident verify \
 The checked-in draft must fail the second command. Freeze-ready validation
 rejects `UNFROZEN` or malformed hashes, draft/provisional policy labels,
 missing timestamp or difficulty selection, empty OVL/DRC validator sets,
-invalid compressed secp256k1 validator keys, zero reserves/treasuries, and
-allocation-total mismatches. Runtime-policy preparation additionally requires
-an explicit blue-score PoW threshold, validator commission/concentration
-limits, and complete TLT/staking emission schedules. It derives DAA, GHOSTDAG,
-emission, monetary, staking, finality, consensus-policy-hash, and P2P
-fingerprint values through one typed conversion. Any artifact mutation after
-hashing is rejected.
+invalid compressed secp256k1 validator keys, missing or over-limit
+per-validator commissions, missing or zero validator metadata commitments,
+zero reserves/treasuries, and allocation-total mismatches. Runtime-policy
+preparation additionally requires an explicit blue-score PoW threshold,
+validator commission/concentration limits, and complete TLT/staking emission
+schedules. It derives DAA, GHOSTDAG, emission, monetary, staking, finality,
+consensus-policy-hash, and P2P fingerprint values through one typed conversion.
+Any artifact mutation after hashing is rejected.
 
 Neither mode writes the document, freezes it, converts it to v2
 `ChainParams`, or starts a node. Ceremony participants must supply allocations,
@@ -82,9 +83,10 @@ The integrated runtime is still insufficient for a safe Trident node loader.
 Genesis storage has an atomic prepared-batch commit, and a freeze-ready
 artifact can now produce a complete typed policy candidate without compiled
 policy defaults. It can also prepare a versioned Block 0 commitment (manifest
-v2, including chain ID and network fingerprint) and a lossless Meta envelope
+v3, including chain ID, network fingerprint, and complete validator
+registrations) and a lossless Meta envelope
 that is overlay-verified before a future loader may append it. Storage envelope
-v2 now includes a separately versioned Borsh datadir identity, persisted in the
+v3 now includes a separately versioned Borsh datadir identity, persisted in the
 same atomic batch and checked byte-for-byte on reopen. That identity binds the
 chain, network fingerprint, artifact, consensus policy, Block 0 commitment,
 committed state root, header network identity, and the concrete header hash
@@ -104,9 +106,9 @@ The candidate is still deliberately not accepted as live state: `genesis_hash` s
 names the full artifact identity, while DAG bootstrap requires the hash of a
 concrete runtime block/header. Remaining blockers are the concrete Trident
 Block 0 body and body-root rule; lossless atomic
-UTXO/account/treasury/vesting/validator/finality mappings whose recomputed live
-state root equals the offline header; complete ceremony-selected validator
-records; and explicit consensus, PoW, storage, P2P, and RPC activation gates.
+UTXO/account/treasury/vesting/validator/finality writes whose recomputed live
+state root equals the offline header; and explicit consensus, PoW, storage,
+P2P, and RPC activation gates.
 Until those exist together, v3 remains offline-only and
 `AGORA_GENESIS_FILE` continues to accept v2 artifacts only.
 
@@ -116,9 +118,19 @@ Populated `genesis_set` entries use:
 {
   "consensus_public_key": "<66 lowercase hex characters; compressed secp256k1>",
   "withdrawal_address": "<ceremony-selected network address>",
-  "self_bond": 1
+  "self_bond": 1,
+  "commission_bps": null,
+  "metadata_hash": "UNFROZEN"
 }
 ```
+
+`null` and `UNFROZEN` are explicit draft placeholders only. Freeze-ready
+entries require an explicitly selected integer commission at or below the set
+maximum (and the global 10,000 bps bound) plus a nonzero 32-byte metadata hash
+as 64 lowercase hexadecimal characters. An explicit zero-percent commission is
+valid; an omitted commission is not ceremony-selected. These fields are part
+of the artifact identity, policy hash, P2P fingerprint, Block 0 state root, and
+Block 0 commitment.
 
 Populated `initial_allocations` entries use `asset`, `address`, and nonzero
 `amount`. Populated `vesting_schedules` entries additionally use nonzero
