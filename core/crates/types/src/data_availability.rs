@@ -1,7 +1,8 @@
-//! Provenance-bound data-commitment candidates for a future Trident L1 lane.
+//! Provenance-bound data-commitment types for the Trident L1 block lane.
 //!
-//! These types define canonical bytes and operator authorization only. They are
-//! not part of [`crate::Block`] and are not accepted by the live L1 RPC yet.
+//! These types define canonical bytes and operator authorization consumed by
+//! [`crate::Block::data_commitments`]. Standalone mempool/RPC submission remains
+//! disabled until Trident defines the TLT inclusion-fee policy.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
@@ -117,7 +118,7 @@ impl DataAvailabilityCommitment {
         Ok(())
     }
 
-    /// Canonical, domain-separated Borsh payload for future consensus review.
+    /// Canonical, domain-separated Borsh payload consumed by consensus.
     pub fn canonical_bytes(&self) -> Vec<u8> {
         borsh::to_vec(&(DA_COMMITMENT_PAYLOAD_DOMAIN, self))
             .expect("borsh serialize data commitment")
@@ -128,11 +129,11 @@ impl DataAvailabilityCommitment {
     }
 }
 
-/// Signed operator authorization that a future versioned L1 transaction can carry.
+/// Signed operator authorization carried in [`crate::Block::data_commitments`].
 ///
-/// `replay_nonce` is cryptographically bound here. A future state transition
-/// must still enforce and persist it atomically; this type alone is not replay
-/// protection and is deliberately not exposed through RPC.
+/// `replay_nonce` is cryptographically bound here and enforced atomically by
+/// the state transition. This type alone is not replay protection and remains
+/// deliberately unavailable through standalone RPC submission.
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]

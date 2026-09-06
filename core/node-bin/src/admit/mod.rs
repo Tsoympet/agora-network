@@ -171,6 +171,20 @@ impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
     }
 }
 
+/// Borrowed multi-lane body used to build a mining template.
+///
+/// Grouping lanes keeps template construction append-only as Trident gains
+/// consensus-recognized body kinds.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BlockTemplateLanes<'a> {
+    pub transfers: &'a [Transaction],
+    pub account_transfers: &'a [agora_types::AccountTransfer],
+    pub stake_ops: &'a [agora_types::SignedStakeTx],
+    pub ovl_executions: &'a [agora_types::OvlExecutionTx],
+    pub drc_payments: &'a [agora_types::DrcPaymentTx],
+    pub data_commitments: &'a [agora_types::DataCommitmentAuthorization],
+}
+
 impl ChainState {
     /// Convenience bootstrap used by integration tests and RPC backends.
     #[allow(dead_code)]
@@ -452,19 +466,20 @@ impl ChainState {
         payout: Address,
         transfers: &[Transaction],
     ) -> Result<Block, AdmitError> {
-        self.block_template_lanes(payout, transfers, &[], &[], &[], &[], &[])
+        self.block_template_lanes(
+            payout,
+            BlockTemplateLanes {
+                transfers,
+                ..BlockTemplateLanes::default()
+            },
+        )
     }
 
     /// Build a mining template with Trident body lanes.
     pub fn block_template_lanes(
         &self,
         payout: Address,
-        transfers: &[Transaction],
-        account_transfers: &[agora_types::AccountTransfer],
-        stake_ops: &[agora_types::SignedStakeTx],
-        ovl_executions: &[agora_types::OvlExecutionTx],
-        drc_payments: &[agora_types::DrcPaymentTx],
-        data_commitments: &[agora_types::DataCommitmentAuthorization],
+        lanes: BlockTemplateLanes<'_>,
     ) -> Result<Block, AdmitError> {
         let parents = self.select_template_parents()?;
         let timestamp_ms = self.template_timestamp_ms(&parents)?;
@@ -474,7 +489,7 @@ impl ChainState {
         let scheduled = self.emission.reward_at_blue_score(blue_score);
         let emission = self.clamp_emission(scheduled)?;
         let max_transfers = self.limits.max_block_transactions.saturating_sub(1);
-        let included = &transfers[..transfers.len().min(max_transfers)];
+        let included = &lanes.transfers[..lanes.transfers.len().min(max_transfers)];
         // Fee total must match only the transfers that enter the block body.
         let fees = sum_transfer_fees(self.store.as_ref(), included)
             .map_err(|e| AdmitError::Utxo(e.to_string()))?;
@@ -507,11 +522,11 @@ impl ChainState {
                 tx_root: Hash::ZERO,
             },
             transactions,
-            account_transfers: account_transfers.to_vec(),
-            stake_ops: stake_ops.to_vec(),
-            ovl_executions: ovl_executions.to_vec(),
-            drc_payments: drc_payments.to_vec(),
-            data_commitments: data_commitments.to_vec(),
+            account_transfers: lanes.account_transfers.to_vec(),
+            stake_ops: lanes.stake_ops.to_vec(),
+            ovl_executions: lanes.ovl_executions.to_vec(),
+            drc_payments: lanes.drc_payments.to_vec(),
+            data_commitments: lanes.data_commitments.to_vec(),
         };
         block.header.tx_root = block.compute_body_root();
         Ok(block)
@@ -2969,7 +2984,13 @@ mod tests {
 
         let oversized = vec![first.clone(); chain.limits.max_data_commitments + 1];
         let oversized_block = chain
-            .block_template_lanes(Address::ZERO, &[], &[], &[], &[], &[], &oversized)
+            .block_template_lanes(
+                Address::ZERO,
+                BlockTemplateLanes {
+                    data_commitments: &oversized,
+                    ..BlockTemplateLanes::default()
+                },
+            )
             .unwrap();
         assert!(matches!(
             chain.check_size_limits(&oversized_block),
@@ -2980,12 +3001,10 @@ mod tests {
         let mut first_block = chain
             .block_template_lanes(
                 Address([1; 20]),
-                &[],
-                &[],
-                &[],
-                &[],
-                &[],
-                std::slice::from_ref(&first),
+                BlockTemplateLanes {
+                    data_commitments: std::slice::from_ref(&first),
+                    ..BlockTemplateLanes::default()
+                },
             )
             .unwrap();
         first_block.header.parents = vec![genesis];
@@ -2996,12 +3015,10 @@ mod tests {
         let mut conflict_block = chain
             .block_template_lanes(
                 Address([2; 20]),
-                &[],
-                &[],
-                &[],
-                &[],
-                &[],
-                std::slice::from_ref(&conflict),
+                BlockTemplateLanes {
+                    data_commitments: std::slice::from_ref(&conflict),
+                    ..BlockTemplateLanes::default()
+                },
             )
             .unwrap();
         conflict_block.header.parents = vec![genesis];

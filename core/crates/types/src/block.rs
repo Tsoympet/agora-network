@@ -324,6 +324,16 @@ mod tests {
         transactions: Vec<Transaction>,
     }
 
+    #[derive(BorshSerialize)]
+    struct LegacyV4Block {
+        header: BlockHeader,
+        transactions: Vec<Transaction>,
+        account_transfers: Vec<AccountTransfer>,
+        stake_ops: Vec<SignedStakeTx>,
+        ovl_executions: Vec<OvlExecutionTx>,
+        drc_payments: Vec<DrcPaymentTx>,
+    }
+
     #[test]
     fn legacy_utxo_block_bytes_decode_with_empty_appended_lanes() {
         let legacy = LegacyUtxoBlock {
@@ -345,6 +355,39 @@ mod tests {
         assert!(decoded.stake_ops.is_empty());
         assert!(decoded.ovl_executions.is_empty());
         assert!(decoded.drc_payments.is_empty());
+        assert!(decoded.data_commitments.is_empty());
+    }
+
+    #[test]
+    fn legacy_v4_block_bytes_decode_with_empty_data_lane() {
+        let payment = DrcPaymentTx::unsigned(
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(3),
+            Amount::ZERO,
+            4,
+            Hash([5; 32]),
+            6,
+        );
+        let legacy = LegacyV4Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![Hash([7; 32])],
+                timestamp_ms: 8,
+                bits: 9,
+                nonce: 10,
+                tx_root: Hash([11; 32]),
+            },
+            transactions: Vec::new(),
+            account_transfers: Vec::new(),
+            stake_ops: Vec::new(),
+            ovl_executions: Vec::new(),
+            drc_payments: vec![payment.clone()],
+        };
+
+        let decoded = Block::try_from_slice(&borsh::to_vec(&legacy).unwrap()).unwrap();
+        assert_eq!(decoded.header, legacy.header);
+        assert_eq!(decoded.drc_payments, vec![payment]);
         assert!(decoded.data_commitments.is_empty());
     }
 
