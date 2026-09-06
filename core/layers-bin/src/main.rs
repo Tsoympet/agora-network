@@ -1,6 +1,8 @@
-//! `agora-layers` — operator JSON-RPC for the L2/L3/L4 stack.
+//! `agora-layers` — operator JSON-RPC for the historical layer lab.
 //!
-//! Bind with `AGORA_LAYERS_BIND` (default `127.0.0.1:8555`).
+//! Bind with `AGORA_LAYERS_BIND` (default `127.0.0.1:8555`). Non-loopback
+//! binds are rejected because this mixed read/mutation surface has no public
+//! endpoint authentication or rate limiting.
 //! Layer genesis:
 //! - `AGORA_OVL_GENESIS_FILE` — Ovolos L2 (default: embedded testnet)
 //! - `AGORA_DRC_GENESIS_FILE` — Drachma L3 (default: embedded testnet)
@@ -28,6 +30,7 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let bind = std::env::var("AGORA_LAYERS_BIND").unwrap_or_else(|_| "127.0.0.1:8555".into());
+    enforce_layers_bind_policy(&bind);
     let challenge_window_ms = std::env::var("AGORA_LAYERS_CHALLENGE_MS")
         .ok()
         .and_then(|s| s.parse().ok());
@@ -50,7 +53,7 @@ async fn main() {
         ovl_genesis = %ovolos_genesis.genesis_hash,
         drc_chain = %drachma_genesis.chain_id,
         drc_genesis = %drachma_genesis.genesis_hash,
-        "loading layer genesis"
+        "loading historical lab genesis"
     );
 
     let data_dir = std::env::var("AGORA_LAYERS_DATA").ok().map(PathBuf::from);
@@ -75,7 +78,7 @@ async fn main() {
 
 async fn serve(bind: &str, state: Arc<Mutex<LayersRuntime>>, data_dir: Option<PathBuf>) {
     let listener = TcpListener::bind(bind).await.expect("bind agora-layers");
-    info!(%bind, "agora-layers listening (L2/L3/L4 JSON-RPC)");
+    info!(%bind, "agora-layers listening (non-canonical experimental lab JSON-RPC)");
     loop {
         let (mut socket, peer) = match listener.accept().await {
             Ok(v) => v,
@@ -130,7 +133,7 @@ async fn handle_http(
     let method = parts.next().unwrap_or("");
     let path = parts.next().unwrap_or("/");
     match (method, path) {
-        ("GET", "/health") => http_json(200, json!({"ok": true, "service": "agora-layers"})),
+        ("GET", "/health") => http_json(200, health_payload()),
         ("POST", "/rpc") | ("POST", "/") => {
             let body = req.split("\r\n\r\n").nth(1).unwrap_or("").trim();
             let rpc: RpcReq = match serde_json::from_str(body) {
@@ -520,7 +523,7 @@ async fn dispatch(
                 .map_err(|e| e.to_string())?;
             Ok(json!({"message_id": id.to_hex()}))
         }
-        // Ethereum-class L2 surface (OVL = ETH role on Ovolos).
+        // Historical EVM-compatibility lab surface; not canonical Trident OVL state.
         "eth_chainId" => Ok(json!(format!("0x{:x}", rt.eth_chain_id()))),
         "eth_blockNumber" => Ok(json!(format!("0x{:x}", rt.eth_block_number()))),
         "eth_getBalance" => {
@@ -625,6 +628,29 @@ fn parse_hex_u128(s: &str) -> Result<u128, String> {
         return Ok(0);
     }
     u128::from_str_radix(s, 16).map_err(|e| e.to_string())
+}
+
+fn is_loopback_bind(bind: &str) -> bool {
+    let host = bind.rsplit_once(':').map(|(host, _)| host).unwrap_or(bind);
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    matches!(host, "127.0.0.1" | "localhost" | "::1" | "0:0:0:0:0:0:0:1")
+}
+
+fn health_payload() -> Value {
+    json!({
+        "ok": true,
+        "service": "agora-layers",
+        "canonical_l1": false,
+        "maturity": "Experimental"
+    })
+}
+
+fn enforce_layers_bind_policy(bind: &str) {
+    assert!(
+        is_loopback_bind(bind),
+        "AGORA_LAYERS_BIND={bind} is not loopback; the historical lab RPC includes \
+         mint/credit mutations and must not be publicly bound"
+    );
 }
 
 fn batch_from_params(p: &BatchParams) -> Result<Batch, String> {
@@ -799,4 +825,34 @@ struct PathPayParams {
     nonce: u64,
     destination_tag: Option<u32>,
     deliver_min: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layers_rpc_bind_is_fail_closed_to_loopback() {
+        assert!(is_loopback_bind("127.0.0.1:8555"));
+        assert!(is_loopback_bind("localhost:8555"));
+        assert!(is_loopback_bind("[::1]:8555"));
+        assert!(!is_loopback_bind("0.0.0.0:8555"));
+        assert!(!is_loopback_bind("203.0.113.7:8555"));
+    }
+
+    #[test]
+    fn health_and_method_policy_keep_lab_mutations_non_public() {
+        let health = health_payload();
+        assert_eq!(health["canonical_l1"], false);
+        assert_eq!(health["maturity"], "Experimental");
+        assert!(is_mutating_method("agora_layers_mintOvl"));
+        assert!(is_mutating_method("agora_layers_creditDrc"));
+        assert!(!is_mutating_method("agora_layers_getInfo"));
+    }
+
+    #[test]
+    #[should_panic(expected = "must not be publicly bound")]
+    fn public_layers_rpc_bind_is_rejected() {
+        enforce_layers_bind_policy("0.0.0.0:8555");
+    }
 }

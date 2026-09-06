@@ -1,7 +1,9 @@
-//! L1 data-availability commitments for Ovolos batches.
+//! Historical lab data commitments for Ovolos batches.
 //!
-//! Commitments are opaque payloads operators post to Agora L1 (tx memo / DA
-//! lane). They do **not** mint L1 assets — TLT remains the only L1 money.
+//! This source type is not an Agora L1 transaction. In particular,
+//! [`BatchCommitment::to_da_bytes`] must not be placed in a transfer memo.
+//! `agora-layers-runtime` can map it into the provenance-bound Trident
+//! commitment candidate that still requires a reviewed consensus lane.
 
 use agora_types::Hash;
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -10,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::types::{Batch, EvmTx};
 
-/// Compact commitment an operator can post to L1 / Agora DA.
+/// Compact source commitment retained by the historical lab runtime.
 #[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct BatchCommitment {
     pub batch_id: Hash,
@@ -39,7 +41,10 @@ impl BatchCommitment {
         Hash::hash_borsh(self)
     }
 
-    /// Borsh bytes suitable for an L1 memo / DA blob.
+    /// Legacy source bytes for lab persistence and reproducibility only.
+    ///
+    /// These bytes have no L1 type/version/network binding and are therefore
+    /// not suitable for direct RPC submission.
     pub fn to_da_bytes(&self) -> Vec<u8> {
         borsh::to_vec(self).expect("borsh BatchCommitment")
     }
