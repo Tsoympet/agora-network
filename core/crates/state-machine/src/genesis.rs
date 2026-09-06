@@ -404,4 +404,15 @@ mod tests {
             .unwrap()
             .is_none());
     }
+
+    #[test]
+    fn v2_ignition_does_not_materialize_trident_block_zero() {
+        let store = StateStore::open_in_memory();
+        GenesisBuilder::default().ignite(&store).unwrap();
+        assert!(store
+            .scan_prefix(ColumnFamily::Meta, b"meta/trident_block_zero/")
+            .unwrap()
+            .is_empty());
+        assert!(crate::load_verified_trident_block_zero(&store).is_err());
+    }
 }
