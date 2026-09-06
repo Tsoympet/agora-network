@@ -1181,7 +1181,7 @@ fn validator_bonds_checked(
     Ok(bonds)
 }
 
-fn checked_sum(values: impl Iterator<Item = u64>, label: &str) -> Result<u64, StateError> {
+fn checked_sum(mut values: impl Iterator<Item = u64>, label: &str) -> Result<u64, StateError> {
     values
         .try_fold(0u64, u64::checked_add)
         .ok_or_else(|| storage_error(format!("{label} sum overflow")))
