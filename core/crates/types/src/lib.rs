@@ -16,6 +16,7 @@ mod payment;
 mod stake;
 mod transaction;
 mod treasury;
+mod trident_header;
 
 pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
 pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
@@ -37,6 +38,10 @@ pub use payment::{DrcPaymentOutboxEvent, DrcPaymentTx, DRC_PAYMENT_SIGNING_DOMAI
 pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 pub use treasury::{TreasuryBalance, TreasuryId};
+pub use trident_header::{
+    TridentHeader, TridentHeaderError, TridentHeaderIdentity, TRIDENT_HEADER_ENCODING_DOMAIN,
+    TRIDENT_HEADER_ENCODING_VERSION,
+};
 
 #[cfg(test)]
 mod tests {
