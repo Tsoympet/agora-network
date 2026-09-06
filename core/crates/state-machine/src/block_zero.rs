@@ -1012,6 +1012,7 @@ pub(crate) const DATADIR_IDENTITY_PREFIX: &[u8] = b"meta/trident_datadir_identit
 pub(crate) const LIVE_STATE_PLAN_PREFIX: &[u8] = b"meta/trident_live_state/";
 
 type BlockZeroEncodedValues = Vec<(&'static [u8], Vec<u8>)>;
+pub(crate) type BlockZeroEncodedRecords = Vec<(Vec<u8>, Vec<u8>)>;
 
 fn storage_err(message: impl Into<String>) -> StateError {
     StateError::Storage(message.into())
@@ -1113,7 +1114,7 @@ fn encode_datadir_identity_values(
 
 pub(crate) fn encode_block_zero_records(
     record: &TridentBlockZeroStorageRecord,
-) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StateError> {
+) -> Result<BlockZeroEncodedRecords, StateError> {
     let values = encode_block_zero_values(record)?;
     if values.len() != TRIDENT_BLOCK_ZERO_META_KEYS.len() {
         return Err(storage_err(
