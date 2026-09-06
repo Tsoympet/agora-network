@@ -7,6 +7,7 @@ mod account;
 mod amount;
 mod asset;
 mod block;
+mod data_availability;
 mod execution;
 mod finality;
 mod hash;
@@ -22,6 +23,12 @@ pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
 pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{Block, BlockHeader};
+pub use data_availability::{
+    DataAvailabilityCommitment, DataCommitmentAuthorization, DataCommitmentError,
+    DataCommitmentSource, DA_COMMITMENT_AUTHORIZATION_DOMAIN,
+    DA_COMMITMENT_AUTHORIZATION_ID_DOMAIN, DA_COMMITMENT_AUTHORIZATION_VERSION,
+    DA_COMMITMENT_PAYLOAD_DOMAIN, DA_COMMITMENT_VERSION, MAX_DA_CHAIN_ID_BYTES,
+};
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
     CheckpointAttestation, CheckpointBody, CheckpointState, FinalityCertificate,
@@ -129,6 +136,8 @@ mod ts_export {
         "AccountTransfer.ts",
         "Block.ts",
         "CheckpointAttestation.ts",
+        "DataAvailabilityCommitment.ts",
+        "DataCommitmentAuthorization.ts",
         "DrcPaymentTx.ts",
         "OvlExecutionTx.ts",
         "SignedStakeTx.ts",
@@ -169,6 +178,9 @@ mod ts_export {
         TransactionAcceptance::export_all().expect("export TransactionAcceptance");
         AcceptanceBitmap::export_all().expect("export AcceptanceBitmap");
         AccountTransfer::export_all().expect("export AccountTransfer");
+        DataCommitmentSource::export_all().expect("export DataCommitmentSource");
+        DataAvailabilityCommitment::export_all().expect("export DataAvailabilityCommitment");
+        DataCommitmentAuthorization::export_all().expect("export DataCommitmentAuthorization");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");

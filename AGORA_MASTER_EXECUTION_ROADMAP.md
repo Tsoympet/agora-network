@@ -56,7 +56,7 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **4.4 (L2):** `BatchCommitment` DA blob + OVL gas ledger (layered mark, not L1 UTXO)
 - [x] **4.5 (Runtime):** `agora-layers-runtime` + `agora-layers` JSON-RPC operator binary
 - [x] **4.5b:** Dedicated Ovolos L2 + Drachma L3 genesis artifacts (testnet frozen, mainnet draft)
-- [ ] **4.6 (Ops):** Post DA commitments from `agora-layers` into live L1 txs / public district endpoints
+- [ ] ~~**4.6 (Ops):** Post DA commitments from `agora-layers` into live L1 txs / public district endpoints~~ — superseded by Trident; the safe protocol prerequisite and remaining activation work are documented in [`docs/core/data-availability.md`](docs/core/data-availability.md)
 
 ## Phase 5: Infrastructure & RPC surface — in progress
 

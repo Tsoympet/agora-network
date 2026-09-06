@@ -284,7 +284,10 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         Ok(id)
     }
 
-    /// Record that a batch commitment was posted to L1 / DA (operator attestation).
+    /// Record an unverified lab-operator assertion that a commitment was posted.
+    ///
+    /// No L1 RPC lookup or acceptance proof is performed. Callers must not
+    /// present this flag as canonical inclusion or finality.
     pub fn record_da_post(&mut self, commitment: BatchCommitment) -> Result<(), RollupError> {
         let tracked = self
             .batches
@@ -303,7 +306,7 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         self.da_posted.contains_key(batch_id)
     }
 
-    /// Submit a fraud proof against a pending batch. On success the batch and
+    /// Submit a fraud proof against a pending lab batch. On success the batch and
     /// all later sequenced batches are reverted and the head rewinds.
     pub fn challenge(&mut self, proof: FraudProof) -> Result<(), RollupError> {
         let tracked = self
@@ -364,7 +367,9 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         Ok(())
     }
 
-    /// Finalize batches whose challenge window has elapsed (permissionless if no bonds).
+    /// Advance the historical lab status after its local challenge timer.
+    ///
+    /// This is unrelated to Trident's PoW + dual-PoS finality predicate.
     pub fn finalize_due(&mut self, now_ms: u64) -> Result<Vec<Hash>, RollupError> {
         if self.sequencers.authorization_required() {
             return Err(RollupError::UnauthorizedSequencer);
@@ -372,7 +377,7 @@ impl<E: EvmExecutor> OvolosRollup<E> {
         self.finalize_due_inner(now_ms)
     }
 
-    /// Finalize due batches as a bonded sequencer.
+    /// Advance due lab batches as a bonded sequencer.
     pub fn finalize_due_as(
         &mut self,
         sequencer: Address,
