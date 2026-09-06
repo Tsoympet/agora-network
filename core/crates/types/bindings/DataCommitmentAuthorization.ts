@@ -3,10 +3,10 @@ import type { Address } from "./Address";
 import type { DataAvailabilityCommitment } from "./DataAvailabilityCommitment";
 
 /**
- * Signed operator authorization that a future versioned L1 transaction can carry.
+ * Signed operator authorization carried in `Block::data_commitments`.
  *
- * `replay_nonce` is cryptographically bound here. A future state transition
- * must still enforce and persist it atomically; this type alone is not replay
- * protection and is deliberately not exposed through RPC.
+ * `replay_nonce` is cryptographically bound here and enforced atomically by
+ * the state transition. This type alone is not replay protection and remains
+ * deliberately unavailable through standalone RPC submission.
  */
 export type DataCommitmentAuthorization = { version: number, operator: Address, replay_nonce: bigint, commitment: DataAvailabilityCommitment, public_key: Array<number>, signature: Array<number>, };

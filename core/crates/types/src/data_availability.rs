@@ -129,7 +129,7 @@ impl DataAvailabilityCommitment {
     }
 }
 
-/// Signed operator authorization carried in [`crate::Block::data_commitments`].
+/// Signed operator authorization carried in `Block::data_commitments`.
 ///
 /// `replay_nonce` is cryptographically bound here and enforced atomically by
 /// the state transition. This type alone is not replay protection and remains
