@@ -46,9 +46,20 @@ pub fn save_identity(path: impl AsRef<Path>, keypair: &Keypair) -> Result<(), P2
 mod tests {
     use super::*;
 
+    fn temp_identity_dir(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "agora-p2p-identity-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ))
+    }
+
     #[test]
     fn load_or_generate_persists_stable_peer_id() {
-        let dir = std::env::temp_dir().join(format!("agora-p2p-identity-{}", std::process::id()));
+        let dir = temp_identity_dir("stable");
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("p2p").join("identity.key");
         let first = load_or_generate_identity(&path).unwrap();
@@ -58,6 +69,22 @@ mod tests {
         let second = load_or_generate_identity(&path).unwrap();
         let peer_b = second.public().to_peer_id();
         assert_eq!(peer_a, peer_b);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn malformed_existing_identity_is_never_overwritten() {
+        let dir = temp_identity_dir("malformed");
+        let path = dir.join("p2p").join("identity.key");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"not-a-libp2p-key").unwrap();
+
+        let error = match load_or_generate_identity(&path) {
+            Ok(_) => panic!("malformed identity must be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("decode"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"not-a-libp2p-key");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

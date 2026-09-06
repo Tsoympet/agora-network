@@ -32,17 +32,33 @@ an exact Borsh round trip and rechecks the state root.
 ## Candidate storage envelope
 
 Explicit Meta keys under `meta/trident_block_zero/` hold a versioned Borsh
-envelope (`TRIDENT_BLOCK_ZERO_STORAGE_VERSION = 1`, independent of live
+envelope (`TRIDENT_BLOCK_ZERO_STORAGE_VERSION = 2`, independent of live
 `SCHEMA_VERSION`). The envelope preserves the complete manifest, canonical
 payload, commitment, commitment hash, artifact identity, consensus policy hash,
-network fingerprint, and chain ID.
+network fingerprint, chain ID, and bound datadir identity.
 
-`TridentBlockZeroState::stage_verified_store_batch` stages every key in one
-`WriteBatch`, applies that batch only to a copy-on-write overlay, rereads the
-bytes, and returns the batch for a future loader. Missing, malformed,
-inconsistent, duplicate, or mismatched records are rejected before any durable
-write. The current `GenesisBuilder` ignition path never writes these keys and
-does not consume the checked reader.
+`TridentDatadirIdentity` is a separately versioned Borsh record under
+`meta/trident_datadir_identity/`. It binds the chain ID, network fingerprint,
+artifact identity, consensus-policy hash, Block 0 commitment, committed state
+root, and the Trident header network identity. When a fully specified offline
+header is available, it also binds that header's canonical hash; no ceremony
+value is defaulted when the hash is absent.
+
+`TridentBlockZeroState::stage_verified_store_batch` places the envelope and
+identity bytes in one `WriteBatch`, applies that batch only to a copy-on-write
+overlay, and rereads every byte. `persist_verified_store_record` commits that
+same batch atomically and performs a durable reread. Reopen verification decodes
+both records, requires canonical Borsh round trips, compares the independently
+stored identity bytes with the copy inside the Block 0 envelope, and can compare
+the entire actual identity byte-for-byte with a caller-supplied expected
+identity. Missing, malformed, inconsistent, duplicate, partial, tampered, or
+mismatched records fail closed.
+
+The legacy `GenesisBuilder` load paths reject any complete or partial Trident
+Block 0/datadir marker, even when a valid v2 genesis hash is also present.
+`agora-node` completes this storage preflight before it calls the libp2p
+identity loader. A candidate persisted by offline tooling therefore cannot be
+silently opened, ignored, or overwritten by the v2 node.
 
 ## Offline header bridge
 
@@ -77,16 +93,16 @@ would be unsafe because:
    by the ceremony schema, not invented by the loader.
 6. The initial finality record and epoch-zero snapshots need explicit persistent
    keys and inclusion in the live composed state root.
-7. Datadir identity currently checks only the legacy genesis hash. The candidate
-   Block 0 envelope now preserves the extra identities, but boot still must bind
-   artifact identity, policy hash, Block 0 commitment, state root, chain ID, and
-   network fingerprint before P2P identity generation or any networking/RPC
-   startup.
+7. Future Trident startup must call `verify_trident_datadir_identity` with the
+   identity derived from its independently verified artifact and concrete
+   header before loading a libp2p key or binding RPC. This prerequisite provides
+   that fail-closed comparison, but no Trident runtime path invokes it yet.
 
-The next bounded prerequisite is the lossless live-state mapping and atomic
+The remaining live-state blocker is the lossless materialization and atomic
 root check: define the concrete Block 0 body/UTXOs, account and treasury
 records, vesting locks, complete validator/finality records, and append them to
-the already-verified batch only when the live composed root equals the offline
-header. Datadir identity and runtime protocol gating remain separate blockers
-after that. Until all steps exist together, `AGORA_GENESIS_FILE` remains the
-frozen v2 loader only.
+the already-verified batch only when the recomputed live composed root equals
+the offline header. Explicit consensus/PoW/storage/P2P/RPC activation gates
+must then consume that verified state without changing v2 identities. Until
+those pieces exist together, `AGORA_GENESIS_FILE` remains the frozen v2 loader
+only.

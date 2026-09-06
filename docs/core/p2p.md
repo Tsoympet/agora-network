@@ -84,7 +84,25 @@ Mining templates pull UTXO transfers plus account/stake lanes and commit all lan
 
 ### Persistent identity
 
-`agora-node` loads or creates `$AGORA_DATA/p2p/identity.key` (libp2p protobuf ed25519) before building the swarm. `NetworkConfig::identity` carries the keypair; when unset (tests), `build` still generates an ephemeral key. PeerId is therefore stable across restarts for the same datadir.
+`agora-node` loads or creates `$AGORA_DATA/p2p/identity.key` (libp2p protobuf
+ed25519) only after the state-store preflight succeeds. Legacy/v2 preflight
+rejects complete, partial, or malformed Trident Block 0/datadir identity
+markers before the identity loader is called; it neither reads an existing
+libp2p key nor creates the `p2p/` directory on that refusal path. Genesis
+identity mismatches use the same ordering.
+
+The versioned Trident datadir identity binds chain ID, network fingerprint,
+artifact identity, consensus-policy hash, Block 0 commitment, committed state
+root, header network identity, and an optional concrete header hash. A future
+Trident startup must derive the expected record independently and complete its
+byte-for-byte store comparison before identity loading, swarm construction,
+seeder access, or RPC binding. No live Trident startup exists yet because the
+committed state has not been materialized.
+
+`NetworkConfig::identity` carries the keypair; when unset in direct P2P tests,
+`NetworkNode::build` still generates an ephemeral key. PeerId is therefore
+stable across accepted restarts for the same legacy datadir. An existing
+malformed identity file is rejected without overwrite.
 
 Integration test `two_node_gossip` dials two local nodes and exchanges a signed transaction.
 
@@ -168,5 +186,6 @@ The script prefers `target/debug/<bin>` when present. `smoke-tx` needs `apps/sha
 - [x] Automated mined-block IBD smoke (`smoke-ibd`)
 - [x] Multi-block IBD smoke + late-join catch-up (`AGORA_SMOKE_IBD_BLOCKS`, `smoke-ibd-catchup`)
 - [x] Persistent libp2p identity (`$AGORA_DATA/p2p/identity.key`)
+- [x] Datadir/genesis preflight before persistent libp2p identity access
 - [x] `agora_getMempool` pending snapshot RPC
 - [x] Automated tx gossip smoke (`smoke-tx`)

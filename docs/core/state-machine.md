@@ -49,12 +49,22 @@ finality, policy-hash, and fingerprint values. It first applies the
 freeze-readiness gate and therefore rejects placeholders, missing policy
 values, and stale artifact hashes. A freeze-ready artifact can also produce a
 versioned Block 0 manifest and a lossless Meta envelope
-(`meta/trident_block_zero/*`, storage version 1, independent of
-`SCHEMA_VERSION`). That envelope is staged, overlay-verified, and fail-closed
-before any durable write; `GenesisBuilder` still does not write it or seed live
-balances from it. The node does not consume this candidate until Block 0 can
-commit and verify the complete artifact-defined state root, including UTXO and
-account materialization; historical v2 loading remains unchanged.
+(`meta/trident_block_zero/*`, storage version 2, independent of
+`SCHEMA_VERSION`). A versioned `meta/trident_datadir_identity/*` Borsh record
+binds its chain ID, network fingerprint, artifact and policy identities, Block
+0 commitment, committed state root, header identity, and optional concrete
+header hash. Both records are staged, overlay-verified, and committed in the
+same atomic batch. Checked reopen requires canonical byte-for-byte equality
+between the independent identity record, the copy inside the envelope, and any
+expected identity supplied by a future Trident startup.
+
+`GenesisBuilder` still does not seed live balances from this candidate. Its
+legacy load paths now reject every complete or partial Trident marker before
+examining or creating v2 genesis state, including datadirs that also contain a
+valid v2 genesis hash. The node does not consume the candidate until the
+artifact's UTXO/account/treasury/vesting/validator/finality records can be
+materialized atomically and their recomputed live root equals the committed
+header state root. Frozen v2 loading and identities remain unchanged.
 
 ## Virtual UTXO (Phase 28)
 
@@ -109,7 +119,12 @@ Node admit enforces reorg-beyond-finality. Account, stake, OVL execution, and na
 - [`StateStore::open_in_memory`] — ephemeral map for unit tests / portable CI
 - [`StateStore::open(path)`] — **RocksDB** when built with `--features rocksdb` (enabled by default on `agora-node`); otherwise falls back to in-memory (path ignored)
 
-`agora-node` defaults to RocksDB under `AGORA_DATA` (default `data/agora-node`). On boot it uses `GenesisBuilder::load_or_ignite` and rebuilds the in-memory DAG/GHOSTDAG from durable tips.
+`agora-node` defaults to RocksDB under `AGORA_DATA` (default
+`data/agora-node`). On boot it opens and verifies storage through
+`prepare_legacy_datadir`; only after that succeeds may the callback load or
+create `$AGORA_DATA/p2p/identity.key`. A Trident marker or genesis mismatch
+therefore returns before P2P identity, swarm, seeder, or RPC setup. The node
+then rebuilds the in-memory DAG/GHOSTDAG from durable tips.
 
 ## Node wiring
 

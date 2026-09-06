@@ -38,7 +38,9 @@ pub const TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN: &[u8] = b"agora-trident-block-ze
 ///
 /// This is independent of [`crate::SCHEMA_VERSION`]: no current boot path
 /// writes or consumes these records.
-pub const TRIDENT_BLOCK_ZERO_STORAGE_VERSION: u32 = 1;
+pub const TRIDENT_BLOCK_ZERO_STORAGE_VERSION: u32 = 2;
+/// Version of the Borsh identity that binds one datadir to one Trident chain.
+pub const TRIDENT_DATADIR_IDENTITY_VERSION: u32 = 1;
 
 const TRIDENT_BLOCK_ZERO_META_KEYS: [&[u8]; 10] = [
     meta_keys::TRIDENT_BLOCK_ZERO_RECORD_VERSION,
@@ -51,6 +53,10 @@ const TRIDENT_BLOCK_ZERO_META_KEYS: [&[u8]; 10] = [
     meta_keys::TRIDENT_BLOCK_ZERO_CONSENSUS_POLICY_HASH,
     meta_keys::TRIDENT_BLOCK_ZERO_NETWORK_FINGERPRINT,
     meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID,
+];
+const TRIDENT_DATADIR_IDENTITY_META_KEYS: [&[u8]; 2] = [
+    meta_keys::TRIDENT_DATADIR_IDENTITY_VERSION,
+    meta_keys::TRIDENT_DATADIR_IDENTITY,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -156,6 +162,34 @@ pub struct TridentBlockZeroCommitment {
     pub state_root: Hash,
 }
 
+/// Header-level network identity available before ceremony-owned header fields.
+#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct TridentDatadirHeaderIdentity {
+    pub protocol_version: u32,
+    pub state_transition_version: String,
+    pub block_zero_commitment: Hash,
+    pub artifact_identity: Hash,
+    pub consensus_policy_hash: Hash,
+}
+
+/// Fail-closed identity binding for a Trident datadir.
+///
+/// The complete header hash is optional until the concrete body, timestamp,
+/// difficulty, and nonce are ceremony-selected. The header's chain identity is
+/// already available and mandatory.
+#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct TridentDatadirIdentity {
+    pub version: u32,
+    pub chain_id: String,
+    pub network_fingerprint: Hash,
+    pub artifact_identity: Hash,
+    pub consensus_policy_hash: Hash,
+    pub block_zero_commitment: Hash,
+    pub committed_state_root: Hash,
+    pub header_identity: TridentDatadirHeaderIdentity,
+    pub block_zero_header_hash: Option<Hash>,
+}
+
 /// Lossless storage envelope for a candidate Block 0 manifest.
 ///
 /// Redundant identities are intentional: the checked reader verifies every
@@ -172,6 +206,7 @@ pub struct TridentBlockZeroStorageRecord {
     pub consensus_policy_hash: Hash,
     pub network_fingerprint: Hash,
     pub chain_id: String,
+    pub datadir_identity: TridentDatadirIdentity,
 }
 
 impl TridentBlockZeroState {
@@ -360,14 +395,68 @@ impl TridentBlockZeroState {
     /// This does not write the caller's store, materialize live balances, or
     /// construct a Block 0 header. Current v2 ignition never calls it.
     pub fn stage_verified_store_batch(&self, store: &StateStore) -> Result<WriteBatch, StateError> {
+        self.prepare_verified_store_batch(store, None)
+            .map(|(_, batch)| batch)
+    }
+
+    /// Stage Block 0 with the hash of a fully specified offline header.
+    pub fn stage_verified_store_batch_with_header(
+        &self,
+        store: &StateStore,
+        header: &TridentHeader,
+    ) -> Result<WriteBatch, StateError> {
+        self.prepare_verified_store_batch(store, Some(header))
+            .map(|(_, batch)| batch)
+    }
+
+    /// Atomically persist the verified envelope and datadir identity, then
+    /// reread their exact bytes from the store.
+    pub fn persist_verified_store_record(
+        &self,
+        store: &StateStore,
+    ) -> Result<TridentBlockZeroStorageRecord, StateError> {
+        self.persist_verified_store_record_inner(store, None)
+    }
+
+    /// Atomically persist the verified envelope with a concrete header hash.
+    pub fn persist_verified_store_record_with_header(
+        &self,
+        store: &StateStore,
+        header: &TridentHeader,
+    ) -> Result<TridentBlockZeroStorageRecord, StateError> {
+        self.persist_verified_store_record_inner(store, Some(header))
+    }
+
+    fn prepare_verified_store_batch(
+        &self,
+        store: &StateStore,
+        header: Option<&TridentHeader>,
+    ) -> Result<(TridentBlockZeroStorageRecord, WriteBatch), StateError> {
         ensure_block_zero_absent(store)?;
-        let record =
-            TridentBlockZeroStorageRecord::from_state(self).map_err(StateError::Storage)?;
+        let record = TridentBlockZeroStorageRecord::from_state_and_header(self, header)
+            .map_err(StateError::Storage)?;
         let batch = encode_block_zero_batch(&record)?;
         let overlay = store.cow_overlay();
         overlay.write_batch(batch.clone())?;
         reread_staged_block_zero(&overlay, &record)?;
-        Ok(batch)
+        Ok((record, batch))
+    }
+
+    fn persist_verified_store_record_inner(
+        &self,
+        store: &StateStore,
+        header: Option<&TridentHeader>,
+    ) -> Result<TridentBlockZeroStorageRecord, StateError> {
+        let (expected, batch) = self.prepare_verified_store_batch(store, header)?;
+        store.write_batch(batch)?;
+        let loaded = load_verified_trident_block_zero(store)?;
+        if loaded != expected {
+            return Err(storage_err(
+                "Block 0 durable reread changed the staged storage record",
+            ));
+        }
+        verify_trident_datadir_identity(store, &expected.datadir_identity)?;
+        Ok(loaded)
     }
 }
 
@@ -463,11 +552,162 @@ impl TridentBlockZeroCommitment {
     }
 }
 
+impl TridentDatadirHeaderIdentity {
+    fn from_header_identity(identity: &TridentHeaderIdentity) -> Self {
+        Self {
+            protocol_version: identity.protocol_version,
+            state_transition_version: identity.state_transition_version.clone(),
+            block_zero_commitment: identity.block_zero_commitment,
+            artifact_identity: identity.artifact_identity,
+            consensus_policy_hash: identity.consensus_policy_hash,
+        }
+    }
+
+    fn as_header_identity(&self) -> TridentHeaderIdentity {
+        TridentHeaderIdentity {
+            protocol_version: self.protocol_version,
+            state_transition_version: self.state_transition_version.clone(),
+            block_zero_commitment: self.block_zero_commitment,
+            artifact_identity: self.artifact_identity,
+            consensus_policy_hash: self.consensus_policy_hash,
+        }
+    }
+
+    fn verify(&self) -> Result<(), String> {
+        self.as_header_identity()
+            .validate()
+            .map_err(|error| error.to_string())?;
+        if self.protocol_version != TRIDENT_PROTOCOL_VERSION {
+            return Err("Trident datadir header protocol version mismatch".into());
+        }
+        if self.state_transition_version != TRIDENT_STATE_TRANSITION_VERSION {
+            return Err("Trident datadir header state-transition version mismatch".into());
+        }
+        Ok(())
+    }
+}
+
+impl TridentDatadirIdentity {
+    /// Bind a verified Block 0 commitment to the header identity currently
+    /// available. A complete header additionally binds its canonical hash.
+    pub fn from_block_zero(
+        commitment: &TridentBlockZeroCommitment,
+        header: Option<&TridentHeader>,
+    ) -> Result<Self, String> {
+        commitment.verify()?;
+        let header_identity = commitment.trident_header_identity()?;
+        let block_zero_header_hash = if let Some(header) = header {
+            commitment.verify_offline_trident_header(header, header.body_root)?;
+            Some(
+                header
+                    .commitment_hash()
+                    .map_err(|error| error.to_string())?,
+            )
+        } else {
+            None
+        };
+        let identity = Self {
+            version: TRIDENT_DATADIR_IDENTITY_VERSION,
+            chain_id: commitment.chain_id.clone(),
+            network_fingerprint: commitment.network_fingerprint,
+            artifact_identity: commitment.artifact_identity,
+            consensus_policy_hash: commitment.consensus_policy_hash,
+            block_zero_commitment: commitment.hash(),
+            committed_state_root: commitment.state_root,
+            header_identity: TridentDatadirHeaderIdentity::from_header_identity(&header_identity),
+            block_zero_header_hash,
+        };
+        identity.verify()?;
+        Ok(identity)
+    }
+
+    /// Validate every redundant identity without consulting storage.
+    pub fn verify(&self) -> Result<(), String> {
+        if self.version != TRIDENT_DATADIR_IDENTITY_VERSION {
+            return Err("unsupported Trident datadir identity version".into());
+        }
+        if self.chain_id.trim().is_empty() {
+            return Err("Trident datadir chain ID must be nonempty".into());
+        }
+        if self.network_fingerprint == Hash::ZERO
+            || self.artifact_identity == Hash::ZERO
+            || self.consensus_policy_hash == Hash::ZERO
+            || self.block_zero_commitment == Hash::ZERO
+            || self.committed_state_root == Hash::ZERO
+        {
+            return Err("Trident datadir identities and state root must be nonzero".into());
+        }
+        if self.network_fingerprint
+            != expected_network_fingerprint(
+                &self.chain_id,
+                &self.artifact_identity,
+                &self.consensus_policy_hash,
+            )
+        {
+            return Err("Trident datadir network fingerprint is inconsistent".into());
+        }
+        self.header_identity.verify()?;
+        if self.header_identity.block_zero_commitment != self.block_zero_commitment
+            || self.header_identity.artifact_identity != self.artifact_identity
+            || self.header_identity.consensus_policy_hash != self.consensus_policy_hash
+        {
+            return Err("Trident datadir header identity is inconsistent".into());
+        }
+        if self.block_zero_header_hash == Some(Hash::ZERO) {
+            return Err("Trident datadir Block 0 header hash must be nonzero".into());
+        }
+        Ok(())
+    }
+
+    /// Deterministic bytes used for expected/actual startup comparison.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, String> {
+        self.verify()?;
+        let bytes = borsh::to_vec(self).map_err(|error| error.to_string())?;
+        let decoded = Self::try_from_slice(&bytes).map_err(|error| error.to_string())?;
+        if decoded != *self {
+            return Err("Trident datadir identity Borsh round-trip changed the record".into());
+        }
+        Ok(bytes)
+    }
+
+    fn verify_against_block_zero(
+        &self,
+        state: &TridentBlockZeroState,
+        commitment: &TridentBlockZeroCommitment,
+    ) -> Result<(), String> {
+        self.verify()?;
+        if self.chain_id != state.chain_id
+            || self.network_fingerprint != state.network_fingerprint
+            || self.artifact_identity != state.artifact_identity
+            || self.consensus_policy_hash != state.consensus_policy_hash
+            || self.block_zero_commitment != commitment.hash()
+            || self.committed_state_root != state.state_root()
+        {
+            return Err("Trident datadir identity does not match Block 0".into());
+        }
+        let expected_header = commitment.trident_header_identity()?;
+        if self.header_identity
+            != TridentDatadirHeaderIdentity::from_header_identity(&expected_header)
+        {
+            return Err("Trident datadir header identity does not match Block 0".into());
+        }
+        Ok(())
+    }
+}
+
 impl TridentBlockZeroStorageRecord {
     pub fn from_state(state: &TridentBlockZeroState) -> Result<Self, String> {
+        Self::from_state_and_header(state, None)
+    }
+
+    pub fn from_state_and_header(
+        state: &TridentBlockZeroState,
+        header: Option<&TridentHeader>,
+    ) -> Result<Self, String> {
         let canonical_payload = state.verified_borsh_payload()?;
         let commitment = state.commitment();
         let commitment_hash = commitment.hash();
+        let datadir_identity = TridentDatadirIdentity::from_block_zero(&commitment, header)?;
         let record = Self {
             version: TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
             manifest: state.clone(),
@@ -478,6 +718,7 @@ impl TridentBlockZeroStorageRecord {
             consensus_policy_hash: state.consensus_policy_hash,
             network_fingerprint: state.network_fingerprint,
             chain_id: state.chain_id.clone(),
+            datadir_identity,
         };
         record.verify()?;
         Ok(record)
@@ -514,19 +755,63 @@ impl TridentBlockZeroStorageRecord {
         {
             return Err("Block 0 commitment identities are inconsistent".into());
         }
+        self.datadir_identity
+            .verify_against_block_zero(&self.manifest, &self.commitment)?;
         Ok(())
     }
 }
 
-/// Checked reader for a future loader. Current boot never calls this.
+/// Checked reader for a future loader. Current boot never accepts this record.
 pub fn load_verified_trident_block_zero(
     store: &StateStore,
 ) -> Result<TridentBlockZeroStorageRecord, StateError> {
     let values = require_block_zero_values(store)?;
-    decode_and_verify_block_zero(&values)
+    let identity_values = require_datadir_identity_values(store)?;
+    decode_and_verify_block_zero(&values, &identity_values)
+}
+
+/// Future Trident startup preflight: require a fully verified Block 0 envelope
+/// and compare the expected datadir identity to the stored bytes exactly.
+pub fn verify_trident_datadir_identity(
+    store: &StateStore,
+    expected: &TridentDatadirIdentity,
+) -> Result<TridentDatadirIdentity, StateError> {
+    let expected_bytes = expected.canonical_bytes().map_err(storage_err)?;
+    let record = load_verified_trident_block_zero(store)?;
+    let identity_values = require_datadir_identity_values(store)?;
+    require_exact_bytes(
+        &identity_values,
+        meta_keys::TRIDENT_DATADIR_IDENTITY,
+        &expected_bytes,
+        "expected Trident datadir identity",
+    )?;
+    if record.datadir_identity != *expected {
+        return Err(storage_err(
+            "Trident datadir identity does not match the expected chain",
+        ));
+    }
+    Ok(record.datadir_identity)
+}
+
+/// Legacy/v2 startup must reject rather than ignore any complete or partial
+/// Trident Block 0/datadir identity marker.
+pub fn ensure_legacy_v2_datadir(store: &StateStore) -> Result<(), StateError> {
+    let has_block_zero = !store
+        .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)?
+        .is_empty();
+    let has_datadir_identity = !store
+        .scan_prefix(ColumnFamily::Meta, DATADIR_IDENTITY_PREFIX)?
+        .is_empty();
+    if has_block_zero || has_datadir_identity {
+        return Err(storage_err(
+            "Trident datadir identity is present; legacy/v2 startup refuses this datadir",
+        ));
+    }
+    Ok(())
 }
 
 const BLOCK_ZERO_PREFIX: &[u8] = b"meta/trident_block_zero/";
+const DATADIR_IDENTITY_PREFIX: &[u8] = b"meta/trident_datadir_identity/";
 
 type BlockZeroEncodedValues = Vec<(&'static [u8], Vec<u8>)>;
 
@@ -555,8 +840,13 @@ fn ensure_block_zero_absent(store: &StateStore) -> Result<(), StateError> {
     if !store
         .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)?
         .is_empty()
+        || !store
+            .scan_prefix(ColumnFamily::Meta, DATADIR_IDENTITY_PREFIX)?
+            .is_empty()
     {
-        return Err(storage_err("duplicate Trident Block 0 storage record"));
+        return Err(storage_err(
+            "duplicate or partial Trident Block 0/datadir identity record",
+        ));
     }
     Ok(())
 }
@@ -606,6 +896,19 @@ fn encode_block_zero_values(
     ])
 }
 
+fn encode_datadir_identity_values(
+    identity: &TridentDatadirIdentity,
+) -> Result<BlockZeroEncodedValues, StateError> {
+    let bytes = identity.canonical_bytes().map_err(storage_err)?;
+    Ok(vec![
+        (
+            meta_keys::TRIDENT_DATADIR_IDENTITY_VERSION,
+            identity.version.to_le_bytes().to_vec(),
+        ),
+        (meta_keys::TRIDENT_DATADIR_IDENTITY, bytes),
+    ])
+}
+
 fn encode_block_zero_batch(
     record: &TridentBlockZeroStorageRecord,
 ) -> Result<WriteBatch, StateError> {
@@ -613,6 +916,12 @@ fn encode_block_zero_batch(
     if values.len() != TRIDENT_BLOCK_ZERO_META_KEYS.len() {
         return Err(storage_err(
             "Block 0 staged batch is missing canonical Meta keys",
+        ));
+    }
+    let identity_values = encode_datadir_identity_values(&record.datadir_identity)?;
+    if identity_values.len() != TRIDENT_DATADIR_IDENTITY_META_KEYS.len() {
+        return Err(storage_err(
+            "staged batch is missing canonical Trident datadir identity keys",
         ));
     }
     let mut seen = BTreeSet::new();
@@ -631,6 +940,25 @@ fn encode_block_zero_batch(
             "Block 0 staged batch is missing canonical Meta keys",
         ));
     }
+    let mut identity_seen = BTreeSet::new();
+    for (key, value) in identity_values {
+        if !TRIDENT_DATADIR_IDENTITY_META_KEYS.contains(&key) {
+            return Err(storage_err(
+                "unexpected Trident datadir identity Meta key in staged batch",
+            ));
+        }
+        if !identity_seen.insert(key) {
+            return Err(storage_err(
+                "duplicate Trident datadir identity Meta key in staged batch",
+            ));
+        }
+        batch.put_cf(ColumnFamily::Meta, key, &value);
+    }
+    if identity_seen.len() != TRIDENT_DATADIR_IDENTITY_META_KEYS.len() {
+        return Err(storage_err(
+            "staged batch is missing canonical Trident datadir identity keys",
+        ));
+    }
     Ok(batch)
 }
 
@@ -647,6 +975,26 @@ fn require_block_zero_values(store: &StateStore) -> Result<BTreeMap<Vec<u8>, Vec
     {
         return Err(storage_err(
             "incomplete, duplicate, or unexpected Trident Block 0 storage record",
+        ));
+    }
+    Ok(values)
+}
+
+fn require_datadir_identity_values(
+    store: &StateStore,
+) -> Result<BTreeMap<Vec<u8>, Vec<u8>>, StateError> {
+    let scanned = store.scan_prefix(ColumnFamily::Meta, DATADIR_IDENTITY_PREFIX)?;
+    if scanned.is_empty() {
+        return Err(storage_err("missing Trident datadir identity"));
+    }
+    let values: BTreeMap<_, _> = scanned.into_iter().collect();
+    if values.len() != TRIDENT_DATADIR_IDENTITY_META_KEYS.len()
+        || TRIDENT_DATADIR_IDENTITY_META_KEYS
+            .iter()
+            .any(|key| !values.contains_key(*key))
+    {
+        return Err(storage_err(
+            "incomplete, duplicate, or unexpected Trident datadir identity",
         ));
     }
     Ok(values)
@@ -686,8 +1034,43 @@ fn require_hash(
     Ok(Hash(hash))
 }
 
+fn decode_and_verify_datadir_identity(
+    values: &BTreeMap<Vec<u8>, Vec<u8>>,
+) -> Result<TridentDatadirIdentity, StateError> {
+    let version_bytes = values
+        .get(meta_keys::TRIDENT_DATADIR_IDENTITY_VERSION)
+        .ok_or_else(|| storage_err("missing Trident datadir identity version"))?;
+    let version_arr: [u8; 4] = version_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| storage_err("malformed Trident datadir identity version"))?;
+    let version = u32::from_le_bytes(version_arr);
+    if version != TRIDENT_DATADIR_IDENTITY_VERSION {
+        return Err(storage_err("unsupported Trident datadir identity version"));
+    }
+
+    let identity_bytes = values
+        .get(meta_keys::TRIDENT_DATADIR_IDENTITY)
+        .ok_or_else(|| storage_err("missing Trident datadir identity record"))?;
+    let identity = TridentDatadirIdentity::try_from_slice(identity_bytes)
+        .map_err(|error| storage_err(format!("malformed Trident datadir identity: {error}")))?;
+    if identity.version != version {
+        return Err(storage_err(
+            "Trident datadir identity version does not match its envelope",
+        ));
+    }
+    let canonical = identity.canonical_bytes().map_err(storage_err)?;
+    if canonical != *identity_bytes {
+        return Err(storage_err(
+            "Trident datadir identity Borsh bytes are not canonical",
+        ));
+    }
+    Ok(identity)
+}
+
 fn decode_and_verify_block_zero(
     values: &BTreeMap<Vec<u8>, Vec<u8>>,
+    identity_values: &BTreeMap<Vec<u8>, Vec<u8>>,
 ) -> Result<TridentBlockZeroStorageRecord, StateError> {
     let version_bytes = values
         .get(meta_keys::TRIDENT_BLOCK_ZERO_RECORD_VERSION)
@@ -718,6 +1101,22 @@ fn decode_and_verify_block_zero(
         ));
     }
     record.verify().map_err(storage_err)?;
+    let datadir_identity = decode_and_verify_datadir_identity(identity_values)?;
+    if datadir_identity != record.datadir_identity {
+        return Err(storage_err(
+            "Trident datadir identity does not match the Block 0 envelope",
+        ));
+    }
+    let identity_bytes = record
+        .datadir_identity
+        .canonical_bytes()
+        .map_err(storage_err)?;
+    require_exact_bytes(
+        identity_values,
+        meta_keys::TRIDENT_DATADIR_IDENTITY,
+        &identity_bytes,
+        "Trident datadir identity",
+    )?;
 
     require_exact_bytes(
         values,
@@ -814,6 +1213,16 @@ fn reread_staged_block_zero(
     let stored = require_block_zero_values(overlay)?;
     for (key, value) in expected_values {
         require_exact_bytes(&stored, key, &value, "staged bytes")?;
+    }
+    let expected_identity_values = encode_datadir_identity_values(&expected.datadir_identity)?;
+    let stored_identity = require_datadir_identity_values(overlay)?;
+    for (key, value) in expected_identity_values {
+        require_exact_bytes(
+            &stored_identity,
+            key,
+            &value,
+            "staged Trident datadir identity bytes",
+        )?;
     }
     Ok(())
 }
@@ -1245,6 +1654,22 @@ mod tests {
         commitment
             .verify_offline_trident_header(&decoded, body_root)
             .unwrap();
+
+        let datadir_identity =
+            TridentDatadirIdentity::from_block_zero(&commitment, Some(&decoded)).unwrap();
+        assert_eq!(
+            datadir_identity.header_identity.block_zero_commitment,
+            commitment.hash()
+        );
+        assert_eq!(
+            datadir_identity.block_zero_header_hash,
+            Some(decoded.commitment_hash().unwrap())
+        );
+        let identity_bytes = datadir_identity.canonical_bytes().unwrap();
+        assert_eq!(
+            TridentDatadirIdentity::try_from_slice(&identity_bytes).unwrap(),
+            datadir_identity
+        );
     }
 
     #[test]
@@ -1419,10 +1844,44 @@ mod tests {
             state.verified_borsh_payload().unwrap()
         );
         assert_eq!(loaded.commitment_hash, state.commitment().hash());
+        assert_eq!(
+            verify_trident_datadir_identity(&store, &expected.datadir_identity).unwrap(),
+            expected.datadir_identity
+        );
         assert!(store
             .scan_prefix(ColumnFamily::Utxo, &[])
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn persisted_identity_is_exact_and_expected_mismatch_is_read_only() {
+        let store = StateStore::open_in_memory();
+        let state =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+        let persisted = state.persist_verified_store_record(&store).unwrap();
+        let identity_bytes = persisted.datadir_identity.canonical_bytes().unwrap();
+        assert_eq!(
+            store
+                .get_cf(ColumnFamily::Meta, meta_keys::TRIDENT_DATADIR_IDENTITY)
+                .unwrap(),
+            Some(identity_bytes.clone())
+        );
+
+        let mut wrong_expected = persisted.datadir_identity.clone();
+        wrong_expected.block_zero_header_hash = Some(Hash([0x77; 32]));
+        wrong_expected.verify().unwrap();
+        let error = verify_trident_datadir_identity(&store, &wrong_expected).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("expected Trident datadir identity"));
+        assert_eq!(
+            store
+                .get_cf(ColumnFamily::Meta, meta_keys::TRIDENT_DATADIR_IDENTITY)
+                .unwrap(),
+            Some(identity_bytes)
+        );
+        assert_eq!(load_verified_trident_block_zero(&store).unwrap(), persisted);
     }
 
     #[test]
@@ -1458,6 +1917,19 @@ mod tests {
             .get_cf(ColumnFamily::Meta, meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID)
             .unwrap()
             .is_none());
+
+        stage_fresh_record_into(&store, &state);
+        store
+            .delete_cf(
+                ColumnFamily::Meta,
+                meta_keys::TRIDENT_DATADIR_IDENTITY_VERSION,
+            )
+            .unwrap();
+        assert!(load_verified_trident_block_zero(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("incomplete"));
+        assert!(stage_error(&state, &store).to_string().contains("partial"));
     }
 
     #[test]
@@ -1516,10 +1988,26 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("unexpected"));
+
+        stage_fresh_record_into(&store, &state);
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::TRIDENT_DATADIR_IDENTITY,
+                b"not-borsh",
+            )
+            .unwrap();
+        assert!(load_verified_trident_block_zero(&store)
+            .unwrap_err()
+            .to_string()
+            .contains("malformed Trident datadir identity"));
     }
 
     fn stage_fresh_record_into(store: &StateStore, state: &TridentBlockZeroState) {
         for key in TRIDENT_BLOCK_ZERO_META_KEYS {
+            store.delete_cf(ColumnFamily::Meta, key).unwrap();
+        }
+        for key in TRIDENT_DATADIR_IDENTITY_META_KEYS {
             store.delete_cf(ColumnFamily::Meta, key).unwrap();
         }
         store
@@ -1536,6 +2024,10 @@ mod tests {
         crate::GenesisBuilder::default().ignite(&store).unwrap();
         assert!(store
             .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .scan_prefix(ColumnFamily::Meta, DATADIR_IDENTITY_PREFIX)
             .unwrap()
             .is_empty());
         assert!(load_verified_trident_block_zero(&store)
@@ -1566,29 +2058,82 @@ mod tests {
         let state =
             TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
         let expected = TridentBlockZeroStorageRecord::from_state(&state).unwrap();
+        let identity_bytes = expected.datadir_identity.canonical_bytes().unwrap();
         {
             let store = StateStore::open(&dir).unwrap();
-            let batch = state.stage_verified_store_batch(&store).unwrap();
             assert!(store
                 .scan_prefix(ColumnFamily::Meta, BLOCK_ZERO_PREFIX)
                 .unwrap()
                 .is_empty());
-            store.write_batch(batch).unwrap();
+            assert_eq!(
+                state.persist_verified_store_record(&store).unwrap(),
+                expected
+            );
         }
         {
             let store = StateStore::open(&dir).unwrap();
             assert_eq!(load_verified_trident_block_zero(&store).unwrap(), expected);
+            assert_eq!(
+                verify_trident_datadir_identity(&store, &expected.datadir_identity).unwrap(),
+                expected.datadir_identity
+            );
+            assert_eq!(
+                store
+                    .get_cf(ColumnFamily::Meta, meta_keys::TRIDENT_DATADIR_IDENTITY)
+                    .unwrap(),
+                Some(identity_bytes.clone())
+            );
+            let mut tampered = identity_bytes;
+            let last = tampered.len() - 1;
+            tampered[last] ^= 1;
             store
                 .put_cf(
                     ColumnFamily::Meta,
-                    meta_keys::TRIDENT_BLOCK_ZERO_NETWORK_FINGERPRINT,
-                    &[0x22; 32],
+                    meta_keys::TRIDENT_DATADIR_IDENTITY,
+                    &tampered,
                 )
                 .unwrap();
+        }
+        {
+            let store = StateStore::open(&dir).unwrap();
             assert!(load_verified_trident_block_zero(&store)
                 .unwrap_err()
                 .to_string()
-                .contains("does not match"));
+                .contains("Trident datadir"));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn rocksdb_reopen_rejects_partial_datadir_identity() {
+        let dir = temp_rocks_dir("partial-identity");
+        let state =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+        {
+            let store = StateStore::open(&dir).unwrap();
+            state.persist_verified_store_record(&store).unwrap();
+            store
+                .delete_cf(
+                    ColumnFamily::Meta,
+                    meta_keys::TRIDENT_DATADIR_IDENTITY_VERSION,
+                )
+                .unwrap();
+        }
+        {
+            let store = StateStore::open(&dir).unwrap();
+            assert!(load_verified_trident_block_zero(&store)
+                .unwrap_err()
+                .to_string()
+                .contains("incomplete"));
+            assert!(ensure_legacy_v2_datadir(&store)
+                .unwrap_err()
+                .to_string()
+                .contains("legacy/v2 startup refuses"));
+            assert!(store
+                .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
+                .unwrap()
+                .is_none());
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

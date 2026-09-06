@@ -137,12 +137,18 @@ fingerprint), a lossless Meta envelope, and fail-closed overlay verification
 before any durable candidate write. A separate domain- and version-gated
 Trident header now commits the Block 0/body/state/policy/version identities
 offline without changing frozen v2 bytes. It still does not materialize live
-balances or provide a node loader entry point. A Trident v3 node loader remains
-blocked on the concrete body/PoW rules, lossless atomic mappings for UTXOs,
-accounts, treasury controls, vesting locks, validator runtime records and
-initial finality, equality between the materialized live-state root and header,
-and full datadir identity binding at boot. Networking and RPC must remain
-disabled for v3 until that complete identity/state contract exists.
+balances or provide a node loader entry point. A versioned Borsh datadir
+identity now binds the chain, artifact, policy, Block 0 commitment, state root,
+network fingerprint, and available header identity/hash in the same atomic
+candidate batch. Legacy/v2 startup rejects that marker before libp2p identity
+access, networking, or RPC; future Trident startup has an exact expected-byte
+verification API at the same boundary.
+
+A Trident v3 node loader remains blocked on the concrete body/PoW rules,
+lossless atomic mappings for UTXOs, accounts, treasury controls, vesting locks,
+validator runtime records and initial finality, and equality between the
+materialized live-state root and header. Networking and RPC must remain
+disabled for v3 until that live-state contract and explicit runtime gates exist.
 See [`../core/block-zero.md`](../core/block-zero.md).
 
 PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.

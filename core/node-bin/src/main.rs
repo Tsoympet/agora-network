@@ -7,6 +7,7 @@ mod backend;
 mod civic;
 mod genesis_cli;
 mod http;
+mod startup;
 mod storage_policy;
 
 use std::collections::HashSet;
@@ -35,6 +36,7 @@ use crate::backend::{
     admit_transaction, NodeBackend, NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
+use crate::startup::{p2p_identity_path, prepare_legacy_datadir};
 use crate::storage_policy::StoragePolicy;
 
 fn resolve_chain_params() -> ChainParams {
@@ -483,40 +485,39 @@ async fn main() {
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(64);
 
+    let data_dir = std::path::PathBuf::from(
+        std::env::var("AGORA_DATA").unwrap_or_else(|_| "data/agora-node".into()),
+    );
+    let storage = StoragePolicy::from_env().for_network(chain_params.network.as_str());
+    let premine_address = chain_params.supply.premine_address;
+    let prepared = prepare_legacy_datadir(&data_dir, &chain_params, storage, |path| {
+        load_or_generate_identity(path)
+    })
+    .unwrap_or_else(|error| {
+        eprintln!("agora-node: startup refused: {error}");
+        std::process::exit(1);
+    });
+    let store = prepared.store;
+    let genesis_hash = prepared.genesis_hash;
+    let identity = prepared.p2p_identity;
+    let identity_path = p2p_identity_path(&data_dir);
+    info!(
+        path = %identity_path.display(),
+        peer = %identity.public().to_peer_id(),
+        "p2p identity ready after datadir preflight"
+    );
+
     let mut net_cfg = NetworkConfig::default()
         .with_network(chain_params.network.as_str())
         .with_listen(listen)
         .with_bootstrap(bootstrap.clone())
         .with_max_peers(max_peers)
-        .with_seeder_refresh_interval(Duration::from_secs(seeder_refresh_secs));
+        .with_seeder_refresh_interval(Duration::from_secs(seeder_refresh_secs))
+        .with_identity(identity);
     if let Some(url) = &dns_seeder {
         net_cfg = net_cfg.with_dns_seeder(url.clone());
     }
 
-    let data_dir = std::env::var("AGORA_DATA").unwrap_or_else(|_| "data/agora-node".into());
-    let identity_path = std::path::Path::new(&data_dir)
-        .join("p2p")
-        .join("identity.key");
-    let identity = load_or_generate_identity(&identity_path).expect("p2p identity");
-    info!(
-        path = %identity_path.display(),
-        peer = %identity.public().to_peer_id(),
-        "p2p identity ready"
-    );
-    net_cfg = net_cfg.with_identity(identity);
-
-    let store = Arc::new(StateStore::open(&data_dir).expect("open state store"));
-    let storage = StoragePolicy::from_env().for_network(chain_params.network.as_str());
-    let premine_address = chain_params.supply.premine_address;
-    let expected_genesis = chain_params.expected_genesis;
-    let genesis_hash = chain_params
-        .builder()
-        .with_archival(storage.archival)
-        .load_or_ignite_checked(store.as_ref(), expected_genesis)
-        .unwrap_or_else(|e| {
-            eprintln!("agora-node: genesis error: {e}");
-            std::process::exit(1);
-        });
     let artifact = agora_state_machine::GenesisArtifact::from_params(&chain_params);
     let policy_hash = artifact
         .consensus
@@ -543,7 +544,7 @@ async fn main() {
             .expect("chain bootstrap"),
     ));
     info!(
-        %data_dir,
+        data_dir = %data_dir.display(),
         archival = storage.archival,
         hot_window = storage.hot_window,
         "state store opened"
