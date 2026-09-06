@@ -8,7 +8,14 @@ DRC stake selects the **community/payments validator set** that independently si
 
 ## Features
 
-Same surface as OVL staking (registration, bond/delegate, epochs, unbonding, commission, rewards, jail/slash/tombstone, concentration controls, snapshots, deterministic quorum) with a **separate** validator set and parameters in genesis.
+Same surface as OVL staking (registration, bond/delegate, epochs, unbonding,
+commission, nonzero 32-byte metadata commitments, rewards,
+jail/slash/tombstone, concentration controls, snapshots, deterministic quorum)
+with a **separate** validator set and parameters in genesis. Genesis commission
+must be explicitly selected within the set and 10,000 bps global bounds; the
+checked Block 0 conversion preserves it, the metadata commitment, and both
+secp256k1/withdrawal identities in the existing DRC staking key/value without
+writing live state.
 
 ## Conservative slash defaults (initial)
 

@@ -17,6 +17,10 @@ use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::columns::{meta_keys, ColumnFamily};
 use crate::error::StateError;
+use crate::staking::{
+    validator_meta_key, StakingParams, ValidatorRecord, ValidatorStatus,
+    MAX_VALIDATOR_COMMISSION_BPS,
+};
 use crate::store::{StateStore, WriteBatch};
 use crate::trident_genesis::{
     TridentGenesisArtifact, TridentGenesisValidator, TridentInitialAllocation, TridentTreasury,
@@ -27,18 +31,18 @@ use crate::trident_genesis::{
 
 /// Version of the canonical Block 0 native-state manifest.
 ///
-/// Version 2 is a pre-freeze break that binds the chain ID and network
-/// fingerprint directly into the manifest and commitment.
-pub const TRIDENT_BLOCK_ZERO_STATE_VERSION: u32 = 2;
+/// Version 3 is a pre-freeze break that adds the complete ceremony-selected
+/// validator registration records to the manifest and commitment.
+pub const TRIDENT_BLOCK_ZERO_STATE_VERSION: u32 = 3;
 /// Domain for the complete native-state root.
-pub const TRIDENT_BLOCK_ZERO_STATE_DOMAIN: &[u8] = b"agora-trident-block-zero-state-v2";
+pub const TRIDENT_BLOCK_ZERO_STATE_DOMAIN: &[u8] = b"agora-trident-block-zero-state-v3";
 /// Domain for the value a future Block 0 header must commit.
-pub const TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN: &[u8] = b"agora-trident-block-zero-commitment-v2";
+pub const TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN: &[u8] = b"agora-trident-block-zero-commitment-v3";
 /// Version of the lossless Meta-CF storage envelope.
 ///
 /// This is independent of [`crate::SCHEMA_VERSION`]: no current boot path
 /// writes or consumes these records.
-pub const TRIDENT_BLOCK_ZERO_STORAGE_VERSION: u32 = 2;
+pub const TRIDENT_BLOCK_ZERO_STORAGE_VERSION: u32 = 3;
 /// Version of the Borsh identity that binds one datadir to one Trident chain.
 pub const TRIDENT_DATADIR_IDENTITY_VERSION: u32 = 1;
 
@@ -103,6 +107,8 @@ pub struct BlockZeroValidator {
     pub consensus_public_key: [u8; 33],
     pub withdrawal_address: Address,
     pub self_bond: u64,
+    pub commission_bps: u16,
+    pub metadata_hash: Hash,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -116,6 +122,95 @@ pub struct BlockZeroValidatorSet {
     pub max_concentration_bps: u16,
     pub validators: Vec<BlockZeroValidator>,
     pub total_active_stake: u64,
+}
+
+impl BlockZeroValidator {
+    /// Losslessly project a committed Block 0 validator into the existing
+    /// staking record without writing it to live state.
+    pub fn to_runtime_validator_record(
+        &self,
+        params: &StakingParams,
+    ) -> Result<ValidatorRecord, String> {
+        let record = ValidatorRecord {
+            operator: self.operator,
+            consensus_pubkey: self.consensus_public_key.to_vec(),
+            withdrawal: self.withdrawal_address,
+            self_bond: self.self_bond,
+            delegated: 0,
+            commission_bps: self.commission_bps,
+            status: ValidatorStatus::Bonded,
+            jailed_until_epoch: 0,
+            metadata_hash: self.metadata_hash,
+        };
+        record
+            .validate_genesis_registration(params)
+            .map_err(|error| error.to_string())?;
+        Ok(record)
+    }
+}
+
+impl BlockZeroValidatorSet {
+    /// Verify set policy equality and derive the exact runtime records and
+    /// unchanged asset-scoped staking keys for a future atomic materializer.
+    pub fn to_runtime_validator_entries(
+        &self,
+        params: &StakingParams,
+    ) -> Result<Vec<(Vec<u8>, ValidatorRecord)>, String> {
+        params.validate().map_err(|error| error.to_string())?;
+        if self.epoch != 0
+            || self.validators.is_empty()
+            || self.validators.len() > self.max_validators as usize
+            || !self
+                .validators
+                .windows(2)
+                .all(|pair| pair[0].operator.0 < pair[1].operator.0)
+            || params.asset != self.asset
+            || params.max_validators != self.max_validators
+            || params.min_self_bond != self.min_self_bond
+            || params.unbonding_period_epochs != self.unbonding_period_checkpoints
+            || params.max_commission_bps != self.max_commission_bps
+            || params.max_concentration_bps != self.max_concentration_bps
+        {
+            return Err(format!(
+                "{} Block 0 validator policy does not match runtime staking parameters",
+                self.asset
+            ));
+        }
+
+        let mut entries = Vec::with_capacity(self.validators.len());
+        let mut keys = BTreeSet::new();
+        let mut total_active_stake = 0u64;
+        for validator in &self.validators {
+            let record = validator.to_runtime_validator_record(params)?;
+            total_active_stake = total_active_stake
+                .checked_add(record.self_bond)
+                .ok_or_else(|| format!("{} runtime validator stake overflow", self.asset))?;
+            let (key, bytes) = record
+                .canonical_genesis_storage_entry(params)
+                .map_err(|error| error.to_string())?;
+            if key != validator_meta_key(self.asset, &validator.operator)
+                || !keys.insert(key.clone())
+            {
+                return Err(format!(
+                    "{} Block 0 validator storage key is inconsistent",
+                    self.asset
+                ));
+            }
+            let decoded = ValidatorRecord::try_from_slice(&bytes)
+                .map_err(|error| format!("invalid runtime validator bytes: {error}"))?;
+            if decoded != record {
+                return Err("runtime validator conversion changed its Borsh identity".into());
+            }
+            entries.push((key, record));
+        }
+        if total_active_stake != self.total_active_stake {
+            return Err(format!(
+                "{} runtime validator stake total mismatch",
+                self.asset
+            ));
+        }
+        Ok(entries)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -1356,6 +1451,16 @@ fn validator_from_artifact(
         consensus_public_key,
         withdrawal_address: parse_address(artifact, &entry.withdrawal_address)?,
         self_bond: entry.self_bond,
+        commission_bps: entry
+            .commission_bps
+            .ok_or_else(|| "validator commission is missing".to_string())?,
+        metadata_hash: parse_nonzero_hash(
+            "validator metadata_hash",
+            entry
+                .metadata_hash
+                .as_deref()
+                .ok_or_else(|| "validator metadata_hash is missing".to_string())?,
+        )?,
     })
 }
 
@@ -1367,6 +1472,9 @@ fn verify_validator_set(
         || set.epoch != 0
         || set.validators.is_empty()
         || set.validators.len() > set.max_validators as usize
+        || set.max_commission_bps > MAX_VALIDATOR_COMMISSION_BPS
+        || set.max_concentration_bps == 0
+        || set.max_concentration_bps > MAX_VALIDATOR_COMMISSION_BPS
     {
         return Err(format!("{} Block 0 validator set is invalid", set.asset));
     }
@@ -1374,9 +1482,20 @@ fn verify_validator_set(
     let mut keys = BTreeSet::new();
     let mut total = 0u64;
     for validator in &set.validators {
+        let consensus_public_key = parse_compressed_public_key(&validator.consensus_public_key)
+            .map_err(|error| {
+                format!(
+                    "{} Block 0 validator consensus key is invalid: {error}",
+                    set.asset
+                )
+            })?;
         if !operators.insert(validator.operator)
             || !keys.insert(validator.consensus_public_key)
             || validator.self_bond < set.min_self_bond
+            || validator.operator != address_from_pubkey(&consensus_public_key)
+            || validator.commission_bps > set.max_commission_bps
+            || validator.commission_bps > MAX_VALIDATOR_COMMISSION_BPS
+            || validator.metadata_hash == Hash::ZERO
         {
             return Err(format!("{} Block 0 validator is invalid", set.asset));
         }
@@ -1533,6 +1652,14 @@ fn parse_hash(label: &str, value: &str) -> Result<Hash, String> {
     Hash::from_hex(value).ok_or_else(|| format!("{label} is not a 32-byte hash"))
 }
 
+fn parse_nonzero_hash(label: &str, value: &str) -> Result<Hash, String> {
+    let hash = parse_hash(label, value)?;
+    if hash == Hash::ZERO {
+        return Err(format!("{label} must be nonzero"));
+    }
+    Ok(hash)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1594,9 +1721,9 @@ mod tests {
             treasury.allocation = 1;
             treasury.control = "synthetic-governance-v1".into();
         }
-        for (set, key, address, bond) in [
-            (&mut artifact.ovl_validators, &ovl, ovl_address, 5),
-            (&mut artifact.drc_validators, &drc, drc_address, 7),
+        for (set, key, address, bond, metadata_byte) in [
+            (&mut artifact.ovl_validators, &ovl, ovl_address, 5, "33"),
+            (&mut artifact.drc_validators, &drc, drc_address, 7, "44"),
         ] {
             set.max_validators = 1;
             set.min_self_bond = 1;
@@ -1607,6 +1734,8 @@ mod tests {
                 consensus_public_key: hex::encode(key.public_key_bytes()),
                 withdrawal_address: address,
                 self_bond: bond,
+                commission_bps: Some(100),
+                metadata_hash: Some(metadata_byte.repeat(32)),
             });
         }
         artifact.genesis_hash = artifact.consensus_identity_hash().to_hex();
@@ -1625,10 +1754,105 @@ mod tests {
         assert_eq!(state.supplies.len(), 3);
         assert_eq!(state.treasuries.len(), 3);
         assert_eq!(state.validator_sets.len(), 2);
+        assert_eq!(state.validator_sets[0].validators[0].commission_bps, 100);
+        assert_eq!(
+            state.validator_sets[0].validators[0].metadata_hash,
+            Hash([0x33; 32])
+        );
         assert_eq!(state.finality.state, CheckpointState::Proposed);
         assert!(!state.verified_borsh_payload().unwrap().is_empty());
         assert_eq!(state.commitment().hash(), state.commitment().hash());
         state.commitment().verify().unwrap();
+    }
+
+    #[test]
+    fn validator_fields_change_state_root_and_block_zero_commitment() {
+        let baseline =
+            TridentBlockZeroState::from_artifact(&synthetic_freeze_ready_artifact()).unwrap();
+
+        let mut changed_commission = baseline.clone();
+        changed_commission.validator_sets[0].validators[0].commission_bps += 1;
+        changed_commission.finality.ovl_snapshot =
+            Hash::hash_borsh(&changed_commission.validator_sets[0]);
+        changed_commission.verify().unwrap();
+        assert_ne!(changed_commission.state_root(), baseline.state_root());
+        assert_ne!(
+            changed_commission.commitment().hash(),
+            baseline.commitment().hash()
+        );
+
+        let mut changed_metadata = baseline.clone();
+        changed_metadata.validator_sets[0].validators[0].metadata_hash = Hash([0x55; 32]);
+        changed_metadata.finality.ovl_snapshot =
+            Hash::hash_borsh(&changed_metadata.validator_sets[0]);
+        changed_metadata.verify().unwrap();
+        assert_ne!(changed_metadata.state_root(), baseline.state_root());
+        assert_ne!(
+            changed_metadata.commitment().hash(),
+            baseline.commitment().hash()
+        );
+    }
+
+    #[test]
+    fn validator_manifest_converts_losslessly_to_runtime_records_and_keys() {
+        let artifact = synthetic_freeze_ready_artifact();
+        let runtime = artifact.to_runtime_policy().unwrap();
+        let state = TridentBlockZeroState::from_artifact(&artifact).unwrap();
+
+        for (set, params) in [
+            (&state.validator_sets[0], &runtime.ovl_staking),
+            (&state.validator_sets[1], &runtime.drc_staking),
+        ] {
+            let entries = set.to_runtime_validator_entries(params).unwrap();
+            assert_eq!(entries.len(), set.validators.len());
+            for ((key, record), source) in entries.iter().zip(&set.validators) {
+                assert_eq!(*key, validator_meta_key(set.asset, &source.operator));
+                assert_eq!(record.operator, source.operator);
+                assert_eq!(
+                    record.consensus_pubkey.as_slice(),
+                    source.consensus_public_key
+                );
+                assert_eq!(record.withdrawal, source.withdrawal_address);
+                assert_eq!(record.self_bond, source.self_bond);
+                assert_eq!(record.delegated, 0);
+                assert_eq!(record.commission_bps, source.commission_bps);
+                assert_eq!(record.status, ValidatorStatus::Bonded);
+                assert_eq!(record.jailed_until_epoch, 0);
+                assert_eq!(record.metadata_hash, source.metadata_hash);
+
+                let (_, bytes) = record.canonical_genesis_storage_entry(params).unwrap();
+                assert_eq!(ValidatorRecord::try_from_slice(&bytes).unwrap(), *record);
+            }
+        }
+    }
+
+    #[test]
+    fn validator_runtime_conversion_rejects_policy_and_identity_mismatch() {
+        let artifact = synthetic_freeze_ready_artifact();
+        let runtime = artifact.to_runtime_policy().unwrap();
+        let state = TridentBlockZeroState::from_artifact(&artifact).unwrap();
+        let set = &state.validator_sets[0];
+
+        let mut wrong_params = runtime.ovl_staking.clone();
+        wrong_params.max_commission_bps += 1;
+        assert!(set
+            .to_runtime_validator_entries(&wrong_params)
+            .unwrap_err()
+            .contains("does not match"));
+
+        let mut changed = set.clone();
+        changed.validators[0].metadata_hash = Hash::ZERO;
+        assert!(changed
+            .to_runtime_validator_entries(&runtime.ovl_staking)
+            .unwrap_err()
+            .contains("metadata hash must be nonzero"));
+
+        let mut changed = set.clone();
+        changed.validators[0].operator = Address([0x77; 20]);
+        assert!(changed
+            .to_runtime_validator_entries(&runtime.ovl_staking)
+            .unwrap_err()
+            .contains("operator does not match"));
     }
 
     #[test]

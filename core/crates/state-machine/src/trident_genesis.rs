@@ -14,16 +14,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::monetary::{AssetMonetaryPolicy, EmissionKind, TridentMonetaryPolicy};
 use crate::network::NetworkId;
-use crate::staking::StakingParams;
+use crate::staking::{StakingParams, MAX_VALIDATOR_COMMISSION_BPS};
 
 pub const TRIDENT_GENESIS_SCHEMA: &str = "agora-trident-genesis-v3";
 /// State-transition version committed into the Trident network fingerprint.
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v5";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v6";
 /// Consensus-policy version string for Trident.
-pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
+pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v2";
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
-pub const TRIDENT_GENESIS_ID_DOMAIN: &[u8] = b"agora-trident-genesis-identity-v1";
-pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-policy-v1";
+pub const TRIDENT_GENESIS_ID_DOMAIN: &[u8] = b"agora-trident-genesis-identity-v2";
+pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-policy-v2";
 /// v4 adds native DRC payment gossip and block-lane settlement.
 pub const TRIDENT_PROTOCOL_VERSION: u32 = 4;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v1";
@@ -167,6 +167,12 @@ pub struct TridentGenesisValidator {
     pub consensus_public_key: String,
     pub withdrawal_address: String,
     pub self_bond: u64,
+    /// Ceremony-selected commission. `None` is accepted only in draft artifacts.
+    #[serde(default)]
+    pub commission_bps: Option<u16>,
+    /// Ceremony-selected 32-byte metadata commitment encoded as lowercase hex.
+    #[serde(default)]
+    pub metadata_hash: Option<String>,
 }
 
 #[derive(
@@ -650,6 +656,21 @@ impl TridentGenesisArtifact {
                 ));
             }
             self.validate_network_address(&validator.withdrawal_address)?;
+            if let Some(commission_bps) = validator.commission_bps {
+                let set_max = validators
+                    .max_commission_bps
+                    .expect("populated validator policy was validated");
+                if commission_bps > set_max || commission_bps > MAX_VALIDATOR_COMMISSION_BPS {
+                    return Err(format!(
+                        "{label} validator commission exceeds the selected maximum"
+                    ));
+                }
+            }
+            if let Some(metadata_hash) = validator.metadata_hash.as_deref() {
+                if !is_placeholder(metadata_hash) && !is_zero_hash(metadata_hash) {
+                    parse_nonzero_hash(&format!("{label} validator metadata_hash"), metadata_hash)?;
+                }
+            }
         }
         Ok(())
     }
@@ -747,6 +768,24 @@ impl TridentGenesisArtifact {
         {
             return Err(format!("{label} validator self bond is below minimum"));
         }
+        for validator in &validators.genesis_set {
+            let commission_bps = validator
+                .commission_bps
+                .ok_or_else(|| format!("{label} validator commission_bps is not selected"))?;
+            let set_max = validators
+                .max_commission_bps
+                .expect("freeze-ready validator policy was validated");
+            if commission_bps > set_max || commission_bps > MAX_VALIDATOR_COMMISSION_BPS {
+                return Err(format!(
+                    "{label} validator commission exceeds the selected maximum"
+                ));
+            }
+            let metadata_hash = validator
+                .metadata_hash
+                .as_deref()
+                .ok_or_else(|| format!("{label} validator metadata_hash is not selected"))?;
+            parse_nonzero_hash(&format!("{label} validator metadata_hash"), metadata_hash)?;
+        }
         Ok(())
     }
 
@@ -761,7 +800,10 @@ impl TridentGenesisArtifact {
         let concentration = validators
             .max_concentration_bps
             .ok_or_else(|| format!("{label} max_concentration_bps is not selected"))?;
-        if commission > 10_000 || concentration == 0 || concentration > 10_000 {
+        if commission > MAX_VALIDATOR_COMMISSION_BPS
+            || concentration == 0
+            || concentration > MAX_VALIDATOR_COMMISSION_BPS
+        {
             return Err(format!("{label} validator basis-point policy is invalid"));
         }
         Ok(())
@@ -910,6 +952,19 @@ fn validate_frozen_hash(label: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn parse_nonzero_hash(label: &str, value: &str) -> Result<Hash, String> {
+    validate_frozen_hash(label, value)?;
+    let hash = Hash::from_hex(value).ok_or_else(|| format!("{label} is not a 32-byte hash"))?;
+    if hash == Hash::ZERO {
+        return Err(format!("{label} must be nonzero"));
+    }
+    Ok(hash)
+}
+
+fn is_zero_hash(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte == b'0')
+}
+
 fn is_placeholder(value: &str) -> bool {
     value.trim().is_empty()
         || value == UNFROZEN
@@ -921,6 +976,67 @@ mod tests {
     use super::*;
 
     const DRAFT: &str = include_str!("../../../../docs/genesis/trident.testnet.genesis.draft.json");
+
+    fn synthetic_freeze_ready_artifact() -> TridentGenesisArtifact {
+        let mut artifact = TridentGenesisArtifact::from_json(DRAFT).unwrap();
+        artifact.timestamp_ms = 1;
+        artifact.bits = Some(0);
+        artifact.maturity = "Scaffold".into();
+        artifact.notes.clear();
+        artifact.wallet.coin_type_status = "registered".into();
+        artifact.governance_constitution_hash = "11".repeat(32);
+        artifact.emergency_policy_hash = "22".repeat(32);
+        artifact.finality.pow_work_threshold_policy = "minimum-blue-score-depth-v1".into();
+        artifact.finality.pow_work_threshold = Some(12);
+        artifact.assets.tlt.treasury_allocation = 1;
+        artifact.assets.ovl.genesis_allocation = 1;
+        artifact.assets.ovl.staking_reward_reserve = 1;
+        artifact.assets.ovl.emission.reserve_base_units = Some(1);
+        artifact.assets.ovl.treasury_allocation = 1;
+        artifact.assets.drc.genesis_allocation = 1;
+        artifact.assets.drc.staking_reward_reserve = 1;
+        artifact.assets.drc.emission.reserve_base_units = Some(1);
+        artifact.assets.drc.treasury_allocation = 1;
+        artifact.treasuries.tlt_security.allocation = 1;
+        artifact.treasuries.ovl_builder.allocation = 1;
+        artifact.treasuries.drc_community.allocation = 1;
+        artifact.treasuries.tlt_security.control = "governance-v1".into();
+        artifact.treasuries.ovl_builder.control = "governance-v1".into();
+        artifact.treasuries.drc_community.control = "governance-v1".into();
+        let address = Address([9; 20]).to_bech32_hrp("agoratest");
+        for (ticker, amount) in [
+            ("TLT", artifact.assets.tlt.genesis_allocation),
+            ("OVL", 1),
+            ("DRC", 1),
+        ] {
+            artifact.initial_allocations.push(TridentInitialAllocation {
+                asset: ticker.into(),
+                address: address.clone(),
+                amount,
+            });
+        }
+        let key = agora_crypto::KeyPair::from_secret_bytes(&[7; 32])
+            .unwrap()
+            .public_key_bytes();
+        let validator = TridentGenesisValidator {
+            consensus_public_key: hex::encode(key),
+            withdrawal_address: address,
+            self_bond: 1,
+            commission_bps: Some(100),
+            metadata_hash: Some("33".repeat(32)),
+        };
+        for set in [&mut artifact.ovl_validators, &mut artifact.drc_validators] {
+            set.max_validators = 1;
+            set.min_self_bond = 1;
+            set.unbonding_period_checkpoints = 1;
+            set.max_commission_bps = Some(2_000);
+            set.max_concentration_bps = Some(10_000);
+            set.genesis_set.push(validator.clone());
+        }
+        artifact.genesis_hash = artifact.consensus_identity_hash().to_hex();
+        artifact.network_fingerprint = artifact.compute_network_fingerprint().to_hex();
+        artifact
+    }
 
     #[test]
     fn checked_in_draft_parses_strictly_and_has_stable_identity() {
@@ -987,6 +1103,8 @@ mod tests {
                 consensus_public_key: "00".repeat(33),
                 withdrawal_address: "agoratest1notvalidateduntil-loader-integration".into(),
                 self_bond: 1,
+                commission_bps: Some(100),
+                metadata_hash: Some("11".repeat(32)),
             });
         assert!(artifact
             .validate_draft()
@@ -995,61 +1113,122 @@ mod tests {
     }
 
     #[test]
+    fn validator_metadata_round_trips_json_and_borsh() {
+        let validator = synthetic_freeze_ready_artifact()
+            .ovl_validators
+            .genesis_set
+            .remove(0);
+        let json = serde_json::to_string(&validator).unwrap();
+        assert_eq!(
+            serde_json::from_str::<TridentGenesisValidator>(&json).unwrap(),
+            validator
+        );
+        let bytes = borsh::to_vec(&validator).unwrap();
+        assert_eq!(
+            TridentGenesisValidator::try_from_slice(&bytes).unwrap(),
+            validator
+        );
+    }
+
+    #[test]
+    fn validator_commission_and_metadata_are_identity_sensitive() {
+        let artifact = synthetic_freeze_ready_artifact();
+        let identity = artifact.consensus_identity_hash();
+        let policy = artifact.consensus_policy_hash();
+        let fingerprint = artifact.compute_network_fingerprint();
+
+        let mut changed = artifact.clone();
+        changed.ovl_validators.genesis_set[0].commission_bps = Some(101);
+        assert_ne!(changed.consensus_identity_hash(), identity);
+        assert_ne!(changed.consensus_policy_hash(), policy);
+        assert_ne!(changed.compute_network_fingerprint(), fingerprint);
+
+        let mut changed = artifact;
+        changed.ovl_validators.genesis_set[0].metadata_hash = Some("44".repeat(32));
+        assert_ne!(changed.consensus_identity_hash(), identity);
+        assert_ne!(changed.consensus_policy_hash(), policy);
+        assert_ne!(changed.compute_network_fingerprint(), fingerprint);
+    }
+
+    #[test]
+    fn validator_commission_obeys_set_and_global_limits() {
+        let mut artifact = synthetic_freeze_ready_artifact();
+        artifact.ovl_validators.genesis_set[0].commission_bps = Some(2_001);
+        assert!(artifact
+            .validate_draft()
+            .unwrap_err()
+            .contains("commission exceeds"));
+
+        let mut artifact = synthetic_freeze_ready_artifact();
+        artifact.ovl_validators.max_commission_bps =
+            Some(MAX_VALIDATOR_COMMISSION_BPS.saturating_add(1));
+        assert!(artifact
+            .validate_draft()
+            .unwrap_err()
+            .contains("basis-point policy"));
+
+        let json =
+            serde_json::to_string(&synthetic_freeze_ready_artifact().ovl_validators.genesis_set[0])
+                .unwrap()
+                .replace("\"commission_bps\":100", "\"commission_bps\":65536");
+        assert!(serde_json::from_str::<TridentGenesisValidator>(&json).is_err());
+    }
+
+    #[test]
+    fn freeze_rejects_missing_placeholder_and_zero_metadata_fields() {
+        let mut missing_commission = synthetic_freeze_ready_artifact();
+        missing_commission.ovl_validators.genesis_set[0].commission_bps = None;
+        missing_commission.validate_draft().unwrap();
+        assert!(missing_commission
+            .validate_freeze_ready()
+            .unwrap_err()
+            .contains("commission_bps is not selected"));
+
+        let mut missing_metadata = synthetic_freeze_ready_artifact();
+        missing_metadata.ovl_validators.genesis_set[0].metadata_hash = None;
+        missing_metadata.validate_draft().unwrap();
+        assert!(missing_metadata
+            .validate_freeze_ready()
+            .unwrap_err()
+            .contains("metadata_hash is not selected"));
+
+        for placeholder in ["UNFROZEN".to_string(), "00".repeat(32)] {
+            let mut artifact = synthetic_freeze_ready_artifact();
+            artifact.ovl_validators.genesis_set[0].metadata_hash = Some(placeholder);
+            artifact.validate_draft().unwrap();
+            assert!(artifact
+                .validate_freeze_ready()
+                .unwrap_err()
+                .contains("metadata_hash"));
+        }
+    }
+
+    #[test]
+    fn legacy_validator_entries_are_draft_only_and_cannot_freeze() {
+        let artifact = synthetic_freeze_ready_artifact();
+        let mut legacy_json = serde_json::to_value(&artifact).unwrap();
+        for set_name in ["ovl_validators", "drc_validators"] {
+            let entry = legacy_json[set_name]["genesis_set"][0]
+                .as_object_mut()
+                .unwrap();
+            entry.remove("commission_bps");
+            entry.remove("metadata_hash");
+        }
+        let legacy: TridentGenesisArtifact = serde_json::from_value(legacy_json).unwrap();
+        legacy.validate_draft().unwrap();
+        assert!(legacy.validate_freeze_ready().is_err());
+        assert!(legacy
+            .ovl_validators
+            .genesis_set
+            .iter()
+            .all(
+                |validator| validator.commission_bps.is_none() && validator.metadata_hash.is_none()
+            ));
+    }
+
+    #[test]
     fn hash_fields_must_match_computed_values_at_freeze() {
-        let mut artifact = TridentGenesisArtifact::from_json(DRAFT).unwrap();
-        artifact.timestamp_ms = 1;
-        artifact.bits = Some(0);
-        artifact.maturity = "Scaffold".into();
-        artifact.notes.clear();
-        artifact.wallet.coin_type_status = "registered".into();
-        artifact.governance_constitution_hash = "11".repeat(32);
-        artifact.emergency_policy_hash = "22".repeat(32);
-        artifact.finality.pow_work_threshold_policy = "minimum-blue-score-depth-v1".into();
-        artifact.finality.pow_work_threshold = Some(12);
-        artifact.assets.tlt.treasury_allocation = 1;
-        artifact.assets.ovl.genesis_allocation = 1;
-        artifact.assets.ovl.staking_reward_reserve = 1;
-        artifact.assets.ovl.emission.reserve_base_units = Some(1);
-        artifact.assets.ovl.treasury_allocation = 1;
-        artifact.assets.drc.genesis_allocation = 1;
-        artifact.assets.drc.staking_reward_reserve = 1;
-        artifact.assets.drc.emission.reserve_base_units = Some(1);
-        artifact.assets.drc.treasury_allocation = 1;
-        artifact.treasuries.tlt_security.allocation = 1;
-        artifact.treasuries.ovl_builder.allocation = 1;
-        artifact.treasuries.drc_community.allocation = 1;
-        artifact.treasuries.tlt_security.control = "governance-v1".into();
-        artifact.treasuries.ovl_builder.control = "governance-v1".into();
-        artifact.treasuries.drc_community.control = "governance-v1".into();
-        let address = Address([9; 20]).to_bech32_hrp("agoratest");
-        for (ticker, amount) in [
-            ("TLT", artifact.assets.tlt.genesis_allocation),
-            ("OVL", 1),
-            ("DRC", 1),
-        ] {
-            artifact.initial_allocations.push(TridentInitialAllocation {
-                asset: ticker.into(),
-                address: address.clone(),
-                amount,
-            });
-        }
-        let key = agora_crypto::KeyPair::from_secret_bytes(&[7; 32])
-            .unwrap()
-            .public_key_bytes();
-        let validator = TridentGenesisValidator {
-            consensus_public_key: hex::encode(key),
-            withdrawal_address: address,
-            self_bond: 1,
-        };
-        for set in [&mut artifact.ovl_validators, &mut artifact.drc_validators] {
-            set.max_validators = 1;
-            set.min_self_bond = 1;
-            set.unbonding_period_checkpoints = 1;
-            set.max_commission_bps = Some(2_000);
-            set.max_concentration_bps = Some(10_000);
-            set.genesis_set.push(validator.clone());
-        }
-        artifact.genesis_hash = artifact.consensus_identity_hash().to_hex();
+        let mut artifact = synthetic_freeze_ready_artifact();
         artifact.network_fingerprint = "00".repeat(32);
         assert!(artifact
             .validate_freeze_ready()

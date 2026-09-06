@@ -8,8 +8,8 @@
   "timestamp_ms": 0,
   "genesis_hash": "UNFROZEN",
   "network_fingerprint": "UNFROZEN",
-  "state_transition_version": "agora-trident-state-v5",
-  "consensus_policy_version": "agora-trident-consensus-v1",
+  "state_transition_version": "agora-trident-state-v6",
+  "consensus_policy_version": "agora-trident-consensus-v2",
   "governance_constitution_hash": "UNFROZEN",
   "emergency_policy_hash": "UNFROZEN",
   "decimals": 8,
@@ -120,6 +120,7 @@
   "notes": [
     "DRAFT ONLY — genesis_hash and fingerprint must be computed by deterministic serialization at freeze.",
     "OVL/DRC staking_reward_reserve values are working testnet defaults (10% of max), not ceremony-frozen.",
+    "Each populated validator entry must explicitly select commission_bps and a nonzero 32-byte metadata_hash; missing, null, UNFROZEN, and all-zero values are draft-only.",
     "Does not claim public-testnet or mainnet readiness."
   ]
 }
