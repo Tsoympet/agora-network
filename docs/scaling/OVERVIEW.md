@@ -9,7 +9,7 @@ Canonical design: [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.m
 | `agora-ovolos-rollup` | L2 OVL + revm | Execution semantics → L1 OVL module (delete unsigned compact / dual balances) |
 | `agora-bridge-sdk` | L3 DRC payments | Payment semantics → L1 DRC module (signed attestations, atomic mutation order) |
 | `agora-intent-engine` | L4 intents | Optional app-layer |
-| `agora-layers-runtime` / `agora-layers` | In-process compose | Lab harness only; mint/credit RPCs must stay off shared public nets |
+| `agora-layers-runtime` / `agora-layers` | In-process compose | Loopback-only lab harness; mint/credit RPCs are never public or canonical |
 
 ```
 Users / Agents
@@ -28,3 +28,7 @@ cargo run -p agora-layers
 ```
 
 Do not claim public multi-chain deployment. Prefer genesis-native Trident balances over migrating lab ledgers ([`../migration/OVL_DRC_TO_L1.md`](../migration/OVL_DRC_TO_L1.md)).
+
+The audited prerequisite for any future provenance-only L1 data commitment is
+[`../core/data-availability.md`](../core/data-availability.md). There is
+currently no live DA transaction or public district endpoint.

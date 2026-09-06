@@ -11,7 +11,7 @@ use agora_ovolos_rollup::{
     decode_evm_tx, Batch, BatchCommitment, BatchStatus, EvmExecutor, EvmTx, FraudProof, OvlBlock,
     OvolosGenesis, OvolosRollup, RevmExecutor, RollupCheckpoint, OVOLOS_POW_ALGORITHM,
 };
-use agora_types::{Address, Amount, Hash};
+use agora_types::{Address, Amount, DataAvailabilityCommitment, Hash};
 use serde::Serialize;
 
 use crate::persist::{parse_hash, LayersCheckpoint};
@@ -61,9 +61,13 @@ impl Default for LayersRuntimeConfig {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LayerInfo {
+    /// Required labeling: this process is never canonical Trident state.
+    pub canonical_l1: bool,
+    pub maturity: &'static str,
     pub hub_id: String,
     pub ovl_genesis_hash: String,
     pub ovl_chain_id: String,
+    /// True only within the historical layer artifact; not canonical Trident state.
     pub ovl_native: bool,
     pub ovl_pow_algorithm: String,
     pub ovl_pow_bits: u32,
@@ -71,6 +75,7 @@ pub struct LayerInfo {
     pub ovl_tip_hash: String,
     pub drc_genesis_hash: String,
     pub drc_chain_id: String,
+    /// True only within the historical layer artifact; not canonical Trident state.
     pub drc_native: bool,
     pub drc_pow_algorithm: String,
     pub drc_pow_bits: u32,
@@ -92,9 +97,10 @@ pub struct LayerInfo {
     pub drc_quorum_threshold: usize,
 }
 
-/// In-process L2 + L3 + L4 stack for operators and integration tests.
+/// Historical in-process layer lab for integration tests and migration evidence.
 ///
-/// L2 uses `RevmExecutor` so OVL behaves as Ethereum-class gas + EVM state.
+/// The lab uses `RevmExecutor` as reusable execution machinery; OVL is not
+/// Ethereum-equivalent and its canonical balance belongs to Trident L1.
 pub struct LayersRuntime {
     rollup: OvolosRollup<RevmExecutor>,
     intents: IntentEngine<CompositeSolver>,
@@ -179,6 +185,8 @@ impl LayersRuntime {
             .map(|d| d.district_id.clone())
             .collect();
         LayerInfo {
+            canonical_l1: false,
+            maturity: "Experimental",
             hub_id: self.hub_id.clone(),
             ovl_genesis_hash: self.ovl_genesis_hash.clone(),
             ovl_chain_id: self.ovl_chain_id.clone(),
@@ -244,6 +252,7 @@ impl LayersRuntime {
             .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
+    /// Advance the historical lab timer status as a bonded lab sequencer.
     pub fn finalize_due_as(
         &mut self,
         sequencer: Address,
@@ -266,6 +275,7 @@ impl LayersRuntime {
             .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
+    /// Store an unverified local operator assertion; this does not query L1.
     pub fn record_da(&mut self, commitment: BatchCommitment) -> Result<(), LayersError> {
         self.rollup
             .record_da_post(commitment)
@@ -278,6 +288,7 @@ impl LayersRuntime {
             .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
+    /// Advance the historical lab timer status, not Trident finality.
     pub fn finalize_due(&mut self, now_ms: u64) -> Result<Vec<Hash>, LayersError> {
         self.rollup
             .finalize_due(now_ms)
@@ -310,11 +321,41 @@ impl LayersRuntime {
         self.rollup.get_commitment(id).cloned()
     }
 
+    /// Build the canonical Trident DA candidate for a historical lab batch.
+    ///
+    /// This does not sign, submit, or confirm an L1 transaction. Keeping the
+    /// conversion read-only prevents the lab's local `record_da` flag from
+    /// being mistaken for canonical settlement.
+    pub fn l1_da_commitment_candidate(
+        &self,
+        id: &Hash,
+    ) -> Result<DataAvailabilityCommitment, LayersError> {
+        let source = self
+            .rollup
+            .get_commitment(id)
+            .ok_or_else(|| LayersError::Rollup(format!("unknown batch {}", id.to_hex())))?;
+        let candidate = DataAvailabilityCommitment::agora_layers_ovolos_batch(
+            self.ovl_chain_id.clone(),
+            parse_hash(&self.ovl_genesis_hash)?,
+            source.batch_id,
+            source.sequence,
+            source.prev_state_root,
+            source.post_state_root,
+            source.tx_merkle_root,
+            source.tx_count,
+            source.posted_at_ms,
+        );
+        candidate.validate().map_err(|err| {
+            LayersError::Rollup(format!("invalid DA commitment candidate: {err}"))
+        })?;
+        Ok(candidate)
+    }
+
     pub fn ovl_balance(&self, address: Address) -> Amount {
         self.rollup.ovl().balance(address)
     }
 
-    /// Mine and admit a native OVL PoW block sealing `batch` (coinbase to `miner`).
+    /// Mine a historical lab-only OVL PoW block; Trident OVL is never mined.
     pub fn mine_ovl_block(
         &mut self,
         batch: Batch,
@@ -455,7 +496,7 @@ impl LayersRuntime {
             .map_err(|e| LayersError::Bridge(e.to_string()))
     }
 
-    /// Mine and admit a native DRC PoW block on a district/hub (coinbase to `miner`).
+    /// Mine a historical lab-only DRC PoW block; Trident DRC is never mined.
     pub fn mine_drc_block(
         &mut self,
         district_id: &str,
@@ -541,7 +582,7 @@ impl LayersRuntime {
             .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
-    // --- Ethereum-class L2 helpers (`eth_*`) ---
+    // --- Historical EVM-compatibility lab helpers (`eth_*`) ---
 
     pub fn eth_chain_id(&self) -> u64 {
         self.ovl_eth_chain_id
@@ -551,7 +592,7 @@ impl LayersRuntime {
         self.rollup.tip_height().max(self.rollup.next_sequence())
     }
 
-    /// Prefer OVL ledger balance (native gas money); fall back to EVM account wei.
+    /// Prefer the lab OVL ledger balance; fall back to its EVM account cache.
     pub fn eth_get_balance(&self, address: Address) -> u128 {
         let ovl = self.rollup.ovl().balance(address).as_base_units() as u128;
         if ovl > 0 {
@@ -725,6 +766,48 @@ mod tests {
     }
 
     #[test]
+    fn lab_batch_maps_to_deterministic_provenance_bound_l1_candidate() {
+        let payer = Address([0xA1; 20]);
+        let mut runtime = LayersRuntime::new(LayersRuntimeConfig {
+            challenge_window_ms: Some(100),
+            gas_payer: Some(payer),
+            hub_id: None,
+            ovolos_genesis: OvolosGenesis::testnet(),
+            drachma_genesis: DrachmaGenesis::testnet(),
+        })
+        .unwrap();
+        runtime
+            .mint_ovl(payer, Amount::from_base_units(50_000))
+            .unwrap();
+        let transactions = vec![encode_value_transfer([0xB2; 20], 9)];
+        let post_state_root = runtime
+            .execute_evm_batch(&Hash::ZERO, &transactions)
+            .unwrap();
+        let batch = Batch {
+            sequence: 0,
+            prev_state_root: Hash::ZERO,
+            post_state_root,
+            transactions,
+            posted_at_ms: 42,
+        };
+        let batch_id = runtime.submit_batch(batch).unwrap();
+
+        let first = runtime.l1_da_commitment_candidate(&batch_id).unwrap();
+        let second = runtime.l1_da_commitment_candidate(&batch_id).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.batch_id, batch_id);
+        assert_eq!(first.source_chain_id, "agora-ovolos-testnet-1");
+        assert_eq!(
+            first.source_genesis_hash.to_hex(),
+            OvolosGenesis::testnet().genesis_hash
+        );
+        assert_eq!(first.commitment_id(), second.commitment_id());
+        assert!(runtime
+            .l1_da_commitment_candidate(&Hash([0xFF; 32]))
+            .is_err());
+    }
+
+    #[test]
     fn end_to_end_layers_from_genesis() {
         let payer = Address([0xA1; 20]);
         let mut rt = LayersRuntime::new(LayersRuntimeConfig {
@@ -736,7 +819,7 @@ mod tests {
         })
         .unwrap();
 
-        // Genesis already preminted OVL to treasury; mint gas for payer separately.
+        // The historical lab genesis preminted OVL; fund its local gas ledger separately.
         rt.mint_ovl(payer, Amount::from_base_units(1_000_000))
             .unwrap();
 
@@ -764,6 +847,8 @@ mod tests {
         assert!(rt.eth_get_balance(payer) > 0);
 
         let info = rt.info();
+        assert!(!info.canonical_l1);
+        assert_eq!(info.maturity, "Experimental");
         assert_eq!(info.ovl_chain_id, "agora-ovolos-testnet-1");
         assert_eq!(info.drc_chain_id, "agora-drachma-testnet-1");
         assert!(info.ovl_native);

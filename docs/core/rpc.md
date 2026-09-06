@@ -45,6 +45,12 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 
 Civic state is persisted under RocksDB Meta key `meta/governance` (`CivicSnapshot`).
 
+There is no data-commitment submit or confirmation RPC. The TLT
+`agora_submitTransaction` schema has no payload field, and commitment bytes
+must not be hidden in a transfer or OVL execution call. See
+[`data-availability.md`](data-availability.md) for the unactivated Trident type
+prerequisite and required consensus work.
+
 ## Dispatch
 
 - `RpcBackend` — trait implemented by node services

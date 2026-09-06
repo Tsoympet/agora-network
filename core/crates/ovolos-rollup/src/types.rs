@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct EvmTx(pub Vec<u8>);
 
-/// Sequencer batch posted to L1 / Agora DA.
+/// Historical lab sequencer batch; construction does not imply L1 submission.
 #[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
 pub struct Batch {
     pub sequence: u64,

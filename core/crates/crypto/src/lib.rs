@@ -7,6 +7,7 @@ mod account;
 mod address;
 mod attestation;
 mod bip44;
+mod data_availability;
 mod error;
 mod execution;
 mod keys;
@@ -24,6 +25,7 @@ pub use attestation::{sign_checkpoint_attestation, verify_checkpoint_attestation
 pub use bip44::{
     derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,
 };
+pub use data_availability::{sign_data_commitment_bound, verify_data_commitment_bound};
 pub use error::CryptoError;
 pub use execution::{sign_ovl_execution_bound, verify_ovl_execution_bound};
 pub use keys::{parse_compressed_public_key, KeyPair, PublicKeyBytes, SignatureBytes};
