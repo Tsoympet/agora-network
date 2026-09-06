@@ -72,9 +72,10 @@ pub mod meta_keys {
     /// Per-asset issued supply prefix: `meta/issued_supply/<asset_wire_byte>`.
     pub const ISSUED_SUPPLY_ASSET_PREFIX: &[u8] = b"meta/issued_supply/";
 
-    // These keys reserve a lossless candidate Block 0 record for a future
-    // atomic loader. The v2 ignition path never writes them, and their
-    // independent record version does not advance the live datadir schema.
+    // These keys reserve a lossless candidate Block 0 record and its bound
+    // datadir identity for a future atomic loader. The v2 ignition path never
+    // writes them, and their independent versions do not advance the live
+    // datadir schema.
     pub const TRIDENT_BLOCK_ZERO_RECORD_VERSION: &[u8] = b"meta/trident_block_zero/record_version";
     pub const TRIDENT_BLOCK_ZERO_RECORD: &[u8] = b"meta/trident_block_zero/record";
     pub const TRIDENT_BLOCK_ZERO_STATE_PAYLOAD: &[u8] = b"meta/trident_block_zero/state_payload";
@@ -89,4 +90,7 @@ pub mod meta_keys {
     pub const TRIDENT_BLOCK_ZERO_NETWORK_FINGERPRINT: &[u8] =
         b"meta/trident_block_zero/network_fingerprint";
     pub const TRIDENT_BLOCK_ZERO_CHAIN_ID: &[u8] = b"meta/trident_block_zero/chain_id";
+
+    pub const TRIDENT_DATADIR_IDENTITY_VERSION: &[u8] = b"meta/trident_datadir_identity/version";
+    pub const TRIDENT_DATADIR_IDENTITY: &[u8] = b"meta/trident_datadir_identity/record";
 }
