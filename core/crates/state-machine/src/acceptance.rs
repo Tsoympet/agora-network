@@ -27,6 +27,8 @@ pub struct BlockAcceptanceRecord {
     pub execution_statuses: Vec<TransactionAcceptance>,
     /// Aligned to `block.drc_payments`.
     pub payment_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.data_commitments`.
+    pub data_commitment_statuses: Vec<TransactionAcceptance>,
 }
 
 #[derive(Debug, Clone, BorshDeserialize)]
@@ -52,10 +54,31 @@ struct MultiLaneV3AcceptanceRecord {
     execution_statuses: Vec<TransactionAcceptance>,
 }
 
+#[derive(Debug, Clone, BorshDeserialize)]
+struct MultiLaneV4AcceptanceRecord {
+    block_hash: Hash,
+    statuses: Vec<TransactionAcceptance>,
+    account_statuses: Vec<TransactionAcceptance>,
+    stake_statuses: Vec<TransactionAcceptance>,
+    execution_statuses: Vec<TransactionAcceptance>,
+    payment_statuses: Vec<TransactionAcceptance>,
+}
+
 impl BlockAcceptanceRecord {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(rec) = Self::try_from_slice(bytes) {
             return Ok(rec);
+        }
+        if let Ok(v4) = MultiLaneV4AcceptanceRecord::try_from_slice(bytes) {
+            return Ok(Self {
+                block_hash: v4.block_hash,
+                statuses: v4.statuses,
+                account_statuses: v4.account_statuses,
+                stake_statuses: v4.stake_statuses,
+                execution_statuses: v4.execution_statuses,
+                payment_statuses: v4.payment_statuses,
+                data_commitment_statuses: Vec::new(),
+            });
         }
         if let Ok(v3) = MultiLaneV3AcceptanceRecord::try_from_slice(bytes) {
             return Ok(Self {
@@ -65,6 +88,7 @@ impl BlockAcceptanceRecord {
                 stake_statuses: v3.stake_statuses,
                 execution_statuses: v3.execution_statuses,
                 payment_statuses: Vec::new(),
+                data_commitment_statuses: Vec::new(),
             });
         }
         if let Ok(v2) = MultiLaneV2AcceptanceRecord::try_from_slice(bytes) {
@@ -75,6 +99,7 @@ impl BlockAcceptanceRecord {
                 stake_statuses: v2.stake_statuses,
                 execution_statuses: Vec::new(),
                 payment_statuses: Vec::new(),
+                data_commitment_statuses: Vec::new(),
             });
         }
         let legacy = LegacyBlockAcceptanceRecord::try_from_slice(bytes)
@@ -86,6 +111,7 @@ impl BlockAcceptanceRecord {
             stake_statuses: Vec::new(),
             execution_statuses: Vec::new(),
             payment_statuses: Vec::new(),
+            data_commitment_statuses: Vec::new(),
         })
     }
 
@@ -117,6 +143,11 @@ impl BlockAcceptanceRecord {
                 .count()
             + self
                 .payment_statuses
+                .iter()
+                .filter(|s| s.is_accepted())
+                .count()
+            + self
+                .data_commitment_statuses
                 .iter()
                 .filter(|s| s.is_accepted())
                 .count()
@@ -194,6 +225,7 @@ mod tests {
             stake_statuses: vec![],
             execution_statuses: vec![],
             payment_statuses: vec![],
+            data_commitment_statuses: vec![TransactionAcceptance::ExactDuplicate],
         };
         store_acceptance(&store, &rec.block_hash, &rec).unwrap();
         let loaded = load_acceptance(&store, &rec.block_hash).unwrap().unwrap();
@@ -219,5 +251,25 @@ mod tests {
             vec![TransactionAcceptance::Accepted]
         );
         assert!(record.payment_statuses.is_empty());
+        assert!(record.data_commitment_statuses.is_empty());
+    }
+
+    #[test]
+    fn payment_era_record_migrates_with_empty_data_commitment_lane() {
+        let bytes = borsh::to_vec(&(
+            Hash([3; 32]),
+            vec![TransactionAcceptance::Accepted],
+            Vec::<TransactionAcceptance>::new(),
+            Vec::<TransactionAcceptance>::new(),
+            Vec::<TransactionAcceptance>::new(),
+            vec![TransactionAcceptance::Accepted],
+        ))
+        .unwrap();
+        let record = BlockAcceptanceRecord::from_bytes(&bytes).unwrap();
+        assert_eq!(
+            record.payment_statuses,
+            vec![TransactionAcceptance::Accepted]
+        );
+        assert!(record.data_commitment_statuses.is_empty());
     }
 }

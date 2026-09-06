@@ -54,6 +54,7 @@ impl NetworkMessage {
             && block.stake_ops.is_empty()
             && block.ovl_executions.is_empty()
             && block.drc_payments.is_empty()
+            && block.data_commitments.is_empty()
         {
             Self::CompactBlock {
                 header: block.header.clone(),
@@ -68,7 +69,7 @@ impl NetworkMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agora_types::Hash;
+    use agora_types::{Address, DataAvailabilityCommitment, DataCommitmentAuthorization, Hash};
 
     #[test]
     fn compact_and_get_block_roundtrip() {
@@ -138,5 +139,60 @@ mod tests {
 
         let message = NetworkMessage::compact_from_block(&block);
         assert_eq!(message, NetworkMessage::Block(block));
+    }
+
+    #[test]
+    fn data_commitment_block_uses_existing_full_block_variant() {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block
+            .data_commitments
+            .push(DataCommitmentAuthorization::unsigned(
+                Address([7; 20]),
+                0,
+                DataAvailabilityCommitment::agora_layers_ovolos_batch(
+                    "agora-ovolos-testnet-1".into(),
+                    Hash([1; 32]),
+                    Hash([2; 32]),
+                    3,
+                    Hash([4; 32]),
+                    Hash([5; 32]),
+                    Hash([6; 32]),
+                    7,
+                    8,
+                ),
+            ));
+        block.header.tx_root = block.compute_body_root();
+
+        let message = NetworkMessage::compact_from_block(&block);
+        assert_eq!(message, NetworkMessage::Block(block.clone()));
+        assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+    }
+
+    #[test]
+    fn existing_wire_enum_discriminants_are_unchanged() {
+        let payment = DrcPaymentTx::unsigned(
+            Address([1; 20]),
+            Address([2; 20]),
+            agora_types::Amount::from_base_units(1),
+            agora_types::Amount::ZERO,
+            0,
+            Hash([3; 32]),
+            0,
+        );
+        assert_eq!(
+            NetworkMessage::Transaction(Transaction::unsigned(1, vec![], vec![], 0)).encode()[0],
+            0
+        );
+        assert_eq!(NetworkMessage::DrcPayment(payment).encode()[0], 9);
     }
 }

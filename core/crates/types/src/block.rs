@@ -2,7 +2,14 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{AccountTransfer, DrcPaymentTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction};
+use crate::{
+    AccountTransfer, DataCommitmentAuthorization, DrcPaymentTx, Hash, OvlExecutionTx,
+    SignedStakeTx, Transaction,
+};
+
+/// Explicit version/domain for bodies carrying authenticated DA commitments.
+pub const TRIDENT_BLOCK_BODY_VERSION: u16 = 5;
+pub const TRIDENT_BLOCK_BODY_DOMAIN: &[u8] = b"agora-block-body-v5";
 
 /// Block header for Agora's BlockDAG tips.
 ///
@@ -26,10 +33,8 @@ impl BlockHeader {
     }
 }
 
-/// Full Trident body: TLT UTXO plus native account, stake, execution, and payment lanes.
-#[derive(
-    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
-)]
+/// Full Trident body: TLT UTXO plus native account, stake, execution, payment, and data lanes.
+#[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, Serialize, Deserialize, TS)]
 pub struct Block {
     pub header: BlockHeader,
     /// TLT UTXO lane (coinbase + transfers).
@@ -46,6 +51,9 @@ pub struct Block {
     /// Signed native DRC payments with routing metadata.
     #[serde(default)]
     pub drc_payments: Vec<DrcPaymentTx>,
+    /// Provenance-bound, operator-authorized data commitments.
+    #[serde(default)]
+    pub data_commitments: Vec<DataCommitmentAuthorization>,
 }
 
 impl Block {
@@ -58,6 +66,7 @@ impl Block {
             stake_ops: Vec::new(),
             ovl_executions: Vec::new(),
             drc_payments: Vec::new(),
+            data_commitments: Vec::new(),
         }
     }
 
@@ -93,8 +102,26 @@ impl Block {
     /// Body commitment for `header.tx_root`.
     ///
     /// UTXO-only blocks keep the legacy merkle root; account/stake-only bodies
-    /// retain v2; OVL execution uses v3; DRC payments use v4.
+    /// retain v2; OVL execution uses v3; DRC payments use v4; authenticated
+    /// data commitments use v5.
     pub fn compute_body_root(&self) -> Hash {
+        if !self.data_commitments.is_empty() {
+            let authorization_ids: Vec<Hash> = self
+                .data_commitments
+                .iter()
+                .map(DataCommitmentAuthorization::authorization_id)
+                .collect();
+            return Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_DOMAIN,
+                TRIDENT_BLOCK_BODY_VERSION,
+                self.compute_body_root_v4(),
+                authorization_ids,
+            ));
+        }
+        self.compute_body_root_v4()
+    }
+
+    fn compute_body_root_v4(&self) -> Hash {
         if !self.drc_payments.is_empty() {
             let payment_ids: Vec<Hash> = self
                 .drc_payments
@@ -149,9 +176,62 @@ impl Block {
     }
 }
 
+impl BorshDeserialize for Block {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        Ok(Self {
+            header: BlockHeader::deserialize_reader(reader)?,
+            transactions: Vec::<Transaction>::deserialize_reader(reader)?,
+            account_transfers: deserialize_trailing_vec(reader)?,
+            stake_ops: deserialize_trailing_vec(reader)?,
+            ovl_executions: deserialize_trailing_vec(reader)?,
+            drc_payments: deserialize_trailing_vec(reader)?,
+            data_commitments: deserialize_trailing_vec(reader)?,
+        })
+    }
+}
+
+/// Appended body lanes are optional only at an exact legacy end-of-input
+/// boundary. A partial vector length or element remains a hard decode failure.
+fn deserialize_trailing_vec<T, R>(reader: &mut R) -> Result<Vec<T>, borsh::io::Error>
+where
+    T: BorshDeserialize,
+    R: borsh::io::Read,
+{
+    let Some(len) = deserialize_optional_len(reader)? else {
+        return Ok(Vec::new());
+    };
+    let mut values = Vec::with_capacity((len as usize).min(1024));
+    for _ in 0..len {
+        values.push(T::deserialize_reader(reader)?);
+    }
+    Ok(values)
+}
+
+fn deserialize_optional_len<R: borsh::io::Read>(
+    reader: &mut R,
+) -> Result<Option<u32>, borsh::io::Error> {
+    let mut bytes = [0u8; 4];
+    let mut filled = 0usize;
+    while filled < bytes.len() {
+        match reader.read(&mut bytes[filled..]) {
+            Ok(0) if filled == 0 => return Ok(None),
+            Ok(0) => {
+                return Err(borsh::io::Error::new(
+                    borsh::io::ErrorKind::UnexpectedEof,
+                    "partial trailing block-lane length",
+                ));
+            }
+            Ok(read) => filled += read,
+            Err(err) if err.kind() == borsh::io::ErrorKind::Interrupted => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(Some(u32::from_le_bytes(bytes)))
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{Address, Amount, DrcPaymentTx};
+    use crate::{Address, Amount, DataAvailabilityCommitment, DrcPaymentTx};
 
     use super::*;
 
@@ -187,5 +267,102 @@ mod tests {
                 vec![block.drc_payments[0].payment_id()]
             ))
         );
+    }
+
+    #[test]
+    fn data_commitment_activates_body_root_v5() {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        let legacy = block.compute_body_root();
+        block
+            .data_commitments
+            .push(DataCommitmentAuthorization::unsigned(
+                Address([7; 20]),
+                0,
+                DataAvailabilityCommitment::agora_layers_ovolos_batch(
+                    "agora-ovolos-testnet-1".into(),
+                    Hash([1; 32]),
+                    Hash([2; 32]),
+                    3,
+                    Hash([4; 32]),
+                    Hash([5; 32]),
+                    Hash([6; 32]),
+                    7,
+                    8,
+                ),
+            ));
+        let first = block.compute_body_root();
+        assert_ne!(first, legacy);
+        assert_eq!(
+            first,
+            Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_DOMAIN,
+                TRIDENT_BLOCK_BODY_VERSION,
+                legacy,
+                vec![block.data_commitments[0].authorization_id()]
+            ))
+        );
+
+        block.data_commitments[0].replay_nonce += 1;
+        assert_ne!(block.compute_body_root(), first);
+        let bytes = borsh::to_vec(&block).unwrap();
+        assert_eq!(Block::try_from_slice(&bytes).unwrap(), block);
+    }
+
+    #[derive(BorshSerialize)]
+    struct LegacyUtxoBlock {
+        header: BlockHeader,
+        transactions: Vec<Transaction>,
+    }
+
+    #[test]
+    fn legacy_utxo_block_bytes_decode_with_empty_appended_lanes() {
+        let legacy = LegacyUtxoBlock {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![Hash([9; 32])],
+                timestamp_ms: 11,
+                bits: 2,
+                nonce: 3,
+                tx_root: Hash::ZERO,
+            },
+            transactions: Vec::new(),
+        };
+        let bytes = borsh::to_vec(&legacy).unwrap();
+        let decoded = Block::try_from_slice(&bytes).unwrap();
+        assert_eq!(decoded.header, legacy.header);
+        assert!(decoded.transactions.is_empty());
+        assert!(decoded.account_transfers.is_empty());
+        assert!(decoded.stake_ops.is_empty());
+        assert!(decoded.ovl_executions.is_empty());
+        assert!(decoded.drc_payments.is_empty());
+        assert!(decoded.data_commitments.is_empty());
+    }
+
+    #[test]
+    fn partial_appended_lane_length_is_not_treated_as_legacy_eof() {
+        let legacy = LegacyUtxoBlock {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: Vec::new(),
+        };
+        let mut bytes = borsh::to_vec(&legacy).unwrap();
+        bytes.push(1);
+        assert!(Block::try_from_slice(&bytes).is_err());
     }
 }

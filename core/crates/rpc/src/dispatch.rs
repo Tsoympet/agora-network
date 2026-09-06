@@ -619,6 +619,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -730,6 +731,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -760,6 +762,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {

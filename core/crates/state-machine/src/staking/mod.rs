@@ -1266,6 +1266,7 @@ mod tests {
         let auth = TxAuthContext {
             chain_id: "agora-dev".into(),
             genesis,
+            data_availability_network_fingerprint: None,
         };
         let params = StakingParams {
             min_self_bond: 100,

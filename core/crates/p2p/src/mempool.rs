@@ -555,6 +555,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -614,6 +615,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));

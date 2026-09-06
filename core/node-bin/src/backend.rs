@@ -242,6 +242,7 @@ impl NodeBackend {
         TxAuthContext {
             chain_id: chain_id.into(),
             genesis: self.genesis_hash,
+            data_availability_network_fingerprint: None,
         }
     }
 
@@ -577,6 +578,7 @@ impl RpcBackend for NodeBackend {
                 &stake_ops,
                 &ovl_executions,
                 &drc_payments,
+                &[],
             )
             .map_err(|e| RpcError::Internal(e.to_string()))
     }

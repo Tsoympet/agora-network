@@ -47,7 +47,8 @@ impl ColumnFamily {
 /// - `7` — native DRC payment lane, duplicate/invoice index, and outbox
 /// - `8` — canonical governance policy and asset-isolated protocol treasuries
 /// - `9` — canonical Hub, Passport, Grant, and Mission registry summary
-pub const SCHEMA_VERSION: u32 = 9;
+/// - `10` — authenticated DA commitment/index/replay state and revert journal
+pub const SCHEMA_VERSION: u32 = 10;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {

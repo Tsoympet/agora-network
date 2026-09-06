@@ -69,6 +69,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         let id = block.id();
         store_orphan(&store, &block).unwrap();

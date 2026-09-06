@@ -22,12 +22,33 @@ pub const MAX_DA_CHAIN_ID_BYTES: usize = 128;
 
 /// Append-only source discriminant for explicitly non-canonical producer data.
 #[derive(
-    Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
+    TS,
 )]
 #[ts(export)]
+#[repr(u8)]
+#[borsh(use_discriminant = true)]
 pub enum DataCommitmentSource {
     /// Historical `agora-layers` Ovolos batch data; never canonical OVL monetary state.
-    AgoraLayersOvolosBatchLab,
+    AgoraLayersOvolosBatchLab = 0x00,
+}
+
+impl DataCommitmentSource {
+    /// Stable key/wire byte. Future source variants must be appended.
+    pub const fn wire_byte(self) -> u8 {
+        self as u8
+    }
 }
 
 /// Deterministic commitment to one historical `agora-layers` Ovolos batch.
@@ -309,6 +330,18 @@ mod tests {
         assert_ne!(
             authorization.signing_bytes_bound("agora-trident-testnet-1", &genesis, &Hash([10; 32])),
             original
+        );
+    }
+
+    #[test]
+    fn source_wire_discriminant_is_stable() {
+        assert_eq!(
+            borsh::to_vec(&DataCommitmentSource::AgoraLayersOvolosBatchLab).unwrap(),
+            vec![0]
+        );
+        assert_eq!(
+            DataCommitmentSource::AgoraLayersOvolosBatchLab.wire_byte(),
+            0
         );
     }
 }
