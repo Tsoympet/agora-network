@@ -490,12 +490,13 @@ async fn main() {
     );
     let storage = StoragePolicy::from_env().for_network(chain_params.network.as_str());
     let premine_address = chain_params.supply.premine_address;
-    let prepared =
-        prepare_legacy_datadir(&data_dir, &chain_params, storage, load_or_generate_identity)
-            .unwrap_or_else(|error| {
-                eprintln!("agora-node: startup refused: {error}");
-                std::process::exit(1);
-            });
+    let prepared = prepare_legacy_datadir(&data_dir, &chain_params, storage, |path| {
+        load_or_generate_identity(path)
+    })
+    .unwrap_or_else(|error| {
+        eprintln!("agora-node: startup refused: {error}");
+        std::process::exit(1);
+    });
     let store = prepared.store;
     let genesis_hash = prepared.genesis_hash;
     let identity = prepared.p2p_identity;
