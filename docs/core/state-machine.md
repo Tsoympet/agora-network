@@ -7,9 +7,9 @@ Applies consensus-ordered blocks to durable storage.
 | CF | Name | Purpose |
 | --- | --- | --- |
 | Hot | `cf_hot` | Recent block bodies for tip validation (pruned by `AGORA_HOT_WINDOW`) |
-| Warm | `cf_warm` | Tx index (`tx/`), UTXO journals (`utxo_diff/`), durable headers (`header/`) — not pruned |
+| Warm | `cf_warm` | Tx index (`tx/`), multi-lane revert journals (`utxo_diff/`), acceptance, durable headers (`header/`) — not pruned |
 | Archival | `cf_archival` | Long-term block payloads (optional via `AGORA_ARCHIVAL`) |
-| Meta | `cf_meta` | Genesis hash, supply caps, tips set — never pruned |
+| Meta | `cf_meta` | Genesis/policy, account modules, DA indexes/nonces, supply, tips — never pruned |
 | UTXO | `cf_utxo` | Spendable outputs keyed by outpoint — never pruned |
 
 Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
@@ -91,13 +91,40 @@ Transaction index (`cf_warm`): key `tx/` ‖ `tx_id`, value `block_id` ‖ `inde
 
 ## Trident staking + finality store (Phase 3+)
 
-Meta CF keys (additive; `SCHEMA_VERSION = 4`):
+Meta CF keys are additive; the authenticated DA lane raises the current
+`SCHEMA_VERSION` to `10`:
 
 - `stake/val|del|unbond|epoch|snap|reward_pool|reserve_remaining/…` — staking + slash/reward + reserve
 - `finality/cert|idx|last_att/…`, `finality/tip_blue_score` — certificates, signer index, tip
 - `compose_trident_state_root` — canonical multi-asset commitment for checkpoint bodies
 
-Node admit enforces reorg-beyond-finality. Account, stake, OVL execution, and native DRC payments enter consensus lanes. DRC payment metadata, governance/treasuries, and the bounded Hub/Passport/Grant/Mission registry commit in the state root. Local unsigned civic/community RPC state remains excluded. See [`community-registry.md`](community-registry.md), [`ovl-execution.md`](ovl-execution.md), [`drc-payments.md`](drc-payments.md), [`governance.md`](governance.md), and [`finality.md`](finality.md).
+Node admit enforces reorg-beyond-finality. Account, stake, OVL execution,
+native DRC payments, and authenticated DA commitments enter versioned consensus
+lanes. DRC payment metadata, DA records/replay cursors,
+governance/treasuries, and the bounded Hub/Passport/Grant/Mission registry
+commit in `agora-trident-state-root-v5`. Local unsigned civic/community RPC
+state remains excluded. See [`community-registry.md`](community-registry.md),
+[`data-availability.md`](data-availability.md),
+[`ovl-execution.md`](ovl-execution.md),
+[`drc-payments.md`](drc-payments.md), [`governance.md`](governance.md), and
+[`finality.md`](finality.md).
+
+## Authenticated DA state
+
+- `da/v1/commitment/<source><sequence_be>` stores the first accepted signed
+  authorization for that source sequence.
+- `da/v1/operator_nonce/<address>` stores the next accepted replay nonce.
+- Exact signed retries are `ExactDuplicate`; a different claimant for the same
+  source sequence or a consumed/future nonce is `ConflictLost` under Virtual
+  order.
+- Invalid structure, secp256k1 signature, chain, genesis, or fingerprint fails
+  the block before storage.
+- `UtxoJournal.data_availability_meta_before` restores both key families in the
+  same crash-safe reorg batches as the other lanes.
+
+The live node leaves DA policy activation unset because no TLT byte/state fee
+or sponsorship rule is frozen. This state consumer is therefore block-only and
+fail-closed outside explicitly activated Trident contexts.
 
 ## Storage backends
 
@@ -108,5 +135,7 @@ Node admit enforces reorg-beyond-finality. Account, stake, OVL execution, and na
 
 ## Node wiring
 
-`ChainState::admit_block` order: PoW verify → `apply_block` → persist block/tips → `Dag`/`Ghostdag`.
-Coinbase budget uses `EmissionSchedule::reward_at_blue_score(estimate)` where estimate is `max(parent.blue_score)+1`.
+`ChainState::admit_block` proves full blue order on a copy-on-write overlay,
+atomically persists DAG/body metadata with a pending-virtual marker, then
+reconciles live state through durable apply/revert journals. Coinbase budget
+uses `EmissionSchedule::reward_at_blue_score` at the simulated GHOSTDAG score.

@@ -437,6 +437,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         }
     }
 

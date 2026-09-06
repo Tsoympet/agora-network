@@ -30,7 +30,7 @@ use agora_types::{
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
 
-use crate::admit::ChainState;
+use crate::admit::{BlockTemplateLanes, ChainState};
 use crate::civic::{load_civic, save_civic};
 
 fn min_relay_fee() -> u64 {
@@ -242,6 +242,7 @@ impl NodeBackend {
         TxAuthContext {
             chain_id: chain_id.into(),
             genesis: self.genesis_hash,
+            data_availability_network_fingerprint: None,
         }
     }
 
@@ -572,11 +573,14 @@ impl RpcBackend for NodeBackend {
             .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
             .block_template_lanes(
                 self.miner_address,
-                &transfers,
-                &account_transfers,
-                &stake_ops,
-                &ovl_executions,
-                &drc_payments,
+                BlockTemplateLanes {
+                    transfers: &transfers,
+                    account_transfers: &account_transfers,
+                    stake_ops: &stake_ops,
+                    ovl_executions: &ovl_executions,
+                    drc_payments: &drc_payments,
+                    ..BlockTemplateLanes::default()
+                },
             )
             .map_err(|e| RpcError::Internal(e.to_string()))
     }

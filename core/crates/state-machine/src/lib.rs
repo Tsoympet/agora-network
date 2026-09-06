@@ -9,6 +9,7 @@ mod apply;
 mod block_zero;
 mod columns;
 mod community_state;
+mod data_availability;
 mod error;
 mod execution;
 mod finality_store;
@@ -57,6 +58,11 @@ pub use community_state::{
     list_passport_attestations, load_canonical_community_summary, register_grant_into,
     register_hub_into, register_mission_into, register_passport_attestation_into,
     CanonicalCommunitySummary, CANONICAL_COMMUNITY_VERSION,
+};
+pub use data_availability::{
+    apply_data_commitment, data_availability_root, data_commitment_key, data_commitment_nonce_key,
+    load_data_commitment, load_data_commitment_nonce, revert_data_commitment_meta_into,
+    AcceptedDataCommitment, ACCEPTED_DATA_COMMITMENT_VERSION, DATA_AVAILABILITY_ROOT_DOMAIN,
 };
 pub use error::StateError;
 pub use execution::{

@@ -22,7 +22,7 @@ pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
 pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
 pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
-pub use block::{Block, BlockHeader};
+pub use block::{Block, BlockHeader, TRIDENT_BLOCK_BODY_DOMAIN, TRIDENT_BLOCK_BODY_VERSION};
 pub use data_availability::{
     DataAvailabilityCommitment, DataCommitmentAuthorization, DataCommitmentError,
     DataCommitmentSource, DA_COMMITMENT_AUTHORIZATION_DOMAIN,
@@ -118,6 +118,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);

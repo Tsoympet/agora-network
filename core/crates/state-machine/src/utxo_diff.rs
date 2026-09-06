@@ -70,6 +70,7 @@ mod tests {
             account_before: Vec::new(),
             stake_meta_before: Vec::new(),
             payment_meta_before: Vec::new(),
+            data_availability_meta_before: Vec::new(),
         };
         store_utxo_journal(&store, &hash, &journal).unwrap();
         let loaded = load_utxo_journal(&store, &hash).unwrap().unwrap();

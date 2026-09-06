@@ -503,6 +503,7 @@ impl RpcBackend for InMemoryBackend {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         })
     }
 

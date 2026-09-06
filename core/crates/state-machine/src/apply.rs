@@ -14,6 +14,7 @@ use crate::accounts::{
     apply_account_transfer_checked, load_account, put_account_into, AccountJournal, AccountState,
 };
 use crate::columns::ColumnFamily;
+use crate::data_availability::{apply_data_commitment, revert_data_commitment_meta_into};
 use crate::execution::apply_ovl_execution;
 use crate::payments::{apply_drc_payment, payment_meta_keys};
 use crate::staking::{
@@ -32,10 +33,14 @@ pub struct BlockApplyResult {
 }
 
 /// Network domain for transaction signatures (`chain_id` + genesis).
+///
+/// `data_availability_network_fingerprint` is `None` until a reviewed Trident
+/// TLT base-fee/inclusion policy activates the block-only DA lane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TxAuthContext {
     pub chain_id: String,
     pub genesis: Hash,
+    pub data_availability_network_fingerprint: Option<Hash>,
 }
 
 /// Journal of block mutations so a failed admission / reorg can roll back.
@@ -61,6 +66,8 @@ pub struct UtxoJournal {
     pub stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     /// DRC payment duplicate/invoice/outbox keys before Accepted payments.
     pub payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    /// DA commitment/index and operator replay keys before Accepted commitments.
+    pub data_availability_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -92,10 +99,36 @@ struct UtxoJournalV3 {
     stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
+/// Multi-lane journal before authenticated data-commitment metadata.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct UtxoJournalV4 {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+    fees: u64,
+    subsidy: u64,
+    coinbase_total: u64,
+    account_before: Vec<(NativeAssetId, Address, AccountState)>,
+    stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
 impl UtxoJournal {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(j) = Self::try_from_slice(bytes) {
             return Ok(j);
+        }
+        if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
+            return Ok(Self {
+                spent: v4.spent,
+                created: v4.created,
+                fees: v4.fees,
+                subsidy: v4.subsidy,
+                coinbase_total: v4.coinbase_total,
+                account_before: v4.account_before,
+                stake_meta_before: v4.stake_meta_before,
+                payment_meta_before: v4.payment_meta_before,
+                data_availability_meta_before: Vec::new(),
+            });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
             return Ok(Self {
@@ -107,6 +140,7 @@ impl UtxoJournal {
                 account_before: v3.account_before,
                 stake_meta_before: v3.stake_meta_before,
                 payment_meta_before: Vec::new(),
+                data_availability_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -119,6 +153,7 @@ impl UtxoJournal {
                 account_before: Vec::new(),
                 stake_meta_before: Vec::new(),
                 payment_meta_before: Vec::new(),
+                data_availability_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -132,6 +167,7 @@ impl UtxoJournal {
             account_before: Vec::new(),
             stake_meta_before: Vec::new(),
             payment_meta_before: Vec::new(),
+            data_availability_meta_before: Vec::new(),
         })
     }
 }
@@ -414,8 +450,13 @@ fn apply_block_batched_mode(
         0
     );
 
-    let (account_statuses, execution_statuses, stake_statuses, payment_statuses) =
-        apply_trident_lanes(store, block, auth, mode, &mut batch, &mut journal)?;
+    let (
+        account_statuses,
+        execution_statuses,
+        stake_statuses,
+        payment_statuses,
+        data_commitment_statuses,
+    ) = apply_trident_lanes(store, block, auth, mode, &mut batch, &mut journal)?;
 
     Ok(BlockApplyResult {
         journal,
@@ -426,6 +467,7 @@ fn apply_block_batched_mode(
             stake_statuses,
             execution_statuses,
             payment_statuses,
+            data_commitment_statuses,
         },
         batch,
     })
@@ -466,6 +508,7 @@ type TridentLaneAcceptances = (
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
 );
 
 /// Apply OVL/DRC account transfers + stake ops; credit Accepted fees to reward pools.
@@ -480,9 +523,10 @@ fn apply_trident_lanes(
     if block.account_transfers.is_empty()
         && block.ovl_executions.is_empty()
         && block.drc_payments.is_empty()
+        && block.data_commitments.is_empty()
         && block.stake_ops.is_empty()
     {
-        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()));
     }
     if (!block.stake_ops.is_empty()
         || !block.ovl_executions.is_empty()
@@ -493,6 +537,18 @@ fn apply_trident_lanes(
             "stake/execution ops require network-bound auth".into(),
         ));
     }
+    if !block.data_commitments.is_empty() && auth.is_none() {
+        return Err(StateError::InvalidTx(
+            "data commitments require network-bound auth".into(),
+        ));
+    }
+    if block.data_commitments.len() > agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK {
+        return Err(StateError::BlockLimit(format!(
+            "too many data commitments: {} > {}",
+            block.data_commitments.len(),
+            agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK
+        )));
+    }
 
     // Sequential visibility without committing the consensus batch early.
     let lane = store.cow_overlay();
@@ -500,6 +556,7 @@ fn apply_trident_lanes(
     let mut execution_statuses = Vec::with_capacity(block.ovl_executions.len());
     let mut stake_statuses = Vec::with_capacity(block.stake_ops.len());
     let mut payment_statuses = Vec::with_capacity(block.drc_payments.len());
+    let mut data_commitment_statuses = Vec::with_capacity(block.data_commitments.len());
     let mut seen_account_ids: HashSet<Hash> = HashSet::new();
     let mut seen_stake_ids: HashSet<Hash> = HashSet::new();
     let mut seen_execution_ids: HashSet<Hash> = HashSet::new();
@@ -635,11 +692,62 @@ fn apply_trident_lanes(
         }
     }
 
+    if !block.data_commitments.is_empty() {
+        let ctx = auth.expect("DA auth checked above");
+        let fingerprint = ctx
+            .data_availability_network_fingerprint
+            .as_ref()
+            .filter(|fingerprint| **fingerprint != Hash::ZERO)
+            .ok_or_else(|| {
+                StateError::InvalidTx(
+                    "data commitment lane disabled pending TLT base-fee policy".into(),
+                )
+            })?;
+        for authorization in &block.data_commitments {
+            let mut op_batch = WriteBatch::new();
+            let mut meta_before = Vec::new();
+            let status = apply_data_commitment(
+                &lane,
+                authorization,
+                &ctx.chain_id,
+                &ctx.genesis,
+                fingerprint,
+                block.id(),
+                &mut op_batch,
+                &mut meta_before,
+            )?;
+            match status {
+                TransactionAcceptance::Accepted => {
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.data_availability_meta_before.extend(meta_before);
+                    data_commitment_statuses.push(status);
+                }
+                TransactionAcceptance::ExactDuplicate | TransactionAcceptance::ConflictLost
+                    if mode == ApplyMode::Virtual =>
+                {
+                    data_commitment_statuses.push(status);
+                }
+                TransactionAcceptance::ExactDuplicate | TransactionAcceptance::ConflictLost => {
+                    return Err(StateError::InvalidTx(format!(
+                        "data commitment not accepted: {status}"
+                    )));
+                }
+                TransactionAcceptance::Invalid => {
+                    return Err(StateError::InvalidTx(
+                        "invalid data commitment acceptance state".into(),
+                    ));
+                }
+            }
+        }
+    }
+
     Ok((
         account_statuses,
         execution_statuses,
         stake_statuses,
         payment_statuses,
+        data_commitment_statuses,
     ))
 }
 
@@ -986,6 +1094,7 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
             None => batch.delete_cf(ColumnFamily::Meta, key),
         }
     }
+    revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
     Ok(batch)
 }
 
@@ -1100,10 +1209,14 @@ pub fn balance_of(
 mod tests {
     use std::collections::HashSet;
 
-    use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_transaction, Bip44Path};
+    use agora_crypto::{
+        derive_bip44, seed_from_mnemonic, sign_data_commitment_bound, sign_transaction, Bip44Path,
+        KeyPair,
+    };
     use agora_types::{
-        Address, Amount, Block, BlockHeader, Hash, OutPoint, Transaction, TransactionAcceptance,
-        TxIn, TxOut,
+        Address, Amount, Block, BlockHeader, DataAvailabilityCommitment,
+        DataCommitmentAuthorization, Hash, OutPoint, Transaction, TransactionAcceptance, TxIn,
+        TxOut,
     };
 
     use super::*;
@@ -1111,6 +1224,38 @@ mod tests {
 
     const PHRASE: &str =
         "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+    fn signed_data_commitment(
+        keypair: &KeyPair,
+        sequence: u64,
+        replay_nonce: u64,
+        marker: u8,
+        genesis: &Hash,
+        fingerprint: &Hash,
+    ) -> DataCommitmentAuthorization {
+        let commitment = DataAvailabilityCommitment::agora_layers_ovolos_batch(
+            "agora-ovolos-testnet-1".into(),
+            Hash([1; 32]),
+            Hash([marker; 32]),
+            sequence,
+            Hash([3; 32]),
+            Hash([marker.wrapping_add(1); 32]),
+            Hash([5; 32]),
+            6,
+            7,
+        );
+        let mut authorization =
+            DataCommitmentAuthorization::unsigned(keypair.address(), replay_nonce, commitment);
+        sign_data_commitment_bound(
+            &mut authorization,
+            keypair,
+            "agora-trident-testnet-1",
+            genesis,
+            fingerprint,
+        )
+        .unwrap();
+        authorization
+    }
 
     #[test]
     fn apply_transfer_spends_premine_and_reverts() {
@@ -1183,6 +1328,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -1372,6 +1518,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -1470,6 +1617,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -1535,6 +1683,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -1609,6 +1758,7 @@ mod tests {
                 stake_ops: vec![],
                 ovl_executions: vec![],
                 drc_payments: vec![],
+                data_commitments: vec![],
             },
             1,
             None,
@@ -1682,6 +1832,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -1773,6 +1924,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -1798,6 +1950,7 @@ mod tests {
         let auth = TxAuthContext {
             chain_id: "agora-trident-testnet-1".into(),
             genesis: genesis_hash,
+            data_availability_network_fingerprint: None,
         };
 
         let mut batch = WriteBatch::new();
@@ -1845,6 +1998,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -1886,6 +2040,7 @@ mod tests {
         let auth = TxAuthContext {
             chain_id: "agora-trident-testnet-1".into(),
             genesis,
+            data_availability_network_fingerprint: None,
         };
         let mut funding = WriteBatch::new();
         credit_account_into(
@@ -1931,6 +2086,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![execution],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -1992,6 +2148,7 @@ mod tests {
         let auth = TxAuthContext {
             chain_id: "agora-trident-testnet-1".into(),
             genesis,
+            data_availability_network_fingerprint: None,
         };
         let mut funding = WriteBatch::new();
         credit_account_into(
@@ -2039,6 +2196,7 @@ mod tests {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![payment],
+            data_commitments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -2100,6 +2258,7 @@ mod tests {
         let auth = TxAuthContext {
             chain_id: "agora-trident-testnet-1".into(),
             genesis: genesis_hash,
+            data_availability_network_fingerprint: None,
         };
         let params = StakingParams::ovl_default();
         let bond = params.min_self_bond;
@@ -2149,6 +2308,7 @@ mod tests {
             stake_ops: vec![stake],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -2229,5 +2389,136 @@ mod tests {
         assert_eq!(journal.fees, 1);
         assert_eq!(journal.subsidy, 2);
         assert!(journal.payment_meta_before.is_empty());
+        assert!(journal.data_availability_meta_before.is_empty());
+    }
+
+    #[test]
+    fn data_commitment_lane_orders_duplicates_and_reverts_atomically() {
+        use crate::{data_availability_root, load_data_commitment, load_data_commitment_nonce};
+
+        let store = StateStore::open_in_memory();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let keypair = KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let fingerprint = Hash([9; 32]);
+        let context = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: Some(fingerprint),
+        };
+        let first = signed_data_commitment(&keypair, 4, 0, 11, &genesis, &fingerprint);
+        let conflict = signed_data_commitment(&keypair, 4, 1, 12, &genesis, &fingerprint);
+        let root_before = data_availability_root(&store).unwrap();
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.data_commitments = vec![first.clone(), first.clone(), conflict];
+        block.header.tx_root = block.compute_body_root();
+
+        let result = apply_block_batched_virtual(&store, &block, 0, Some(&context)).unwrap();
+        assert_eq!(
+            result.acceptance.data_commitment_statuses,
+            vec![
+                TransactionAcceptance::Accepted,
+                TransactionAcceptance::ExactDuplicate,
+                TransactionAcceptance::ConflictLost,
+            ]
+        );
+        assert!(load_data_commitment(&store, first.commitment.source, 4)
+            .unwrap()
+            .is_none());
+        let journal = result.journal;
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(
+            load_data_commitment_nonce(&store, &keypair.address()).unwrap(),
+            1
+        );
+        assert_eq!(
+            load_data_commitment(&store, first.commitment.source, 4)
+                .unwrap()
+                .unwrap()
+                .authorization,
+            first
+        );
+        assert_ne!(data_availability_root(&store).unwrap(), root_before);
+
+        store
+            .write_batch(revert_journal_batched(&journal).unwrap())
+            .unwrap();
+        assert_eq!(data_availability_root(&store).unwrap(), root_before);
+        assert_eq!(
+            load_data_commitment_nonce(&store, &keypair.address()).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn data_commitment_lane_fails_closed_and_discards_partial_batch() {
+        use crate::load_data_commitment;
+
+        let store = StateStore::open_in_memory();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let keypair = KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let fingerprint = Hash([9; 32]);
+        let valid = signed_data_commitment(&keypair, 4, 0, 11, &genesis, &fingerprint);
+        let mut invalid = signed_data_commitment(&keypair, 5, 1, 12, &genesis, &fingerprint);
+        invalid.signature[0] ^= 1;
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.data_commitments = vec![valid.clone(), invalid];
+        block.header.tx_root = block.compute_body_root();
+
+        let disabled = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let disabled_err = apply_block_batched_virtual(&store, &block, 0, Some(&disabled))
+            .err()
+            .expect("disabled DA lane must reject");
+        assert!(disabled_err.to_string().contains("base-fee policy"));
+
+        let enabled = TxAuthContext {
+            data_availability_network_fingerprint: Some(fingerprint),
+            ..disabled
+        };
+        assert!(apply_block_batched_virtual(&store, &block, 0, Some(&enabled)).is_err());
+        assert!(load_data_commitment(&store, valid.commitment.source, 4)
+            .unwrap()
+            .is_none());
     }
 }
