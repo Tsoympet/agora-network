@@ -263,8 +263,9 @@ struct ConsensusIdentity<'a> {
 
 /// Fully typed policy derived only from a freeze-ready Trident artifact.
 ///
-/// This is intentionally not a node boot configuration: the current block/state
-/// model cannot yet derive and verify canonical Block 0 from all v3 allocations.
+/// This is intentionally not a node boot configuration: canonical Block 0 can
+/// be derived and stored as a verified Meta envelope, but live balances and
+/// header identity are still incomplete.
 #[derive(Debug, Clone)]
 pub struct TridentRuntimePolicy {
     pub network: NetworkId,

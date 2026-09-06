@@ -46,10 +46,13 @@ pub use apply::{
     TxAuthContext, UtxoJournal,
 };
 pub use block_zero::{
+    ensure_legacy_v2_datadir, load_verified_trident_block_zero, verify_trident_datadir_identity,
     BlockZeroAllocation, BlockZeroFinality, BlockZeroSupply, BlockZeroTreasury, BlockZeroValidator,
     BlockZeroValidatorSet, BlockZeroVesting, TridentBlockZeroCommitment, TridentBlockZeroState,
+    TridentBlockZeroStorageRecord, TridentDatadirHeaderIdentity, TridentDatadirIdentity,
     TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN, TRIDENT_BLOCK_ZERO_STATE_DOMAIN,
-    TRIDENT_BLOCK_ZERO_STATE_VERSION,
+    TRIDENT_BLOCK_ZERO_STATE_VERSION, TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
+    TRIDENT_DATADIR_IDENTITY_VERSION,
 };
 pub use columns::{meta_keys, ColumnFamily, SCHEMA_VERSION};
 pub use community_state::{

@@ -10,10 +10,19 @@ Offline v3 draft/freeze-readiness commands are documented in
 their existence does not make Trident Public testnet ready.
 
 Do not point `AGORA_GENESIS_FILE` at the checked-in Trident draft. Node loading
-remains v2-only while Trident runtime policy and Block 0 identity wiring are
-incomplete. Genesis initialization now fails before writing when a requested
-identity mismatches and refuses malformed or state-bearing identity-less
-datadirs, but that storage prerequisite is not a Trident boot path.
+remains v2-only while Trident runtime policy and Block 0 live-state wiring are
+incomplete. A candidate Block 0 Meta envelope can now be staged and verified
+without writing live balances. Its versioned Borsh datadir identity is committed
+atomically with the envelope and checked byte-for-byte on reopen. The historical
+v2 node intentionally refuses any complete or partial Trident identity before
+loading/creating `$AGORA_DATA/p2p/identity.key`, accessing a seeder, building a
+swarm, or binding RPC; do not try to reuse one datadir for both protocols.
+
+Boot still does not consume the Trident candidate as live state. The remaining
+blocker is lossless Block 0 body, UTXO, account, treasury, vesting, validator,
+and finality materialization whose recomputed state root equals the committed
+header, followed by explicit runtime activation gates. This prerequisite does
+not make Trident Public testnet ready.
 
 ## Quick start (Docker)
 
