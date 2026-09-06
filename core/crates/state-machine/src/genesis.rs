@@ -218,6 +218,7 @@ impl GenesisBuilder {
 
     /// Return the existing genesis hash from meta, or [`ignite`] a fresh chain.
     pub fn load_or_ignite(&self, store: &StateStore) -> Result<Hash, StateError> {
+        crate::block_zero::ensure_legacy_v2_datadir(store)?;
         if let Some(hash) = Self::existing_genesis(store)? {
             return Ok(hash);
         }
@@ -231,6 +232,7 @@ impl GenesisBuilder {
         store: &StateStore,
         expected: Option<Hash>,
     ) -> Result<Hash, StateError> {
+        crate::block_zero::ensure_legacy_v2_datadir(store)?;
         if let Some(hash) = Self::existing_genesis(store)? {
             if let Some(want) = expected {
                 if hash != want {
@@ -400,6 +402,75 @@ mod tests {
             store.get_cf(ColumnFamily::Utxo, b"existing").unwrap(),
             Some(b"value".to_vec())
         );
+        assert!(store
+            .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn v2_ignition_does_not_materialize_trident_block_zero() {
+        let store = StateStore::open_in_memory();
+        GenesisBuilder::default().ignite(&store).unwrap();
+        assert!(store
+            .scan_prefix(ColumnFamily::Meta, b"meta/trident_block_zero/")
+            .unwrap()
+            .is_empty());
+        assert!(crate::load_verified_trident_block_zero(&store).is_err());
+    }
+
+    #[test]
+    fn legacy_loader_refuses_trident_identity_without_overwriting_v2_state() {
+        let store = StateStore::open_in_memory();
+        let builder = GenesisBuilder::default();
+        let genesis = builder.ignite(&store).unwrap();
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::TRIDENT_DATADIR_IDENTITY_VERSION,
+                &1u32.to_le_bytes(),
+            )
+            .unwrap();
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::TRIDENT_DATADIR_IDENTITY,
+                b"future-trident-identity",
+            )
+            .unwrap();
+
+        let error = builder
+            .load_or_ignite_checked(&store, Some(genesis))
+            .unwrap_err();
+        assert!(error.to_string().contains("legacy/v2 startup refuses"));
+        assert_eq!(
+            store
+                .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
+                .unwrap(),
+            Some(genesis.as_bytes().to_vec())
+        );
+        assert_eq!(
+            store
+                .get_cf(ColumnFamily::Meta, meta_keys::TRIDENT_DATADIR_IDENTITY)
+                .unwrap(),
+            Some(b"future-trident-identity".to_vec())
+        );
+    }
+
+    #[test]
+    fn legacy_loader_refuses_partial_block_zero_marker() {
+        let store = StateStore::open_in_memory();
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::TRIDENT_BLOCK_ZERO_CHAIN_ID,
+                b"partial",
+            )
+            .unwrap();
+        let error = GenesisBuilder::default()
+            .load_or_ignite_checked(&store, None)
+            .unwrap_err();
+        assert!(error.to_string().contains("legacy/v2 startup refuses"));
         assert!(store
             .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
             .unwrap()

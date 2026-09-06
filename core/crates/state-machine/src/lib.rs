@@ -47,10 +47,13 @@ pub use apply::{
     TxAuthContext, UtxoJournal,
 };
 pub use block_zero::{
+    ensure_legacy_v2_datadir, load_verified_trident_block_zero, verify_trident_datadir_identity,
     BlockZeroAllocation, BlockZeroFinality, BlockZeroSupply, BlockZeroTreasury, BlockZeroValidator,
     BlockZeroValidatorSet, BlockZeroVesting, TridentBlockZeroCommitment, TridentBlockZeroState,
+    TridentBlockZeroStorageRecord, TridentDatadirHeaderIdentity, TridentDatadirIdentity,
     TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN, TRIDENT_BLOCK_ZERO_STATE_DOMAIN,
-    TRIDENT_BLOCK_ZERO_STATE_VERSION,
+    TRIDENT_BLOCK_ZERO_STATE_VERSION, TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
+    TRIDENT_DATADIR_IDENTITY_VERSION,
 };
 pub use columns::{meta_keys, ColumnFamily, SCHEMA_VERSION};
 pub use community_state::{
@@ -108,9 +111,9 @@ pub use staking::{
     drip_staking_reserve, init_staking_reserve_into, load_epoch, load_reward_pool, load_snapshot,
     load_staking_reserve_remaining, load_validator, put_epoch_into, put_reward_pool_into,
     put_staking_reserve_remaining_into, put_validator_into, reward_pool_meta_key, signed_stake_for,
-    snapshot_meta_keys, stake_meta_keys_touched, validator_key_matches, withdraw_unbonded,
-    DelegationRecord, StakingParams, UnbondingEntry, ValidatorRecord, ValidatorSetSnapshot,
-    ValidatorStatus,
+    snapshot_meta_keys, stake_meta_keys_touched, validator_key_matches, validator_meta_key,
+    withdraw_unbonded, DelegationRecord, StakingParams, UnbondingEntry, ValidatorRecord,
+    ValidatorSetSnapshot, ValidatorStatus, MAX_VALIDATOR_COMMISSION_BPS,
 };
 pub use state_root::{
     acceptance_root, compose_trident_state_root, finalized_tip_commitment, utxo_commitment,
@@ -123,10 +126,11 @@ pub use supply::{
     put_schema_version_into, verify_supply_invariants,
 };
 pub use trident_genesis::{
-    TridentFinalityPolicy, TridentGenesisArtifact, TridentRuntimeFinalityPolicy,
-    TridentRuntimePolicy, TridentValidatorGenesis, TRIDENT_CONSENSUS_POLICY_DOMAIN,
-    TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA, TRIDENT_NET_FP_DOMAIN,
-    TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION, TRIDENT_TX_SIGNING_VERSION,
+    TridentFinalityPolicy, TridentGenesisArtifact, TridentGenesisValidator,
+    TridentRuntimeFinalityPolicy, TridentRuntimePolicy, TridentValidatorGenesis,
+    TRIDENT_CONSENSUS_POLICY_DOMAIN, TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA,
+    TRIDENT_NET_FP_DOMAIN, TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION,
+    TRIDENT_TX_SIGNING_VERSION,
 };
 pub use tx_index::{
     decode_tx_location, encode_tx_location, index_block_transactions,

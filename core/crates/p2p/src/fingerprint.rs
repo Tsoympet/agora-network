@@ -20,7 +20,7 @@ pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
 pub const TRIDENT_PROTOCOL_VERSION: u32 = 5;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v1";
 pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v6";
-pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
+pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v2";
 
 /// Canonical network fingerprint hash (pre-Trident / genesis v2).
 pub fn network_fingerprint(chain_id: &str, genesis: &Hash, consensus_policy_hash: &Hash) -> Hash {

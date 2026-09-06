@@ -4,7 +4,7 @@
 //! never share stake or combine via prices.
 
 use agora_consensus::{SlashPolicy, ValidatorEvidence};
-use agora_crypto::verify_stake_tx_bound;
+use agora_crypto::{address_from_pubkey, parse_compressed_public_key, verify_stake_tx_bound};
 use agora_types::{
     Address, CheckpointAttestation, Hash, NativeAssetId, SignedStakeTx, StakeOpKind,
 };
@@ -16,6 +16,9 @@ use crate::columns::ColumnFamily;
 use crate::store::WriteBatch;
 use crate::supply::{load_issued_supply, load_max_supply, put_issued_supply_into};
 use crate::{StateError, StateStore};
+
+/// Consensus-wide upper bound for validator commission basis points.
+pub const MAX_VALIDATOR_COMMISSION_BPS: u16 = 10_000;
 
 /// Staking parameters for one validator set (OVL or DRC).
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -57,6 +60,23 @@ impl StakingParams {
         }
     }
 
+    pub fn validate(&self) -> Result<(), StateError> {
+        self.validate_asset()?;
+        if self.max_commission_bps > MAX_VALIDATOR_COMMISSION_BPS {
+            return Err(StateError::InvalidTx(
+                "maximum commission exceeds global basis-point limit".into(),
+            ));
+        }
+        if self.max_concentration_bps == 0
+            || self.max_concentration_bps > MAX_VALIDATOR_COMMISSION_BPS
+        {
+            return Err(StateError::InvalidTx(
+                "validator concentration basis-point policy is invalid".into(),
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_asset(&self) -> Result<(), StateError> {
         if !matches!(self.asset, NativeAssetId::OVL | NativeAssetId::DRC) {
             return Err(StateError::InvalidTx("staking only for OVL or DRC".into()));
@@ -94,6 +114,59 @@ impl ValidatorRecord {
         } else {
             0
         }
+    }
+
+    /// Validate the exact epoch-zero representation before a future genesis
+    /// writer can derive its Meta key and Borsh value.
+    pub fn validate_genesis_registration(&self, params: &StakingParams) -> Result<(), StateError> {
+        params.validate()?;
+        let key = parse_compressed_public_key(&self.consensus_pubkey)
+            .map_err(|error| StateError::InvalidTx(format!("invalid consensus pubkey: {error}")))?;
+        if address_from_pubkey(&key) != self.operator {
+            return Err(StateError::InvalidTx(
+                "validator operator does not match consensus pubkey".into(),
+            ));
+        }
+        if self.self_bond < params.min_self_bond {
+            return Err(StateError::InvalidTx("self-bond below minimum".into()));
+        }
+        if self.delegated != 0
+            || self.status != ValidatorStatus::Bonded
+            || self.jailed_until_epoch != 0
+        {
+            return Err(StateError::InvalidTx(
+                "genesis validator must begin bonded without delegated or jailed state".into(),
+            ));
+        }
+        if self.commission_bps > params.max_commission_bps
+            || self.commission_bps > MAX_VALIDATOR_COMMISSION_BPS
+        {
+            return Err(StateError::InvalidTx("commission too high".into()));
+        }
+        if self.metadata_hash == Hash::ZERO {
+            return Err(StateError::InvalidTx(
+                "genesis validator metadata hash must be nonzero".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Return the unchanged staking key format and canonical record bytes
+    /// without writing live state.
+    pub fn canonical_genesis_storage_entry(
+        &self,
+        params: &StakingParams,
+    ) -> Result<(Vec<u8>, Vec<u8>), StateError> {
+        self.validate_genesis_registration(params)?;
+        let value = borsh::to_vec(self).map_err(|error| StateError::Storage(error.to_string()))?;
+        let decoded =
+            Self::try_from_slice(&value).map_err(|error| StateError::Storage(error.to_string()))?;
+        if decoded != *self {
+            return Err(StateError::Storage(
+                "genesis validator Borsh round-trip changed the record".into(),
+            ));
+        }
+        Ok((validator_meta_key(params.asset, &self.operator), value))
     }
 }
 
@@ -134,7 +207,7 @@ impl ValidatorSetSnapshot {
     }
 }
 
-fn validator_key(asset: NativeAssetId, op: &Address) -> Vec<u8> {
+pub fn validator_meta_key(asset: NativeAssetId, op: &Address) -> Vec<u8> {
     let mut k = b"stake/val/".to_vec();
     k.push(asset.wire_byte());
     k.push(b'/');
@@ -171,13 +244,13 @@ fn unbonding_key(asset: NativeAssetId, op: &Address) -> Vec<u8> {
 /// so interleaved account-transfer + stake restores stay well-ordered.
 pub fn stake_meta_keys_touched(tx: &SignedStakeTx) -> Vec<Vec<u8>> {
     let mut keys = vec![
-        validator_key(tx.asset, &tx.validator),
+        validator_meta_key(tx.asset, &tx.validator),
         delegation_key(tx.asset, &tx.actor, &tx.validator),
         unbonding_key(tx.asset, &tx.actor),
         reward_pool_key(tx.asset),
     ];
     if tx.actor != tx.validator {
-        keys.push(validator_key(tx.asset, &tx.actor));
+        keys.push(validator_meta_key(tx.asset, &tx.actor));
         keys.push(unbonding_key(tx.asset, &tx.validator));
     }
     keys
@@ -376,7 +449,7 @@ pub fn load_validator(
     asset: NativeAssetId,
     op: &Address,
 ) -> Result<Option<ValidatorRecord>, StateError> {
-    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &validator_key(asset, op))? else {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &validator_meta_key(asset, op))? else {
         return Ok(None);
     };
     Ok(Some(
@@ -392,7 +465,7 @@ pub fn put_validator_into(
     let bytes = borsh::to_vec(record).map_err(|e| StateError::Storage(e.to_string()))?;
     batch.put_cf(
         ColumnFamily::Meta,
-        &validator_key(asset, &record.operator),
+        &validator_meta_key(asset, &record.operator),
         &bytes,
     );
     Ok(())
@@ -443,7 +516,7 @@ pub fn bond_validator(
     commission_bps: u16,
     metadata_hash: Hash,
 ) -> Result<(), StateError> {
-    params.validate_asset()?;
+    params.validate()?;
     if self_bond < params.min_self_bond {
         return Err(StateError::InvalidTx("self-bond below minimum".into()));
     }
@@ -815,7 +888,8 @@ pub fn distribute_reward_pool_amount(
         let Some(val) = load_validator(store, asset, op)? else {
             continue;
         };
-        let commission = ((u128::from(share) * u128::from(val.commission_bps)) / 10_000) as u64;
+        let commission = ((u128::from(share) * u128::from(val.commission_bps))
+            / u128::from(MAX_VALIDATOR_COMMISSION_BPS)) as u64;
         let after_commission = share.saturating_sub(commission);
         let bonded = val.self_bond.saturating_add(val.delegated).max(1);
         let op_stake_share = ((u128::from(after_commission) * u128::from(val.self_bond))
@@ -968,6 +1042,83 @@ mod tests {
         let mut batch = WriteBatch::new();
         credit_account_into(&mut batch, store, asset, who, Amount::from_base_units(amt)).unwrap();
         store.write_batch(batch).unwrap();
+    }
+
+    #[test]
+    fn genesis_validator_record_has_canonical_key_and_borsh_value() {
+        let key = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let params = StakingParams {
+            min_self_bond: 1,
+            max_commission_bps: 2_000,
+            ..StakingParams::ovl_default()
+        };
+        let record = ValidatorRecord {
+            operator: key.address(),
+            consensus_pubkey: key.public_key_bytes().to_vec(),
+            withdrawal: Address([0x22; 20]),
+            self_bond: 5,
+            delegated: 0,
+            commission_bps: 100,
+            status: ValidatorStatus::Bonded,
+            jailed_until_epoch: 0,
+            metadata_hash: Hash([0x33; 32]),
+        };
+
+        let (storage_key, value) = record.canonical_genesis_storage_entry(&params).unwrap();
+        assert_eq!(
+            storage_key,
+            validator_meta_key(NativeAssetId::OVL, &record.operator)
+        );
+        assert_eq!(ValidatorRecord::try_from_slice(&value).unwrap(), record);
+    }
+
+    #[test]
+    fn genesis_validator_record_rejects_defaults_and_limits() {
+        let key = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let params = StakingParams {
+            min_self_bond: 1,
+            max_commission_bps: 2_000,
+            ..StakingParams::ovl_default()
+        };
+        let record = ValidatorRecord {
+            operator: key.address(),
+            consensus_pubkey: key.public_key_bytes().to_vec(),
+            withdrawal: Address([0x22; 20]),
+            self_bond: 5,
+            delegated: 0,
+            commission_bps: 100,
+            status: ValidatorStatus::Bonded,
+            jailed_until_epoch: 0,
+            metadata_hash: Hash([0x33; 32]),
+        };
+
+        let mut changed = record.clone();
+        changed.metadata_hash = Hash::ZERO;
+        assert!(changed
+            .validate_genesis_registration(&params)
+            .unwrap_err()
+            .to_string()
+            .contains("metadata hash must be nonzero"));
+
+        let mut changed = record.clone();
+        changed.commission_bps = params.max_commission_bps + 1;
+        assert!(changed
+            .validate_genesis_registration(&params)
+            .unwrap_err()
+            .to_string()
+            .contains("commission too high"));
+
+        let mut changed = record;
+        changed.operator = Address([0x44; 20]);
+        assert!(changed
+            .validate_genesis_registration(&params)
+            .unwrap_err()
+            .to_string()
+            .contains("operator does not match"));
+
+        let mut invalid_params = params;
+        invalid_params.max_commission_bps = MAX_VALIDATOR_COMMISSION_BPS + 1;
+        assert!(invalid_params.validate().is_err());
     }
 
     #[test]

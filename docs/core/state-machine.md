@@ -47,9 +47,31 @@ For Trident v3, `TridentGenesisArtifact::to_runtime_policy` is the single
 offline conversion into typed DAA, GHOSTDAG, emission, monetary, staking,
 finality, policy-hash, and fingerprint values. It first applies the
 freeze-readiness gate and therefore rejects placeholders, missing policy
-values, and stale artifact hashes. The node does not consume this candidate
-until Block 0 can commit and verify the complete artifact-defined state root;
-historical v2 loading remains unchanged.
+values, and stale artifact hashes. A freeze-ready artifact can also produce a
+versioned Block 0 manifest and a lossless Meta envelope
+(`meta/trident_block_zero/*`, storage version 3, independent of
+`SCHEMA_VERSION`). A versioned `meta/trident_datadir_identity/*` Borsh record
+binds its chain ID, network fingerprint, artifact and policy identities, Block
+0 commitment, committed state root, header identity, and optional concrete
+header hash. Both records are staged, overlay-verified, and committed in the
+same atomic batch. Checked reopen requires canonical byte-for-byte equality
+between the independent identity record, the copy inside the envelope, and any
+expected identity supplied by a future Trident startup.
+
+Epoch-zero validators include ceremony-selected commission and nonzero 32-byte
+metadata commitments. `BlockZeroValidatorSet::to_runtime_validator_entries`
+checks exact policy equality, preserves the secp256k1 consensus/withdrawal
+identities, and derives the existing asset-scoped `stake/val/` key plus
+canonical `ValidatorRecord` bytes. This is a pure conversion surface; it does
+not materialize live staking state.
+
+`GenesisBuilder` still does not seed live balances from this candidate. Its
+legacy load paths now reject every complete or partial Trident marker before
+examining or creating v2 genesis state, including datadirs that also contain a
+valid v2 genesis hash. The node does not consume the candidate until the
+artifact's UTXO/account/treasury/vesting/validator/finality records can be
+materialized atomically and their recomputed live root equals the committed
+header state root. Frozen v2 loading and identities remain unchanged.
 
 ## Virtual UTXO (Phase 28)
 
@@ -131,7 +153,12 @@ fail-closed outside explicitly activated Trident contexts.
 - [`StateStore::open_in_memory`] — ephemeral map for unit tests / portable CI
 - [`StateStore::open(path)`] — **RocksDB** when built with `--features rocksdb` (enabled by default on `agora-node`); otherwise falls back to in-memory (path ignored)
 
-`agora-node` defaults to RocksDB under `AGORA_DATA` (default `data/agora-node`). On boot it uses `GenesisBuilder::load_or_ignite` and rebuilds the in-memory DAG/GHOSTDAG from durable tips.
+`agora-node` defaults to RocksDB under `AGORA_DATA` (default
+`data/agora-node`). On boot it opens and verifies storage through
+`prepare_legacy_datadir`; only after that succeeds may the callback load or
+create `$AGORA_DATA/p2p/identity.key`. A Trident marker or genesis mismatch
+therefore returns before P2P identity, swarm, seeder, or RPC setup. The node
+then rebuilds the in-memory DAG/GHOSTDAG from durable tips.
 
 ## Node wiring
 
