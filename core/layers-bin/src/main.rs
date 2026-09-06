@@ -133,15 +133,7 @@ async fn handle_http(
     let method = parts.next().unwrap_or("");
     let path = parts.next().unwrap_or("/");
     match (method, path) {
-        ("GET", "/health") => http_json(
-            200,
-            json!({
-                "ok": true,
-                "service": "agora-layers",
-                "canonical_l1": false,
-                "maturity": "Experimental"
-            }),
-        ),
+        ("GET", "/health") => http_json(200, health_payload()),
         ("POST", "/rpc") | ("POST", "/") => {
             let body = req.split("\r\n\r\n").nth(1).unwrap_or("").trim();
             let rpc: RpcReq = match serde_json::from_str(body) {
@@ -644,6 +636,15 @@ fn is_loopback_bind(bind: &str) -> bool {
     matches!(host, "127.0.0.1" | "localhost" | "::1" | "0:0:0:0:0:0:0:1")
 }
 
+fn health_payload() -> Value {
+    json!({
+        "ok": true,
+        "service": "agora-layers",
+        "canonical_l1": false,
+        "maturity": "Experimental"
+    })
+}
+
 fn enforce_layers_bind_policy(bind: &str) {
     assert!(
         is_loopback_bind(bind),
@@ -837,6 +838,16 @@ mod tests {
         assert!(is_loopback_bind("[::1]:8555"));
         assert!(!is_loopback_bind("0.0.0.0:8555"));
         assert!(!is_loopback_bind("203.0.113.7:8555"));
+    }
+
+    #[test]
+    fn health_and_method_policy_keep_lab_mutations_non_public() {
+        let health = health_payload();
+        assert_eq!(health["canonical_l1"], false);
+        assert_eq!(health["maturity"], "Experimental");
+        assert!(is_mutating_method("agora_layers_mintOvl"));
+        assert!(is_mutating_method("agora_layers_creditDrc"));
+        assert!(!is_mutating_method("agora_layers_getInfo"));
     }
 
     #[test]
