@@ -275,13 +275,13 @@ pub fn snapshot_meta_keys(
     Ok(out)
 }
 
-fn epoch_key(asset: NativeAssetId) -> Vec<u8> {
+pub(crate) fn epoch_key(asset: NativeAssetId) -> Vec<u8> {
     let mut k = b"stake/epoch/".to_vec();
     k.push(asset.wire_byte());
     k
 }
 
-fn snapshot_key(asset: NativeAssetId, epoch: u64) -> Vec<u8> {
+pub(crate) fn snapshot_key(asset: NativeAssetId, epoch: u64) -> Vec<u8> {
     let mut k = b"stake/snap/".to_vec();
     k.push(asset.wire_byte());
     k.push(b'/');
@@ -295,7 +295,7 @@ fn reward_pool_key(asset: NativeAssetId) -> Vec<u8> {
     k
 }
 
-fn staking_reserve_key(asset: NativeAssetId) -> Vec<u8> {
+pub(crate) fn staking_reserve_key(asset: NativeAssetId) -> Vec<u8> {
     let mut k = b"stake/reserve_remaining/".to_vec();
     k.push(asset.wire_byte());
     k

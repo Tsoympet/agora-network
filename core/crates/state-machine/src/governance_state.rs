@@ -51,7 +51,7 @@ impl Default for CanonicalGovernancePolicy {
     }
 }
 
-fn treasury_key(treasury: TreasuryId) -> Vec<u8> {
+pub(crate) fn treasury_key(treasury: TreasuryId) -> Vec<u8> {
     let mut key = Vec::with_capacity(TREASURY_PREFIX.len() + 1);
     key.extend_from_slice(TREASURY_PREFIX);
     key.push(treasury.wire_byte());

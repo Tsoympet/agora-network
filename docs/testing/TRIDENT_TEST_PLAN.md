@@ -54,6 +54,14 @@ Block 0 store tests cover in-memory staging plus RocksDB reopen, tamper, and
 no-partial-write cases for the candidate Meta envelope. They must not write
 live balances or change v2 ignition.
 
+Offline live-state-plan tests additionally cover one-to-one manifest-field
+coverage, deterministic key order, TLT outpoints, OVL/DRC asset isolation,
+per-asset conservation, treasury controls, vesting arithmetic and
+bond/vesting disjointness, epoch-zero validator snapshots, initial unfinalized
+finality, root/header tamper rejection, and COW base-store no-write behavior.
+RocksDB reopen is permitted only after staging the records in an overlay; the
+reopened base must remain empty.
+
 ## Integration
 
 Miner proposes; OVL+DRC attest; checkpoint finalizes; wallet sends three assets; OVL gas spend; DRC merchant payment; governance after timelock; grant milestone payment; multi-node convergence.

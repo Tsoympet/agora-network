@@ -57,10 +57,11 @@ encoding versions, malformed/trailing bytes, zero roots or identities, and
 mismatches against caller-recomputed roots and network identity.
 
 The type intentionally has no serde or `ts-rs` export: it is not shared with
-clients and is not accepted by storage, mining, consensus, RPC, or P2P. Runtime
-activation remains blocked on a concrete Trident body mapping, atomic live-state
-materialization whose recomputed root equals the header, datadir identity
-binding, and an explicit consensus/network protocol switch.
+clients and is not accepted by mining, consensus, RPC, or P2P. The offline
+state-machine planner now derives its exact Block 0 body and recomputable
+live-state root, but exposes no durable writer. Runtime activation remains
+blocked on one atomic envelope/plan commit with durable reread, plus an explicit
+consensus/PoW/storage/network protocol switch.
 
 ## Change process
 

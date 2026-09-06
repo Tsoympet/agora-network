@@ -49,7 +49,7 @@ finality, policy-hash, and fingerprint values. It first applies the
 freeze-readiness gate and therefore rejects placeholders, missing policy
 values, and stale artifact hashes. A freeze-ready artifact can also produce a
 versioned Block 0 manifest and a lossless Meta envelope
-(`meta/trident_block_zero/*`, storage version 3, independent of
+(`meta/trident_block_zero/*`, storage version 4, independent of
 `SCHEMA_VERSION`). A versioned `meta/trident_datadir_identity/*` Borsh record
 binds its chain ID, network fingerprint, artifact and policy identities, Block
 0 commitment, committed state root, header identity, and optional concrete
@@ -59,19 +59,25 @@ between the independent identity record, the copy inside the envelope, and any
 expected identity supplied by a future Trident startup.
 
 Epoch-zero validators include ceremony-selected commission and nonzero 32-byte
-metadata commitments. `BlockZeroValidatorSet::to_runtime_validator_entries`
-checks exact policy equality, preserves the secp256k1 consensus/withdrawal
-identities, and derives the existing asset-scoped `stake/val/` key plus
-canonical `ValidatorRecord` bytes. This is a pure conversion surface; it does
-not materialize live staking state.
+metadata commitments. The offline `TridentLiveStatePlan` now maps every
+manifest field exactly once to a primary versioned record, derives canonical
+TLT outpoints, OVL/DRC liquid accounts, supply indexes, treasury
+balances/controls, explicit vesting locks, validator records, epoch-zero
+snapshots, reward pools, and initial acceptance/finality records, then stages
+them only in a COW overlay. It rereads every exact byte and recomposes the
+domain-separated state root required by the offline header. Validator bonds are
+removed from liquid account balances; vesting remains a non-additive
+encumbrance with explicit release arithmetic.
 
 `GenesisBuilder` still does not seed live balances from this candidate. Its
-legacy load paths now reject every complete or partial Trident marker before
+legacy load paths reject every complete or partial Trident marker before
 examining or creating v2 genesis state, including datadirs that also contain a
-valid v2 genesis hash. The node does not consume the candidate until the
-artifact's UTXO/account/treasury/vesting/validator/finality records can be
-materialized atomically and their recomputed live root equals the committed
-header state root. Frozen v2 loading and identities remain unchanged.
+valid v2 genesis hash. No live-plan batch or commit API exists. The final
+storage blocker is one durable all-or-nothing commit that combines the
+previously verified envelope/identity and exact live-state plan, followed by a
+durable reread and root recomposition. Node boot additionally remains blocked
+on explicit consensus, PoW, vesting/treasury enforcement, P2P, and RPC
+activation gates. Frozen v2 loading and identities remain unchanged.
 
 ## Virtual UTXO (Phase 28)
 

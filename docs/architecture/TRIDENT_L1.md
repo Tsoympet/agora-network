@@ -145,11 +145,14 @@ candidate batch. Legacy/v2 startup rejects that marker before libp2p identity
 access, networking, or RPC; future Trident startup has an exact expected-byte
 verification API at the same boundary.
 
-A Trident v3 node loader remains blocked on the concrete body/PoW rules,
-lossless atomic mappings for UTXOs, accounts, treasury controls, vesting locks,
-validator runtime records and initial finality, and equality between the
-materialized live-state root and header. Networking and RPC must remain
-disabled for v3 until that live-state contract and explicit runtime gates exist.
+A complete offline plan now deterministically maps Block 0 into canonical
+UTXOs, accounts, supply buckets, treasury controls, vesting locks, validator
+records, epoch snapshots, reward pools, acceptance, and initial finality. It
+derives the body and composed state roots, verifies them against the header, and
+stages only in a COW overlay. A Trident v3 node loader remains blocked on one
+atomic durable commit plus post-commit root verification and explicit
+consensus/PoW/vesting/treasury/P2P/RPC activation gates. Networking and RPC
+remain disabled.
 See [`../core/block-zero.md`](../core/block-zero.md).
 
 PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.

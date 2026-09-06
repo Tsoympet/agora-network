@@ -1,11 +1,8 @@
 //! Canonical, artifact-only Trident Block 0 state commitment.
 //!
-//! Preparation can stage a verified Meta envelope for a future atomic loader, but it
-//! does not write the caller's datadir, materialize live balances, construct a
-//! [`agora_types::Block`], or participate in node boot. The current header has no
-//! state-root field, and several committed records still lack lossless runtime-store
-//! representations. Keeping those mappings out of this batch prevents a partially
-//! seeded Trident node from reaching networking.
+//! A separate offline planner can now derive and COW-stage every live record,
+//! body root, and composed state root. Neither this module nor that planner
+//! exposes a live-state commit or participates in node boot.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,7 +15,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use crate::columns::{meta_keys, ColumnFamily};
 use crate::error::StateError;
 use crate::staking::{
-    validator_meta_key, StakingParams, ValidatorRecord, ValidatorStatus,
+    validator_meta_key, StakingParams, ValidatorRecord, ValidatorSetSnapshot, ValidatorStatus,
     MAX_VALIDATOR_COMMISSION_BPS,
 };
 use crate::store::{StateStore, WriteBatch};
@@ -31,25 +28,26 @@ use crate::trident_genesis::{
 
 /// Version of the canonical Block 0 native-state manifest.
 ///
-/// Version 3 is a pre-freeze break that adds the complete ceremony-selected
-/// validator registration records to the manifest and commitment.
-pub const TRIDENT_BLOCK_ZERO_STATE_VERSION: u32 = 3;
-/// Domain for the complete native-state root.
-pub const TRIDENT_BLOCK_ZERO_STATE_DOMAIN: &[u8] = b"agora-trident-block-zero-state-v3";
+/// Version 4 is a pre-freeze break that adds lossless live-state inputs and
+/// separates the manifest identity from the composed materialized-state root.
+pub const TRIDENT_BLOCK_ZERO_STATE_VERSION: u32 = 4;
+/// Domain for the canonical manifest identity (not the materialized-state root).
+pub const TRIDENT_BLOCK_ZERO_STATE_DOMAIN: &[u8] = b"agora-trident-block-zero-manifest-v4";
 /// Domain for the value a future Block 0 header must commit.
-pub const TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN: &[u8] = b"agora-trident-block-zero-commitment-v3";
+pub const TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN: &[u8] = b"agora-trident-block-zero-commitment-v4";
 /// Version of the lossless Meta-CF storage envelope.
 ///
 /// This is independent of [`crate::SCHEMA_VERSION`]: no current boot path
 /// writes or consumes these records.
-pub const TRIDENT_BLOCK_ZERO_STORAGE_VERSION: u32 = 3;
+pub const TRIDENT_BLOCK_ZERO_STORAGE_VERSION: u32 = 4;
 /// Version of the Borsh identity that binds one datadir to one Trident chain.
 pub const TRIDENT_DATADIR_IDENTITY_VERSION: u32 = 1;
 
-const TRIDENT_BLOCK_ZERO_META_KEYS: [&[u8]; 10] = [
+const TRIDENT_BLOCK_ZERO_META_KEYS: [&[u8]; 11] = [
     meta_keys::TRIDENT_BLOCK_ZERO_RECORD_VERSION,
     meta_keys::TRIDENT_BLOCK_ZERO_RECORD,
     meta_keys::TRIDENT_BLOCK_ZERO_STATE_PAYLOAD,
+    meta_keys::TRIDENT_BLOCK_ZERO_MANIFEST_ROOT,
     meta_keys::TRIDENT_BLOCK_ZERO_STATE_ROOT,
     meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT,
     meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT_HASH,
@@ -78,6 +76,47 @@ pub struct BlockZeroVesting {
     pub start_timestamp_ms: u64,
     pub cliff_timestamp_ms: u64,
     pub end_timestamp_ms: u64,
+    pub release_policy: BlockZeroVestingPolicy,
+}
+
+/// Explicit vesting arithmetic committed by the artifact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize, PartialOrd, Ord)]
+#[repr(u8)]
+#[borsh(use_discriminant = true)]
+pub enum BlockZeroVestingPolicy {
+    /// Unlock linearly from `start`, while the cliff withholds all accrued value.
+    LinearFromStartWithCliffV1 = 1,
+}
+
+impl BlockZeroVesting {
+    /// Remaining lock at `timestamp_ms`, rounded conservatively toward locked.
+    pub fn locked_amount_at(&self, timestamp_ms: u64) -> Result<u64, String> {
+        self.verify()?;
+        if timestamp_ms < self.cliff_timestamp_ms {
+            return Ok(self.amount);
+        }
+        if timestamp_ms >= self.end_timestamp_ms {
+            return Ok(0);
+        }
+        let duration = self.end_timestamp_ms - self.start_timestamp_ms;
+        if duration == 0 {
+            return Ok(0);
+        }
+        let elapsed = timestamp_ms.saturating_sub(self.start_timestamp_ms);
+        let unlocked =
+            (u128::from(self.amount) * u128::from(elapsed) / u128::from(duration)) as u64;
+        Ok(self.amount.saturating_sub(unlocked))
+    }
+
+    fn verify(&self) -> Result<(), String> {
+        if self.amount == 0
+            || self.start_timestamp_ms > self.cliff_timestamp_ms
+            || self.cliff_timestamp_ms > self.end_timestamp_ms
+        {
+            return Err("Block 0 vesting schedule is invalid".into());
+        }
+        Ok(())
+    }
 }
 
 /// Supply buckets are mutually exclusive except that validator bonds and vesting
@@ -120,6 +159,7 @@ pub struct BlockZeroValidatorSet {
     pub unbonding_period_checkpoints: u64,
     pub max_commission_bps: u16,
     pub max_concentration_bps: u16,
+    pub epoch_reserve_drip: u64,
     pub validators: Vec<BlockZeroValidator>,
     pub total_active_stake: u64,
 }
@@ -150,6 +190,33 @@ impl BlockZeroValidator {
 }
 
 impl BlockZeroValidatorSet {
+    /// Exact staking policy committed for this set.
+    pub fn runtime_params(&self) -> StakingParams {
+        StakingParams {
+            asset: self.asset,
+            max_validators: self.max_validators,
+            min_self_bond: self.min_self_bond,
+            unbonding_period_epochs: self.unbonding_period_checkpoints,
+            max_commission_bps: self.max_commission_bps,
+            max_concentration_bps: self.max_concentration_bps,
+            epoch_reserve_drip: self.epoch_reserve_drip,
+        }
+    }
+
+    /// Epoch-zero snapshot represented by the canonical runtime snapshot type.
+    pub fn epoch_zero_snapshot(&self) -> ValidatorSetSnapshot {
+        ValidatorSetSnapshot {
+            epoch: self.epoch,
+            asset: self.asset,
+            validators: self
+                .validators
+                .iter()
+                .map(|validator| (validator.operator, validator.self_bond))
+                .collect(),
+            total_active_stake: self.total_active_stake,
+        }
+    }
+
     /// Verify set policy equality and derive the exact runtime records and
     /// unchanged asset-scoped staking keys for a future atomic materializer.
     pub fn to_runtime_validator_entries(
@@ -170,6 +237,7 @@ impl BlockZeroValidatorSet {
             || params.unbonding_period_epochs != self.unbonding_period_checkpoints
             || params.max_commission_bps != self.max_commission_bps
             || params.max_concentration_bps != self.max_concentration_bps
+            || params.epoch_reserve_drip != self.epoch_reserve_drip
         {
             return Err(format!(
                 "{} Block 0 validator policy does not match runtime staking parameters",
@@ -234,6 +302,8 @@ pub struct BlockZeroFinality {
 pub struct TridentBlockZeroState {
     pub version: u32,
     pub chain_id: String,
+    pub timestamp_ms: u64,
+    pub bits: u32,
     pub network_fingerprint: Hash,
     pub artifact_identity: Hash,
     pub consensus_policy_hash: Hash,
@@ -254,6 +324,7 @@ pub struct TridentBlockZeroCommitment {
     pub network_fingerprint: Hash,
     pub artifact_identity: Hash,
     pub consensus_policy_hash: Hash,
+    pub manifest_root: Hash,
     pub state_root: Hash,
 }
 
@@ -329,6 +400,8 @@ impl TridentBlockZeroState {
                 entry.start_timestamp_ms,
                 entry.cliff_timestamp_ms,
                 entry.end_timestamp_ms,
+                entry.amount,
+                entry.release_policy,
             )
         });
         verify_vesting_is_funded(&allocations, &vesting)?;
@@ -363,10 +436,10 @@ impl TridentBlockZeroState {
             state: CheckpointState::Proposed,
             pow_work_met: false,
             finalized_blue_score: None,
-            ovl_snapshot: Hash::hash_borsh(&ovl),
+            ovl_snapshot: ovl.epoch_zero_snapshot().commitment(),
             ovl_active_stake: ovl.total_active_stake,
             ovl_signed_stake: 0,
-            drc_snapshot: Hash::hash_borsh(&drc),
+            drc_snapshot: drc.epoch_zero_snapshot().commitment(),
             drc_active_stake: drc.total_active_stake,
             drc_signed_stake: 0,
         };
@@ -374,6 +447,10 @@ impl TridentBlockZeroState {
         let state = Self {
             version: TRIDENT_BLOCK_ZERO_STATE_VERSION,
             chain_id: artifact.chain_id.clone(),
+            timestamp_ms: artifact.timestamp_ms,
+            bits: artifact
+                .bits
+                .ok_or_else(|| "Block 0 difficulty is missing".to_string())?,
             network_fingerprint: parse_hash("network_fingerprint", &artifact.network_fingerprint)?,
             artifact_identity: artifact.consensus_identity_hash(),
             consensus_policy_hash: artifact.consensus_policy_hash(),
@@ -396,8 +473,14 @@ impl TridentBlockZeroState {
         Ok(state)
     }
 
-    pub fn state_root(&self) -> Hash {
+    /// Canonical identity of the complete Block 0 manifest.
+    pub fn manifest_root(&self) -> Hash {
         Hash::hash_borsh(&(TRIDENT_BLOCK_ZERO_STATE_DOMAIN, self))
+    }
+
+    /// Composed root of the exact canonical live-store projection.
+    pub fn state_root(&self) -> Hash {
+        crate::live_state_plan::projected_state_root(self)
     }
 
     pub fn commitment(&self) -> TridentBlockZeroCommitment {
@@ -407,6 +490,7 @@ impl TridentBlockZeroState {
             network_fingerprint: self.network_fingerprint,
             artifact_identity: self.artifact_identity,
             consensus_policy_hash: self.consensus_policy_hash,
+            manifest_root: self.manifest_root(),
             state_root: self.state_root(),
         }
     }
@@ -420,9 +504,14 @@ impl TridentBlockZeroState {
         if self.chain_id.trim().is_empty() {
             return Err("Block 0 chain ID must be nonempty".into());
         }
+        if self.timestamp_ms == 0 {
+            return Err("Block 0 timestamp must be nonzero".into());
+        }
         if self.artifact_identity == Hash::ZERO
             || self.consensus_policy_hash == Hash::ZERO
             || self.network_fingerprint == Hash::ZERO
+            || self.governance_constitution_hash == Hash::ZERO
+            || self.emergency_policy_hash == Hash::ZERO
         {
             return Err("Block 0 identities must be nonzero".into());
         }
@@ -442,7 +531,7 @@ impl TridentBlockZeroState {
         if !is_sorted_vesting(&self.vesting) {
             return Err("Block 0 vesting schedules are not canonically sorted".into());
         }
-        verify_vesting_is_funded(&self.allocations, &self.vesting)?;
+        reject_duplicate_vesting(&self.vesting)?;
         verify_allocation_supply(&self.allocations, &self.supplies)?;
         verify_treasury_supply(&self.treasuries, &self.supplies)?;
         if self.validator_sets.len() != 2
@@ -454,6 +543,7 @@ impl TridentBlockZeroState {
         for set in &self.validator_sets {
             verify_validator_set(set, &self.allocations)?;
         }
+        verify_allocation_encumbrances(&self.allocations, &self.vesting, &self.validator_sets)?;
         let ovl = &self.validator_sets[0];
         let drc = &self.validator_sets[1];
         if self.finality.state != CheckpointState::Proposed
@@ -461,13 +551,14 @@ impl TridentBlockZeroState {
             || self.finality.finalized_blue_score.is_some()
             || self.finality.ovl_signed_stake != 0
             || self.finality.drc_signed_stake != 0
-            || self.finality.ovl_snapshot != Hash::hash_borsh(ovl)
-            || self.finality.drc_snapshot != Hash::hash_borsh(drc)
+            || self.finality.ovl_snapshot != ovl.epoch_zero_snapshot().commitment()
+            || self.finality.drc_snapshot != drc.epoch_zero_snapshot().commitment()
             || self.finality.ovl_active_stake != ovl.total_active_stake
             || self.finality.drc_active_stake != drc.total_active_stake
         {
             return Err("Block 0 initial finality state is inconsistent".into());
         }
+        crate::live_state_plan::verify_manifest_coverage(self)?;
         self.commitment().verify()?;
         Ok(())
     }
@@ -478,7 +569,10 @@ impl TridentBlockZeroState {
         self.verify()?;
         let bytes = borsh::to_vec(self).map_err(|error| error.to_string())?;
         let decoded = Self::try_from_slice(&bytes).map_err(|error| error.to_string())?;
-        if decoded != *self || decoded.state_root() != self.state_root() {
+        if decoded != *self
+            || decoded.manifest_root() != self.manifest_root()
+            || decoded.state_root() != self.state_root()
+        {
             return Err("Block 0 Borsh round-trip changed the state commitment".into());
         }
         Ok(bytes)
@@ -574,9 +668,13 @@ impl TridentBlockZeroCommitment {
         if self.network_fingerprint == Hash::ZERO
             || self.artifact_identity == Hash::ZERO
             || self.consensus_policy_hash == Hash::ZERO
+            || self.manifest_root == Hash::ZERO
             || self.state_root == Hash::ZERO
         {
-            return Err("Block 0 commitment identities and state root must be nonzero".into());
+            return Err(
+                "Block 0 commitment identities, manifest root, and state root must be nonzero"
+                    .into(),
+            );
         }
         if self.network_fingerprint
             != expected_network_fingerprint(
@@ -777,6 +875,7 @@ impl TridentDatadirIdentity {
             || self.consensus_policy_hash != state.consensus_policy_hash
             || self.block_zero_commitment != commitment.hash()
             || self.committed_state_root != state.state_root()
+            || commitment.manifest_root != state.manifest_root()
         {
             return Err("Trident datadir identity does not match Block 0".into());
         }
@@ -897,7 +996,10 @@ pub fn ensure_legacy_v2_datadir(store: &StateStore) -> Result<(), StateError> {
     let has_datadir_identity = !store
         .scan_prefix(ColumnFamily::Meta, DATADIR_IDENTITY_PREFIX)?
         .is_empty();
-    if has_block_zero || has_datadir_identity {
+    let has_live_state_plan = !store
+        .scan_prefix(ColumnFamily::Meta, LIVE_STATE_PLAN_PREFIX)?
+        .is_empty();
+    if has_block_zero || has_datadir_identity || has_live_state_plan {
         return Err(storage_err(
             "Trident datadir identity is present; legacy/v2 startup refuses this datadir",
         ));
@@ -905,8 +1007,9 @@ pub fn ensure_legacy_v2_datadir(store: &StateStore) -> Result<(), StateError> {
     Ok(())
 }
 
-const BLOCK_ZERO_PREFIX: &[u8] = b"meta/trident_block_zero/";
-const DATADIR_IDENTITY_PREFIX: &[u8] = b"meta/trident_datadir_identity/";
+pub(crate) const BLOCK_ZERO_PREFIX: &[u8] = b"meta/trident_block_zero/";
+pub(crate) const DATADIR_IDENTITY_PREFIX: &[u8] = b"meta/trident_datadir_identity/";
+pub(crate) const LIVE_STATE_PLAN_PREFIX: &[u8] = b"meta/trident_live_state/";
 
 type BlockZeroEncodedValues = Vec<(&'static [u8], Vec<u8>)>;
 
@@ -962,6 +1065,10 @@ fn encode_block_zero_values(
         (
             meta_keys::TRIDENT_BLOCK_ZERO_STATE_PAYLOAD,
             record.canonical_payload.clone(),
+        ),
+        (
+            meta_keys::TRIDENT_BLOCK_ZERO_MANIFEST_ROOT,
+            record.manifest.manifest_root().as_bytes().to_vec(),
         ),
         (
             meta_keys::TRIDENT_BLOCK_ZERO_STATE_ROOT,
@@ -1240,6 +1347,12 @@ fn decode_and_verify_block_zero(
 
     require_exact_bytes(
         values,
+        meta_keys::TRIDENT_BLOCK_ZERO_MANIFEST_ROOT,
+        record.manifest.manifest_root().as_bytes(),
+        "manifest root",
+    )?;
+    require_exact_bytes(
+        values,
         meta_keys::TRIDENT_BLOCK_ZERO_STATE_ROOT,
         record.manifest.state_root().as_bytes(),
         "state root",
@@ -1276,7 +1389,12 @@ fn decode_and_verify_block_zero(
     )?;
 
     // Independent raw-key copies must also decode to the same identities.
-    let independent_root = require_hash(
+    let independent_manifest_root = require_hash(
+        values,
+        meta_keys::TRIDENT_BLOCK_ZERO_MANIFEST_ROOT,
+        "manifest root",
+    )?;
+    let independent_state_root = require_hash(
         values,
         meta_keys::TRIDENT_BLOCK_ZERO_STATE_ROOT,
         "state root",
@@ -1286,7 +1404,8 @@ fn decode_and_verify_block_zero(
         meta_keys::TRIDENT_BLOCK_ZERO_COMMITMENT_HASH,
         "commitment hash",
     )?;
-    if independent_root != record.manifest.state_root()
+    if independent_manifest_root != record.manifest.manifest_root()
+        || independent_state_root != record.manifest.state_root()
         || independent_commitment != record.commitment_hash
     {
         return Err(storage_err("Block 0 identity copies are mismatched"));
@@ -1354,6 +1473,14 @@ fn vesting_from_artifact(
     artifact: &TridentGenesisArtifact,
     entry: &TridentVestingSchedule,
 ) -> Result<BlockZeroVesting, String> {
+    let release_policy = match entry.release_policy.as_str() {
+        "linear_from_start_with_cliff_v1" => BlockZeroVestingPolicy::LinearFromStartWithCliffV1,
+        other => {
+            return Err(format!(
+                "unsupported Block 0 vesting release policy {other}"
+            ))
+        }
+    };
     Ok(BlockZeroVesting {
         asset: asset_from_ticker(&entry.asset)?,
         address: parse_address(artifact, &entry.address)?,
@@ -1361,6 +1488,7 @@ fn vesting_from_artifact(
         start_timestamp_ms: entry.start_timestamp_ms,
         cliff_timestamp_ms: entry.cliff_timestamp_ms,
         end_timestamp_ms: entry.end_timestamp_ms,
+        release_policy,
     })
 }
 
@@ -1419,6 +1547,12 @@ fn validator_set_from_artifact(
         sum.checked_add(validator.self_bond)
             .ok_or_else(|| format!("{asset} active stake overflow"))
     })?;
+    let epoch_reserve_drip = match asset {
+        NativeAssetId::OVL => artifact.assets.ovl.emission.epoch_reserve_drip,
+        NativeAssetId::DRC => artifact.assets.drc.emission.epoch_reserve_drip,
+        NativeAssetId::TLT => None,
+    }
+    .ok_or_else(|| format!("{asset} epoch reserve drip is missing"))?;
     let set = BlockZeroValidatorSet {
         asset,
         epoch: 0,
@@ -1431,6 +1565,7 @@ fn validator_set_from_artifact(
         max_concentration_bps: source
             .max_concentration_bps
             .ok_or_else(|| format!("{asset} max concentration is missing"))?,
+        epoch_reserve_drip,
         validators,
         total_active_stake,
     };
@@ -1472,6 +1607,11 @@ fn verify_validator_set(
         || set.epoch != 0
         || set.validators.is_empty()
         || set.validators.len() > set.max_validators as usize
+        || !set
+            .validators
+            .windows(2)
+            .all(|pair| pair[0].operator.0 < pair[1].operator.0)
+        || set.epoch_reserve_drip == 0
         || set.max_commission_bps > MAX_VALIDATOR_COMMISSION_BPS
         || set.max_concentration_bps == 0
         || set.max_concentration_bps > MAX_VALIDATOR_COMMISSION_BPS
@@ -1525,11 +1665,13 @@ fn verify_validator_set(
 
 fn reject_duplicate_allocations(allocations: &[BlockZeroAllocation]) -> Result<(), String> {
     let mut seen = BTreeSet::new();
-    if allocations
-        .iter()
-        .any(|entry| !seen.insert((entry.asset.wire_byte(), entry.address.0)))
-    {
-        return Err("duplicate Block 0 allocation for asset/address".into());
+    for entry in allocations {
+        if entry.amount == 0 {
+            return Err("Block 0 allocation amount must be nonzero".into());
+        }
+        if !seen.insert((entry.asset.wire_byte(), entry.address.0)) {
+            return Err("duplicate Block 0 allocation for asset/address".into());
+        }
     }
     Ok(())
 }
@@ -1547,6 +1689,9 @@ fn verify_allocation_supply(
         return Err("Block 0 supply buckets must be ordered TLT/OVL/DRC".into());
     }
     for supply in supplies {
+        if supply.max_supply == 0 {
+            return Err(format!("{} maximum supply must be nonzero", supply.asset));
+        }
         let allocated = allocations
             .iter()
             .filter(|entry| entry.asset == supply.asset)
@@ -1589,6 +1734,7 @@ fn verify_treasury_supply(
         if entry.treasury != id
             || entry.asset != id.asset()
             || entry.control.trim().is_empty()
+            || entry.balance == 0
             || entry.balance != supply.treasury
         {
             return Err(format!("{} treasury commitment mismatch", id.as_str()));
@@ -1603,6 +1749,7 @@ fn verify_vesting_is_funded(
 ) -> Result<(), String> {
     let mut locked = BTreeMap::<(u8, [u8; 20]), u64>::new();
     for schedule in vesting {
+        schedule.verify()?;
         let value = locked
             .entry((schedule.asset.wire_byte(), schedule.address.0))
             .or_default();
@@ -1623,6 +1770,66 @@ fn verify_vesting_is_funded(
     Ok(())
 }
 
+fn reject_duplicate_vesting(vesting: &[BlockZeroVesting]) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    for schedule in vesting {
+        schedule.verify()?;
+        let identity = (
+            schedule.asset.wire_byte(),
+            schedule.address.0,
+            schedule.start_timestamp_ms,
+            schedule.cliff_timestamp_ms,
+            schedule.end_timestamp_ms,
+            schedule.amount,
+            schedule.release_policy,
+        );
+        if !seen.insert(identity) {
+            return Err("duplicate Block 0 vesting schedule".into());
+        }
+    }
+    Ok(())
+}
+
+/// Vesting and validator bonds are disjoint locks inside one allocation.
+fn verify_allocation_encumbrances(
+    allocations: &[BlockZeroAllocation],
+    vesting: &[BlockZeroVesting],
+    validator_sets: &[BlockZeroValidatorSet],
+) -> Result<(), String> {
+    let mut encumbered = BTreeMap::<(u8, [u8; 20]), u64>::new();
+    for schedule in vesting {
+        let value = encumbered
+            .entry((schedule.asset.wire_byte(), schedule.address.0))
+            .or_default();
+        *value = value
+            .checked_add(schedule.amount)
+            .ok_or_else(|| "Block 0 allocation encumbrance overflow".to_string())?;
+    }
+    for set in validator_sets {
+        for validator in &set.validators {
+            let value = encumbered
+                .entry((set.asset.wire_byte(), validator.operator.0))
+                .or_default();
+            *value = value
+                .checked_add(validator.self_bond)
+                .ok_or_else(|| "Block 0 allocation encumbrance overflow".to_string())?;
+        }
+    }
+    for ((asset, address), amount) in encumbered {
+        let funded = allocations
+            .iter()
+            .find(|entry| entry.asset.wire_byte() == asset && entry.address.0 == address)
+            .map(|entry| entry.amount)
+            .unwrap_or(0);
+        if amount > funded {
+            return Err(
+                "Block 0 vesting and validator locks exceed the matching allocation".into(),
+            );
+        }
+    }
+    Ok(())
+}
+
 fn is_sorted_allocations(entries: &[BlockZeroAllocation]) -> bool {
     entries.windows(2).all(|pair| {
         (pair[0].asset.wire_byte(), pair[0].address.0)
@@ -1638,12 +1845,16 @@ fn is_sorted_vesting(entries: &[BlockZeroVesting]) -> bool {
             pair[0].start_timestamp_ms,
             pair[0].cliff_timestamp_ms,
             pair[0].end_timestamp_ms,
-        ) <= (
+            pair[0].amount,
+            pair[0].release_policy,
+        ) < (
             pair[1].asset.wire_byte(),
             pair[1].address.0,
             pair[1].start_timestamp_ms,
             pair[1].cliff_timestamp_ms,
             pair[1].end_timestamp_ms,
+            pair[1].amount,
+            pair[1].release_policy,
         )
     })
 }
@@ -1772,8 +1983,9 @@ mod tests {
 
         let mut changed_commission = baseline.clone();
         changed_commission.validator_sets[0].validators[0].commission_bps += 1;
-        changed_commission.finality.ovl_snapshot =
-            Hash::hash_borsh(&changed_commission.validator_sets[0]);
+        changed_commission.finality.ovl_snapshot = changed_commission.validator_sets[0]
+            .epoch_zero_snapshot()
+            .commitment();
         changed_commission.verify().unwrap();
         assert_ne!(changed_commission.state_root(), baseline.state_root());
         assert_ne!(
@@ -1783,8 +1995,9 @@ mod tests {
 
         let mut changed_metadata = baseline.clone();
         changed_metadata.validator_sets[0].validators[0].metadata_hash = Hash([0x55; 32]);
-        changed_metadata.finality.ovl_snapshot =
-            Hash::hash_borsh(&changed_metadata.validator_sets[0]);
+        changed_metadata.finality.ovl_snapshot = changed_metadata.validator_sets[0]
+            .epoch_zero_snapshot()
+            .commitment();
         changed_metadata.verify().unwrap();
         assert_ne!(changed_metadata.state_root(), baseline.state_root());
         assert_ne!(

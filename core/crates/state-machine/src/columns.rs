@@ -79,6 +79,7 @@ pub mod meta_keys {
     pub const TRIDENT_BLOCK_ZERO_RECORD_VERSION: &[u8] = b"meta/trident_block_zero/record_version";
     pub const TRIDENT_BLOCK_ZERO_RECORD: &[u8] = b"meta/trident_block_zero/record";
     pub const TRIDENT_BLOCK_ZERO_STATE_PAYLOAD: &[u8] = b"meta/trident_block_zero/state_payload";
+    pub const TRIDENT_BLOCK_ZERO_MANIFEST_ROOT: &[u8] = b"meta/trident_block_zero/manifest_root";
     pub const TRIDENT_BLOCK_ZERO_STATE_ROOT: &[u8] = b"meta/trident_block_zero/state_root";
     pub const TRIDENT_BLOCK_ZERO_COMMITMENT: &[u8] = b"meta/trident_block_zero/commitment";
     pub const TRIDENT_BLOCK_ZERO_COMMITMENT_HASH: &[u8] =
@@ -93,4 +94,12 @@ pub mod meta_keys {
 
     pub const TRIDENT_DATADIR_IDENTITY_VERSION: &[u8] = b"meta/trident_datadir_identity/version";
     pub const TRIDENT_DATADIR_IDENTITY: &[u8] = b"meta/trident_datadir_identity/record";
+
+    // Offline-only live-state plan metadata. No current writer commits these
+    // records and no node boot path consumes them.
+    pub const TRIDENT_LIVE_STATE_PLAN_VERSION: &[u8] = b"meta/trident_live_state/plan_version";
+    pub const TRIDENT_LIVE_STATE_MANIFEST_ROOT: &[u8] = b"meta/trident_live_state/manifest_root";
+    pub const TRIDENT_LIVE_STATE_BODY_ROOT: &[u8] = b"meta/trident_live_state/body_root";
+    pub const TRIDENT_LIVE_STATE_STATE_ROOT: &[u8] = b"meta/trident_live_state/state_root";
+    pub const TRIDENT_LIVE_STATE_HEADER_HASH: &[u8] = b"meta/trident_live_state/header_hash";
 }

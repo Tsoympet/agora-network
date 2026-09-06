@@ -16,6 +16,7 @@ mod genesis;
 mod ghostdag_store;
 mod governance_state;
 mod headers;
+mod live_state_plan;
 mod marks;
 mod monetary;
 mod network;
@@ -48,9 +49,9 @@ pub use apply::{
 pub use block_zero::{
     ensure_legacy_v2_datadir, load_verified_trident_block_zero, verify_trident_datadir_identity,
     BlockZeroAllocation, BlockZeroFinality, BlockZeroSupply, BlockZeroTreasury, BlockZeroValidator,
-    BlockZeroValidatorSet, BlockZeroVesting, TridentBlockZeroCommitment, TridentBlockZeroState,
-    TridentBlockZeroStorageRecord, TridentDatadirHeaderIdentity, TridentDatadirIdentity,
-    TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN, TRIDENT_BLOCK_ZERO_STATE_DOMAIN,
+    BlockZeroValidatorSet, BlockZeroVesting, BlockZeroVestingPolicy, TridentBlockZeroCommitment,
+    TridentBlockZeroState, TridentBlockZeroStorageRecord, TridentDatadirHeaderIdentity,
+    TridentDatadirIdentity, TRIDENT_BLOCK_ZERO_COMMITMENT_DOMAIN, TRIDENT_BLOCK_ZERO_STATE_DOMAIN,
     TRIDENT_BLOCK_ZERO_STATE_VERSION, TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
     TRIDENT_DATADIR_IDENTITY_VERSION,
 };
@@ -81,6 +82,15 @@ pub use governance_state::{
     CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
 };
 pub use headers::{header_key, load_header, store_header, store_header_into};
+pub use live_state_plan::{
+    TridentAssetConservation, TridentBlockZeroAcceptanceRecord, TridentBlockZeroBody,
+    TridentBlockZeroTltIssuance, TridentLiveAllocationRecord, TridentLiveIdentityRecord,
+    TridentLiveInitialFinalityRecord, TridentLiveStakingPolicyRecord, TridentLiveStateComponent,
+    TridentLiveStatePlan, TridentLiveStateRoots, TridentLiveSupplyRecord,
+    TridentLiveTreasuryRecord, TridentLiveVestingLockRecord, TridentManifestFieldMapping,
+    TridentPlannedStoreRecord, TridentVestingFunding, TRIDENT_BLOCK_ZERO_BODY_DOMAIN,
+    TRIDENT_LIVE_STATE_PLAN_VERSION, TRIDENT_LIVE_STATE_ROOT_DOMAIN,
+};
 pub use marks::{default_token_marks, TokenMark};
 pub use monetary::{
     issued_within_cap, AssetMonetaryPolicy, EmissionKind, TridentMonetaryPolicy,

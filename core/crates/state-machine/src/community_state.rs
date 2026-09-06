@@ -13,7 +13,7 @@ use crate::{StateError, StateStore, TxAuthContext, WriteBatch};
 
 pub const CANONICAL_COMMUNITY_VERSION: u32 = 1;
 
-const SUMMARY_KEY: &[u8] = b"community/v1/summary";
+pub(crate) const SUMMARY_KEY: &[u8] = b"community/v1/summary";
 const HUB_PREFIX: &[u8] = b"community/v1/hub/";
 const PASSPORT_PREFIX: &[u8] = b"community/v1/passport/";
 const GRANT_PREFIX: &[u8] = b"community/v1/grant/";
