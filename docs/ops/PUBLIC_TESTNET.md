@@ -21,14 +21,17 @@ swarm, or binding RPC; do not try to reuse one datadir for both protocols.
 Boot still does not consume the Trident candidate as live state. An offline
 plan now maps every manifest field exactly once, derives the canonical Block 0
 body and live UTXO/account/supply/treasury-control/vesting/staking/finality
-records, stages them only in a COW overlay, and recomputes the state root
-against the verified header. It exposes no durable commit operation.
+records, stages the complete record set in a COW overlay, and recomputes the
+state root against the verified header.
 
-The final storage blocker is a single atomic commit of the already verified
-envelope/datadir identity plus that exact plan, followed by a durable reread and
-root recomposition. Consensus, PoW, vesting-spend, treasury-authorization,
-P2P, and RPC activation gates remain separate requirements. This prerequisite
-does not make Trident Public testnet ready.
+The state-machine consumer can commit the already verified envelope/datadir
+identity plus that exact plan in one batch. A sealed storage-readiness
+capability is returned only after durable reread and root/identity
+recomposition; exact reopen is idempotent and any partial or mismatched
+datadir is rejected without overwrite. No node startup path consumes the
+capability. Consensus, PoW, vesting-spend, treasury-authorization, P2P, and RPC
+activation gates remain separate requirements. This prerequisite does not make
+Trident Public testnet ready.
 
 ## Quick start (Docker)
 

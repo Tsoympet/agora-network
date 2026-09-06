@@ -69,15 +69,22 @@ domain-separated state root required by the offline header. Validator bonds are
 removed from liquid account balances; vesting remains a non-additive
 encumbrance with explicit release arithmetic.
 
-`GenesisBuilder` still does not seed live balances from this candidate. Its
-legacy load paths reject every complete or partial Trident marker before
-examining or creating v2 genesis state, including datadirs that also contain a
-valid v2 genesis hash. No live-plan batch or commit API exists. The final
-storage blocker is one durable all-or-nothing commit that combines the
-previously verified envelope/identity and exact live-state plan, followed by a
-durable reread and root recomposition. Node boot additionally remains blocked
-on explicit consensus, PoW, vesting/treasury enforcement, P2P, and RPC
-activation gates. Frozen v2 loading and identities remain unchanged.
+`TridentLiveStatePlan::commit_atomically` now combines that exact plan with the
+Block 0 envelope and datadir identity in one `WriteBatch`. A fresh store first
+passes a full COW root/identity recomputation; the sole durable write is then
+reread through an independently rederived plan.
+`reopen_verified_trident_live_state` requires exact bytes and returns the
+sealed, non-serializable `TridentLiveStateReadiness` capability only after all
+component, body, state, manifest, header, and datadir identities verify. Exact
+reopen is idempotent; partial, additional, or mismatched state is never
+overwritten.
+
+`GenesisBuilder` still does not call this API. Its legacy load paths reject
+every complete or partial Trident marker before examining or creating v2
+genesis state, including datadirs that also contain a valid v2 genesis hash.
+Node boot remains blocked until one Trident loader requires the capability and
+the consensus, PoW, vesting/treasury enforcement, P2P, and RPC paths all consume
+the same versioned state. Frozen v2 loading and identities remain unchanged.
 
 ## Virtual UTXO (Phase 28)
 

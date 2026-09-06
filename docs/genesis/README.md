@@ -103,8 +103,8 @@ creating its libp2p key, constructing a swarm, or binding RPC. A future Trident
 node must derive the expected identity from independently verified inputs and
 pass the exact stored-byte comparison at the same startup boundary.
 
-The candidate is still deliberately not accepted as live state. The offline
-`TridentLiveStatePlan` now derives a canonical TLT issuance body/outpoint set
+The candidate is still deliberately not accepted by node startup. The offline
+`TridentLiveStatePlan` derives a canonical TLT issuance body/outpoint set
 and every account, supply, treasury/control, vesting, validator, epoch snapshot,
 reward-pool, acceptance, and initial-finality record. Every manifest leaf maps
 to one primary versioned key/value; derived runtime indexes cannot substitute
@@ -112,11 +112,16 @@ for a missing source mapping. The plan stages only in a COW overlay, proves
 per-asset conservation, rereads exact bytes, recomposes its component roots,
 and rejects any body/state mismatch against the commitment or header.
 
-The final storage blocker is an explicit atomic writer that combines the
-verified envelope/datadir identity and this exact plan in one durable commit,
-then rereads and recomposes before exposing the datadir. Separate consensus,
-PoW, vesting-spend, treasury-authorization, P2P, and RPC activation gates remain
-mandatory. Until those exist together, v3 remains offline-only and
+The state-machine API can now combine the verified envelope/datadir identity
+and exact plan in one durable batch. It performs a full COW preflight, then
+independently rederives and rereads every root and identity before returning a
+sealed storage-readiness capability. Exact committed reopen is idempotent;
+partial or mismatched state is rejected without overwrite.
+
+No current node loader accepts that capability. Consensus, PoW,
+vesting-spend, treasury-authorization, P2P, and RPC activation gates remain
+mandatory, and the checked-in artifact remains unfrozen. Until one complete
+startup path consumes all of them, v3 remains offline-only and
 `AGORA_GENESIS_FILE` continues to accept v2 artifacts only.
 
 Populated `genesis_set` entries use:

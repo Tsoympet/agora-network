@@ -100,7 +100,29 @@ initial finality, DRC payments, and community state. Planning writes the exact
 record set only to a copy-on-write overlay, rereads every byte, recomputes every
 component, and confirms equality with both commitment and header. The base
 store is snapshotted before and after and must remain byte-for-byte unchanged.
-There is deliberately no live-plan `WriteBatch` accessor or commit operation.
+
+## Atomic materialization consumer
+
+`TridentLiveStatePlan::commit_atomically` is the only durable consumer of the
+plan. For a fresh store it combines all canonical UTXO, account, supply,
+treasury/control, vesting, staking, epoch, reward, finality, acceptance,
+header, body, envelope, and datadir-identity records into one `WriteBatch`.
+Before that one durable write, the complete batch is applied to a COW overlay
+and every component/body/header/manifest root and identity is recomputed from
+the staged bytes.
+
+After the write, `reopen_verified_trident_live_state` independently rederives
+the plan from the verified manifest and header, requires an exact store
+snapshot, rereads the complete Block 0 envelope and datadir identity, and
+recomputes every root. A write error or any missing, additional, malformed,
+partial, tampered, or mismatched record returns an error and no readiness
+value. Calling the commit API against the exact already-committed snapshot is
+idempotent and performs no write; no other existing state is overwritten.
+
+Only that durable verifier can construct `TridentLiveStateReadiness`. The
+type's fields and constructor are sealed, it is not serializable, and it
+proves only this storage prerequisite. It has no operation that starts
+consensus, mining, P2P, or RPC.
 
 ## Offline header bridge
 
@@ -116,25 +138,21 @@ no loader, mining, consensus, RPC, or P2P consumer.
 ## Why the loader remains disabled
 
 The abstraction still does not construct the legacy [`agora_types::Block`],
-commit live state, or run inside `agora-node`. A partial boot path remains
-unsafe because:
+or run inside `agora-node`. The storage prerequisite is complete, but a partial
+boot path remains unsafe because:
 
-1. No API atomically combines the verified Meta envelope/datadir identity and
-   the verified live-state plan into one durable candidate commit with a
-   post-commit reread. This is the final storage prerequisite.
-2. The Trident header/body encoding and composed-root version remain
+1. The Trident header/body encoding and composed-root version remain
    offline-only. Consensus, PoW, acceptance, reorg, vesting-spend, treasury
    authorization, storage, P2P, and RPC gates must consume those exact versions
    before any node may boot them; the frozen v2 `BlockHeader`/`Block` path cannot
    be repurposed.
-3. Future Trident startup must call `verify_trident_datadir_identity` with the
-   identity derived from its independently verified artifact and concrete
-   header before loading a libp2p key or binding RPC. This prerequisite provides
-   that fail-closed comparison, but no Trident runtime path invokes it yet.
+2. A future Trident node loader must independently verify the frozen artifact
+   and concrete header, call `reopen_verified_trident_live_state`, and require
+   its sealed capability before loading a libp2p key or binding RPC. No current
+   startup path accepts that capability, so it cannot be bypassed accidentally.
+3. The checked-in artifact is still unfrozen. The commit API consumes typed,
+   already verified state and header inputs; it does not read
+   `AGORA_GENESIS_FILE` or supply ceremony values.
 
-The final atomic-commit blocker is intentionally narrow: append the already
-verified envelope and this exact plan to one durable batch, reject any existing
-live/candidate state, commit once, and reread/recompose before exposing the
-datadir. Runtime activation gates are separate follow-up work. Until both
-atomic persistence and explicit activation exist, `AGORA_GENESIS_FILE` remains
-the frozen v2 loader only.
+Until one complete startup path consumes the capability and all activation
+gates, `AGORA_GENESIS_FILE` remains the frozen v2 loader only.

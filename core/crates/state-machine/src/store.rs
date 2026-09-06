@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::columns::ColumnFamily;
@@ -12,6 +14,15 @@ use crate::{StateError, StateZone};
 ///   otherwise falls back to an in-memory map (path ignored)
 pub struct StateStore {
     inner: Inner,
+    #[cfg(test)]
+    test_controls: TestControls,
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct TestControls {
+    fail_next_batch_write: AtomicBool,
+    batch_write_calls: AtomicUsize,
 }
 
 /// In-memory backend map: `(cf, key) -> value`.
@@ -86,6 +97,8 @@ impl StateStore {
     pub fn open_in_memory() -> Self {
         Self {
             inner: Inner::Memory(Arc::new(Mutex::new(HashMap::new()))),
+            #[cfg(test)]
+            test_controls: TestControls::default(),
         }
     }
 
@@ -99,6 +112,8 @@ impl StateStore {
                 base,
                 delta: Arc::new(Mutex::new(HashMap::new())),
             },
+            #[cfg(test)]
+            test_controls: TestControls::default(),
         }
     }
 
@@ -109,6 +124,8 @@ impl StateStore {
     pub fn cow_overlay(&self) -> Self {
         Self::open_cow_overlay(Arc::new(Self {
             inner: self.clone_inner(),
+            #[cfg(test)]
+            test_controls: TestControls::default(),
         }))
     }
 
@@ -157,6 +174,8 @@ impl StateStore {
 
         Ok(Self {
             inner: Inner::Rocks(Arc::new(db)),
+            #[cfg(test)]
+            test_controls: TestControls::default(),
         })
     }
 
@@ -295,6 +314,19 @@ impl StateStore {
 
     /// Commit a [`WriteBatch`] atomically (all ops apply, or none on error).
     pub fn write_batch(&self, batch: WriteBatch) -> Result<(), StateError> {
+        #[cfg(test)]
+        {
+            if self
+                .test_controls
+                .fail_next_batch_write
+                .swap(false, Ordering::SeqCst)
+            {
+                return Err(StateError::Storage("injected batch write failure".into()));
+            }
+            self.test_controls
+                .batch_write_calls
+                .fetch_add(1, Ordering::SeqCst);
+        }
         match &self.inner {
             Inner::Memory(map) => {
                 let mut guard = map
@@ -346,6 +378,18 @@ impl StateStore {
                 Ok(())
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_batch_write_for_test(&self) {
+        self.test_controls
+            .fail_next_batch_write
+            .store(true, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn batch_write_calls_for_test(&self) -> usize {
+        self.test_controls.batch_write_calls.load(Ordering::SeqCst)
     }
 
     pub fn put(&self, zone: StateZone, key: &[u8], value: &[u8]) -> Result<(), StateError> {

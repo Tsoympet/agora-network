@@ -138,8 +138,7 @@ commission, metadata commitments, timestamp/difficulty, and reward-drip
 policy), a lossless Meta envelope, and fail-closed overlay verification before
 any durable candidate write. A separate domain- and version-gated Trident
 header now commits the Block 0/body/state/policy/version identities offline
-without changing frozen v2 bytes. It still does not durably materialize live
-balances or provide a node loader entry point. A versioned Borsh datadir
+without changing frozen v2 bytes. A versioned Borsh datadir
 identity now binds the chain, artifact, policy, Block 0 commitment, state root,
 network fingerprint, and available header identity/hash in the same atomic
 candidate batch. Legacy/v2 startup rejects that marker before libp2p identity
@@ -150,10 +149,15 @@ A complete offline plan now deterministically maps Block 0 into canonical
 UTXOs, accounts, supply buckets, treasury controls, vesting locks, validator
 records, epoch snapshots, reward pools, acceptance, and initial finality. It
 derives the body and composed state roots, verifies them against the header, and
-stages only in a COW overlay. A Trident v3 node loader remains blocked on one
-atomic durable commit plus post-commit root verification and explicit
-consensus/PoW/vesting/treasury/P2P/RPC activation gates. Networking and RPC
-remain disabled.
+preflights the complete envelope/identity/live-state record set in a COW
+overlay. The state-machine consumer now commits that set through one durable
+batch, rederives and reverifies every root and identity from the committed
+bytes, and exposes a sealed storage-readiness capability only on success.
+
+A Trident v3 node loader remains blocked until the entire startup path requires
+that capability and consensus, PoW, acceptance, reorg, vesting, treasury, P2P,
+and RPC all consume the same Trident versions. The checked-in artifact remains
+unfrozen; `AGORA_GENESIS_FILE`, networking, and RPC remain on the v2 path.
 See [`../core/block-zero.md`](../core/block-zero.md).
 
 PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.

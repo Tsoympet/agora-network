@@ -59,8 +59,14 @@ coverage, deterministic key order, TLT outpoints, OVL/DRC asset isolation,
 per-asset conservation, treasury controls, vesting arithmetic and
 bond/vesting disjointness, epoch-zero validator snapshots, initial unfinalized
 finality, root/header tamper rejection, and COW base-store no-write behavior.
-RocksDB reopen is permitted only after staging the records in an overlay; the
-reopened base must remain empty.
+
+Atomic materialization tests cover one-batch in-memory and RocksDB commits,
+COW root recomputation, durable exact reopen, idempotency without a second
+write, injected write failure, partial-state refusal without overwrite,
+component/root/identity tamper, mismatched verified inputs, and absence of P2P
+or RPC filesystem side effects. Only the exact durable snapshot may produce
+the sealed storage-readiness capability. These tests do not activate a node or
+change frozen v2 behavior.
 
 ## Integration
 
