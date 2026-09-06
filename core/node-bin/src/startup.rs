@@ -163,4 +163,57 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn trident_live_state_marker_refuses_legacy_startup_before_p2p_side_effects() {
+        let dir = temp_rocks_dir("trident-live-state-refusal");
+        let identity_path = p2p_identity_path(&dir);
+        {
+            let store = StateStore::open(&dir).unwrap();
+            store
+                .put_cf(
+                    ColumnFamily::Meta,
+                    meta_keys::TRIDENT_LIVE_STATE_PLAN_VERSION,
+                    &1u32.to_le_bytes(),
+                )
+                .unwrap();
+        }
+
+        let identity_loader_called = Cell::new(false);
+        let error = prepare_legacy_datadir(
+            &dir,
+            &ChainParams::dev(),
+            StoragePolicy::default(),
+            |path| -> Result<(), String> {
+                identity_loader_called.set(true);
+                std::fs::create_dir_all(path.parent().expect("identity parent"))
+                    .map_err(|error| error.to_string())?;
+                std::fs::write(path, b"must-not-exist").map_err(|error| error.to_string())
+            },
+        )
+        .err()
+        .expect("Trident live state must be refused");
+
+        assert!(error.contains("legacy/v2 startup refuses"));
+        assert!(!identity_loader_called.get());
+        assert!(!identity_path.exists());
+        assert!(!dir.join("p2p").exists());
+        {
+            let store = StateStore::open(&dir).unwrap();
+            assert_eq!(
+                store
+                    .get_cf(
+                        ColumnFamily::Meta,
+                        meta_keys::TRIDENT_LIVE_STATE_PLAN_VERSION
+                    )
+                    .unwrap(),
+                Some(1u32.to_le_bytes().to_vec())
+            );
+            assert!(store
+                .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
+                .unwrap()
+                .is_none());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

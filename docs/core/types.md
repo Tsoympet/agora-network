@@ -59,9 +59,11 @@ mismatches against caller-recomputed roots and network identity.
 The type intentionally has no serde or `ts-rs` export: it is not shared with
 clients and is not accepted by mining, consensus, RPC, or P2P. The offline
 state-machine planner now derives its exact Block 0 body and recomputable
-live-state root, but exposes no durable writer. Runtime activation remains
-blocked on one atomic envelope/plan commit with durable reread, plus an explicit
-consensus/PoW/storage/network protocol switch.
+live-state root. The state-machine consumer can atomically persist the matching
+envelope, plan, and datadir identity and returns a sealed storage-readiness
+capability only after durable root/identity verification. Runtime activation
+remains blocked until a node loader requires that capability and implements an
+explicit consensus/PoW/storage/network protocol switch.
 
 ## Change process
 

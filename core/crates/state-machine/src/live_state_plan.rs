@@ -3,7 +3,8 @@
 //! The plan projects every committed manifest leaf onto exactly one primary
 //! versioned record, derives the runtime indexes from those records, stages the
 //! complete set in a copy-on-write overlay, and recomputes the composed root.
-//! It intentionally exposes no durable commit operation.
+//! It exposes no raw batch; the separate fail-closed consumer is the only
+//! durable path.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -315,9 +316,27 @@ impl TridentLiveStatePlan {
         base: &StateStore,
         header: &TridentHeader,
     ) -> Result<Self, StateError> {
+        let plan = Self::derive_verified(state, header)?;
+        validate_plan_base(base, state, header)?;
+
+        let before = snapshot_store(base)?;
+        let overlay = plan.staged_overlay(base)?;
+        plan.verify_overlay(&overlay)?;
+        let after = snapshot_store(base)?;
+        if after != before {
+            return Err(storage_error(
+                "Block 0 planning mutated the caller's base store",
+            ));
+        }
+        Ok(plan)
+    }
+
+    pub(crate) fn derive_verified(
+        state: &TridentBlockZeroState,
+        header: &TridentHeader,
+    ) -> Result<Self, StateError> {
         state.verify().map_err(storage_error)?;
         validate_header(state, header)?;
-        validate_plan_base(base, state, header)?;
 
         let projection = projected_records(state);
         let body_root = projection.body.root();
@@ -359,16 +378,6 @@ impl TridentLiveStatePlan {
             conservation,
         };
         plan.verify(state, header)?;
-
-        let before = snapshot_store(base)?;
-        let overlay = plan.staged_overlay(base)?;
-        plan.verify_overlay(&overlay)?;
-        let after = snapshot_store(base)?;
-        if after != before {
-            return Err(storage_error(
-                "Block 0 planning mutated the caller's base store",
-            ));
-        }
         Ok(plan)
     }
 
@@ -446,8 +455,8 @@ impl TridentLiveStatePlan {
         Ok(())
     }
 
-    /// Apply the plan only to a new COW view. There is deliberately no method
-    /// that returns a batch or writes these records to the durable base.
+    /// Apply the plan only to a new COW view. Raw batch access remains private
+    /// so durable writes can only pass the atomic consumer's full verification.
     pub fn staged_overlay(&self, base: &StateStore) -> Result<StateStore, StateError> {
         let before = snapshot_store(base)?;
         let overlay = base.cow_overlay();
@@ -461,7 +470,7 @@ impl TridentLiveStatePlan {
         Ok(overlay)
     }
 
-    fn verify_overlay(&self, overlay: &StateStore) -> Result<(), StateError> {
+    pub(crate) fn verify_overlay(&self, overlay: &StateStore) -> Result<(), StateError> {
         let mut reread = Vec::with_capacity(self.records.len());
         for record in &self.records {
             let value = overlay
@@ -1937,6 +1946,131 @@ mod tests {
             .is_none());
     }
 
+    #[test]
+    fn atomic_commit_reopens_idempotently_and_uses_one_durable_batch() {
+        let (state, header) = state_and_header();
+        let store = StateStore::open_in_memory();
+        let plan = state.plan_live_state(&store, &header).unwrap();
+
+        let ready = plan.commit_atomically(&store, &state, &header).unwrap();
+        assert_eq!(store.batch_write_calls_for_test(), 1);
+        assert_eq!(ready.manifest_root(), state.manifest_root());
+        assert_eq!(ready.body_root(), header.body_root);
+        assert_eq!(ready.state_roots(), &plan.state_roots);
+        assert_eq!(ready.state_root(), header.state_root);
+        assert_eq!(
+            ready.header_hash(),
+            header.commitment_hash().expect("verified header")
+        );
+        assert_eq!(
+            ready.datadir_identity().block_zero_header_hash,
+            Some(ready.header_hash())
+        );
+
+        let committed = snapshot_store(&store).unwrap();
+        let reopened = crate::reopen_verified_trident_live_state(&store, &state, &header).unwrap();
+        assert_eq!(reopened, ready);
+        let idempotent = plan.commit_atomically(&store, &state, &header).unwrap();
+        assert_eq!(idempotent, ready);
+        assert_eq!(store.batch_write_calls_for_test(), 1);
+        assert_eq!(snapshot_store(&store).unwrap(), committed);
+    }
+
+    #[test]
+    fn injected_atomic_write_failure_returns_no_readiness_and_leaves_store_empty() {
+        let (state, header) = state_and_header();
+        let store = StateStore::open_in_memory();
+        let plan = state.plan_live_state(&store, &header).unwrap();
+        store.fail_next_batch_write_for_test();
+
+        let error = plan.commit_atomically(&store, &state, &header).unwrap_err();
+        assert!(error.to_string().contains("injected batch write failure"));
+        assert_eq!(store.batch_write_calls_for_test(), 0);
+        for cf in ColumnFamily::ALL {
+            assert!(store.scan_prefix(cf, &[]).unwrap().is_empty());
+        }
+        assert!(crate::reopen_verified_trident_live_state(&store, &state, &header).is_err());
+    }
+
+    #[test]
+    fn partial_existing_state_is_rejected_without_overwrite() {
+        let (state, header) = state_and_header();
+        let planning_store = StateStore::open_in_memory();
+        let plan = state
+            .plan_live_state(&planning_store, &header)
+            .expect("independent plan");
+        let store = StateStore::open_in_memory();
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::TRIDENT_LIVE_STATE_STATE_ROOT,
+                plan.state_root.as_bytes(),
+            )
+            .unwrap();
+        let before = snapshot_store(&store).unwrap();
+
+        let error = plan.commit_atomically(&store, &state, &header).unwrap_err();
+        assert!(error.to_string().contains("partial, mismatched"));
+        assert_eq!(store.batch_write_calls_for_test(), 0);
+        assert_eq!(snapshot_store(&store).unwrap(), before);
+    }
+
+    #[test]
+    fn durable_record_and_root_tamper_fail_closed_without_repair() {
+        let (state, header) = state_and_header();
+        let store = StateStore::open_in_memory();
+        let plan = state.plan_live_state(&store, &header).unwrap();
+        plan.commit_atomically(&store, &state, &header).unwrap();
+
+        let utxo = plan
+            .records()
+            .iter()
+            .find(|record| record.component() == Some(TridentLiveStateComponent::Utxo))
+            .expect("planned UTXO");
+        let mut changed = utxo.value().to_vec();
+        changed[0] ^= 1;
+        store
+            .put_cf(utxo.column_family(), utxo.key(), &changed)
+            .unwrap();
+        let tampered = snapshot_store(&store).unwrap();
+        assert!(crate::reopen_verified_trident_live_state(&store, &state, &header).is_err());
+        assert!(plan.commit_atomically(&store, &state, &header).is_err());
+        assert_eq!(snapshot_store(&store).unwrap(), tampered);
+        assert_eq!(store.batch_write_calls_for_test(), 1);
+
+        store
+            .put_cf(utxo.column_family(), utxo.key(), utxo.value())
+            .unwrap();
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                meta_keys::TRIDENT_LIVE_STATE_STATE_ROOT,
+                &[0x99; 32],
+            )
+            .unwrap();
+        let wrong_root = snapshot_store(&store).unwrap();
+        assert!(crate::reopen_verified_trident_live_state(&store, &state, &header).is_err());
+        assert_eq!(snapshot_store(&store).unwrap(), wrong_root);
+        assert_eq!(store.batch_write_calls_for_test(), 1);
+    }
+
+    #[test]
+    fn mismatched_verified_inputs_never_overwrite_an_exact_commit() {
+        let (state, header) = state_and_header();
+        let store = StateStore::open_in_memory();
+        let plan = state.plan_live_state(&store, &header).unwrap();
+        plan.commit_atomically(&store, &state, &header).unwrap();
+        let before = snapshot_store(&store).unwrap();
+
+        let mut wrong_header = header.clone();
+        wrong_header.state_root = Hash([0x88; 32]);
+        let error =
+            crate::reopen_verified_trident_live_state(&store, &state, &wrong_header).unwrap_err();
+        assert!(error.to_string().contains("state root mismatch"));
+        assert_eq!(snapshot_store(&store).unwrap(), before);
+        assert_eq!(store.batch_write_calls_for_test(), 1);
+    }
+
     #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_reopen_proves_overlay_plan_never_reaches_base() {
@@ -1970,5 +2104,88 @@ mod tests {
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn rocksdb_atomic_commit_reopens_exactly_without_network_side_effects() {
+        let root = std::env::temp_dir().join(format!(
+            "agora-live-commit-reopen-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let state_dir = root.join("state");
+        let _ = std::fs::remove_dir_all(&root);
+        let (state, header) = state_and_header();
+        let plan;
+        let expected;
+        {
+            let store = StateStore::open(&state_dir).unwrap();
+            plan = state.plan_live_state(&store, &header).unwrap();
+            expected = plan.commit_atomically(&store, &state, &header).unwrap();
+            assert_eq!(store.batch_write_calls_for_test(), 1);
+        }
+        assert!(!root.join("p2p").exists());
+        assert!(!root.join("rpc").exists());
+        {
+            let reopened_store = StateStore::open(&state_dir).unwrap();
+            let reopened =
+                crate::reopen_verified_trident_live_state(&reopened_store, &state, &header)
+                    .unwrap();
+            assert_eq!(reopened, expected);
+            assert_eq!(
+                plan.commit_atomically(&reopened_store, &state, &header)
+                    .unwrap(),
+                expected
+            );
+            assert_eq!(reopened_store.batch_write_calls_for_test(), 0);
+        }
+        assert!(!root.join("p2p").exists());
+        assert!(!root.join("rpc").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn rocksdb_injected_write_failure_and_partial_reopen_fail_closed() {
+        let root = std::env::temp_dir().join(format!(
+            "agora-live-commit-failure-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let (state, header) = state_and_header();
+        let planning_store = StateStore::open_in_memory();
+        let plan = state.plan_live_state(&planning_store, &header).unwrap();
+        {
+            let store = StateStore::open(&root).unwrap();
+            store.fail_next_batch_write_for_test();
+            assert!(plan.commit_atomically(&store, &state, &header).is_err());
+            for cf in ColumnFamily::ALL {
+                assert!(store.scan_prefix(cf, &[]).unwrap().is_empty());
+            }
+            store
+                .put_cf(
+                    ColumnFamily::Meta,
+                    meta_keys::TRIDENT_LIVE_STATE_STATE_ROOT,
+                    plan.state_root.as_bytes(),
+                )
+                .unwrap();
+        }
+        {
+            let store = StateStore::open(&root).unwrap();
+            let before = snapshot_store(&store).unwrap();
+            assert!(plan.commit_atomically(&store, &state, &header).is_err());
+            assert!(crate::reopen_verified_trident_live_state(&store, &state, &header).is_err());
+            assert_eq!(snapshot_store(&store).unwrap(), before);
+            assert_eq!(store.batch_write_calls_for_test(), 0);
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

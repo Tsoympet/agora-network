@@ -16,6 +16,7 @@ mod genesis;
 mod ghostdag_store;
 mod governance_state;
 mod headers;
+mod live_state_commit;
 mod live_state_plan;
 mod marks;
 mod monetary;
@@ -82,6 +83,7 @@ pub use governance_state::{
     CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
 };
 pub use headers::{header_key, load_header, store_header, store_header_into};
+pub use live_state_commit::{reopen_verified_trident_live_state, TridentLiveStateReadiness};
 pub use live_state_plan::{
     TridentAssetConservation, TridentBlockZeroAcceptanceRecord, TridentBlockZeroBody,
     TridentBlockZeroTltIssuance, TridentLiveAllocationRecord, TridentLiveIdentityRecord,

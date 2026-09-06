@@ -95,8 +95,8 @@ pub mod meta_keys {
     pub const TRIDENT_DATADIR_IDENTITY_VERSION: &[u8] = b"meta/trident_datadir_identity/version";
     pub const TRIDENT_DATADIR_IDENTITY: &[u8] = b"meta/trident_datadir_identity/record";
 
-    // Offline-only live-state plan metadata. No current writer commits these
-    // records and no node boot path consumes them.
+    // Trident initial live-state metadata. Only the fail-closed atomic plan
+    // consumer writes these records; no node boot path consumes them yet.
     pub const TRIDENT_LIVE_STATE_PLAN_VERSION: &[u8] = b"meta/trident_live_state/plan_version";
     pub const TRIDENT_LIVE_STATE_MANIFEST_ROOT: &[u8] = b"meta/trident_live_state/manifest_root";
     pub const TRIDENT_LIVE_STATE_BODY_ROOT: &[u8] = b"meta/trident_live_state/body_root";

@@ -1,8 +1,8 @@
 //! Canonical, artifact-only Trident Block 0 state commitment.
 //!
 //! A separate offline planner can now derive and COW-stage every live record,
-//! body root, and composed state root. Neither this module nor that planner
-//! exposes a live-state commit or participates in node boot.
+//! body root, and composed state root. The atomic consumer commits those
+//! verified records, but neither path participates in node boot.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1111,9 +1111,9 @@ fn encode_datadir_identity_values(
     ])
 }
 
-fn encode_block_zero_batch(
+pub(crate) fn encode_block_zero_records(
     record: &TridentBlockZeroStorageRecord,
-) -> Result<WriteBatch, StateError> {
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StateError> {
     let values = encode_block_zero_values(record)?;
     if values.len() != TRIDENT_BLOCK_ZERO_META_KEYS.len() {
         return Err(storage_err(
@@ -1127,7 +1127,9 @@ fn encode_block_zero_batch(
         ));
     }
     let mut seen = BTreeSet::new();
-    let mut batch = WriteBatch::new();
+    let mut records = Vec::with_capacity(
+        TRIDENT_BLOCK_ZERO_META_KEYS.len() + TRIDENT_DATADIR_IDENTITY_META_KEYS.len(),
+    );
     for (key, value) in values {
         if !TRIDENT_BLOCK_ZERO_META_KEYS.contains(&key) {
             return Err(storage_err("unexpected Block 0 Meta key in staged batch"));
@@ -1135,7 +1137,7 @@ fn encode_block_zero_batch(
         if !seen.insert(key) {
             return Err(storage_err("duplicate Block 0 Meta key in staged batch"));
         }
-        batch.put_cf(ColumnFamily::Meta, key, &value);
+        records.push((key.to_vec(), value));
     }
     if seen.len() != TRIDENT_BLOCK_ZERO_META_KEYS.len() {
         return Err(storage_err(
@@ -1154,12 +1156,23 @@ fn encode_block_zero_batch(
                 "duplicate Trident datadir identity Meta key in staged batch",
             ));
         }
-        batch.put_cf(ColumnFamily::Meta, key, &value);
+        records.push((key.to_vec(), value));
     }
     if identity_seen.len() != TRIDENT_DATADIR_IDENTITY_META_KEYS.len() {
         return Err(storage_err(
             "staged batch is missing canonical Trident datadir identity keys",
         ));
+    }
+    records.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(records)
+}
+
+fn encode_block_zero_batch(
+    record: &TridentBlockZeroStorageRecord,
+) -> Result<WriteBatch, StateError> {
+    let mut batch = WriteBatch::new();
+    for (key, value) in encode_block_zero_records(record)? {
+        batch.put_cf(ColumnFamily::Meta, &key, &value);
     }
     Ok(batch)
 }
