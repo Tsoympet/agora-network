@@ -48,8 +48,14 @@ Civic state is persisted under RocksDB Meta key `meta/governance` (`CivicSnapsho
 There is no data-commitment submit or confirmation RPC. The TLT
 `agora_submitTransaction` schema has no payload field, and commitment bytes
 must not be hidden in a transfer or OVL execution call. See
-[`data-availability.md`](data-availability.md) for the unactivated Trident type
-prerequisite and required consensus work.
+[`data-availability.md`](data-availability.md) for the block/state consensus
+lane and remaining fee, mempool, outbox, and transport prerequisites.
+
+The internal acceptance record can distinguish `Accepted`, `ExactDuplicate`,
+and `ConflictLost`, but that alone cannot truthfully report `pending` or
+`orphaned` to a client. An authenticated submit/status API remains disabled
+until it has durable mempool/outbox identity, virtual-view lookup, and states
+separate from full PoW + dual-PoS finality.
 
 ## Dispatch
 

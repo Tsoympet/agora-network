@@ -9,7 +9,8 @@ The acceptance layer is the sole authority for which transactions mutate state, 
 1. Pre-select transferable txs (`selectable_transfers`) — preserves soft-skip / `pending_reserve` semantics from consensus hardening PRs #76–#81.
 2. Fully validate auth even for soft-skipped transfers.
 3. Mutate UTXO **only** for `Accepted` txs.
-4. Emit `BlockAcceptanceRecord` with UTXO, account, stake, OVL execution, and DRC payment statuses aligned to each lane.
+4. Emit `BlockAcceptanceRecord` with UTXO, account, stake, OVL execution, DRC
+   payment, and authenticated DA statuses aligned to each lane.
 5. Persist `acceptance/<block_hash>` in the same atomic `WriteBatch` as `utxo_diff/<block_hash>` and issued supply.
 
 ## Statuses
@@ -23,8 +24,15 @@ The acceptance layer is the sole authority for which transactions mutate state, 
 
 ## Multi-asset
 
-TLT remains UTXO. OVL/DRC use parallel account/stake lanes; OVL execution and DRC payments have dedicated lanes. Apply mutates only `Accepted` operations. DRC payment bodies use `agora-block-body-v4`.
+TLT remains UTXO. OVL/DRC use parallel account/stake lanes; OVL execution,
+DRC payments, and provenance-only DA authorizations have dedicated lanes.
+Apply mutates only `Accepted` operations. DA bodies use
+`agora-block-body-v5`; their `(source, sequence)` key and per-operator replay
+nonce follow the same Virtual first-winner rule. Exact duplicate means the
+same signed authorization ID, not merely matching source data.
 
 ## RPC
 
-`agora_getTransaction` includes `acceptance`. Confirmations require `Accepted` when a record exists.
+`agora_getTransaction` includes TLT transaction acceptance. There is no DA
+status RPC until pending/orphaned tracking can be reported without implying
+hybrid finality.
