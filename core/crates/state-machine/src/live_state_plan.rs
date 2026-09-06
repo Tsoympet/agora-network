@@ -2020,7 +2020,7 @@ mod tests {
         let (state, header) = state_and_header();
         let store = StateStore::open_in_memory();
         let plan = state.plan_live_state(&store, &header).unwrap();
-        plan.commit_atomically(&store, &state, &header).unwrap();
+        let _ready = plan.commit_atomically(&store, &state, &header).unwrap();
 
         let utxo = plan
             .records()
@@ -2059,7 +2059,7 @@ mod tests {
         let (state, header) = state_and_header();
         let store = StateStore::open_in_memory();
         let plan = state.plan_live_state(&store, &header).unwrap();
-        plan.commit_atomically(&store, &state, &header).unwrap();
+        let _ready = plan.commit_atomically(&store, &state, &header).unwrap();
         let before = snapshot_store(&store).unwrap();
 
         let mut wrong_header = header.clone();
