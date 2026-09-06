@@ -166,6 +166,7 @@ impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
             emission: params.emission.clone(),
             chain_id: params.network.chain_id().into(),
             consensus_policy_hash,
+            data_availability_network_fingerprint: None,
         }
     }
 }
