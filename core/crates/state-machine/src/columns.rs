@@ -71,4 +71,22 @@ pub mod meta_keys {
     pub const SCHEMA_VERSION: &[u8] = b"meta/schema_version";
     /// Per-asset issued supply prefix: `meta/issued_supply/<asset_wire_byte>`.
     pub const ISSUED_SUPPLY_ASSET_PREFIX: &[u8] = b"meta/issued_supply/";
+
+    // These keys reserve a lossless candidate Block 0 record for a future
+    // atomic loader. The v2 ignition path never writes them, and their
+    // independent record version does not advance the live datadir schema.
+    pub const TRIDENT_BLOCK_ZERO_RECORD_VERSION: &[u8] = b"meta/trident_block_zero/record_version";
+    pub const TRIDENT_BLOCK_ZERO_RECORD: &[u8] = b"meta/trident_block_zero/record";
+    pub const TRIDENT_BLOCK_ZERO_STATE_PAYLOAD: &[u8] = b"meta/trident_block_zero/state_payload";
+    pub const TRIDENT_BLOCK_ZERO_STATE_ROOT: &[u8] = b"meta/trident_block_zero/state_root";
+    pub const TRIDENT_BLOCK_ZERO_COMMITMENT: &[u8] = b"meta/trident_block_zero/commitment";
+    pub const TRIDENT_BLOCK_ZERO_COMMITMENT_HASH: &[u8] =
+        b"meta/trident_block_zero/commitment_hash";
+    pub const TRIDENT_BLOCK_ZERO_ARTIFACT_IDENTITY: &[u8] =
+        b"meta/trident_block_zero/artifact_identity";
+    pub const TRIDENT_BLOCK_ZERO_CONSENSUS_POLICY_HASH: &[u8] =
+        b"meta/trident_block_zero/consensus_policy_hash";
+    pub const TRIDENT_BLOCK_ZERO_NETWORK_FINGERPRINT: &[u8] =
+        b"meta/trident_block_zero/network_fingerprint";
+    pub const TRIDENT_BLOCK_ZERO_CHAIN_ID: &[u8] = b"meta/trident_block_zero/chain_id";
 }
