@@ -6,10 +6,10 @@
 deterministic Borsh manifest that a future Trident Block 0 transition must
 materialize. Preparation is accepted only from a freeze-ready v3 artifact.
 
-Manifest version 2 is a pre-freeze break. It binds the artifact `chain_id` and
-network fingerprint into both `TridentBlockZeroState` and
-`TridentBlockZeroCommitment` so those identities cannot be omitted from the
-future header/datadir contract.
+Manifest version 3 is a pre-freeze break. It retains the version 2 chain ID and
+network-fingerprint binding and adds complete ceremony-selected validator
+registration fields to `TridentBlockZeroState` and
+`TridentBlockZeroCommitment`.
 
 The manifest commits:
 
@@ -17,8 +17,10 @@ The manifest commits:
 - every TLT, OVL, and DRC initial allocation and vesting lock;
 - maximum, allocated, treasury, staking-reserve, and unissued supply buckets;
 - all three protocol treasuries, including their artifact-selected controls;
-- independent epoch-zero OVL and DRC validator sets, public keys, withdrawal
-  addresses, funded self-bonds, set policies, totals, and snapshot commitments;
+- independent epoch-zero OVL and DRC validator sets, secp256k1 public keys,
+  withdrawal addresses, funded self-bonds, explicitly selected commissions,
+  nonzero 32-byte metadata commitments, set policies, totals, and snapshot
+  commitments;
 - the constitution and emergency-policy hashes;
 - an explicitly unfinalized initial checkpoint state with no signatures or PoW
   satisfaction.
@@ -32,7 +34,7 @@ an exact Borsh round trip and rechecks the state root.
 ## Candidate storage envelope
 
 Explicit Meta keys under `meta/trident_block_zero/` hold a versioned Borsh
-envelope (`TRIDENT_BLOCK_ZERO_STORAGE_VERSION = 2`, independent of live
+envelope (`TRIDENT_BLOCK_ZERO_STORAGE_VERSION = 3`, independent of live
 `SCHEMA_VERSION`). The envelope preserves the complete manifest, canonical
 payload, commitment, commitment hash, artifact identity, consensus policy hash,
 network fingerprint, chain ID, and bound datadir identity.
@@ -88,9 +90,10 @@ would be unsafe because:
    governance store currently initializes compiled defaults rather than the
    artifact-selected constitution and emergency-policy hashes.
 4. No canonical vesting store or lock enforcement exists.
-5. Validator runtime records require per-validator commission and metadata
-   values that the v3 artifact does not contain. Those values must be selected
-   by the ceremony schema, not invented by the loader.
+5. Validator records now have a checked, lossless projection onto the existing
+   asset-scoped `stake/val/` key and `ValidatorRecord` Borsh value. They are
+   still not written into live state or reconciled with the composed runtime
+   state root.
 6. The initial finality record and epoch-zero snapshots need explicit persistent
    keys and inclusion in the live composed state root.
 7. Future Trident startup must call `verify_trident_datadir_identity` with the
@@ -100,7 +103,7 @@ would be unsafe because:
 
 The remaining live-state blocker is the lossless materialization and atomic
 root check: define the concrete Block 0 body/UTXOs, account and treasury
-records, vesting locks, complete validator/finality records, and append them to
+records, vesting locks, validator/finality writes, and append them to
 the already-verified batch only when the recomputed live composed root equals
 the offline header. Explicit consensus/PoW/storage/P2P/RPC activation gates
 must then consume that verified state without changing v2 identities. Until

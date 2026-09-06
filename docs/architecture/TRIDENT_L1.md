@@ -132,8 +132,9 @@ Do **not** use “role-complete” as a substitute for the above.
 Genesis-loader prerequisite status: the integrated runtime can now stage and
 commit genesis storage atomically and can derive all representable runtime
 policy through one freeze-gated conversion. The bounded Block 0 prerequisite
-now includes a versioned Borsh manifest (v2 binds chain ID and network
-fingerprint), a lossless Meta envelope, and fail-closed overlay verification
+now includes a versioned Borsh manifest (v3 preserves the v2 chain/network
+binding and adds ceremony-selected validator commission and metadata
+commitments), a lossless Meta envelope, and fail-closed overlay verification
 before any durable candidate write. A separate domain- and version-gated
 Trident header now commits the Block 0/body/state/policy/version identities
 offline without changing frozen v2 bytes. It still does not materialize live

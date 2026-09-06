@@ -285,7 +285,7 @@ mod tests {
 
     const ENCODING_VECTOR: &str = concat!(
         "61676f72612d74726964656e742d6865616465722d656e76656c6f70652d763101001601",
-        "0000040000001600000061676f72612d74726964656e742d73746174652d763511111111",
+        "0000040000001600000061676f72612d74726964656e742d73746174652d763611111111",
         "111111111111111111111111111111111111111111111111111111112222222222222222",
         "222222222222222222222222222222222222222222222222333333333333333333333333",
         "333333333333333333333333333333333333333302000000444444444444444444444444",
@@ -295,13 +295,13 @@ mod tests {
         "77777777777777777777777777777777777777777777777777777777"
     );
     const COMMITMENT_VECTOR: &str =
-        "24055e6d1e9ff030ba321b75d4f95ecb6b9ebdec1bd648dd0a10d95d5bbc3d55";
+        "daeb33929a5050ed9039519010bee7dda8a953416f460a3940cd8176e6d5ca3a";
 
     fn sample_header() -> TridentHeader {
         TridentHeader::new(
             TridentHeaderIdentity {
                 protocol_version: 4,
-                state_transition_version: "agora-trident-state-v5".into(),
+                state_transition_version: "agora-trident-state-v6".into(),
                 block_zero_commitment: Hash([0x11; 32]),
                 artifact_identity: Hash([0x22; 32]),
                 consensus_policy_hash: Hash([0x33; 32]),
