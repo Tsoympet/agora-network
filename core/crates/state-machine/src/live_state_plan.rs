@@ -615,7 +615,9 @@ fn projected_records(state: &TridentBlockZeroState) -> ProjectedRecords {
                     tx_id: issuance_id,
                     index: tlt_index,
                 };
-                tlt_index = tlt_index.saturating_add(1);
+                tlt_index = tlt_index
+                    .checked_add(1)
+                    .expect("manifest coverage bounds TLT output count");
                 tlt_outpoints.insert(allocation.address.0, outpoint);
                 push_encoded(
                     &mut records,
@@ -635,7 +637,10 @@ fn projected_records(state: &TridentBlockZeroState) -> ProjectedRecords {
                     .copied()
                     .unwrap_or(0);
                 let account = AccountState {
-                    balance: allocation.amount.saturating_sub(bonded),
+                    balance: allocation
+                        .amount
+                        .checked_sub(bonded)
+                        .expect("manifest validation funds every validator bond"),
                     nonce: 0,
                 };
                 let component = if allocation.asset == NativeAssetId::OVL {
@@ -685,7 +690,10 @@ fn projected_records(state: &TridentBlockZeroState) -> ProjectedRecords {
             supply.max_supply.to_le_bytes().to_vec(),
             Some(TridentLiveStateComponent::Supply),
         );
-        let issued = supply.genesis_allocated.saturating_add(supply.treasury);
+        let issued = supply
+            .genesis_allocated
+            .checked_add(supply.treasury)
+            .expect("manifest validation excludes issued-supply overflow");
         push_raw(
             &mut records,
             ColumnFamily::Meta,
@@ -735,10 +743,9 @@ fn projected_records(state: &TridentBlockZeroState) -> ProjectedRecords {
     for (index, schedule) in state.vesting.iter().enumerate() {
         let funding = match schedule.asset {
             NativeAssetId::TLT => TridentVestingFunding::TltOutPoint(
-                *tlt_outpoints.get(&schedule.address.0).unwrap_or(&OutPoint {
-                    tx_id: Hash::ZERO,
-                    index: 0,
-                }),
+                *tlt_outpoints
+                    .get(&schedule.address.0)
+                    .expect("manifest validation funds every TLT vesting lock"),
             ),
             NativeAssetId::OVL | NativeAssetId::DRC => TridentVestingFunding::Account {
                 asset: schedule.asset,
@@ -1158,7 +1165,9 @@ fn validator_bonds(state: &TridentBlockZeroState) -> BTreeMap<(u8, [u8; 20]), u6
             let amount = bonds
                 .entry((set.asset.wire_byte(), validator.operator.0))
                 .or_insert(0u64);
-            *amount = amount.saturating_add(validator.self_bond);
+            *amount = amount
+                .checked_add(validator.self_bond)
+                .expect("manifest validation excludes validator bond overflow");
         }
     }
     bonds
@@ -1390,7 +1399,7 @@ fn fields(prefix: &str, names: &[&str]) -> Vec<String> {
         .collect()
 }
 
-fn canonicalize_records(records: &mut Vec<TridentPlannedStoreRecord>) -> Result<(), StateError> {
+fn canonicalize_records(records: &mut [TridentPlannedStoreRecord]) -> Result<(), StateError> {
     records.sort_by(record_order);
     for pair in records.windows(2) {
         if pair[0].column_family == pair[1].column_family && pair[0].key == pair[1].key {
@@ -1461,9 +1470,9 @@ fn batch_from_records(records: &[TridentPlannedStoreRecord]) -> WriteBatch {
     batch
 }
 
-fn snapshot_store(
-    store: &StateStore,
-) -> Result<Vec<(ColumnFamily, Vec<(Vec<u8>, Vec<u8>)>)>, StateError> {
+type StoreSnapshot = Vec<(ColumnFamily, Vec<crate::store::KvPair>)>;
+
+fn snapshot_store(store: &StateStore) -> Result<StoreSnapshot, StateError> {
     ColumnFamily::ALL
         .iter()
         .copied()
