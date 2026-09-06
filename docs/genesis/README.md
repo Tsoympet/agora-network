@@ -83,10 +83,11 @@ The integrated runtime is still insufficient for a safe Trident node loader.
 Genesis storage has an atomic prepared-batch commit, and a freeze-ready
 artifact can now produce a complete typed policy candidate without compiled
 policy defaults. It can also prepare a versioned Block 0 commitment (manifest
-v3, including chain ID, network fingerprint, and complete validator
-registrations) and a lossless Meta envelope
-that is overlay-verified before a future loader may append it. Storage envelope
-v3 now includes a separately versioned Borsh datadir identity, persisted in the
+v4 over the v3 artifact schema, including chain ID, network fingerprint,
+artifact timestamp/difficulty, reward-drip policy, and complete validator
+registrations) and a lossless Meta envelope that is overlay-verified before a
+future loader may append it. Storage envelope v4 includes a separately
+versioned Borsh datadir identity, persisted in the
 same atomic batch and checked byte-for-byte on reopen. That identity binds the
 chain, network fingerprint, artifact, consensus policy, Block 0 commitment,
 committed state root, header network identity, and the concrete header hash
@@ -102,14 +103,20 @@ creating its libp2p key, constructing a swarm, or binding RPC. A future Trident
 node must derive the expected identity from independently verified inputs and
 pass the exact stored-byte comparison at the same startup boundary.
 
-The candidate is still deliberately not accepted as live state: `genesis_hash` still
-names the full artifact identity, while DAG bootstrap requires the hash of a
-concrete runtime block/header. Remaining blockers are the concrete Trident
-Block 0 body and body-root rule; lossless atomic
-UTXO/account/treasury/vesting/validator/finality writes whose recomputed live
-state root equals the offline header; and explicit consensus, PoW, storage,
-P2P, and RPC activation gates.
-Until those exist together, v3 remains offline-only and
+The candidate is still deliberately not accepted as live state. The offline
+`TridentLiveStatePlan` now derives a canonical TLT issuance body/outpoint set
+and every account, supply, treasury/control, vesting, validator, epoch snapshot,
+reward-pool, acceptance, and initial-finality record. Every manifest leaf maps
+to one primary versioned key/value; derived runtime indexes cannot substitute
+for a missing source mapping. The plan stages only in a COW overlay, proves
+per-asset conservation, rereads exact bytes, recomposes its component roots,
+and rejects any body/state mismatch against the commitment or header.
+
+The final storage blocker is an explicit atomic writer that combines the
+verified envelope/datadir identity and this exact plan in one durable commit,
+then rereads and recomposes before exposing the datadir. Separate consensus,
+PoW, vesting-spend, treasury-authorization, P2P, and RPC activation gates remain
+mandatory. Until those exist together, v3 remains offline-only and
 `AGORA_GENESIS_FILE` continues to accept v2 artifacts only.
 
 Populated `genesis_set` entries use:
@@ -134,7 +141,8 @@ Block 0 commitment.
 
 Populated `initial_allocations` entries use `asset`, `address`, and nonzero
 `amount`. Populated `vesting_schedules` entries additionally use nonzero
-`amount`, `start_timestamp_ms`, `cliff_timestamp_ms`, and `end_timestamp_ms`.
+`amount`, `start_timestamp_ms`, `cliff_timestamp_ms`, `end_timestamp_ms`, and
+the explicit release policy `linear_from_start_with_cliff_v1`.
 The freeze ceremony must also add the selected top-level `bits` value; it is
 optional only while the artifact remains a draft.
 

@@ -16,8 +16,12 @@ use crate::{StateError, StateStore};
 const SEEN_PREFIX: &[u8] = b"payment/drc/seen/";
 const INVOICE_PREFIX: &[u8] = b"payment/drc/invoice/";
 const OUTBOX_PREFIX: &[u8] = b"payment/drc/outbox/";
-const PAYMENT_ROOT_KEY: &[u8] = b"payment/drc/root";
+pub(crate) const PAYMENT_ROOT_KEY: &[u8] = b"payment/drc/root";
 pub const DRC_PAYMENT_VERSION: u32 = 1;
+
+pub(crate) fn empty_drc_payment_root() -> Hash {
+    Hash::hash_borsh(&(b"agora-drc-payment-root-v1", Hash::ZERO))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrcPaymentReceipt {
@@ -95,10 +99,7 @@ pub fn list_drc_outbox(
 /// Bounded rolling commitment to accepted payment metadata and outbox events.
 pub fn drc_payment_root(store: &StateStore) -> Result<Hash, StateError> {
     let Some(bytes) = store.get_cf(ColumnFamily::Meta, PAYMENT_ROOT_KEY)? else {
-        return Ok(Hash::hash_borsh(&(
-            b"agora-drc-payment-root-v1",
-            Hash::ZERO,
-        )));
+        return Ok(empty_drc_payment_root());
     };
     if bytes.len() != 32 {
         return Err(StateError::Storage(

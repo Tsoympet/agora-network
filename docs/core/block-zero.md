@@ -6,15 +6,17 @@
 deterministic Borsh manifest that a future Trident Block 0 transition must
 materialize. Preparation is accepted only from a freeze-ready v3 artifact.
 
-Manifest version 3 is a pre-freeze break. It retains the version 2 chain ID and
-network-fingerprint binding and adds complete ceremony-selected validator
-registration fields to `TridentBlockZeroState` and
-`TridentBlockZeroCommitment`.
+Manifest version 4 is a pre-freeze break. It retains the chain ID,
+network-fingerprint, and complete validator registration binding, adds the
+artifact timestamp/difficulty and validator reward-drip policy needed by live
+records, and separates the canonical manifest root from the composed live-state
+root in `TridentBlockZeroCommitment`.
 
 The manifest commits:
 
 - chain ID and network fingerprint, together with the artifact and consensus-policy identities;
-- every TLT, OVL, and DRC initial allocation and vesting lock;
+- every TLT, OVL, and DRC initial allocation and vesting lock, including an
+  explicit `linear_from_start_with_cliff_v1` release policy;
 - maximum, allocated, treasury, staking-reserve, and unissued supply buckets;
 - all three protocol treasuries, including their artifact-selected controls;
 - independent epoch-zero OVL and DRC validator sets, secp256k1 public keys,
@@ -26,18 +28,20 @@ The manifest commits:
   satisfaction.
 
 Collections are sorted by wire asset and address identities before hashing.
-`TridentBlockZeroState::verify` checks supply conservation, allocation-backed
-vesting and validator self-bonds, independent validator-set identities, fingerprint
-consistency, and the initial finality state. `verified_borsh_payload` then performs
-an exact Borsh round trip and rechecks the state root.
+`TridentBlockZeroState::verify` checks supply conservation, disjoint
+allocation-backed vesting and validator self-bonds, independent validator-set
+identities, fingerprint consistency, complete one-to-one manifest-field
+coverage, and the initial finality state. `verified_borsh_payload` then performs
+an exact Borsh round trip and rechecks both roots.
 
 ## Candidate storage envelope
 
 Explicit Meta keys under `meta/trident_block_zero/` hold a versioned Borsh
-envelope (`TRIDENT_BLOCK_ZERO_STORAGE_VERSION = 3`, independent of live
+envelope (`TRIDENT_BLOCK_ZERO_STORAGE_VERSION = 4`, independent of live
 `SCHEMA_VERSION`). The envelope preserves the complete manifest, canonical
-payload, commitment, commitment hash, artifact identity, consensus policy hash,
-network fingerprint, chain ID, and bound datadir identity.
+payload, manifest root, composed state root, commitment, commitment hash,
+artifact identity, consensus policy hash, network fingerprint, chain ID, and
+bound datadir identity.
 
 `TridentDatadirIdentity` is a separately versioned Borsh record under
 `meta/trident_datadir_identity/`. It binds the chain ID, network fingerprint,
@@ -62,6 +66,42 @@ Block 0/datadir marker, even when a valid v2 genesis hash is also present.
 identity loader. A candidate persisted by offline tooling therefore cannot be
 silently opened, ignored, or overwritten by the v2 node.
 
+## Offline live-state plan
+
+`TridentBlockZeroState::plan_live_state` produces
+`TridentLiveStatePlan` only after verifying the manifest and an independently
+supplied `TridentHeader`. It derives:
+
+- a versioned Block 0 body containing the canonical TLT issuance outputs and
+  deterministic `issuance_id || output_index_le` outpoints;
+- allocation provenance and exact TLT UTXOs, plus asset-scoped OVL/DRC account
+  records whose liquid balances exclude validator self-bonds;
+- complete supply buckets and derived maximum/issued/reserve keys;
+- treasury balances and lossless artifact-selected control records;
+- explicit vesting records that bind either a TLT outpoint or an OVL/DRC
+  account and provide deterministic cliff/linear lock arithmetic;
+- validator policies and records, epoch-zero snapshots, zero reward pools,
+  staking reserves, an accepted Block 0 issuance record, and an explicitly
+  unfinalized initial finality record;
+- explicit empty DRC-payment and community roots, versioned body/header
+  records, and genesis/tip/index metadata for the eventual loader.
+
+Each manifest leaf has exactly one primary `(column family, key, value)`
+mapping. Runtime balances and indexes are deterministic derivatives and cannot
+replace or silently default a primary record. Keys are sorted and duplicate
+keys or source mappings fail closed. Per-asset conservation proves
+`liquid + validator bonds = genesis allocation`,
+`genesis allocation + treasury = issued`, and
+`issued + staking reserve + unissued = maximum`.
+
+The composed root domain-separates identity, allocation, UTXO, each account
+asset, supply, treasuries/controls, vesting, each staking set, acceptance,
+initial finality, DRC payments, and community state. Planning writes the exact
+record set only to a copy-on-write overlay, rereads every byte, recomputes every
+component, and confirms equality with both commitment and header. The base
+store is snapshotted before and after and must remain byte-for-byte unchanged.
+There is deliberately no live-plan `WriteBatch` accessor or commit operation.
+
 ## Offline header bridge
 
 `TridentBlockZeroCommitment::to_offline_trident_header` now converts a
@@ -75,37 +115,26 @@ no loader, mining, consensus, RPC, or P2P consumer.
 
 ## Why the loader remains disabled
 
-The abstraction still does not construct a [`agora_types::Block`], materialize
-live UTXO/account balances, or run inside `agora-node`. A partial boot path
-would be unsafe because:
+The abstraction still does not construct the legacy [`agora_types::Block`],
+commit live state, or run inside `agora-node`. A partial boot path remains
+unsafe because:
 
-1. The new header encoding is offline-only. A concrete Trident body format,
-   body-root derivation, PoW hash rule, and explicit runtime protocol gate still
-   need specification and wiring; the frozen v2 `BlockHeader`/`Block` path
-   cannot be repurposed.
-2. TLT artifact allocations still need a lossless Block 0 transaction/UTXO
-   mapping, while OVL/DRC allocations need an atomic account mapping whose
-   composed root exactly equals the header state root.
-3. Runtime treasury records do not preserve artifact treasury controls, and the
-   governance store currently initializes compiled defaults rather than the
-   artifact-selected constitution and emergency-policy hashes.
-4. No canonical vesting store or lock enforcement exists.
-5. Validator records now have a checked, lossless projection onto the existing
-   asset-scoped `stake/val/` key and `ValidatorRecord` Borsh value. They are
-   still not written into live state or reconciled with the composed runtime
-   state root.
-6. The initial finality record and epoch-zero snapshots need explicit persistent
-   keys and inclusion in the live composed state root.
-7. Future Trident startup must call `verify_trident_datadir_identity` with the
+1. No API atomically combines the verified Meta envelope/datadir identity and
+   the verified live-state plan into one durable candidate commit with a
+   post-commit reread. This is the final storage prerequisite.
+2. The Trident header/body encoding and composed-root version remain
+   offline-only. Consensus, PoW, acceptance, reorg, vesting-spend, treasury
+   authorization, storage, P2P, and RPC gates must consume those exact versions
+   before any node may boot them; the frozen v2 `BlockHeader`/`Block` path cannot
+   be repurposed.
+3. Future Trident startup must call `verify_trident_datadir_identity` with the
    identity derived from its independently verified artifact and concrete
    header before loading a libp2p key or binding RPC. This prerequisite provides
    that fail-closed comparison, but no Trident runtime path invokes it yet.
 
-The remaining live-state blocker is the lossless materialization and atomic
-root check: define the concrete Block 0 body/UTXOs, account and treasury
-records, vesting locks, validator/finality writes, and append them to
-the already-verified batch only when the recomputed live composed root equals
-the offline header. Explicit consensus/PoW/storage/P2P/RPC activation gates
-must then consume that verified state without changing v2 identities. Until
-those pieces exist together, `AGORA_GENESIS_FILE` remains the frozen v2 loader
-only.
+The final atomic-commit blocker is intentionally narrow: append the already
+verified envelope and this exact plan to one durable batch, reject any existing
+live/candidate state, commit once, and reread/recompose before exposing the
+datadir. Runtime activation gates are separate follow-up work. Until both
+atomic persistence and explicit activation exist, `AGORA_GENESIS_FILE` remains
+the frozen v2 loader only.

@@ -132,12 +132,13 @@ Do **not** use “role-complete” as a substitute for the above.
 Genesis-loader prerequisite status: the integrated runtime can now stage and
 commit genesis storage atomically and can derive all representable runtime
 policy through one freeze-gated conversion. The bounded Block 0 prerequisite
-now includes a versioned Borsh manifest (v3 preserves the v2 chain/network
-binding and adds ceremony-selected validator commission and metadata
-commitments), a lossless Meta envelope, and fail-closed overlay verification
-before any durable candidate write. A separate domain- and version-gated
-Trident header now commits the Block 0/body/state/policy/version identities
-offline without changing frozen v2 bytes. It still does not materialize live
+now includes a versioned Borsh manifest (v4 over the v3 artifact schema
+preserves the v2 chain/network binding and adds ceremony-selected validator
+commission, metadata commitments, timestamp/difficulty, and reward-drip
+policy), a lossless Meta envelope, and fail-closed overlay verification before
+any durable candidate write. A separate domain- and version-gated Trident
+header now commits the Block 0/body/state/policy/version identities offline
+without changing frozen v2 bytes. It still does not durably materialize live
 balances or provide a node loader entry point. A versioned Borsh datadir
 identity now binds the chain, artifact, policy, Block 0 commitment, state root,
 network fingerprint, and available header identity/hash in the same atomic
@@ -145,11 +146,14 @@ candidate batch. Legacy/v2 startup rejects that marker before libp2p identity
 access, networking, or RPC; future Trident startup has an exact expected-byte
 verification API at the same boundary.
 
-A Trident v3 node loader remains blocked on the concrete body/PoW rules,
-lossless atomic mappings for UTXOs, accounts, treasury controls, vesting locks,
-validator runtime records and initial finality, and equality between the
-materialized live-state root and header. Networking and RPC must remain
-disabled for v3 until that live-state contract and explicit runtime gates exist.
+A complete offline plan now deterministically maps Block 0 into canonical
+UTXOs, accounts, supply buckets, treasury controls, vesting locks, validator
+records, epoch snapshots, reward pools, acceptance, and initial finality. It
+derives the body and composed state roots, verifies them against the header, and
+stages only in a COW overlay. A Trident v3 node loader remains blocked on one
+atomic durable commit plus post-commit root verification and explicit
+consensus/PoW/vesting/treasury/P2P/RPC activation gates. Networking and RPC
+remain disabled.
 See [`../core/block-zero.md`](../core/block-zero.md).
 
 PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.

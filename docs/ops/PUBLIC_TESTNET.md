@@ -18,11 +18,17 @@ v2 node intentionally refuses any complete or partial Trident identity before
 loading/creating `$AGORA_DATA/p2p/identity.key`, accessing a seeder, building a
 swarm, or binding RPC; do not try to reuse one datadir for both protocols.
 
-Boot still does not consume the Trident candidate as live state. The remaining
-blocker is lossless Block 0 body, UTXO, account, treasury, vesting, validator,
-and finality materialization whose recomputed state root equals the committed
-header, followed by explicit runtime activation gates. This prerequisite does
-not make Trident Public testnet ready.
+Boot still does not consume the Trident candidate as live state. An offline
+plan now maps every manifest field exactly once, derives the canonical Block 0
+body and live UTXO/account/supply/treasury-control/vesting/staking/finality
+records, stages them only in a COW overlay, and recomputes the state root
+against the verified header. It exposes no durable commit operation.
+
+The final storage blocker is a single atomic commit of the already verified
+envelope/datadir identity plus that exact plan, followed by a durable reread and
+root recomposition. Consensus, PoW, vesting-spend, treasury-authorization,
+P2P, and RPC activation gates remain separate requirements. This prerequisite
+does not make Trident Public testnet ready.
 
 ## Quick start (Docker)
 

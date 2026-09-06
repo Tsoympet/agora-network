@@ -199,6 +199,8 @@ pub struct TridentVestingSchedule {
     pub start_timestamp_ms: u64,
     pub cliff_timestamp_ms: u64,
     pub end_timestamp_ms: u64,
+    /// Explicit release semantics; freeze-ready artifacts may not infer this.
+    pub release_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -269,9 +271,9 @@ struct ConsensusIdentity<'a> {
 
 /// Fully typed policy derived only from a freeze-ready Trident artifact.
 ///
-/// This is intentionally not a node boot configuration: canonical Block 0 can
-/// be derived and stored as a verified Meta envelope, but live balances and
-/// header identity are still incomplete.
+/// This is intentionally not a node boot configuration: Block 0 can be
+/// envelope-verified and live-state-planned offline, but no durable plan writer
+/// or runtime activation path exists.
 #[derive(Debug, Clone)]
 pub struct TridentRuntimePolicy {
     pub network: NetworkId,
@@ -385,6 +387,13 @@ impl TridentGenesisArtifact {
         self.require_freeze_ready_validator_set("OVL", &self.ovl_validators)?;
         self.require_freeze_ready_validator_set("DRC", &self.drc_validators)?;
         self.require_allocation_totals()?;
+        for schedule in &self.vesting_schedules {
+            if schedule.release_policy != "linear_from_start_with_cliff_v1" {
+                return Err(
+                    "vesting release_policy must be linear_from_start_with_cliff_v1".into(),
+                );
+            }
+        }
 
         let expected_genesis = self.consensus_identity_hash().to_hex();
         if self.genesis_hash != expected_genesis {
@@ -690,6 +699,9 @@ impl TridentGenesisArtifact {
                 || schedule.cliff_timestamp_ms > schedule.end_timestamp_ms
             {
                 return Err("vesting schedule is invalid".into());
+            }
+            if schedule.release_policy.trim().is_empty() {
+                return Err("vesting release_policy is required".into());
             }
             self.validate_network_address(&schedule.address)?;
         }
