@@ -2135,7 +2135,10 @@ mod tests {
     #[test]
     fn drc_payment_accepts_emits_outbox_and_reverts() {
         use crate::accounts::{credit_account_into, load_account};
-        use crate::payments::{drc_payment_root, load_drc_outbox_event, load_drc_payment_receipt};
+        use crate::payments::{
+            drc_payment_root, load_drc_outbox_event, load_drc_payment_by_invoice,
+            load_drc_payment_receipt,
+        };
         use crate::staking::load_reward_pool;
         use agora_crypto::sign_drc_payment_bound;
         use agora_types::{DrcPaymentTx, NativeAssetId};
@@ -2231,6 +2234,12 @@ mod tests {
         assert_eq!(receipt.delivered_amount, receipt.requested_amount);
         assert_eq!(receipt.source_tag, Some(84));
         assert_eq!(receipt.destination_tag, 42);
+        assert_eq!(
+            load_drc_payment_by_invoice(&store, &merchant.address(), &Hash([9; 32]))
+                .unwrap()
+                .unwrap(),
+            receipt
+        );
         assert_ne!(drc_payment_root(&store).unwrap(), payment_root_before);
 
         store
@@ -2249,6 +2258,11 @@ mod tests {
         assert!(load_drc_payment_receipt(&store, &payment_id)
             .unwrap()
             .is_none());
+        assert!(
+            load_drc_payment_by_invoice(&store, &merchant.address(), &Hash([9; 32]))
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(drc_payment_root(&store).unwrap(), payment_root_before);
     }
 

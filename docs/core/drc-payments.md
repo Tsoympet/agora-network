@@ -94,6 +94,30 @@ process-local mempool, so pending submissions remain `unknown`; it also does
 not claim dual-PoS checkpoint finality. Finality remains independently
 queryable through the checkpoint RPCs.
 
+`agora_getDrcPaymentByInvoice` is the corresponding exact merchant lookup. It
+requires a recipient account plus a 32-byte invoice ID and performs one direct
+read of the existing uniqueness key:
+
+```text
+payment/drc/invoice/<20-byte recipient><32-byte invoice_id> -> <32-byte payment_id>
+```
+
+The derived index is written atomically with the receipt. Its key, value, and
+prior absence are captured by the payment reorg journal. The physical index is
+not hashed as a separate tree; its complete logical mapping is committed by the
+rolling DRC payment root because the receipt and outbox event commit the
+recipient, invoice ID, and payment ID. Lookup validates the 32-byte index value,
+loads an exact-delivery receipt, and re-checks all three committed fields before
+returning it. An inconsistent index fails closed rather than crossing recipient
+boundaries.
+
+A valid unknown tuple, invoice ID zero, pending payment, wrong recipient, or
+rolled-back payment returns `status: "unknown"`, `payment_id: null`, and
+`receipt: null`. There is no prefix scan or invoice enumeration. `settled`
+means accepted into the canonical state-machine virtual settlement view; it
+does not assert PoW/OVL/DRC checkpoint finality. Both settled query methods
+exclude signatures and public keys.
+
 Escrow, recurring authorization, multisig accounts, cross-district paths, and
 merchant tag registries remain separate future transitions. Destination tags
 are recipient-local routing metadata (as on XRPL), not globally owned names.
@@ -105,6 +129,7 @@ module.
 
 ## Next bounded slice
 
-Add a recipient-scoped merchant invoice lookup over the existing unique
-invoice index. That slice should resolve an invoice to this settled receipt
-without adding partial delivery, paths, issued assets, escrow, or execution.
+Add a recipient-controlled “destination tag required” account policy, modeled
+as a native validation flag rather than a tag registry or program. It should
+reject untagged payments before mutation while preserving exact delivery and
+must not add partial payments, paths, issued assets, escrow, or execution.

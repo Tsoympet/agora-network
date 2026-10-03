@@ -17,6 +17,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_submitOvlExecution` | Validate and gossip a signed intrinsic-gas OVL execution envelope |
 | `agora_submitDrcPayment` | Validate and gossip a versioned signed DRC payment with source/destination-tag and invoice routing |
 | `agora_getDrcPayment` | Read a canonical settled DRC exact-delivery receipt by payment ID (`settled` / `unknown`) |
+| `agora_getDrcPaymentByInvoice` | Resolve an exact recipient/invoice tuple to its canonical settled DRC receipt |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
@@ -99,7 +100,7 @@ When unset, JSON-RPC stays open (safe with the default loopback bind). When set:
 | Always public | Token required |
 | --- | --- |
 | `GET /health` | `agora_submitTransaction` / `agora_submitBlock` |
-| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` / `agora_getDrcPayment` | `agora_getBlockTemplate` / `agora_fundAddress` |
+| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` / DRC payment reads | `agora_getBlockTemplate` / `agora_fundAddress` |
 | `agora_getMempool` / `agora_getNodeInfo` / `agora_estimateFee` | `agora_getBalance` / `agora_getUtxos` |
 | `agora_getConstitution` / `agora_getGovernance` | `agora_submitProposal` / `agora_castGovVote` / … |
 | `agora_listProposals` / `agora_getProposal` / `agora_listOffices` | `agora_depositProposal` / tally / execute / forum post |
@@ -125,6 +126,34 @@ array, or a bare hex ID. A canonical root-committed receipt returns
 invoice ID. It excludes authorization bytes. Pending mempool state is
 intentionally not coupled into this durable lookup, and `settled` does not by
 itself assert checkpoint finality. Malformed IDs return `-32602`.
+
+`agora_getDrcPaymentByInvoice` accepts either
+`{ "recipient": "<account>", "invoice_id": "<64 hex>" }` or the positional
+array `["<account>", "<64 hex>"]`. Account parsing follows existing RPC
+conventions: a 20-byte hex account (optional `0x`) or an Agora Bech32m account;
+the response normalizes it to Bech32m. Invoice IDs must decode to exactly 32
+bytes. Malformed or missing values return `-32602`.
+
+The response is:
+
+```json
+{
+  "recipient": "agora1...",
+  "invoice_id": "<64 lowercase hex>",
+  "payment_id": "<64 lowercase hex or null>",
+  "status": "settled",
+  "receipt": {}
+}
+```
+
+For a valid unknown tuple, invoice ID zero, wrong recipient, pending payment,
+or rolled-back payment, `status` is `"unknown"` and both `payment_id` and
+`receipt` are `null`. A settled response uses the same exact-delivery receipt
+shape as `agora_getDrcPayment`, preserving source and destination tags while
+excluding signatures and public keys. The method performs one
+recipient-scoped index lookup and offers no invoice listing or prefix scan.
+Here `settled` means accepted in the canonical state-machine virtual view, not
+dual-PoS checkpoint finality.
 
 `agora_getBlockTemplate` returns `{ "block": Block, "randomx_epoch": u64 }` (native serde hashes as byte arrays). The block has a coinbase paying `AGORA_MINER_ADDRESS` for **emission + Σ transfer fees** at the estimated next blue score, followed by up to 128 mempool transfers (fee-desc, then `tx_id`); `header.tx_root` commits to that body. `randomx_epoch` is the blue-score–anchored RandomX key epoch miners must use. `agora_submitBlock` rejects `tx_root` mismatches and evicts included/conflicting mempool txs. Mempool admission requires `fee ≥ AGORA_MIN_RELAY_FEE`; fees are paid to the miner via the coinbase (not burned).
 
