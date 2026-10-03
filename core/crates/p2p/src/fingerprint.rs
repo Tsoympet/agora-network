@@ -16,10 +16,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Trident fingerprint domain + versions (distinct mesh from v2).
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
-/// v8 carries owner-authorized DRC recipient policy and payment-v3 tag presence.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 8;
-pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v3";
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v9";
+/// v9 carries address-based DRC DepositAuth preauthorization.
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 9;
+pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v4";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v10";
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
 
 /// Canonical network fingerprint hash (pre-Trident / genesis v2).
@@ -90,17 +90,17 @@ mod tests {
 
         let prior = Hash::hash_borsh(&(
             TRIDENT_NET_FP_DOMAIN,
-            7u32,
+            8u32,
             "agora-trident-testnet-1",
             genesis.as_bytes(),
             policy.as_bytes(),
-            "agora-trident-tx-v2",
-            "agora-trident-state-v8",
+            "agora-trident-tx-v3",
+            "agora-trident-state-v9",
             TRIDENT_CONSENSUS_POLICY_VERSION,
         ));
         assert_ne!(t1, prior);
-        assert_eq!(TRIDENT_PROTOCOL_VERSION, 8);
-        assert_eq!(TRIDENT_TX_SIGNING_VERSION, "agora-trident-tx-v3");
-        assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v9");
+        assert_eq!(TRIDENT_PROTOCOL_VERSION, 9);
+        assert_eq!(TRIDENT_TX_SIGNING_VERSION, "agora-trident-tx-v4");
+        assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v10");
     }
 }

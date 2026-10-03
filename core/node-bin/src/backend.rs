@@ -12,22 +12,26 @@ use agora_governance::{
 use agora_p2p::{
     Mempool, NetworkHandle, NetworkMessage, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT,
 };
-use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
+use agora_rpc::{
+    DrcDepositPreauthStatus, FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup,
+    UtxoEntry,
+};
 use agora_state_machine::{
-    apply_account_transfer, apply_drc_account_policy, apply_drc_payment, apply_ovl_execution,
-    apply_signed_stake_tx, build_snapshot, canonical_community_root, governance_treasury_root,
-    list_grants as list_canonical_grants, list_hubs as list_canonical_hubs,
-    list_missions as list_canonical_missions, list_passport_attestations,
-    load_canonical_community_summary, load_canonical_governance_policy,
-    load_drc_payment_by_invoice, load_drc_payment_receipt, load_epoch,
-    load_known_drc_account_policy, load_protocol_treasuries, load_reward_pool, load_validator,
-    lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth, AccountJournal,
-    ColumnFamily, StakingParams, StateStore, TxAuthContext, WriteBatch,
+    apply_account_transfer, apply_drc_account_policy, apply_drc_deposit_preauth, apply_drc_payment,
+    apply_ovl_execution, apply_signed_stake_tx, build_snapshot, canonical_community_root,
+    governance_treasury_root, list_grants as list_canonical_grants,
+    list_hubs as list_canonical_hubs, list_missions as list_canonical_missions,
+    list_passport_attestations, load_canonical_community_summary, load_canonical_governance_policy,
+    load_drc_account_policy, load_drc_deposit_preauth, load_drc_payment_by_invoice,
+    load_drc_payment_receipt, load_epoch, load_known_drc_account_policy,
+    load_known_drc_deposit_authorization, load_protocol_treasuries, load_reward_pool,
+    load_validator, lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth,
+    AccountJournal, ColumnFamily, StakingParams, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAccountPolicy,
-    DrcAccountPolicyTx, DrcPaymentReceipt, DrcPaymentTx, Hash, NativeAssetId, OutPoint,
-    OvlExecutionTx, SignedStakeTx, Transaction, TxOut,
+    DrcAccountPolicyTx, DrcDepositPreauthTx, DrcPaymentReceipt, DrcPaymentTx, Hash, NativeAssetId,
+    OutPoint, OvlExecutionTx, SignedStakeTx, Transaction, TxOut,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -181,8 +185,17 @@ pub(crate) fn admit_drc_payment(
     let mut journal = AccountJournal::default();
     apply_drc_payment(store, &tx, auth, &mut batch, &mut journal)
         .map_err(|e| RpcError::Rejected(format!("DRC payment: {e}")))?;
-    pool.admit_payment(tx)
-        .map_err(|e| RpcError::Rejected(e.to_string()))
+    let canonical_policy = load_drc_account_policy(store, &tx.to)
+        .map_err(|error| RpcError::Internal(error.to_string()))?;
+    let canonical_preauthorized = tx.from == tx.to
+        || load_drc_deposit_preauth(store, &tx.to, &tx.from)
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+    pool.admit_payment_with_deposit_auth(
+        tx,
+        canonical_policy.deposit_auth_required,
+        canonical_preauthorized,
+    )
+    .map_err(|e| RpcError::Rejected(e.to_string()))
 }
 
 /// Validate and reserve an owner-authorized DRC account-policy operation.
@@ -212,6 +225,36 @@ pub(crate) fn admit_drc_account_policy(
     apply_drc_account_policy(store, &tx, auth, &mut batch, &mut journal)
         .map_err(|error| RpcError::Rejected(format!("DRC account policy: {error}")))?;
     pool.admit_drc_policy(tx)
+        .map_err(|error| RpcError::Rejected(error.to_string()))
+}
+
+/// Validate and reserve an owner-authorized DRC deposit preauthorization.
+pub(crate) fn admit_drc_deposit_preauth(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: DrcDepositPreauthTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(NativeAssetId::DRC, &tx.owner) {
+        return Err(RpcError::Rejected(
+            "DRC account already has a pending nonce".into(),
+        ));
+    }
+    if tx.fee.as_base_units() < min_relay_fee() {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {} < min relay {}",
+            tx.fee.as_base_units(),
+            min_relay_fee()
+        )));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_drc_deposit_preauth(store, &tx, auth, &mut batch, &mut journal)
+        .map_err(|error| RpcError::Rejected(format!("DRC deposit preauthorization: {error}")))?;
+    pool.admit_drc_deposit_preauth(tx)
         .map_err(|error| RpcError::Rejected(error.to_string()))
 }
 
@@ -549,12 +592,38 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_drc_deposit_preauth(&mut self, tx: DrcDepositPreauthTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_drc_deposit_preauth(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcDepositPreauth(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
     fn get_drc_account_policy(
         &self,
         account: &Address,
     ) -> Result<Option<(DrcAccountPolicy, u64)>, RpcError> {
         load_known_drc_account_policy(self.store.as_ref(), account)
             .map(|known| known.map(|(policy, state)| (policy, state.nonce)))
+            .map_err(|error| RpcError::Internal(error.to_string()))
+    }
+
+    fn get_drc_deposit_preauth(
+        &self,
+        owner: &Address,
+        authorized_source: &Address,
+    ) -> Result<Option<DrcDepositPreauthStatus>, RpcError> {
+        load_known_drc_deposit_authorization(self.store.as_ref(), owner, authorized_source)
+            .map(|status| {
+                status.map(|status| DrcDepositPreauthStatus {
+                    preauthorized: status.preauthorized,
+                    deposit_auth_required: status.deposit_auth_required,
+                    deposit_authorized: status.deposit_authorized,
+                })
+            })
             .map_err(|error| RpcError::Internal(error.to_string()))
     }
 
@@ -627,6 +696,7 @@ impl RpcBackend for NodeBackend {
             ovl_executions,
             drc_payments,
             drc_account_policies,
+            drc_deposit_preauths,
         ) = {
             let pool = self
                 .mempool
@@ -639,6 +709,7 @@ impl RpcBackend for NodeBackend {
                 pool.select_ovl_executions(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_payments(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_account_policies(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_deposit_preauths(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         self.chain
@@ -653,6 +724,7 @@ impl RpcBackend for NodeBackend {
                     ovl_executions: &ovl_executions,
                     drc_payments: &drc_payments,
                     drc_account_policies: &drc_account_policies,
+                    drc_deposit_preauths: &drc_deposit_preauths,
                     ..BlockTemplateLanes::default()
                 },
             )
@@ -1100,8 +1172,8 @@ mod tests {
     use agora_consensus::{PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
     use agora_crypto::{
         derive_bip44, seed_from_mnemonic, sign_account_transfer_bound,
-        sign_drc_account_policy_bound, sign_drc_payment_bound, sign_ovl_execution_bound,
-        sign_transaction_bound, Bip44Path,
+        sign_drc_account_policy_bound, sign_drc_deposit_preauth_bound, sign_drc_payment_bound,
+        sign_ovl_execution_bound, sign_transaction_bound, Bip44Path,
     };
     use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
@@ -1397,6 +1469,68 @@ mod tests {
 
         let template = backend.get_block_template().unwrap();
         assert_eq!(template.drc_account_policies, vec![tx]);
+        assert_eq!(template.header.tx_root, template.compute_body_root());
+    }
+
+    #[test]
+    fn drc_deposit_preauth_enters_template_and_pending_does_not_mutate_query() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let owner = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let source = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut funding = WriteBatch::new();
+        for account in [&owner, &source] {
+            credit_account_into(
+                &mut funding,
+                &store,
+                NativeAssetId::DRC,
+                &account.address(),
+                Amount::from_base_units(100),
+            )
+            .unwrap();
+        }
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(chain, store, mempool, backend_config(genesis));
+        let before = backend
+            .get_drc_deposit_preauth(&owner.address(), &source.address())
+            .unwrap()
+            .unwrap();
+        assert!(!before.preauthorized);
+        assert!(!before.deposit_auth_required);
+        assert!(before.deposit_authorized);
+
+        let mut tx = DrcDepositPreauthTx::authorize(
+            owner.address(),
+            source.address(),
+            Amount::from_base_units(1),
+            0,
+        );
+        sign_drc_deposit_preauth_bound(&mut tx, &owner, "agora-dev", &genesis).unwrap();
+        let id = backend.submit_drc_deposit_preauth(tx.clone()).unwrap();
+        assert_eq!(id, tx.preauth_tx_id());
+        assert_eq!(
+            backend
+                .get_drc_deposit_preauth(&owner.address(), &source.address())
+                .unwrap()
+                .unwrap(),
+            before,
+            "pending preauthorization is not canonical state"
+        );
+
+        let template = backend.get_block_template().unwrap();
+        assert_eq!(template.drc_deposit_preauths, vec![tx]);
         assert_eq!(template.header.tx_root, template.compute_body_root());
     }
 

@@ -42,8 +42,9 @@ See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../as
 - `Block::id()` = SHA-256(borsh(header))
 - `Block::compute_tx_root` = pairwise merkle over tx ids
 - `Block::compute_body_root` = legacy root when appended lanes are empty; DRC
-  policy entries activate `agora-block-body-v6` over the unchanged v5 root and
-  ordered policy-operation IDs
+  policy entries activate `agora-block-body-v6` over the unchanged v5 root;
+  deposit-preauthorization entries activate `agora-block-body-v7` over the
+  unchanged v6 root and ordered operation IDs
 
 `DataCommitmentSource` uses explicit stable Borsh discriminants; future variants
 must be appended. `Block` deserialization accepts older bodies that end before

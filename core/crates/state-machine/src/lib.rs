@@ -10,6 +10,7 @@ mod block_zero;
 mod columns;
 mod community_state;
 mod data_availability;
+mod drc_deposit_preauth;
 mod drc_policy;
 mod error;
 mod execution;
@@ -38,8 +39,9 @@ pub use acceptance::{
     tx_acceptance_status, BlockAcceptanceRecord,
 };
 pub use accounts::{
-    account_key, account_root, apply_account_transfer, credit_account_into, genesis_credit,
-    load_account, put_account_into, revert_account_journal_into, AccountJournal, AccountState,
+    account_exists, account_key, account_root, apply_account_transfer, credit_account_into,
+    genesis_credit, load_account, put_account_into, revert_account_journal_into, AccountJournal,
+    AccountState,
 };
 pub use apply::{
     apply_block, apply_block_batched, apply_block_batched_virtual, apply_block_batched_with_auth,
@@ -64,6 +66,11 @@ pub use data_availability::{
     apply_data_commitment, data_availability_root, data_commitment_key, data_commitment_nonce_key,
     load_data_commitment, load_data_commitment_nonce, revert_data_commitment_meta_into,
     AcceptedDataCommitment, ACCEPTED_DATA_COMMITMENT_VERSION, DATA_AVAILABILITY_ROOT_DOMAIN,
+};
+pub use drc_deposit_preauth::{
+    apply_drc_deposit_preauth, drc_deposit_preauth_key, drc_deposit_preauth_meta_keys,
+    drc_deposit_preauth_root, load_drc_deposit_preauth, load_known_drc_deposit_authorization,
+    DrcDepositAuthorization, DRC_DEPOSIT_PREAUTH_ROOT_DOMAIN,
 };
 pub use drc_policy::{
     apply_drc_account_policy, drc_account_policy_key, drc_account_policy_meta_keys,

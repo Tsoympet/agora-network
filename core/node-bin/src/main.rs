@@ -31,8 +31,8 @@ use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
-    admit_account_transfer, admit_drc_account_policy, admit_drc_payment, admit_ovl_execution,
-    admit_stake_tx, admit_transaction, NodeBackend, NodeBackendConfig,
+    admit_account_transfer, admit_drc_account_policy, admit_drc_deposit_preauth, admit_drc_payment,
+    admit_ovl_execution, admit_stake_tx, admit_transaction, NodeBackend, NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::storage_policy::StoragePolicy;
@@ -1048,6 +1048,16 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "DRC account-policy gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcDepositPreauth(tx) => {
+                        match admit_drc_deposit_preauth(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, preauth = %id.to_hex(), "DRC deposit-preauthorization gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC deposit-preauthorization gossip rejected");
                             }
                         }
                     }

@@ -1,6 +1,6 @@
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcPaymentReceipt, DrcPaymentTx,
-    Hash, OvlExecutionTx, Transaction,
+    AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcDepositPreauthTx,
+    DrcPaymentReceipt, DrcPaymentTx, Hash, OvlExecutionTx, Transaction,
 };
 use serde_json::{json, Value};
 
@@ -162,6 +162,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                         "policy": {
                             "version": policy.version,
                             "require_destination_tag": policy.require_destination_tag,
+                            "deposit_auth_required": policy.deposit_auth_required,
                         },
                         "account_nonce": nonce,
                     })),
@@ -170,6 +171,41 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                         "status": "unknown",
                         "policy": null,
                         "account_nonce": null,
+                    })),
+                }
+            }
+            RpcMethod::SubmitDrcDepositPreauth => {
+                let raw = req
+                    .params
+                    .get("preauth")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcDepositPreauthTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_deposit_preauth(tx)?;
+                Ok(json!({ "preauth_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcDepositPreauth => {
+                let (owner, authorized_source) = drc_deposit_preauth_params(&req.params)?;
+                match self
+                    .backend
+                    .get_drc_deposit_preauth(&owner, &authorized_source)?
+                {
+                    Some(status) => Ok(json!({
+                        "owner": owner.to_bech32(),
+                        "authorized_source": authorized_source.to_bech32(),
+                        "status": "known",
+                        "preauthorized": status.preauthorized,
+                        "deposit_auth_required": status.deposit_auth_required,
+                        "deposit_authorized": status.deposit_authorized,
+                    })),
+                    None => Ok(json!({
+                        "owner": owner.to_bech32(),
+                        "authorized_source": authorized_source.to_bech32(),
+                        "status": "unknown",
+                        "preauthorized": null,
+                        "deposit_auth_required": null,
+                        "deposit_authorized": null,
                     })),
                 }
             }
@@ -373,6 +409,7 @@ fn block_to_explorer_json(block: &Block) -> Value {
         "ovl_execution_count": block.ovl_executions.len(),
         "drc_payment_count": block.drc_payments.len(),
         "drc_account_policy_count": block.drc_account_policies.len(),
+        "drc_deposit_preauth_count": block.drc_deposit_preauths.len(),
         "transactions": transactions,
     })
 }
@@ -604,6 +641,33 @@ fn drc_invoice_params(params: &Value) -> Result<(Address, Hash), RpcError> {
     ))
 }
 
+fn drc_deposit_preauth_params(params: &Value) -> Result<(Address, Address), RpcError> {
+    let (owner, authorized_source) = if let Some(obj) = params.as_object() {
+        let owner = obj
+            .get("owner")
+            .ok_or_else(|| RpcError::InvalidParams("missing `owner`".into()))?;
+        let authorized_source = obj
+            .get("authorized_source")
+            .ok_or_else(|| RpcError::InvalidParams("missing `authorized_source`".into()))?;
+        (owner, authorized_source)
+    } else if let Some(arr) = params.as_array() {
+        if arr.len() != 2 {
+            return Err(RpcError::InvalidParams(
+                "expected `[owner, authorized_source]`".into(),
+            ));
+        }
+        (&arr[0], &arr[1])
+    } else {
+        return Err(RpcError::InvalidParams(
+            "expected `{owner, authorized_source}` or `[owner, authorized_source]`".into(),
+        ));
+    };
+    Ok((
+        parse_address_value(owner, "owner")?,
+        parse_address_value(authorized_source, "authorized_source")?,
+    ))
+}
+
 fn param_amount(params: &Value, key: &str) -> Result<Amount, RpcError> {
     // Support object `{address, amount}` or array `[address, amount]`.
     let amount_val = if let Some(obj) = params.as_object() {
@@ -729,6 +793,7 @@ mod tests {
             drc_payments: vec![],
             data_commitments: vec![],
             drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -842,6 +907,7 @@ mod tests {
             drc_payments: vec![],
             data_commitments: vec![],
             drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -874,6 +940,7 @@ mod tests {
             drc_payments: vec![],
             data_commitments: vec![],
             drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {
@@ -1089,6 +1156,7 @@ mod tests {
             DrcAccountPolicy {
                 version: agora_types::DRC_ACCOUNT_POLICY_STATE_VERSION,
                 require_destination_tag: true,
+                deposit_auth_required: true,
             },
             9,
         );
@@ -1107,6 +1175,7 @@ mod tests {
                 "policy": {
                     "version": agora_types::DRC_ACCOUNT_POLICY_STATE_VERSION,
                     "require_destination_tag": true,
+                    "deposit_auth_required": true,
                 },
                 "account_nonce": 9,
             })
@@ -1149,6 +1218,91 @@ mod tests {
             id: Some(json!(5)),
             method: "agora_submitDrcAccountPolicy".into(),
             params: json!({ "policy": valid }),
+        });
+        assert_eq!(rejected.error.unwrap().code, -32001);
+    }
+
+    #[test]
+    fn drc_deposit_preauth_rpc_handles_known_unknown_and_malformed_params() {
+        let owner = Address([7; 20]);
+        let source = Address([8; 20]);
+        let unknown_source = Address([9; 20]);
+        let mut backend = InMemoryBackend::new();
+        backend.insert_drc_deposit_preauth(
+            owner,
+            source,
+            crate::backend::DrcDepositPreauthStatus {
+                preauthorized: true,
+                deposit_auth_required: true,
+                deposit_authorized: true,
+            },
+        );
+        let mut rpc = RpcDispatcher::new(backend);
+
+        let known = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getDrcDepositPreauth".into(),
+            params: json!({
+                "owner": owner.to_hex(),
+                "authorized_source": source.to_bech32(),
+            }),
+        });
+        assert_eq!(
+            known.result.unwrap(),
+            json!({
+                "owner": owner.to_bech32(),
+                "authorized_source": source.to_bech32(),
+                "status": "known",
+                "preauthorized": true,
+                "deposit_auth_required": true,
+                "deposit_authorized": true,
+            })
+        );
+
+        let unknown = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getDrcDepositPreauth".into(),
+            params: json!([owner.to_bech32(), unknown_source.to_hex()]),
+        });
+        assert_eq!(
+            unknown.result.unwrap(),
+            json!({
+                "owner": owner.to_bech32(),
+                "authorized_source": unknown_source.to_bech32(),
+                "status": "unknown",
+                "preauthorized": null,
+                "deposit_auth_required": null,
+                "deposit_authorized": null,
+            })
+        );
+
+        for params in [
+            json!({}),
+            json!({"owner": owner.to_hex()}),
+            json!({"owner": 7, "authorized_source": source.to_hex()}),
+            json!({"owner": owner.to_hex(), "authorized_source": "abcd"}),
+            json!([owner.to_hex()]),
+        ] {
+            let response = rpc.handle(RpcRequest {
+                id: Some(json!(3)),
+                method: "agora_getDrcDepositPreauth".into(),
+                params,
+            });
+            assert_eq!(response.error.unwrap().code, -32602);
+        }
+
+        let malformed_submit = rpc.handle(RpcRequest {
+            id: Some(json!(4)),
+            method: "agora_submitDrcDepositPreauth".into(),
+            params: json!({ "preauth": { "version": 1 } }),
+        });
+        assert_eq!(malformed_submit.error.unwrap().code, -32602);
+
+        let valid = DrcDepositPreauthTx::authorize(owner, source, Amount::from_base_units(1), 9);
+        let rejected = rpc.handle(RpcRequest {
+            id: Some(json!(5)),
+            method: "agora_submitDrcDepositPreauth".into(),
+            params: json!({ "preauth": valid }),
         });
         assert_eq!(rejected.error.unwrap().code, -32001);
     }

@@ -45,6 +45,26 @@ pub fn load_account(
     AccountState::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))
 }
 
+/// Whether an account has a canonical persisted record.
+///
+/// A missing account still loads as the all-zero default for read convenience,
+/// but owner-controlled state creation must distinguish that from an existing
+/// account, matching the account-address semantics of DRC policy operations.
+pub fn account_exists(
+    store: &StateStore,
+    asset: NativeAssetId,
+    address: &Address,
+) -> Result<bool, StateError> {
+    if asset == NativeAssetId::TLT {
+        return Err(StateError::InvalidTx(
+            "TLT uses UTXO module, not account module".into(),
+        ));
+    }
+    Ok(store
+        .get_cf(ColumnFamily::Meta, &account_key(asset, address))?
+        .is_some())
+}
+
 pub fn put_account_into(
     batch: &mut WriteBatch,
     asset: NativeAssetId,

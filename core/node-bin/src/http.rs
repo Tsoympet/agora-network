@@ -155,6 +155,7 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getDrcPayment"
             | "agora_getDrcPaymentByInvoice"
             | "agora_getDrcAccountPolicy"
+            | "agora_getDrcDepositPreauth"
             | "agora_getMempool"
             | "agora_getNodeInfo"
             | "agora_estimateFee"
@@ -320,6 +321,7 @@ mod tests {
         assert!(!method_requires_token("agora_getDrcPayment"));
         assert!(!method_requires_token("agora_getDrcPaymentByInvoice"));
         assert!(!method_requires_token("agora_getDrcAccountPolicy"));
+        assert!(!method_requires_token("agora_getDrcDepositPreauth"));
         assert!(!method_requires_token("agora_getMempool"));
         assert!(!method_requires_token("agora_getNodeInfo"));
         assert!(!method_requires_token("agora_estimateFee"));

@@ -184,6 +184,7 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_payments: &'a [agora_types::DrcPaymentTx],
     pub data_commitments: &'a [agora_types::DataCommitmentAuthorization],
     pub drc_account_policies: &'a [agora_types::DrcAccountPolicyTx],
+    pub drc_deposit_preauths: &'a [agora_types::DrcDepositPreauthTx],
 }
 
 impl ChainState {
@@ -529,6 +530,7 @@ impl ChainState {
             drc_payments: lanes.drc_payments.to_vec(),
             data_commitments: lanes.data_commitments.to_vec(),
             drc_account_policies: lanes.drc_account_policies.to_vec(),
+            drc_deposit_preauths: lanes.drc_deposit_preauths.to_vec(),
         };
         block.header.tx_root = block.compute_body_root();
         Ok(block)
@@ -1864,6 +1866,7 @@ impl ChainState {
                 payment_meta_before: journal.payment_meta_before,
                 data_availability_meta_before: journal.data_availability_meta_before,
                 drc_policy_meta_before: journal.drc_policy_meta_before,
+                drc_deposit_preauth_meta_before: journal.drc_deposit_preauth_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

@@ -26,9 +26,10 @@ The acceptance layer is the sole authority for which transactions mutate state, 
 
 TLT remains UTXO. OVL/DRC use parallel account/stake lanes; OVL execution,
 DRC payments, and provenance-only DA authorizations have dedicated lanes.
-DRC policy operations execute before payments and share the DRC account nonce.
-Apply mutates only `Accepted` operations. Policy bodies use
-`agora-block-body-v6`; DA bodies retain
+DRC policy operations execute before address preauthorizations, both execute
+before payments, and all share the DRC account nonce. Apply mutates only
+`Accepted` operations. Deposit-preauthorization bodies use
+`agora-block-body-v7`; policy bodies retain `agora-block-body-v6`; DA bodies retain
 `agora-block-body-v5`; their `(source, sequence)` key and per-operator replay
 nonce follow the same Virtual first-winner rule. Exact duplicate means the
 same signed authorization ID, not merely matching source data.

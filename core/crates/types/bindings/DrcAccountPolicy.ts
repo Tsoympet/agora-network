@@ -3,4 +3,8 @@
 /**
  * Canonical recipient policy. Missing state is exactly [`Self::default`].
  */
-export type DrcAccountPolicy = { version: number, require_destination_tag: boolean, };
+export type DrcAccountPolicy = { version: number, require_destination_tag: boolean,
+/**
+ * Incoming non-self payments require an address preauthorization when enabled.
+ */
+deposit_auth_required: boolean, };

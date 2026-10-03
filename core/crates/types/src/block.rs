@@ -3,13 +3,15 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::{
-    AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcPaymentTx, Hash,
-    OvlExecutionTx, SignedStakeTx, Transaction,
+    AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcDepositPreauthTx,
+    DrcPaymentTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 
-/// Explicit version/domain for bodies carrying DRC account-policy operations.
-pub const TRIDENT_BLOCK_BODY_VERSION: u16 = 6;
-pub const TRIDENT_BLOCK_BODY_DOMAIN: &[u8] = b"agora-block-body-v6";
+/// Explicit version/domain for bodies carrying DRC deposit preauthorizations.
+pub const TRIDENT_BLOCK_BODY_VERSION: u16 = 7;
+pub const TRIDENT_BLOCK_BODY_DOMAIN: &[u8] = b"agora-block-body-v7";
+const TRIDENT_BLOCK_BODY_V6_VERSION: u16 = 6;
+const TRIDENT_BLOCK_BODY_V6_DOMAIN: &[u8] = b"agora-block-body-v6";
 const TRIDENT_BLOCK_BODY_V5_VERSION: u16 = 5;
 const TRIDENT_BLOCK_BODY_V5_DOMAIN: &[u8] = b"agora-block-body-v5";
 
@@ -59,6 +61,9 @@ pub struct Block {
     /// Owner-authorized, contract-free DRC recipient-policy operations.
     #[serde(default)]
     pub drc_account_policies: Vec<DrcAccountPolicyTx>,
+    /// Owner-authorized, address-based DRC deposit preauthorizations.
+    #[serde(default)]
+    pub drc_deposit_preauths: Vec<DrcDepositPreauthTx>,
 }
 
 impl Block {
@@ -73,6 +78,7 @@ impl Block {
             drc_payments: Vec::new(),
             data_commitments: Vec::new(),
             drc_account_policies: Vec::new(),
+            drc_deposit_preauths: Vec::new(),
         }
     }
 
@@ -109,8 +115,26 @@ impl Block {
     ///
     /// UTXO-only blocks keep the legacy merkle root; account/stake-only bodies
     /// retain v2; OVL execution uses v3; DRC payments use v4; authenticated
-    /// data commitments use v5; DRC account policies use v6.
+    /// data commitments use v5; DRC account policies use v6; address-based DRC
+    /// deposit preauthorizations use v7.
     pub fn compute_body_root(&self) -> Hash {
+        if !self.drc_deposit_preauths.is_empty() {
+            let preauth_ids: Vec<Hash> = self
+                .drc_deposit_preauths
+                .iter()
+                .map(DrcDepositPreauthTx::preauth_tx_id)
+                .collect();
+            return Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_DOMAIN,
+                TRIDENT_BLOCK_BODY_VERSION,
+                self.compute_body_root_v6(),
+                preauth_ids,
+            ));
+        }
+        self.compute_body_root_v6()
+    }
+
+    fn compute_body_root_v6(&self) -> Hash {
         if !self.drc_account_policies.is_empty() {
             let policy_ids: Vec<Hash> = self
                 .drc_account_policies
@@ -118,8 +142,8 @@ impl Block {
                 .map(DrcAccountPolicyTx::policy_tx_id)
                 .collect();
             return Hash::hash_borsh(&(
-                TRIDENT_BLOCK_BODY_DOMAIN,
-                TRIDENT_BLOCK_BODY_VERSION,
+                TRIDENT_BLOCK_BODY_V6_DOMAIN,
+                TRIDENT_BLOCK_BODY_V6_VERSION,
                 self.compute_body_root_v5(),
                 policy_ids,
             ));
@@ -210,6 +234,7 @@ impl BorshDeserialize for Block {
             drc_payments: deserialize_trailing_vec(reader)?,
             data_commitments: deserialize_trailing_vec(reader)?,
             drc_account_policies: deserialize_trailing_vec(reader)?,
+            drc_deposit_preauths: deserialize_trailing_vec(reader)?,
         })
     }
 }
@@ -255,7 +280,10 @@ fn deserialize_optional_len<R: borsh::io::Read>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{Address, Amount, DataAvailabilityCommitment, DrcAccountPolicyTx, DrcPaymentTx};
+    use crate::{
+        Address, Amount, DataAvailabilityCommitment, DrcAccountPolicyTx, DrcDepositPreauthTx,
+        DrcPaymentTx,
+    };
 
     use super::*;
 
@@ -400,8 +428,8 @@ mod tests {
         assert_eq!(
             set_root,
             Hash::hash_borsh(&(
-                TRIDENT_BLOCK_BODY_DOMAIN,
-                TRIDENT_BLOCK_BODY_VERSION,
+                TRIDENT_BLOCK_BODY_V6_DOMAIN,
+                TRIDENT_BLOCK_BODY_V6_VERSION,
                 legacy,
                 vec![block.drc_account_policies[0].policy_tx_id()]
             ))
@@ -409,6 +437,44 @@ mod tests {
         block.drc_account_policies[0].action =
             crate::DrcAccountPolicyAction::ClearRequireDestinationTag;
         assert_ne!(block.compute_body_root(), set_root);
+        let bytes = borsh::to_vec(&block).unwrap();
+        assert_eq!(Block::try_from_slice(&bytes).unwrap(), block);
+    }
+
+    #[test]
+    fn drc_deposit_preauth_activates_body_root_v7_and_commits_action() {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        let legacy = block.compute_body_root();
+        block
+            .drc_deposit_preauths
+            .push(DrcDepositPreauthTx::authorize(
+                Address([7; 20]),
+                Address([8; 20]),
+                Amount::from_base_units(1),
+                2,
+            ));
+        let authorize_root = block.compute_body_root();
+        assert_eq!(
+            authorize_root,
+            Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_DOMAIN,
+                TRIDENT_BLOCK_BODY_VERSION,
+                legacy,
+                vec![block.drc_deposit_preauths[0].preauth_tx_id()]
+            ))
+        );
+        block.drc_deposit_preauths[0].action = crate::DrcDepositPreauthAction::Unauthorize;
+        assert_ne!(block.compute_body_root(), authorize_root);
         let bytes = borsh::to_vec(&block).unwrap();
         assert_eq!(Block::try_from_slice(&bytes).unwrap(), block);
     }
@@ -440,6 +506,18 @@ mod tests {
         data_commitments: Vec<DataCommitmentAuthorization>,
     }
 
+    #[derive(BorshSerialize)]
+    struct LegacyV6Block {
+        header: BlockHeader,
+        transactions: Vec<Transaction>,
+        account_transfers: Vec<AccountTransfer>,
+        stake_ops: Vec<SignedStakeTx>,
+        ovl_executions: Vec<OvlExecutionTx>,
+        drc_payments: Vec<DrcPaymentTx>,
+        data_commitments: Vec<DataCommitmentAuthorization>,
+        drc_account_policies: Vec<DrcAccountPolicyTx>,
+    }
+
     #[test]
     fn legacy_utxo_block_bytes_decode_with_empty_appended_lanes() {
         let legacy = LegacyUtxoBlock {
@@ -463,6 +541,7 @@ mod tests {
         assert!(decoded.drc_payments.is_empty());
         assert!(decoded.data_commitments.is_empty());
         assert!(decoded.drc_account_policies.is_empty());
+        assert!(decoded.drc_deposit_preauths.is_empty());
     }
 
     #[test]
@@ -497,6 +576,7 @@ mod tests {
         assert_eq!(decoded.drc_payments, vec![payment]);
         assert!(decoded.data_commitments.is_empty());
         assert!(decoded.drc_account_policies.is_empty());
+        assert!(decoded.drc_deposit_preauths.is_empty());
     }
 
     #[test]
@@ -521,6 +601,34 @@ mod tests {
         assert_eq!(decoded.header, legacy.header);
         assert!(decoded.data_commitments.is_empty());
         assert!(decoded.drc_account_policies.is_empty());
+        assert!(decoded.drc_deposit_preauths.is_empty());
+    }
+
+    #[test]
+    fn legacy_v6_block_bytes_decode_with_empty_preauth_lane() {
+        let policy =
+            DrcAccountPolicyTx::set_require_destination_tag(Address([7; 20]), Amount::ZERO, 0);
+        let legacy = LegacyV6Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![Hash([8; 32])],
+                timestamp_ms: 9,
+                bits: 10,
+                nonce: 11,
+                tx_root: Hash([12; 32]),
+            },
+            transactions: Vec::new(),
+            account_transfers: Vec::new(),
+            stake_ops: Vec::new(),
+            ovl_executions: Vec::new(),
+            drc_payments: Vec::new(),
+            data_commitments: Vec::new(),
+            drc_account_policies: vec![policy.clone()],
+        };
+        let decoded = Block::try_from_slice(&borsh::to_vec(&legacy).unwrap()).unwrap();
+        assert_eq!(decoded.header, legacy.header);
+        assert_eq!(decoded.drc_account_policies, vec![policy]);
+        assert!(decoded.drc_deposit_preauths.is_empty());
     }
 
     #[test]

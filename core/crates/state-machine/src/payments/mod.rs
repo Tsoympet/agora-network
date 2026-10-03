@@ -10,6 +10,7 @@ use borsh::BorshDeserialize;
 use crate::accounts::{load_account, put_account_into, AccountJournal};
 use crate::apply::TxAuthContext;
 use crate::columns::ColumnFamily;
+use crate::drc_deposit_preauth::load_drc_deposit_preauth;
 use crate::drc_policy::load_drc_account_policy;
 use crate::store::WriteBatch;
 use crate::{StateError, StateStore};
@@ -187,9 +188,6 @@ pub fn apply_drc_payment(
     if tx.amount.as_base_units() == 0 {
         return Err(StateError::InvalidTx("zero DRC payment".into()));
     }
-    if tx.from == tx.to {
-        return Err(StateError::InvalidTx("DRC self-payment forbidden".into()));
-    }
     verify_drc_payment_bound(tx, &auth.chain_id, &auth.genesis)
         .map_err(|e| StateError::InvalidTx(e.to_string()))?;
 
@@ -212,16 +210,27 @@ pub fn apply_drc_payment(
             "duplicate DRC merchant invoice".into(),
         ));
     }
-    if load_drc_account_policy(store, &tx.to)?.require_destination_tag
-        && tx.authenticated_destination_tag().is_none()
-    {
+    let recipient_policy = load_drc_account_policy(store, &tx.to)?;
+    if recipient_policy.require_destination_tag && tx.authenticated_destination_tag().is_none() {
         return Err(StateError::InvalidTx(
             "DRC destination tag required by recipient policy".into(),
         ));
     }
+    if recipient_policy.deposit_auth_required
+        && tx.from != tx.to
+        && !load_drc_deposit_preauth(store, &tx.to, &tx.from)?
+    {
+        return Err(StateError::InvalidTx(
+            "DRC deposit authorization required by recipient policy".into(),
+        ));
+    }
 
     let mut from = load_account(store, NativeAssetId::DRC, &tx.from)?;
-    let mut to = load_account(store, NativeAssetId::DRC, &tx.to)?;
+    let mut to = if tx.from == tx.to {
+        None
+    } else {
+        Some(load_account(store, NativeAssetId::DRC, &tx.to)?)
+    };
     if from.nonce != tx.nonce {
         return Err(StateError::InvalidTx(format!(
             "bad DRC payment nonce: got {} expected {}",
@@ -239,9 +248,29 @@ pub fn apply_drc_payment(
         ));
     }
     let recipient_balance = to
-        .balance
-        .checked_add(tx.amount.as_base_units())
-        .ok_or_else(|| StateError::InvalidTx("DRC payment recipient overflow".into()))?;
+        .as_ref()
+        .map(|recipient| {
+            recipient
+                .balance
+                .checked_add(tx.amount.as_base_units())
+                .ok_or_else(|| StateError::InvalidTx("DRC payment recipient overflow".into()))
+        })
+        .transpose()?;
+    let next_nonce = from
+        .nonce
+        .checked_add(1)
+        .ok_or_else(|| StateError::InvalidTx("DRC payment nonce overflow".into()))?;
+    let next_sender_balance = if tx.from == tx.to {
+        // XRPL DepositAuth treats self-payments as authorized. Exact native DRC
+        // self-payment has a fee-only net effect, but still requires the sender
+        // to fund amount + fee before the amount is credited back.
+        from.balance
+            .checked_sub(debit)
+            .and_then(|balance| balance.checked_add(tx.amount.as_base_units()))
+            .ok_or_else(|| StateError::InvalidTx("DRC self-payment balance overflow".into()))?
+    } else {
+        from.balance - debit
+    };
     let event = DrcPaymentOutboxEvent::from_tx(tx);
     let receipt = DrcPaymentReceipt::delivered_exact(tx);
     let event_bytes = borsh::to_vec(&event).map_err(|e| StateError::Storage(e.to_string()))?;
@@ -253,15 +282,18 @@ pub fn apply_drc_payment(
     journal
         .before
         .push((NativeAssetId::DRC, tx.from, from.clone()));
-    journal.before.push((NativeAssetId::DRC, tx.to, to.clone()));
-    from.balance -= debit;
-    from.nonce = from
-        .nonce
-        .checked_add(1)
-        .ok_or_else(|| StateError::InvalidTx("DRC payment nonce overflow".into()))?;
-    to.balance = recipient_balance;
+    if let Some(recipient) = to.as_ref() {
+        journal
+            .before
+            .push((NativeAssetId::DRC, tx.to, recipient.clone()));
+    }
+    from.balance = next_sender_balance;
+    from.nonce = next_nonce;
     put_account_into(batch, NativeAssetId::DRC, &tx.from, &from)?;
-    put_account_into(batch, NativeAssetId::DRC, &tx.to, &to)?;
+    if let (Some(recipient), Some(balance)) = (to.as_mut(), recipient_balance) {
+        recipient.balance = balance;
+        put_account_into(batch, NativeAssetId::DRC, &tx.to, recipient)?;
+    }
     batch.put_cf(ColumnFamily::Meta, &payment_seen_key(&payment_id), &[1]);
     if tx.invoice_id != Hash::ZERO {
         batch.put_cf(
@@ -900,6 +932,171 @@ mod tests {
             &mut journal,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn deposit_auth_composes_with_self_payments_tags_and_dormant_records() {
+        use agora_crypto::{sign_drc_account_policy_bound, sign_drc_deposit_preauth_bound};
+        use agora_types::{DrcAccountPolicyTx, DrcDepositPreauthTx};
+
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let authorized = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let owner = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let unauthorized = derive_bip44(&seed, &Bip44Path::external(2)).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis: Hash([7; 32]),
+            data_availability_network_fingerprint: None,
+        };
+        let mut funding = WriteBatch::new();
+        for account in [&authorized, &owner, &unauthorized] {
+            credit_account_into(
+                &mut funding,
+                &store,
+                NativeAssetId::DRC,
+                &account.address(),
+                Amount::from_base_units(100),
+            )
+            .unwrap();
+        }
+        store.write_batch(funding).unwrap();
+
+        let mut enable =
+            DrcAccountPolicyTx::set_deposit_auth_required(owner.address(), Amount::ZERO, 0);
+        sign_drc_account_policy_bound(&mut enable, &owner, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        crate::apply_drc_account_policy(&store, &enable, &auth, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+
+        let mut grant =
+            DrcDepositPreauthTx::authorize(owner.address(), authorized.address(), Amount::ZERO, 1);
+        sign_drc_deposit_preauth_bound(&mut grant, &owner, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        crate::apply_drc_deposit_preauth(&store, &grant, &auth, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+
+        let mut rejected = DrcPaymentTx::unsigned_v3(
+            unauthorized.address(),
+            owner.address(),
+            Amount::from_base_units(10),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        sign_drc_payment_bound(&mut rejected, &unauthorized, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let mut rejected_batch = WriteBatch::new();
+        let mut rejected_journal = AccountJournal::default();
+        let error = apply_drc_payment(
+            &store,
+            &rejected,
+            &auth,
+            &mut rejected_batch,
+            &mut rejected_journal,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("deposit authorization required"), "{error}");
+        assert!(rejected_batch.is_empty());
+        assert!(rejected_journal.before.is_empty());
+
+        let mut accepted = DrcPaymentTx::unsigned_v3(
+            authorized.address(),
+            owner.address(),
+            Amount::from_base_units(10),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        sign_drc_payment_bound(&mut accepted, &authorized, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_payment(&store, &accepted, &auth, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+
+        let mut self_payment = DrcPaymentTx::unsigned_v3(
+            owner.address(),
+            owner.address(),
+            Amount::from_base_units(50),
+            Amount::from_base_units(2),
+            None,
+            None,
+            Hash::ZERO,
+            2,
+        );
+        sign_drc_payment_bound(&mut self_payment, &owner, &auth.chain_id, &auth.genesis).unwrap();
+        let owner_before = load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_payment(&store, &self_payment, &auth, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+        let owner_after = load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
+        assert_eq!(owner_after.balance, owner_before.balance - 2);
+        assert_eq!(owner_after.nonce, owner_before.nonce + 1);
+
+        let mut disable =
+            DrcAccountPolicyTx::clear_deposit_auth_required(owner.address(), Amount::ZERO, 3);
+        sign_drc_account_policy_bound(&mut disable, &owner, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        crate::apply_drc_account_policy(&store, &disable, &auth, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+        assert!(
+            crate::load_drc_deposit_preauth(&store, &owner.address(), &authorized.address())
+                .unwrap(),
+            "clearing DepositAuth leaves dormant address records"
+        );
+
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_payment(&store, &rejected, &auth, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+
+        let mut require_tag =
+            DrcAccountPolicyTx::set_require_destination_tag(owner.address(), Amount::ZERO, 4);
+        sign_drc_account_policy_bound(&mut require_tag, &owner, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        crate::apply_drc_account_policy(&store, &require_tag, &auth, &mut batch, &mut journal)
+            .unwrap();
+        store.write_batch(batch).unwrap();
+
+        let mut missing_tag = DrcPaymentTx::unsigned_v3(
+            owner.address(),
+            owner.address(),
+            Amount::from_base_units(1),
+            Amount::ZERO,
+            None,
+            None,
+            Hash::ZERO,
+            5,
+        );
+        sign_drc_payment_bound(&mut missing_tag, &owner, &auth.chain_id, &auth.genesis).unwrap();
+        let mut rejected_batch = WriteBatch::new();
+        let mut rejected_journal = AccountJournal::default();
+        assert!(apply_drc_payment(
+            &store,
+            &missing_tag,
+            &auth,
+            &mut rejected_batch,
+            &mut rejected_journal,
+        )
+        .is_err());
+        assert!(rejected_batch.is_empty());
+
+        missing_tag.destination_tag = Some(0);
+        sign_drc_payment_bound(&mut missing_tag, &owner, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_payment(&store, &missing_tag, &auth, &mut batch, &mut journal).unwrap();
     }
 
     #[test]

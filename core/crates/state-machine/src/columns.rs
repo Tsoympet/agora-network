@@ -50,7 +50,8 @@ impl ColumnFamily {
 /// - `10` — authenticated DA commitment/index/replay state and revert journal
 /// - `11` — root-committed exact-delivery DRC receipt index
 /// - `12` — owner-authorized DRC recipient policy and payment-v3 tag presence
-pub const SCHEMA_VERSION: u32 = 12;
+/// - `13` — address-based DRC DepositAuth preauthorization records and journals
+pub const SCHEMA_VERSION: u32 = 13;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {
