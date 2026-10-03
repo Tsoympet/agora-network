@@ -188,6 +188,73 @@ mod tests {
     }
 
     #[test]
+    fn ovl_execution_cannot_mutate_drc_accounts() {
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let bob = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis: Hash([2; 32]),
+            data_availability_network_fingerprint: None,
+        };
+        let mut funding = WriteBatch::new();
+        for asset in [NativeAssetId::OVL, NativeAssetId::DRC] {
+            credit_account_into(
+                &mut funding,
+                &store,
+                asset,
+                &alice.address(),
+                Amount::from_base_units(100_000),
+            )
+            .unwrap();
+            credit_account_into(
+                &mut funding,
+                &store,
+                asset,
+                &bob.address(),
+                Amount::from_base_units(5_000),
+            )
+            .unwrap();
+        }
+        store.write_batch(funding).unwrap();
+        let alice_drc_before =
+            load_account(&store, NativeAssetId::DRC, &alice.address()).unwrap();
+        let bob_drc_before = load_account(&store, NativeAssetId::DRC, &bob.address()).unwrap();
+
+        let mut tx = OvlExecutionTx::unsigned(
+            alice.address(),
+            bob.address(),
+            Amount::from_base_units(1_000),
+            OVL_INTRINSIC_GAS,
+            2,
+            0,
+            vec![],
+        );
+        sign_ovl_execution_bound(&mut tx, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_ovl_execution(&store, &tx, &auth, &mut batch, &mut journal).unwrap();
+
+        assert!(
+            journal
+                .before
+                .iter()
+                .all(|(asset, _, _)| *asset == NativeAssetId::OVL),
+            "OVL execution journal crossed into the DRC account domain"
+        );
+        store.write_batch(batch).unwrap();
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &alice.address()).unwrap(),
+            alice_drc_before
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &bob.address()).unwrap(),
+            bob_drc_before
+        );
+    }
+
+    #[test]
     fn contract_payloads_rejected_until_vm_activation() {
         let tx = OvlExecutionTx::unsigned(
             Address([1; 20]),
