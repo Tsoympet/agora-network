@@ -6,8 +6,8 @@ use agora_governance::{
     CivicSnapshot, ProposalKind, TopicCategory, VoteChoice,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, BlockHeader, DrcPaymentTx, Hash, OutPoint,
-    OvlExecutionTx, Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, BlockHeader, DrcPaymentReceipt, DrcPaymentTx, Hash,
+    OutPoint, OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -172,6 +172,8 @@ pub trait RpcBackend: Send {
     fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError>;
     fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError>;
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError>;
+    /// Root-committed canonical settlement only; pending is intentionally out of scope.
+    fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
     /// Live UTXO set for wallet coin selection.
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError>;
@@ -250,6 +252,8 @@ pub struct InMemoryBackend {
     mempool: HashMap<Hash, Transaction>,
     /// `tx_id` → `(block_id, index)` for confirmed txs.
     tx_index: HashMap<Hash, (Hash, u32)>,
+    /// Canonical exact-delivery receipts keyed by signed payment id.
+    drc_payment_receipts: HashMap<Hash, DrcPaymentReceipt>,
     template_bits: u32,
     fund_nonce: u64,
     civic: Mutex<CivicSnapshot>,
@@ -264,6 +268,7 @@ impl Default for InMemoryBackend {
             utxos: HashMap::new(),
             mempool: HashMap::new(),
             tx_index: HashMap::new(),
+            drc_payment_receipts: HashMap::new(),
             template_bits: 0,
             fund_nonce: 0,
             civic: Mutex::new(CivicSnapshot::genesis(10_000)),
@@ -300,6 +305,11 @@ impl InMemoryBackend {
 
     pub fn set_tips(&mut self, tips: Vec<Hash>) {
         self.tips = tips;
+    }
+
+    pub fn insert_drc_payment_receipt(&mut self, receipt: DrcPaymentReceipt) {
+        self.drc_payment_receipts
+            .insert(receipt.payment_id, receipt);
     }
 
     pub fn insert_block(&mut self, block: Block) {
@@ -444,6 +454,10 @@ impl RpcBackend for InMemoryBackend {
         Err(RpcError::Rejected(
             "in-memory backend does not admit DRC payments".into(),
         ))
+    }
+
+    fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError> {
+        Ok(self.drc_payment_receipts.get(payment_id).cloned())
     }
 
     fn get_balance(&self, address: &Address) -> Amount {

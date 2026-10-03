@@ -41,7 +41,8 @@ pub use hrp::{
 };
 pub use passport::{PassportAttestation, PassportCategory, PASSPORT_ATTESTATION_DOMAIN};
 pub use payment::{
-    DrcPaymentEnvelopeError, DrcPaymentOutboxEvent, DrcPaymentTx, DRC_PAYMENT_LEGACY_VERSION,
+    DrcPaymentEnvelopeError, DrcPaymentOutboxEvent, DrcPaymentReceipt, DrcPaymentReceiptError,
+    DrcPaymentResult, DrcPaymentTx, DRC_PAYMENT_LEGACY_VERSION, DRC_PAYMENT_RECEIPT_VERSION,
     DRC_PAYMENT_SIGNING_DOMAIN, DRC_PAYMENT_V1_SIGNING_DOMAIN, DRC_PAYMENT_V2_SIGNING_DOMAIN,
     DRC_PAYMENT_VERSION,
 };
@@ -143,6 +144,8 @@ mod ts_export {
         "CheckpointAttestation.ts",
         "DataAvailabilityCommitment.ts",
         "DataCommitmentAuthorization.ts",
+        "DrcPaymentReceipt.ts",
+        "DrcPaymentResult.ts",
         "DrcPaymentTx.ts",
         "OvlExecutionTx.ts",
         "SignedStakeTx.ts",
@@ -189,6 +192,8 @@ mod ts_export {
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");
+        DrcPaymentResult::export_all().expect("export DrcPaymentResult");
+        DrcPaymentReceipt::export_all().expect("export DrcPaymentReceipt");
         CheckpointState::export_all().expect("export CheckpointState");
         CheckpointBody::export_all().expect("export CheckpointBody");
         CheckpointAttestation::export_all().expect("export CheckpointAttestation");
@@ -208,5 +213,12 @@ mod ts_export {
         )
         .expect("read DRC outbox binding");
         assert!(outbox_binding.contains("source_tag: number | null"));
+        let receipt_binding = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings/DrcPaymentReceipt.ts"),
+        )
+        .expect("read DRC receipt binding");
+        assert!(receipt_binding.contains("requested_amount: Amount"));
+        assert!(receipt_binding.contains("delivered_amount: Amount"));
+        assert!(receipt_binding.contains("source_tag: number | null"));
     }
 }

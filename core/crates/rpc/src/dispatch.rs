@@ -1,5 +1,6 @@
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, DrcPaymentTx, Hash, OvlExecutionTx, Transaction,
+    AccountTransfer, Address, Amount, Block, DrcPaymentReceipt, DrcPaymentTx, Hash, OvlExecutionTx,
+    Transaction,
 };
 use serde_json::{json, Value};
 
@@ -118,6 +119,15 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
                 let id = self.backend.submit_drc_payment(tx)?;
                 Ok(json!({ "payment_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcPayment => {
+                let payment_id = param_hash(&req.params, "payment_id")?;
+                let receipt = self.backend.get_drc_payment(&payment_id)?;
+                Ok(json!({
+                    "payment_id": payment_id.to_hex(),
+                    "status": if receipt.is_some() { "settled" } else { "unknown" },
+                    "receipt": receipt.as_ref().map(drc_payment_receipt_to_json),
+                }))
             }
             RpcMethod::GetBalance => {
                 let address = param_address(&req.params, "address")?;
@@ -357,6 +367,22 @@ fn mempool_entry_to_json(entry: &crate::backend::MempoolEntry) -> Value {
         "tx_id": entry.tx_id.to_hex(),
         "fee": entry.fee,
         "transaction": tx_to_explorer_json(&entry.transaction),
+    })
+}
+
+fn drc_payment_receipt_to_json(receipt: &DrcPaymentReceipt) -> Value {
+    json!({
+        "version": receipt.version,
+        "payment_version": receipt.payment_version,
+        "result": receipt.result.as_str(),
+        "from": receipt.from.to_bech32(),
+        "to": receipt.to.to_bech32(),
+        "requested_amount": receipt.requested_amount.as_base_units(),
+        "delivered_amount": receipt.delivered_amount.as_base_units(),
+        "fee_paid": receipt.fee_paid.as_base_units(),
+        "source_tag": receipt.source_tag,
+        "destination_tag": receipt.destination_tag,
+        "invoice_id": receipt.invoice_id.to_hex(),
     })
 }
 
@@ -600,7 +626,7 @@ fn param_topic_category(params: &Value) -> Result<agora_governance::TopicCategor
 mod tests {
     use super::*;
     use crate::backend::InMemoryBackend;
-    use agora_types::{Block, BlockHeader, TxOut};
+    use agora_types::{Block, BlockHeader, DrcPaymentTx, TxOut};
 
     #[test]
     fn tips_balance_submit_fund() {
@@ -782,6 +808,77 @@ mod tests {
         assert!(result["header"]["parents"].as_array().unwrap().is_empty());
         assert_eq!(result["tx_count"], json!(0));
         assert!(result["transactions"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn drc_payment_query_serializes_exact_receipt_unknown_and_malformed_ids() {
+        let payment = DrcPaymentTx::unsigned_v2(
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(300),
+            Amount::from_base_units(7),
+            42,
+            Some(84),
+            Hash([9; 32]),
+            5,
+        );
+        let receipt = DrcPaymentReceipt::delivered_exact(&payment);
+        let payment_id = receipt.payment_id;
+        let mut backend = InMemoryBackend::new();
+        backend.insert_drc_payment_receipt(receipt);
+        let mut rpc = RpcDispatcher::new(backend);
+
+        let settled = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getDrcPayment".into(),
+            params: json!({ "payment_id": payment_id.to_hex() }),
+        });
+        assert_eq!(
+            settled.result.unwrap(),
+            json!({
+                "payment_id": payment_id.to_hex(),
+                "status": "settled",
+                "receipt": {
+                    "version": 1,
+                    "payment_version": 2,
+                    "result": "delivered_exact",
+                    "from": payment.from.to_bech32(),
+                    "to": payment.to.to_bech32(),
+                    "requested_amount": 300,
+                    "delivered_amount": 300,
+                    "fee_paid": 7,
+                    "source_tag": 84,
+                    "destination_tag": 42,
+                    "invoice_id": payment.invoice_id.to_hex(),
+                }
+            })
+        );
+
+        let unknown_id = Hash([3; 32]);
+        let unknown = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getDrcPayment".into(),
+            params: json!([unknown_id.to_hex()]),
+        });
+        assert_eq!(
+            unknown.result.unwrap(),
+            json!({
+                "payment_id": unknown_id.to_hex(),
+                "status": "unknown",
+                "receipt": null,
+            })
+        );
+
+        for malformed in ["abcd".to_string(), "g".repeat(64)] {
+            let response = rpc.handle(RpcRequest {
+                id: Some(json!(3)),
+                method: "agora_getDrcPayment".into(),
+                params: json!({ "payment_id": malformed }),
+            });
+            let error = response.error.unwrap();
+            assert_eq!(error.code, -32602);
+            assert!(error.message.contains("invalid hash"));
+        }
     }
 
     #[test]

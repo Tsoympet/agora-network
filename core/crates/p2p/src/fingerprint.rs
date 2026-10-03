@@ -16,10 +16,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Trident fingerprint domain + versions (distinct mesh from v2).
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
-/// v6 carries versioned DRC v2 source tags inside the existing payment variants.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 6;
+/// v7 carries root-committed exact-delivery DRC receipt state.
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 7;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v2";
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v7";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v8";
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
 
 /// Canonical network fingerprint hash (pre-Trident / genesis v2).

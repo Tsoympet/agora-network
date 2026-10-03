@@ -80,8 +80,8 @@ Mining templates pull UTXO transfers plus account/stake lanes and commit all lan
 
 Authenticated DA authorizations deliberately have no standalone mempool or
 `NetworkMessage` variant. Existing enum discriminants remain unchanged; full
-block propagation carries accepted candidates under Trident protocol v5 /
-state-transition v6. The current node leaves DA activation disabled until a
+block propagation carries accepted candidates under the current Trident
+protocol v7 / state-transition v8 fingerprint. The current node leaves DA activation disabled until a
 reviewed TLT base-fee/sponsorship policy exists, so there is no free public
 gossip path.
 

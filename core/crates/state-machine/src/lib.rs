@@ -98,8 +98,8 @@ pub use network::{
 pub use orphans::{delete_orphan, list_orphans, load_orphan, orphan_key, store_orphan};
 pub use payments::{
     apply_drc_payment, drc_payment_root, list_drc_outbox, load_drc_outbox_event,
-    payment_invoice_key, payment_meta_keys, payment_outbox_key, payment_seen_key,
-    DrcPaymentReceipt, DRC_PAYMENT_LEGACY_VERSION, DRC_PAYMENT_VERSION,
+    load_drc_payment_receipt, payment_invoice_key, payment_meta_keys, payment_outbox_key,
+    payment_receipt_key, payment_seen_key, DRC_PAYMENT_LEGACY_VERSION, DRC_PAYMENT_VERSION,
 };
 pub use staking::{
     advance_epoch, advance_epoch_with_params, apply_evidence, apply_signed_stake_tx,
