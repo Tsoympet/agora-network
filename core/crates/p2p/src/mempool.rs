@@ -200,6 +200,16 @@ impl Mempool {
         if self.payment_txs.contains_key(&id) {
             return Ok(id);
         }
+        if tx.authenticated_destination_tag().is_none()
+            && self
+                .drc_policy_txs
+                .values()
+                .any(|policy| policy.account == tx.to && policy.action.require_destination_tag())
+        {
+            return Err(P2pError::MempoolRejected(
+                "pending recipient policy requires a DRC destination tag".into(),
+            ));
+        }
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
@@ -231,7 +241,28 @@ impl Mempool {
                 "account already has a pending nonce".into(),
             ));
         }
+        let account = tx.account;
+        let requires_destination_tag = tx.action.require_destination_tag();
         self.drc_policy_txs.insert(id, tx);
+        if requires_destination_tag {
+            // A valid owner policy has deterministic precedence over the later
+            // payment lane. Drop candidates that would make local templates
+            // invalid, and reject equivalent candidates while the policy waits.
+            let incompatible: Vec<Hash> = self
+                .payment_txs
+                .iter()
+                .filter_map(|(payment_id, payment)| {
+                    (payment.to == account && payment.authenticated_destination_tag().is_none())
+                        .then_some(*payment_id)
+                })
+                .collect();
+            for payment_id in incompatible {
+                if let Some(payment) = self.payment_txs.remove(&payment_id) {
+                    self.reserved_accounts
+                        .remove(&(NativeAssetId::DRC, payment.from));
+                }
+            }
+        }
         Ok(id)
     }
 
@@ -775,5 +806,46 @@ mod tests {
             pool.admit_drc_policy(replacement).is_err(),
             "higher fee does not replace a resident account nonce"
         );
+    }
+
+    #[test]
+    fn pending_set_policy_evicts_and_blocks_untagged_recipient_payments() {
+        use agora_types::DrcAccountPolicyTx;
+
+        let owner = agora_types::Address([8; 20]);
+        let payer = agora_types::Address([7; 20]);
+        let untagged = DrcPaymentTx::unsigned_v3(
+            payer,
+            owner,
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        let untagged_id = untagged.payment_id();
+        let policy =
+            DrcAccountPolicyTx::set_require_destination_tag(owner, Amount::from_base_units(1), 0);
+
+        let mut pool = Mempool::new(8);
+        pool.admit_payment(untagged.clone()).unwrap();
+        pool.admit_drc_policy(policy).unwrap();
+        assert!(!pool.contains(&untagged_id));
+        assert!(!pool.account_reserved(NativeAssetId::DRC, &payer));
+        assert!(pool.admit_payment(untagged).is_err());
+
+        let tagged_zero = DrcPaymentTx::unsigned_v3(
+            payer,
+            owner,
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            Some(0),
+            None,
+            Hash::ZERO,
+            0,
+        );
+        pool.admit_payment(tagged_zero.clone()).unwrap();
+        assert_eq!(pool.select_drc_payments(1), vec![tagged_zero]);
     }
 }

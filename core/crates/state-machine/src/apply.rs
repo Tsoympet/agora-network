@@ -2422,6 +2422,23 @@ mod tests {
             0,
         );
         sign_drc_payment_bound(&mut missing, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let mut shared_nonce_conflict = DrcPaymentTx::unsigned_v3(
+            merchant.address(),
+            alice.address(),
+            Amount::from_base_units(1),
+            Amount::ZERO,
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        sign_drc_payment_bound(
+            &mut shared_nonce_conflict,
+            &merchant,
+            &auth.chain_id,
+            &auth.genesis,
+        )
+        .unwrap();
         let mut set_block = Block::utxo(
             BlockHeader {
                 version: 1,
@@ -2442,7 +2459,7 @@ mod tests {
             )],
         );
         set_block.drc_account_policies = vec![set];
-        set_block.drc_payments = vec![missing];
+        set_block.drc_payments = vec![missing, shared_nonce_conflict];
         set_block.header.tx_root = set_block.compute_body_root();
 
         let set_result = apply_block_batched_virtual(&store, &set_block, 0, Some(&auth)).unwrap();
@@ -2452,7 +2469,10 @@ mod tests {
         );
         assert_eq!(
             set_result.acceptance.payment_statuses,
-            vec![TransactionAcceptance::ConflictLost]
+            vec![
+                TransactionAcceptance::ConflictLost,
+                TransactionAcceptance::ConflictLost,
+            ]
         );
         let set_journal = set_result.journal.clone();
         store.write_batch(set_result.batch).unwrap();

@@ -81,6 +81,10 @@ mod tests {
         let v2 = network_fingerprint("agora-trident-testnet-1", &genesis, &policy);
         let t1 = trident_network_fingerprint("agora-trident-testnet-1", &genesis, &policy);
         assert_ne!(v2, t1);
+        assert_eq!(
+            t1.to_hex(),
+            "5e2699aa4a9feee7652b483a0b82aad291db1f99a880c5c7b4c9198c25926a87"
+        );
         let t2 = trident_network_fingerprint("agora-trident-testnet-2", &genesis, &policy);
         assert_ne!(t1, t2);
 

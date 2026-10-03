@@ -96,6 +96,11 @@ over later payments from the same owner. A payment invalidated only by ordered
 account state is `ConflictLost` under Virtual apply and never mutates balances.
 Mempool admission reserves the same DRC account nonce across transfers, stake,
 payments, and policy operations. Account-lane replacement is disabled.
+A pending, prevalidated set-policy operation evicts already-pending untagged
+payments to that recipient and rejects new ones, so local templates cannot
+contradict the policy-before-payment lane order. Tagged payments remain
+eligible; a clear operation does not authorize untagged relay until it is
+canonical.
 
 Accepted policy state, fee reward, account nonce, acceptance result, and reorg
 journal commit atomically. Clearing deletes the policy key because absence is
