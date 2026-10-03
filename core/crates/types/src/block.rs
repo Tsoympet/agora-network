@@ -270,6 +270,39 @@ mod tests {
     }
 
     #[test]
+    fn drc_v2_source_tag_changes_the_committed_body_root() {
+        let mut untagged = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        untagged.drc_payments.push(DrcPaymentTx::unsigned_v2(
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            9,
+            None,
+            Hash([3; 32]),
+            0,
+        ));
+        let mut tagged = untagged.clone();
+        tagged.drc_payments[0].source_tag = Some(u32::MAX);
+
+        assert_ne!(
+            untagged.drc_payments[0].payment_id(),
+            tagged.drc_payments[0].payment_id()
+        );
+        assert_ne!(untagged.compute_body_root(), tagged.compute_body_root());
+    }
+
+    #[test]
     fn data_commitment_activates_body_root_v5() {
         let mut block = Block::utxo(
             BlockHeader {

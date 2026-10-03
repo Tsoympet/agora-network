@@ -11,6 +11,8 @@ pub fn sign_drc_payment_bound(
     chain_id: &str,
     genesis: &Hash,
 ) -> Result<(), CryptoError> {
+    tx.validate_envelope_version()
+        .map_err(|_| CryptoError::InvalidTransactionAuth)?;
     if keypair.address() != tx.from {
         return Err(CryptoError::InvalidTransactionAuth);
     }
@@ -26,6 +28,8 @@ pub fn verify_drc_payment_bound(
     chain_id: &str,
     genesis: &Hash,
 ) -> Result<(), CryptoError> {
+    tx.validate_envelope_version()
+        .map_err(|_| CryptoError::InvalidTransactionAuth)?;
     if tx.public_key.len() != 33 || tx.signature.len() != 64 {
         return Err(CryptoError::InvalidTransactionAuth);
     }
@@ -68,6 +72,19 @@ mod tests {
         )
     }
 
+    fn payment_v2(from: Address, source_tag: Option<u32>) -> DrcPaymentTx {
+        DrcPaymentTx::unsigned_v2(
+            from,
+            Address([2u8; 20]),
+            Amount::from_base_units(3),
+            Amount::from_base_units(1),
+            42,
+            source_tag,
+            Hash([6u8; 32]),
+            7,
+        )
+    }
+
     #[test]
     fn drc_payment_bound_sign_verify_and_replay_rejection() {
         let keypair = keypair();
@@ -94,5 +111,34 @@ mod tests {
         sign_drc_payment_bound(&mut signed, &keypair, "agora-dev", &Hash::ZERO).unwrap();
         signed.from = Address::ZERO;
         assert!(verify_drc_payment_bound(&signed, "agora-dev", &Hash::ZERO).is_err());
+    }
+
+    #[test]
+    fn drc_payment_v2_source_tag_is_authenticated() {
+        let keypair = keypair();
+        let genesis = Hash([7u8; 32]);
+        let mut tx = payment_v2(keypair.address(), Some(u32::MAX));
+
+        sign_drc_payment_bound(&mut tx, &keypair, "agora-dev", &genesis).unwrap();
+        verify_drc_payment_bound(&tx, "agora-dev", &genesis).unwrap();
+
+        tx.source_tag = Some(u32::MAX - 1);
+        assert!(verify_drc_payment_bound(&tx, "agora-dev", &genesis).is_err());
+        tx.source_tag = None;
+        assert!(verify_drc_payment_bound(&tx, "agora-dev", &genesis).is_err());
+    }
+
+    #[test]
+    fn drc_payment_rejects_unsupported_or_legacy_source_tag_versions() {
+        let keypair = keypair();
+        let mut legacy = payment(keypair.address());
+        legacy.source_tag = Some(0);
+        assert!(sign_drc_payment_bound(&mut legacy, &keypair, "agora-dev", &Hash::ZERO).is_err());
+
+        let mut unsupported = payment_v2(keypair.address(), None);
+        unsupported.version += 1;
+        assert!(
+            sign_drc_payment_bound(&mut unsupported, &keypair, "agora-dev", &Hash::ZERO).is_err()
+        );
     }
 }

@@ -189,10 +189,23 @@ mod tests {
             Hash([3; 32]),
             0,
         );
+        let source_tagged = DrcPaymentTx::unsigned_v2(
+            Address([1; 20]),
+            Address([2; 20]),
+            agora_types::Amount::from_base_units(1),
+            agora_types::Amount::ZERO,
+            0,
+            Some(42),
+            Hash([3; 32]),
+            0,
+        );
         assert_eq!(
             NetworkMessage::Transaction(Transaction::unsigned(1, vec![], vec![], 0)).encode()[0],
             0
         );
         assert_eq!(NetworkMessage::DrcPayment(payment).encode()[0], 9);
+        let message = NetworkMessage::DrcPayment(source_tagged);
+        assert_eq!(message.encode()[0], 9);
+        assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
     }
 }

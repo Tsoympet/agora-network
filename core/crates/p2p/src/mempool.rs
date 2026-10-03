@@ -651,4 +651,26 @@ mod tests {
         pool.admit_account(account).unwrap();
         assert!(pool.admit_payment(payment).is_err());
     }
+
+    #[test]
+    fn pending_drc_payment_preserves_v2_source_tag() {
+        use agora_types::DrcPaymentTx;
+
+        let payment = DrcPaymentTx::unsigned_v2(
+            agora_types::Address([6; 20]),
+            agora_types::Address([7; 20]),
+            Amount::from_base_units(5),
+            Amount::from_base_units(1),
+            9,
+            Some(u32::MAX),
+            Hash::ZERO,
+            0,
+        );
+        let mut pool = Mempool::new(4);
+        let id = pool.admit_payment(payment.clone()).unwrap();
+
+        assert_eq!(id, payment.payment_id());
+        assert_eq!(pool.select_drc_payments(1), vec![payment]);
+        assert_eq!(pool.select_drc_payments(1)[0].source_tag, Some(u32::MAX));
+    }
 }

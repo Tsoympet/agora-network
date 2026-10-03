@@ -40,7 +40,11 @@ pub use hrp::{
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
 };
 pub use passport::{PassportAttestation, PassportCategory, PASSPORT_ATTESTATION_DOMAIN};
-pub use payment::{DrcPaymentOutboxEvent, DrcPaymentTx, DRC_PAYMENT_SIGNING_DOMAIN};
+pub use payment::{
+    DrcPaymentEnvelopeError, DrcPaymentOutboxEvent, DrcPaymentTx, DRC_PAYMENT_LEGACY_VERSION,
+    DRC_PAYMENT_SIGNING_DOMAIN, DRC_PAYMENT_V1_SIGNING_DOMAIN, DRC_PAYMENT_V2_SIGNING_DOMAIN,
+    DRC_PAYMENT_VERSION,
+};
 pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 pub use treasury::{TreasuryBalance, TreasuryId};
@@ -193,5 +197,16 @@ mod ts_export {
         PassportCategory::export_all().expect("export PassportCategory");
         PassportAttestation::export_all().expect("export PassportAttestation");
         normalize_generated_bindings();
+
+        let payment_binding = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings/DrcPaymentTx.ts"),
+        )
+        .expect("read DRC payment binding");
+        assert!(payment_binding.contains("source_tag: number | null"));
+        let outbox_binding = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings/DrcPaymentOutboxEvent.ts"),
+        )
+        .expect("read DRC outbox binding");
+        assert!(outbox_binding.contains("source_tag: number | null"));
     }
 }

@@ -18,15 +18,15 @@ use crate::staking::StakingParams;
 
 pub const TRIDENT_GENESIS_SCHEMA: &str = "agora-trident-genesis-v3";
 /// State-transition version committed into the Trident network fingerprint.
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v6";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v7";
 /// Consensus-policy version string for Trident.
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
 pub const TRIDENT_GENESIS_ID_DOMAIN: &[u8] = b"agora-trident-genesis-identity-v1";
 pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-policy-v1";
-/// v5 adds the authenticated block-only DA commitment lane.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 5;
-pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v1";
+/// v6 adds the versioned DRC v2 source-tag envelope on the existing payment lane.
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 6;
+pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v2";
 const UNFROZEN: &str = "UNFROZEN";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]

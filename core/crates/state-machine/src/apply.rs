@@ -2161,12 +2161,13 @@ mod tests {
         .unwrap();
         store.write_batch(funding).unwrap();
 
-        let mut payment = DrcPaymentTx::unsigned(
+        let mut payment = DrcPaymentTx::unsigned_v2(
             alice.address(),
             merchant.address(),
             Amount::from_base_units(400),
             Amount::from_base_units(7),
             42,
+            Some(84),
             Hash([9; 32]),
             0,
         );
@@ -2220,9 +2221,9 @@ mod tests {
             400
         );
         assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 7);
-        assert!(load_drc_outbox_event(&store, &payment_id)
-            .unwrap()
-            .is_some());
+        let outbox = load_drc_outbox_event(&store, &payment_id).unwrap().unwrap();
+        assert_eq!(outbox.source_tag, Some(84));
+        assert_eq!(outbox.destination_tag, 42);
         assert_ne!(drc_payment_root(&store).unwrap(), payment_root_before);
 
         store

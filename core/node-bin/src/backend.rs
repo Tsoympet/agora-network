@@ -1236,12 +1236,13 @@ mod tests {
             .unwrap(),
         ));
         let mut backend = NodeBackend::new(chain, store, mempool, backend_config(genesis));
-        let mut tx = DrcPaymentTx::unsigned(
+        let mut tx = DrcPaymentTx::unsigned_v2(
             alice.address(),
             merchant.address(),
             Amount::from_base_units(100),
             Amount::from_base_units(1),
             77,
+            Some(88),
             Hash([8; 32]),
             0,
         );
@@ -1251,6 +1252,7 @@ mod tests {
         assert_eq!(id, tx.payment_id());
         let template = backend.get_block_template().unwrap();
         assert_eq!(template.drc_payments, vec![tx]);
+        assert_eq!(template.drc_payments[0].source_tag, Some(88));
         assert_eq!(template.header.tx_root, template.compute_body_root());
     }
 

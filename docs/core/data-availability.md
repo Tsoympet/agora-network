@@ -91,8 +91,10 @@ They contribute to `agora-trident-state-root-v5`. Their prior values are stored
 in `UtxoJournal` and apply/revert with acceptance in the same `WriteBatch`, so
 reorg and crash recovery use the existing `pending_virtual` protocol.
 
-The Trident protocol fingerprint is v5 and the state-transition version is
-`agora-trident-state-v6`. Frozen pre-Trident/v2 constants remain unchanged.
+The Trident protocol fingerprint is v6 and the state-transition version is
+`agora-trident-state-v7`; this later bump activates DRC payment-v2 source tags
+without changing the DA lane described here. Frozen pre-Trident/v2 constants
+remain unchanged.
 No standalone `NetworkMessage` variant was added: authenticated commitments
 travel only inside full blocks, preserving every existing wire-enum
 discriminant.

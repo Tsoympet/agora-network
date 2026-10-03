@@ -17,12 +17,16 @@ const SEEN_PREFIX: &[u8] = b"payment/drc/seen/";
 const INVOICE_PREFIX: &[u8] = b"payment/drc/invoice/";
 const OUTBOX_PREFIX: &[u8] = b"payment/drc/outbox/";
 const PAYMENT_ROOT_KEY: &[u8] = b"payment/drc/root";
-pub const DRC_PAYMENT_VERSION: u32 = 1;
+pub const DRC_PAYMENT_LEGACY_VERSION: u32 = agora_types::DRC_PAYMENT_LEGACY_VERSION;
+pub const DRC_PAYMENT_VERSION: u32 = agora_types::DRC_PAYMENT_VERSION;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrcPaymentReceipt {
     pub payment_id: Hash,
+    pub payment_version: u32,
     pub fee_paid: u64,
+    pub source_tag: Option<u32>,
+    pub destination_tag: u32,
 }
 
 pub fn payment_seen_key(payment_id: &Hash) -> Vec<u8> {
@@ -120,12 +124,8 @@ pub fn apply_drc_payment(
     batch: &mut WriteBatch,
     journal: &mut AccountJournal,
 ) -> Result<DrcPaymentReceipt, StateError> {
-    if tx.version != DRC_PAYMENT_VERSION {
-        return Err(StateError::InvalidTx(format!(
-            "unsupported DRC payment version {}",
-            tx.version
-        )));
-    }
+    tx.validate_envelope_version()
+        .map_err(|err| StateError::InvalidTx(err.to_string()))?;
     if tx.amount.as_base_units() == 0 {
         return Err(StateError::InvalidTx("zero DRC payment".into()));
     }
@@ -216,7 +216,10 @@ pub fn apply_drc_payment(
 
     Ok(DrcPaymentReceipt {
         payment_id,
+        payment_version: tx.version,
         fee_paid: tx.fee.as_base_units(),
+        source_tag: tx.source_tag,
+        destination_tag: tx.destination_tag,
     })
 }
 
@@ -270,6 +273,9 @@ mod tests {
         store.write_batch(batch).unwrap();
 
         assert_eq!(receipt.fee_paid, 7);
+        assert_eq!(receipt.payment_version, DRC_PAYMENT_LEGACY_VERSION);
+        assert_eq!(receipt.source_tag, None);
+        assert_eq!(receipt.destination_tag, 42);
         assert_eq!(
             load_account(&store, NativeAssetId::DRC, &alice.address())
                 .unwrap()
@@ -285,9 +291,138 @@ mod tests {
         let event = load_drc_outbox_event(&store, &receipt.payment_id)
             .unwrap()
             .unwrap();
+        assert_eq!(event.payment_version, DRC_PAYMENT_LEGACY_VERSION);
+        assert_eq!(event.source_tag, None);
         assert_eq!(event.destination_tag, 42);
         assert_eq!(event.invoice_id, Hash([9; 32]));
+        assert_eq!(list_drc_outbox(&store, 1).unwrap(), vec![event]);
         assert_ne!(drc_payment_root(&store).unwrap(), root_before);
+    }
+
+    fn settle_v2(
+        source_tag: Option<u32>,
+    ) -> (DrcPaymentReceipt, DrcPaymentOutboxEvent, Hash, Hash) {
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let merchant = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis: Hash([3; 32]),
+            data_availability_network_fingerprint: None,
+        };
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &alice.address(),
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+
+        let mut tx = DrcPaymentTx::unsigned_v2(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(400),
+            Amount::from_base_units(7),
+            42,
+            source_tag,
+            Hash([9; 32]),
+            0,
+        );
+        sign_drc_payment_bound(&mut tx, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let signed_bytes = borsh::to_vec(&tx).unwrap();
+        let tx = DrcPaymentTx::try_from_slice(&signed_bytes).unwrap();
+        verify_drc_payment_bound(&tx, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        let receipt = apply_drc_payment(&store, &tx, &auth, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &alice.address())
+                .unwrap()
+                .balance,
+            593
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &merchant.address())
+                .unwrap()
+                .balance,
+            400
+        );
+        let event = load_drc_outbox_event(&store, &receipt.payment_id)
+            .unwrap()
+            .unwrap();
+        let payment_root = drc_payment_root(&store).unwrap();
+        let state_root = crate::compose_trident_state_root(&store, &Hash([4; 32])).unwrap();
+        (receipt, event, payment_root, state_root)
+    }
+
+    #[test]
+    fn source_tag_survives_settlement_and_changes_payment_and_state_roots() {
+        let (untagged_receipt, untagged_event, untagged_payment_root, untagged_state_root) =
+            settle_v2(None);
+        let (tagged_receipt, tagged_event, tagged_payment_root, tagged_state_root) =
+            settle_v2(Some(0));
+
+        assert_eq!(untagged_receipt.payment_version, DRC_PAYMENT_VERSION);
+        assert_eq!(untagged_receipt.source_tag, None);
+        assert_eq!(untagged_event.source_tag, None);
+        assert_eq!(tagged_receipt.source_tag, Some(0));
+        assert_eq!(tagged_event.source_tag, Some(0));
+        assert_eq!(tagged_event.destination_tag, 42);
+        assert_ne!(tagged_receipt.payment_id, untagged_receipt.payment_id);
+        assert_ne!(tagged_payment_root, untagged_payment_root);
+        assert_ne!(tagged_state_root, untagged_state_root);
+    }
+
+    #[test]
+    fn malformed_or_unsupported_payment_versions_stage_no_state() {
+        let store = StateStore::open_in_memory();
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis: Hash([5; 32]),
+            data_availability_network_fingerprint: None,
+        };
+        let mut unsupported = DrcPaymentTx::unsigned_v2(
+            agora_types::Address([1; 20]),
+            agora_types::Address([2; 20]),
+            Amount::from_base_units(1),
+            Amount::ZERO,
+            0,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        unsupported.version += 1;
+
+        let mut legacy_with_source = DrcPaymentTx::unsigned(
+            agora_types::Address([1; 20]),
+            agora_types::Address([2; 20]),
+            Amount::from_base_units(1),
+            Amount::ZERO,
+            0,
+            Hash::ZERO,
+            0,
+        );
+        legacy_with_source.source_tag = Some(0);
+
+        for (tx, expected) in [
+            (unsupported, "unsupported DRC payment version"),
+            (legacy_with_source, "v1 cannot carry a source tag"),
+        ] {
+            let mut batch = WriteBatch::new();
+            let mut journal = AccountJournal::default();
+            let err = apply_drc_payment(&store, &tx, &auth, &mut batch, &mut journal)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains(expected), "{err}");
+            assert!(batch.is_empty());
+            assert!(journal.before.is_empty());
+        }
     }
 
     #[test]

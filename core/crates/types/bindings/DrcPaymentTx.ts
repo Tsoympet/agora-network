@@ -12,6 +12,10 @@ export type DrcPaymentTx = { version: number, from: Address, to: Address, amount
  */
 destination_tag: number,
 /**
+ * Optional sender-local routing metadata. `Some(0)` is distinct from no source tag.
+ */
+source_tag: number | null,
+/**
  * `Hash::ZERO` indicates that the payment is not associated with an invoice.
  */
 invoice_id: Hash, nonce: bigint, public_key: Array<number>, signature: Array<number>, };
