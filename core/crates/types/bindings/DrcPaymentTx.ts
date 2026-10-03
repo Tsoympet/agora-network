@@ -8,9 +8,9 @@ import type { Hash } from "./Hash";
  */
 export type DrcPaymentTx = { version: number, from: Address, to: Address, amount: Amount, fee: Amount,
 /**
- * `0` indicates that the destination does not require a tag.
+ * Recipient-local routing metadata. `Some(0)` is distinct from no tag in v3.
  */
-destination_tag: number,
+destination_tag: number | null,
 /**
  * Optional sender-local routing metadata. `Some(0)` is distinct from no source tag.
  */
