@@ -28,7 +28,8 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | `OvlExecutionTx` | Signed, chain-bound OVL value/execution envelope with gas limits |
 | `DrcPaymentTx` / `DrcPaymentOutboxEvent` | Versioned signed DRC settlement and deterministic source/destination-tag routing event |
 | `DrcPaymentReceipt` / `DrcPaymentResult` | Versioned exact full-delivery result; no partial-delivery variant |
-| `DrcAccountPolicyTx` / `DrcAccountPolicy` | Owner-authorized DRC destination-tag requirement operation and canonical state |
+| `DrcAccountPolicyTx` / `DrcAccountPolicy` | Versioned owner-authorized DRC destination-tag and DepositAuth flags |
+| `DrcDepositPreauthTx` / `DrcDepositPreauth` | Address-only recipient grant/revoke operation and canonical record |
 | `DataAvailabilityCommitment` | Versioned Borsh integrity/provenance payload for explicitly non-canonical source data |
 | `DataCommitmentAuthorization` | secp256k1 operator authorization bound to L1 chain, genesis, fingerprint, and replay nonce |
 | `TransactionBody` | Signable subset (no auth material) |

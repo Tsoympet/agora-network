@@ -84,6 +84,10 @@ genesis hash, operation version, account, action, shared DRC account nonce, and
 explicit DRC fee. V2 additionally binds the explicit operation type. The
 signer-derived address must equal the policy account.
 
+Set and clear are idempotent flag assignments: repeating the current value with
+the next valid nonce is accepted and still consumes that nonce and fee. A
+DepositAuth v2 operation requires an existing canonical DRC owner account.
+
 Missing policy state is off. When enabled, a payment to that account must carry
 an authenticated destination tag. Frozen v1/v2 non-zero tags satisfy the
 policy, while their `0` sentinel remains absent. Payment v3 carries
