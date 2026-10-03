@@ -218,8 +218,7 @@ mod tests {
             .unwrap();
         }
         store.write_batch(funding).unwrap();
-        let alice_drc_before =
-            load_account(&store, NativeAssetId::DRC, &alice.address()).unwrap();
+        let alice_drc_before = load_account(&store, NativeAssetId::DRC, &alice.address()).unwrap();
         let bob_drc_before = load_account(&store, NativeAssetId::DRC, &bob.address()).unwrap();
 
         let mut tx = OvlExecutionTx::unsigned(
