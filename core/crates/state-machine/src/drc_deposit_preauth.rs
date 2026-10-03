@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn legacy_and_future_persisted_record_versions_fail_closed() {
-        for version in [0, DRC_DEPOSIT_PREAUTH_STATE_VERSION + 1] {
+        for version in [0, agora_types::DRC_DEPOSIT_PREAUTH_STATE_VERSION + 1] {
             let store = StateStore::open_in_memory();
             let owner = Address([1; 20]);
             let source = Address([2; 20]);
