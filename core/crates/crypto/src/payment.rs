@@ -136,7 +136,7 @@ mod tests {
         assert!(sign_drc_payment_bound(&mut legacy, &keypair, "agora-dev", &Hash::ZERO).is_err());
 
         let mut unsupported = payment_v2(keypair.address(), None);
-        unsupported.version += 1;
+        unsupported.version = agora_types::DRC_PAYMENT_VERSION + 1;
         assert!(
             sign_drc_payment_bound(&mut unsupported, &keypair, "agora-dev", &Hash::ZERO).is_err()
         );
