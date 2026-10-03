@@ -20,9 +20,11 @@ const INVOICE_PREFIX: &[u8] = b"payment/drc/invoice/";
 const OUTBOX_PREFIX: &[u8] = b"payment/drc/outbox/";
 const RECEIPT_PREFIX: &[u8] = b"payment/drc/receipt/";
 const PAYMENT_ROOT_KEY: &[u8] = b"payment/drc/root";
-const PAYMENT_ROOT_DOMAIN: &[u8] = b"agora-drc-payment-root-v3";
+const PAYMENT_ROOT_DOMAIN: &[u8] = b"agora-drc-payment-root-v4";
 pub const DRC_PAYMENT_LEGACY_VERSION: u32 = agora_types::DRC_PAYMENT_LEGACY_VERSION;
 pub const DRC_PAYMENT_SOURCE_TAG_VERSION: u32 = agora_types::DRC_PAYMENT_SOURCE_TAG_VERSION;
+pub const DRC_PAYMENT_DESTINATION_TAG_VERSION: u32 =
+    agora_types::DRC_PAYMENT_DESTINATION_TAG_VERSION;
 pub const DRC_PAYMENT_VERSION: u32 = agora_types::DRC_PAYMENT_VERSION;
 
 pub fn payment_seen_key(payment_id: &Hash) -> Vec<u8> {
@@ -183,6 +185,36 @@ pub fn apply_drc_payment(
     batch: &mut WriteBatch,
     journal: &mut AccountJournal,
 ) -> Result<DrcPaymentReceipt, StateError> {
+    apply_drc_payment_with_blue_score(store, tx, auth, None, batch, journal)
+}
+
+/// Apply a payment under its containing block's consensus-derived GHOSTDAG blue score.
+pub fn apply_drc_payment_at_blue_score(
+    store: &StateStore,
+    tx: &DrcPaymentTx,
+    auth: &TxAuthContext,
+    application_blue_score: u64,
+    batch: &mut WriteBatch,
+    journal: &mut AccountJournal,
+) -> Result<DrcPaymentReceipt, StateError> {
+    apply_drc_payment_with_blue_score(
+        store,
+        tx,
+        auth,
+        Some(application_blue_score),
+        batch,
+        journal,
+    )
+}
+
+pub(crate) fn apply_drc_payment_with_blue_score(
+    store: &StateStore,
+    tx: &DrcPaymentTx,
+    auth: &TxAuthContext,
+    application_blue_score: Option<u64>,
+    batch: &mut WriteBatch,
+    journal: &mut AccountJournal,
+) -> Result<DrcPaymentReceipt, StateError> {
     tx.validate_envelope_version()
         .map_err(|err| StateError::InvalidTx(err.to_string()))?;
     if tx.amount.as_base_units() == 0 {
@@ -190,6 +222,20 @@ pub fn apply_drc_payment(
     }
     verify_drc_payment_bound(tx, &auth.chain_id, &auth.genesis)
         .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+    if tx.version == DRC_PAYMENT_VERSION {
+        let score = application_blue_score.ok_or_else(|| {
+            StateError::InvalidTx(
+                "DRC payment v4 requires a consensus application blue score".into(),
+            )
+        })?;
+        if let Some(cutoff) = tx.last_valid_blue_score {
+            if score > cutoff {
+                return Err(StateError::InvalidTx(format!(
+                    "expired DRC payment: application blue score {score} exceeds last valid blue score {cutoff}"
+                )));
+            }
+        }
+    }
 
     let payment_id = tx.payment_id();
     if store
@@ -1163,5 +1209,80 @@ mod tests {
             load_account(&store, NativeAssetId::DRC, &alice.address()).unwrap(),
             before
         );
+    }
+
+    #[test]
+    fn payment_v4_expiry_is_inclusive_atomic_and_preserves_nonce() {
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let merchant = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis: Hash([11; 32]),
+            data_availability_network_fingerprint: None,
+        };
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &alice.address(),
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+
+        let mut at_cutoff = DrcPaymentTx::unsigned_v4(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(10),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+            Some(5),
+        );
+        sign_drc_payment_bound(&mut at_cutoff, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_payment_at_blue_score(&store, &at_cutoff, &auth, 5, &mut batch, &mut journal)
+            .unwrap();
+        store.write_batch(batch).unwrap();
+
+        let mut after_cutoff = at_cutoff.clone();
+        after_cutoff.amount = Amount::from_base_units(11);
+        sign_drc_payment_bound(&mut after_cutoff, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let before = load_account(&store, NativeAssetId::DRC, &alice.address()).unwrap();
+        let root_before = drc_payment_root(&store).unwrap();
+        let mut rejected_batch = WriteBatch::new();
+        let mut rejected_journal = AccountJournal::default();
+        let error = apply_drc_payment_at_blue_score(
+            &store,
+            &after_cutoff,
+            &auth,
+            6,
+            &mut rejected_batch,
+            &mut rejected_journal,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("expired DRC payment"), "{error}");
+        assert!(rejected_batch.is_empty());
+        assert!(rejected_journal.before.is_empty());
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &alice.address()).unwrap(),
+            before
+        );
+        assert_eq!(drc_payment_root(&store).unwrap(), root_before);
+
+        let mut retry = at_cutoff.clone();
+        retry.nonce = 1;
+        sign_drc_payment_bound(&mut retry, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_payment_at_blue_score(&store, &retry, &auth, 5, &mut batch, &mut journal)
+            .unwrap();
     }
 }

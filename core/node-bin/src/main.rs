@@ -158,14 +158,16 @@ fn admit_gossip_block(
     mempool: &Arc<Mutex<Mempool>>,
     block: Block,
 ) -> Result<Hash, AdmitError> {
-    let id = {
+    let (id, virtual_blue_score) = {
         let mut guard = chain
             .lock()
             .map_err(|_| AdmitError::Storage("chain lock poisoned".into()))?;
-        guard.admit_block(block.clone())?
+        let id = guard.admit_block(block.clone())?;
+        let score = guard.virtual_blue_score()?;
+        (id, score)
     };
     if let Ok(mut pool) = mempool.lock() {
-        pool.evict_for_block(&block);
+        pool.evict_for_block_at_blue_score(&block, virtual_blue_score);
     }
     Ok(id)
 }
@@ -1032,7 +1034,18 @@ async fn main() {
                         }
                     }
                     NetworkMessage::DrcPayment(tx) => {
-                        match admit_drc_payment(store.as_ref(), &mempool, tx, &tx_auth) {
+                        let application_blue_score = chain
+                            .lock()
+                            .map_err(|_| "chain lock poisoned".to_string())
+                            .and_then(|guard| {
+                                guard
+                                    .virtual_blue_score()
+                                    .map_err(|error| error.to_string())
+                            });
+                        match application_blue_score.and_then(|score| {
+                            admit_drc_payment(store.as_ref(), &mempool, tx, &tx_auth, score)
+                                .map_err(|error| error.to_string())
+                        }) {
                             Ok(id) => {
                                 info!(%peer, %topic, payment = %id.to_hex(), "DRC payment gossip admitted");
                             }

@@ -17,9 +17,9 @@ use agora_rpc::{
     UtxoEntry,
 };
 use agora_state_machine::{
-    apply_account_transfer, apply_drc_account_policy, apply_drc_deposit_preauth, apply_drc_payment,
-    apply_ovl_execution, apply_signed_stake_tx, build_snapshot, canonical_community_root,
-    governance_treasury_root, list_grants as list_canonical_grants,
+    apply_account_transfer, apply_drc_account_policy, apply_drc_deposit_preauth,
+    apply_drc_payment_at_blue_score, apply_ovl_execution, apply_signed_stake_tx, build_snapshot,
+    canonical_community_root, governance_treasury_root, list_grants as list_canonical_grants,
     list_hubs as list_canonical_hubs, list_missions as list_canonical_missions,
     list_passport_attestations, load_canonical_community_summary, load_canonical_governance_policy,
     load_drc_account_policy, load_drc_deposit_preauth, load_drc_payment_by_invoice,
@@ -165,6 +165,7 @@ pub(crate) fn admit_drc_payment(
     mempool: &Mutex<Mempool>,
     tx: DrcPaymentTx,
     auth: &TxAuthContext,
+    application_blue_score: u64,
 ) -> Result<Hash, RpcError> {
     let mut pool = mempool
         .lock()
@@ -183,15 +184,23 @@ pub(crate) fn admit_drc_payment(
     }
     let mut batch = WriteBatch::new();
     let mut journal = AccountJournal::default();
-    apply_drc_payment(store, &tx, auth, &mut batch, &mut journal)
-        .map_err(|e| RpcError::Rejected(format!("DRC payment: {e}")))?;
+    apply_drc_payment_at_blue_score(
+        store,
+        &tx,
+        auth,
+        application_blue_score,
+        &mut batch,
+        &mut journal,
+    )
+    .map_err(|e| RpcError::Rejected(format!("DRC payment: {e}")))?;
     let canonical_policy = load_drc_account_policy(store, &tx.to)
         .map_err(|error| RpcError::Internal(error.to_string()))?;
     let canonical_preauthorized = tx.from == tx.to
         || load_drc_deposit_preauth(store, &tx.to, &tx.from)
             .map_err(|error| RpcError::Internal(error.to_string()))?;
-    pool.admit_payment_with_deposit_auth(
+    pool.admit_payment_with_deposit_auth_at_blue_score(
         tx,
+        application_blue_score,
         canonical_policy.deposit_auth_required,
         canonical_preauthorized,
     )
@@ -574,7 +583,19 @@ impl RpcBackend for NodeBackend {
 
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError> {
         let auth = self.tx_auth();
-        let id = admit_drc_payment(&self.store, &self.mempool, tx.clone(), &auth)?;
+        let application_blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .virtual_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id = admit_drc_payment(
+            &self.store,
+            &self.mempool,
+            tx.clone(),
+            &auth,
+            application_blue_score,
+        )?;
         if let Some(net) = &self.net {
             net.publish_message(NetworkMessage::DrcPayment(tx))
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
@@ -689,6 +710,13 @@ impl RpcBackend for NodeBackend {
     }
 
     fn get_block_template(&self) -> Result<Block, RpcError> {
+        let chain = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?;
+        let application_blue_score = chain
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
         let (
             transfers,
             account_transfers,
@@ -707,14 +735,15 @@ impl RpcBackend for NodeBackend {
                 pool.select_account_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_stake_ops(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_ovl_executions(DEFAULT_TEMPLATE_TX_LIMIT),
-                pool.select_drc_payments(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_payments_at_blue_score(
+                    DEFAULT_TEMPLATE_TX_LIMIT,
+                    application_blue_score,
+                ),
                 pool.select_drc_account_policies(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_deposit_preauths(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
-        self.chain
-            .lock()
-            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+        chain
             .block_template_lanes(
                 self.miner_address,
                 BlockTemplateLanes {
@@ -739,12 +768,12 @@ impl RpcBackend for NodeBackend {
     }
 
     fn submit_block(&mut self, block: Block) -> Result<Hash, RpcError> {
-        let id = self
-            .chain
-            .lock()
-            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
-            .admit_block(block.clone())
-            .map_err(|e| match e {
+        let (id, virtual_blue_score) = {
+            let mut chain = self
+                .chain
+                .lock()
+                .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?;
+            let id = chain.admit_block(block.clone()).map_err(|e| match e {
                 crate::admit::AdmitError::InvalidPow => {
                     RpcError::Rejected("invalid proof of work".into())
                 }
@@ -772,8 +801,13 @@ impl RpcBackend for NodeBackend {
                 }
                 other => RpcError::Internal(other.to_string()),
             })?;
+            let score = chain
+                .virtual_blue_score()
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+            (id, score)
+        };
         if let Ok(mut pool) = self.mempool.lock() {
-            pool.evict_for_block(&block);
+            pool.evict_for_block_at_blue_score(&block, virtual_blue_score);
         }
         if let Some(net) = &self.net {
             // Prefer compact + announce; peers inflate from mempool or issue GetBlock.
@@ -1565,7 +1599,7 @@ mod tests {
         sign_drc_payment_bound(&mut payment, &alice, "agora-dev", &genesis).unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
-        let expected = apply_drc_payment(
+        let expected = apply_drc_payment_at_blue_score(
             store.as_ref(),
             &payment,
             &TxAuthContext {
@@ -1573,6 +1607,7 @@ mod tests {
                 genesis,
                 data_availability_network_fingerprint: None,
             },
+            1,
             &mut batch,
             &mut journal,
         )

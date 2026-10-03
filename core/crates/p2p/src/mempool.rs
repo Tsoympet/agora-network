@@ -207,7 +207,16 @@ impl Mempool {
 
     /// Admit a pre-validated native DRC payment.
     pub fn admit_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, P2pError> {
-        self.admit_payment_with_deposit_auth(tx, false, false)
+        self.admit_payment_with_context(tx, None, false, false)
+    }
+
+    /// Admit a payment after checking expiry against the current virtual blue score.
+    pub fn admit_payment_at_blue_score(
+        &mut self,
+        tx: DrcPaymentTx,
+        application_blue_score: u64,
+    ) -> Result<Hash, P2pError> {
+        self.admit_payment_with_context(tx, Some(application_blue_score), false, false)
     }
 
     /// Admit a payment with its canonical recipient DepositAuth context.
@@ -221,6 +230,51 @@ impl Mempool {
         canonical_deposit_auth_required: bool,
         canonical_preauthorized: bool,
     ) -> Result<Hash, P2pError> {
+        self.admit_payment_with_context(
+            tx,
+            None,
+            canonical_deposit_auth_required,
+            canonical_preauthorized,
+        )
+    }
+
+    /// Admit with expiry and canonical recipient DepositAuth context.
+    pub fn admit_payment_with_deposit_auth_at_blue_score(
+        &mut self,
+        tx: DrcPaymentTx,
+        application_blue_score: u64,
+        canonical_deposit_auth_required: bool,
+        canonical_preauthorized: bool,
+    ) -> Result<Hash, P2pError> {
+        self.admit_payment_with_context(
+            tx,
+            Some(application_blue_score),
+            canonical_deposit_auth_required,
+            canonical_preauthorized,
+        )
+    }
+
+    fn admit_payment_with_context(
+        &mut self,
+        tx: DrcPaymentTx,
+        application_blue_score: Option<u64>,
+        canonical_deposit_auth_required: bool,
+        canonical_preauthorized: bool,
+    ) -> Result<Hash, P2pError> {
+        tx.validate_envelope_version()
+            .map_err(|error| P2pError::MempoolRejected(error.to_string()))?;
+        if tx.version == agora_types::DRC_PAYMENT_VERSION {
+            let score = application_blue_score.ok_or_else(|| {
+                P2pError::MempoolRejected(
+                    "DRC payment v4 requires an application blue score".into(),
+                )
+            })?;
+            if tx.is_expired_at_blue_score(score) {
+                return Err(P2pError::MempoolRejected(format!(
+                    "expired DRC payment at blue score {score}"
+                )));
+            }
+        }
         let id = tx.payment_id();
         if self.payment_txs.contains_key(&id) {
             return Ok(id);
@@ -487,7 +541,31 @@ impl Mempool {
     }
 
     pub fn select_drc_payments(&self, max: usize) -> Vec<DrcPaymentTx> {
-        let mut txs: Vec<_> = self.payment_txs.values().cloned().collect();
+        self.select_drc_payments_matching(max, |_| true)
+    }
+
+    /// Template selection omits entries expired at the candidate block's exact score.
+    pub fn select_drc_payments_at_blue_score(
+        &self,
+        max: usize,
+        application_blue_score: u64,
+    ) -> Vec<DrcPaymentTx> {
+        self.select_drc_payments_matching(max, |tx| {
+            !tx.is_expired_at_blue_score(application_blue_score)
+        })
+    }
+
+    fn select_drc_payments_matching(
+        &self,
+        max: usize,
+        predicate: impl Fn(&DrcPaymentTx) -> bool,
+    ) -> Vec<DrcPaymentTx> {
+        let mut txs: Vec<_> = self
+            .payment_txs
+            .values()
+            .filter(|tx| predicate(tx))
+            .cloned()
+            .collect();
         txs.sort_by(|a, b| {
             b.fee
                 .as_base_units()
@@ -622,6 +700,27 @@ impl Mempool {
             .collect();
         for id in drop {
             let _ = self.remove(&id);
+        }
+    }
+
+    /// Reconcile a block and evict payments stale at the advanced virtual score.
+    pub fn evict_for_block_at_blue_score(&mut self, block: &Block, virtual_blue_score: u64) {
+        self.evict_for_block(block);
+        self.evict_expired_drc_payments(virtual_blue_score);
+    }
+
+    /// Local policy only: consensus validity still uses the containing block's score.
+    pub fn evict_expired_drc_payments(&mut self, application_blue_score: u64) {
+        let expired: Vec<Hash> = self
+            .payment_txs
+            .iter()
+            .filter_map(|(id, tx)| {
+                tx.is_expired_at_blue_score(application_blue_score)
+                    .then_some(*id)
+            })
+            .collect();
+        for id in expired {
+            self.remove_payment(&id);
         }
     }
 
@@ -959,6 +1058,45 @@ mod tests {
         assert_eq!(id, payment.payment_id());
         assert_eq!(pool.select_drc_payments(1), vec![payment]);
         assert_eq!(pool.select_drc_payments(1)[0].source_tag, Some(u32::MAX));
+    }
+
+    #[test]
+    fn drc_expiry_is_inclusive_and_revalidated_for_templates_and_reorg_resubmission() {
+        let sender = Address([6; 20]);
+        let payment = DrcPaymentTx::unsigned_v4(
+            sender,
+            Address([7; 20]),
+            Amount::from_base_units(5),
+            Amount::from_base_units(1),
+            Some(0),
+            None,
+            Hash::ZERO,
+            0,
+            Some(11),
+        );
+        let id = payment.payment_id();
+        let mut pool = Mempool::new(4);
+
+        pool.admit_payment_at_blue_score(payment.clone(), 10)
+            .unwrap();
+        assert_eq!(
+            pool.select_drc_payments_at_blue_score(1, 11),
+            vec![payment.clone()],
+            "the exact cutoff remains eligible"
+        );
+        assert!(
+            pool.select_drc_payments_at_blue_score(1, 12).is_empty(),
+            "a cutoff+1 template omits the payment"
+        );
+        assert!(pool.contains(&id));
+
+        pool.evict_expired_drc_payments(12);
+        assert!(!pool.contains(&id));
+        assert!(!pool.account_reserved(NativeAssetId::DRC, &sender));
+        assert!(
+            pool.admit_payment_at_blue_score(payment, 11).is_ok(),
+            "a lower-score canonical reorg permits explicit resubmission"
+        );
     }
 
     #[test]

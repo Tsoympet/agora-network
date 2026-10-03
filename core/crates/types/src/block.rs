@@ -7,9 +7,11 @@ use crate::{
     DrcPaymentTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 
-/// Explicit version/domain for bodies carrying DRC deposit preauthorizations.
-pub const TRIDENT_BLOCK_BODY_VERSION: u16 = 7;
-pub const TRIDENT_BLOCK_BODY_DOMAIN: &[u8] = b"agora-block-body-v7";
+/// Explicit version/domain for bodies carrying expiring DRC payment envelopes.
+pub const TRIDENT_BLOCK_BODY_VERSION: u16 = 8;
+pub const TRIDENT_BLOCK_BODY_DOMAIN: &[u8] = b"agora-block-body-v8";
+const TRIDENT_BLOCK_BODY_V7_VERSION: u16 = 7;
+const TRIDENT_BLOCK_BODY_V7_DOMAIN: &[u8] = b"agora-block-body-v7";
 const TRIDENT_BLOCK_BODY_V6_VERSION: u16 = 6;
 const TRIDENT_BLOCK_BODY_V6_DOMAIN: &[u8] = b"agora-block-body-v6";
 const TRIDENT_BLOCK_BODY_V5_VERSION: u16 = 5;
@@ -116,8 +118,29 @@ impl Block {
     /// UTXO-only blocks keep the legacy merkle root; account/stake-only bodies
     /// retain v2; OVL execution uses v3; DRC payments use v4; authenticated
     /// data commitments use v5; DRC account policies use v6; address-based DRC
-    /// deposit preauthorizations use v7.
+    /// deposit preauthorizations use v7; payment-v4 expiry uses v8.
     pub fn compute_body_root(&self) -> Hash {
+        if self
+            .drc_payments
+            .iter()
+            .any(|payment| payment.version >= crate::DRC_PAYMENT_VERSION)
+        {
+            let payment_ids: Vec<Hash> = self
+                .drc_payments
+                .iter()
+                .map(DrcPaymentTx::payment_id)
+                .collect();
+            return Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_DOMAIN,
+                TRIDENT_BLOCK_BODY_VERSION,
+                self.compute_body_root_v7(),
+                payment_ids,
+            ));
+        }
+        self.compute_body_root_v7()
+    }
+
+    fn compute_body_root_v7(&self) -> Hash {
         if !self.drc_deposit_preauths.is_empty() {
             let preauth_ids: Vec<Hash> = self
                 .drc_deposit_preauths
@@ -125,8 +148,8 @@ impl Block {
                 .map(DrcDepositPreauthTx::preauth_tx_id)
                 .collect();
             return Hash::hash_borsh(&(
-                TRIDENT_BLOCK_BODY_DOMAIN,
-                TRIDENT_BLOCK_BODY_VERSION,
+                TRIDENT_BLOCK_BODY_V7_DOMAIN,
+                TRIDENT_BLOCK_BODY_V7_VERSION,
                 self.compute_body_root_v6(),
                 preauth_ids,
             ));
@@ -467,8 +490,8 @@ mod tests {
         assert_eq!(
             authorize_root,
             Hash::hash_borsh(&(
-                TRIDENT_BLOCK_BODY_DOMAIN,
-                TRIDENT_BLOCK_BODY_VERSION,
+                TRIDENT_BLOCK_BODY_V7_DOMAIN,
+                TRIDENT_BLOCK_BODY_V7_VERSION,
                 legacy,
                 vec![block.drc_deposit_preauths[0].preauth_tx_id()]
             ))
@@ -477,6 +500,50 @@ mod tests {
         assert_ne!(block.compute_body_root(), authorize_root);
         let bytes = borsh::to_vec(&block).unwrap();
         assert_eq!(Block::try_from_slice(&bytes).unwrap(), block);
+    }
+
+    #[test]
+    fn drc_payment_v4_activates_body_root_v8() {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.drc_payments.push(DrcPaymentTx::unsigned_v4(
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash([3; 32]),
+            0,
+            Some(7),
+        ));
+        let v7 = block.compute_body_root_v7();
+        let payment_ids = vec![block.drc_payments[0].payment_id()];
+        let expiring_root = block.compute_body_root();
+
+        assert_eq!(
+            expiring_root,
+            Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_DOMAIN,
+                TRIDENT_BLOCK_BODY_VERSION,
+                v7,
+                payment_ids
+            ))
+        );
+
+        let mut no_expiry = block;
+        no_expiry.drc_payments[0].last_valid_blue_score = None;
+        assert_ne!(no_expiry.compute_body_root(), v7);
+        assert_ne!(no_expiry.compute_body_root(), expiring_root);
     }
 
     #[derive(BorshSerialize)]

@@ -10,4 +10,4 @@ import type { Hash } from "./Hash";
  * This type is separate from [`DrcPaymentOutboxEvent`] so the frozen outbox-v1
  * encoding remains unchanged.
  */
-export type DrcPaymentReceipt = { version: number, payment_id: Hash, payment_version: number, result: DrcPaymentResult, from: Address, to: Address, requested_amount: Amount, delivered_amount: Amount, fee_paid: Amount, source_tag: number | null, destination_tag: number | null, invoice_id: Hash, };
+export type DrcPaymentReceipt = { version: number, payment_id: Hash, payment_version: number, result: DrcPaymentResult, from: Address, to: Address, requested_amount: Amount, delivered_amount: Amount, fee_paid: Amount, source_tag: number | null, destination_tag: number | null, invoice_id: Hash, last_valid_blue_score: bigint | null, };

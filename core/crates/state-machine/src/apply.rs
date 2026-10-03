@@ -18,7 +18,7 @@ use crate::data_availability::{apply_data_commitment, revert_data_commitment_met
 use crate::drc_deposit_preauth::{apply_drc_deposit_preauth, drc_deposit_preauth_meta_keys};
 use crate::drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys};
 use crate::execution::apply_ovl_execution;
-use crate::payments::{apply_drc_payment, payment_meta_keys};
+use crate::payments::{apply_drc_payment_with_blue_score, payment_meta_keys};
 use crate::staking::{
     apply_signed_stake_tx, credit_fee_share_to_reward_pool, reward_pool_meta_key,
     snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
@@ -396,7 +396,25 @@ pub fn apply_block_batched_with_auth(
     emission_reward: u64,
     auth: Option<&TxAuthContext>,
 ) -> Result<BlockApplyResult, StateError> {
-    apply_block_batched_mode(store, block, emission_reward, auth, ApplyMode::Strict)
+    apply_block_batched_mode(store, block, emission_reward, auth, None, ApplyMode::Strict)
+}
+
+/// Strict block apply with the containing block's validated GHOSTDAG blue score.
+pub fn apply_block_batched_with_auth_at_blue_score(
+    store: &StateStore,
+    block: &Block,
+    emission_reward: u64,
+    auth: Option<&TxAuthContext>,
+    application_blue_score: u64,
+) -> Result<BlockApplyResult, StateError> {
+    apply_block_batched_mode(
+        store,
+        block,
+        emission_reward,
+        auth,
+        Some(application_blue_score),
+        ApplyMode::Strict,
+    )
 }
 
 /// Virtual-order apply: skip already-spent / duplicate-outpoint txs instead of failing.
@@ -410,7 +428,32 @@ pub fn apply_block_batched_virtual(
     emission_reward: u64,
     auth: Option<&TxAuthContext>,
 ) -> Result<BlockApplyResult, StateError> {
-    apply_block_batched_mode(store, block, emission_reward, auth, ApplyMode::Virtual)
+    apply_block_batched_mode(
+        store,
+        block,
+        emission_reward,
+        auth,
+        None,
+        ApplyMode::Virtual,
+    )
+}
+
+/// Virtual-order apply with the containing block's validated GHOSTDAG blue score.
+pub fn apply_block_batched_virtual_at_blue_score(
+    store: &StateStore,
+    block: &Block,
+    emission_reward: u64,
+    auth: Option<&TxAuthContext>,
+    application_blue_score: u64,
+) -> Result<BlockApplyResult, StateError> {
+    apply_block_batched_mode(
+        store,
+        block,
+        emission_reward,
+        auth,
+        Some(application_blue_score),
+        ApplyMode::Virtual,
+    )
 }
 
 fn apply_block_batched_mode(
@@ -418,6 +461,7 @@ fn apply_block_batched_mode(
     block: &Block,
     emission_reward: u64,
     auth: Option<&TxAuthContext>,
+    application_blue_score: Option<u64>,
     mode: ApplyMode,
 ) -> Result<BlockApplyResult, StateError> {
     let mut batch = WriteBatch::new();
@@ -531,7 +575,15 @@ fn apply_block_batched_mode(
         drc_deposit_preauth_statuses,
         payment_statuses,
         data_commitment_statuses,
-    ) = apply_trident_lanes(store, block, auth, mode, &mut batch, &mut journal)?;
+    ) = apply_trident_lanes(
+        store,
+        block,
+        auth,
+        application_blue_score,
+        mode,
+        &mut batch,
+        &mut journal,
+    )?;
 
     Ok(BlockApplyResult {
         journal,
@@ -603,6 +655,7 @@ fn apply_trident_lanes(
     store: &StateStore,
     block: &Block,
     auth: Option<&TxAuthContext>,
+    application_blue_score: Option<u64>,
     mode: ApplyMode,
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
@@ -844,7 +897,14 @@ fn apply_trident_lanes(
         let meta_before = snapshot_meta_keys(&lane, &payment_meta_keys(tx))?;
         let mut op_batch = WriteBatch::new();
         let mut acct_journal = AccountJournal::default();
-        match apply_drc_payment(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
+        match apply_drc_payment_with_blue_score(
+            &lane,
+            tx,
+            ctx,
+            application_blue_score,
+            &mut op_batch,
+            &mut acct_journal,
+        ) {
             Ok(receipt) => {
                 let pool_snap =
                     snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;

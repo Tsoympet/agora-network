@@ -26,11 +26,11 @@ use agora_consensus::{
     KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher,
 };
 use agora_state_machine::{
-    apply_block_batched_virtual, ghostdag_key, index_block_transactions_into, list_tx_inclusions,
-    load_ghostdag_record, load_header, load_utxo_journal, lookup_tx_location, meta_keys,
-    revert_journal_batched, set_primary_tx_location, store_ghostdag_record, store_header,
-    store_header_into, sum_transfer_fees, utxo_diff_key, ColumnFamily, GhostdagRecord, StateStore,
-    TxAuthContext, WriteBatch,
+    apply_block_batched_virtual_at_blue_score, ghostdag_key, index_block_transactions_into,
+    list_tx_inclusions, load_ghostdag_record, load_header, load_utxo_journal, lookup_tx_location,
+    meta_keys, revert_journal_batched, set_primary_tx_location, store_ghostdag_record,
+    store_header, store_header_into, sum_transfer_fees, utxo_diff_key, ColumnFamily,
+    GhostdagRecord, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -268,6 +268,21 @@ impl ChainState {
 
     pub fn virtual_tip(&self) -> Result<Hash, AdmitError> {
         Ok(self.load_virtual_tip()?.unwrap_or(self.genesis))
+    }
+
+    /// Objective GHOSTDAG blue score of the current virtual tip.
+    pub fn virtual_blue_score(&self) -> Result<u64, AdmitError> {
+        let tip = self.virtual_tip()?;
+        self.ghostdag
+            .blue_score(&tip)
+            .ok_or_else(|| AdmitError::Consensus(format!("uncolored {}", tip.to_hex())))
+    }
+
+    /// Exact GHOSTDAG blue score a template over the current parent set will receive.
+    pub fn next_template_blue_score(&self) -> Result<u64, AdmitError> {
+        let parents = self.select_template_parents()?;
+        let bits = self.expected_bits_for_parents(&parents)?;
+        self.simulate_blue_score(&parents, bits)
     }
 
     pub fn pow_algorithm(&self) -> PowAlgorithm {
@@ -920,9 +935,14 @@ impl ChainState {
             let blue_score = self.ghostdag.blue_score(hash).unwrap_or(1);
             let scheduled = self.emission.reward_at_blue_score(blue_score);
             let emission = scheduled.min(max.saturating_sub(issued.min(max)));
-            let mut applied =
-                apply_block_batched_virtual(&overlay, &body, emission, self.auth.as_ref())
-                    .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+            let mut applied = apply_block_batched_virtual_at_blue_score(
+                &overlay,
+                &body,
+                emission,
+                self.auth.as_ref(),
+                blue_score,
+            )
+            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
             if issued.saturating_add(applied.journal.subsidy) > max {
                 return Err(AdmitError::SupplyCapExceeded);
             }
@@ -1432,9 +1452,14 @@ impl ChainState {
         let emission = self.clamp_emission(scheduled)?;
         // Atomic commit: UTXO changes + revert journal + issued-supply update land as a
         // single WriteBatch so a crash cannot leave UTXOs and supply out of sync.
-        let mut applied =
-            apply_block_batched_virtual(self.store.as_ref(), &block, emission, self.auth.as_ref())
-                .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        let mut applied = apply_block_batched_virtual_at_blue_score(
+            self.store.as_ref(),
+            &block,
+            emission,
+            self.auth.as_ref(),
+            blue_score,
+        )
+        .map_err(|e| AdmitError::Utxo(e.to_string()))?;
         if applied.journal.subsidy > emission {
             return Err(AdmitError::Utxo(format!(
                 "coinbase subsidy {} exceeds clamped emission {emission}",

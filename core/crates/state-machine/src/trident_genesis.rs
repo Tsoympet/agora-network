@@ -18,15 +18,15 @@ use crate::staking::StakingParams;
 
 pub const TRIDENT_GENESIS_SCHEMA: &str = "agora-trident-genesis-v3";
 /// State-transition version committed into the Trident network fingerprint.
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v10";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v11";
 /// Consensus-policy version string for Trident.
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
 pub const TRIDENT_GENESIS_ID_DOMAIN: &[u8] = b"agora-trident-genesis-identity-v1";
 pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-policy-v1";
-/// v9 adds address-based DRC DepositAuth preauthorization.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 9;
-pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v4";
+/// v10 adds signed DRC payment-v4 GHOSTDAG blue-score expiry.
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 10;
+pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v5";
 const UNFROZEN: &str = "UNFROZEN";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
