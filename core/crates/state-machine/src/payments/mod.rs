@@ -324,6 +324,10 @@ mod tests {
                 .unwrap(),
             receipt
         );
+        assert_eq!(
+            drc_payment_root(&store).unwrap(),
+            Hash::hash_borsh(&(PAYMENT_ROOT_DOMAIN, root_before, &event, &receipt))
+        );
         assert_eq!(list_drc_outbox(&store, 1).unwrap(), vec![event]);
         assert_ne!(drc_payment_root(&store).unwrap(), root_before);
     }

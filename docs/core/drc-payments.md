@@ -54,12 +54,13 @@ equal authenticated `requested_amount` and `delivered_amount` values. There is
 no partial result or delivered-amount input.
 
 The outbox is deterministic consensus metadata for transport consumers; network
-message delivery state remains outside consensus. The receipt, outbox event,
-and their payment-ID indexes feed the versioned rolling payment commitment
-rather than requiring a state-root rescan. Reorg journals restore all of these
-keys atomically. Receipt v1 has no variable-length fields (142 bytes without a
-source tag, 146 bytes with one), and only one receipt can occupy a unique
-payment-ID key; existing block-byte and mempool-count limits bound admission.
+message delivery state remains outside consensus. The receipt and outbox event
+feed the versioned rolling payment commitment, while the derived payment-ID
+lookup key is written in the same atomic batch. Reorg journals restore all of
+these keys atomically. Receipt v1 has no variable-length fields (142 bytes
+without a source tag, 146 bytes with one), and only one receipt can occupy a
+unique payment-ID key; existing block-byte and mempool-count limits bound
+admission.
 
 ## BlockDAG integration
 
