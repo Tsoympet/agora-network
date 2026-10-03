@@ -15,7 +15,7 @@ OVL remains the only Trident execution and contracts domain.
 
 ## Payment envelope
 
-`DrcPaymentTx` has three explicit consensus encodings:
+`DrcPaymentTx` has four explicit consensus encodings:
 
 - frozen v1 binds the sender, recipient, amount, explicit DRC fee, destination
   tag, merchant invoice ID, account nonce, chain ID, and genesis hash
@@ -23,8 +23,10 @@ OVL remains the only Trident execution and contracts domain.
   new signing domain
 - v3 preserves those semantics and adds authenticated destination-tag presence
   under a third signing domain
+- v4 preserves v3 semantics and adds an optional signed
+  `last_valid_blue_score` under a fourth signing domain
 
-All versions use secp256k1. V1/v2 bytes and signing preimages remain unchanged;
+All versions use secp256k1. V1–v3 bytes and signing preimages remain unchanged;
 v1 carrying an in-memory source tag fails closed. V2 Borsh encodes
 `Option<u32>` deterministically, so no source tag, source tag `0`, and source
 tag `u32::MAX` are distinct authenticated values. V3 does the same for the
@@ -48,8 +50,9 @@ Before any write is appended, the transition verifies:
 4. unused recipient-scoped invoice ID
 5. recipient `require_destination_tag` policy
 6. recipient DepositAuth policy and address preauthorization
-7. exact account nonce
-8. checked `amount + fee`, sender balance, and recipient overflow
+7. for payment v4 only, inclusive GHOSTDAG blue-score expiry (see below)
+8. exact account nonce
+9. checked `amount + fee`, sender balance, and recipient overflow
 
 Acceptance debits `amount + fee`, credits the recipient amount, sends the fee
 to the DRC validator reward pool, records duplicate/invoice indexes, and writes
@@ -192,26 +195,64 @@ disables do not relax canonical admission before settlement. Pending enables
 retain payments only when their source has an already-canonical (possibly
 dormant) preauthorization; pending revokes evict affected guarded payments.
 
+## Signed GHOSTDAG blue-score expiry (payment v4)
+
+XRPL `LastLedgerSequence` names a monotonic ledger index after which a signed
+payment is invalid. Trident maps that role to the **GHOSTDAG blue score of the
+containing block** at consensus application time—not wall clock, arrival order,
+local virtual-tip guesses, or an unverified header field.
+
+**Determinism.** Each admitted block receives a blue score from the canonical
+GHOSTDAG engine (`Ghostdag::add_block_with_work` / persisted `GhostdagRecord`).
+The same parent set and block work always yields the same score on every node.
+Block construction uses `simulate_blue_score` over the chosen parent set;
+settlement uses the score stored for that block when the virtual UTXO/state
+transition runs (`apply_block_batched_*_at_blue_score`). Payment v4 therefore
+reads `application_blue_score` from the same consensus-derived value that
+drives emission and finality metadata.
+
+**Field.** `last_valid_blue_score: Option<u64>` on `DrcPaymentTx` v4 is bound
+in the v4 signing preimage. `None` means no expiry (legacy v1–v3 behavior).
+`Some(cutoff)` uses **inclusive** semantics: the payment is valid when
+`application_blue_score <= cutoff` and rejected when
+`application_blue_score > cutoff`. Tampering the cutoff invalidates the
+signature; changing any bound field changes `payment_id` and the rolling payment
+root.
+
+**Atomic rejection.** Expiry is checked after auth/version/policy/preauth gates
+and before nonce/balance writes. A rejected expiry does not debit balances,
+consume nonce, charge fee, write receipt/outbox/invoice/seen keys, or advance the
+payment root.
+
+**Mempool and templates (non-authoritative).** Admission and template selection
+revalidate expiry against the current virtual blue score and
+`next_template_blue_score` respectively. Expired entries are rejected or omitted
+and evicted with nonce reservation released. After a reorg lowers the virtual
+score, a payment that was locally expired may become admissible again if still
+within its signed cutoff—consensus application remains authoritative.
+
+Receipt v3 and outbox events for v4 payments persist `last_valid_blue_score`
+when present. Settled RPC queries include the cutoff only when the canonical
+receipt carries it; there is no durable “expired” status for unsettled payments.
+
 ## BlockDAG integration
 
 Payments use `Block.drc_payments`; policy operations use
 `Block.drc_account_policies`; grants/revokes use the appended
-`Block.drc_deposit_preauths` lane. `agora-block-body-v7` wraps the unchanged v6
-root with ordered preauthorization-operation IDs, while an empty preauth lane
-retains the legacy root. V6 continues to wrap ordered policy-operation IDs.
-Payment IDs remain committed by the existing
+`Block.drc_deposit_preauths` lane. `agora-block-body-v7` wraps the unchanged v6 root with ordered
+preauthorization-operation IDs. `agora-block-body-v8` further wraps v7 when any
+payment envelope is v4 (ordered payment IDs over the v7 root). V6 continues to
+wrap ordered policy-operation IDs. Payment IDs remain committed by the existing
 `agora-block-body-v4` combiner. `BlockAcceptanceRecord` has aligned policy,
 preauthorization, and payment statuses. Account, policy, preauthorization, and
 payment metadata are journaled for reorg restoration and included in the
 Trident state root.
 `agora_submitDrcPayment` admits signed payments into mempool/gossip/template
-flow. Body-root v4 did not need a format change: it commits ordered payment IDs,
-and each ID commits the versioned complete signed envelope. Trident protocol
-v9, transaction-signing v4, state-transition `agora-trident-state-v10`,
-state-root v7, and body-root v7 isolate DepositAuth activation from older
-peers. This raises the Experimental datadir schema to v13; an older
-Experimental datadir must be replayed/reindexed (or recreated). Frozen
-payment-v1/v2/v3, policy-v1, outbox-v1/v2, receipt-v1, body-v1–v6, and
+flow. Trident protocol v10, transaction-signing v5, state-transition
+`agora-trident-state-v11`, state-root v8, and body-root v8 isolate payment-v4
+expiry from older peers. This raises the Experimental datadir schema to v14; an
+older Experimental datadir must be replayed/reindexed (or recreated). Frozen
+payment-v1/v2/v3, policy-v1, outbox-v1/v2/v3, receipt-v1/v2, body-v1–v7, and
 historical acceptance/journal bytes remain readable and unchanged.
 
 ## Settled payment query
@@ -221,7 +262,8 @@ historical acceptance/journal bytes remain readable and unchanged.
 
 - a canonical receipt returns `status: "settled"` and the receipt fields,
   including `result: "delivered_exact"`, both amounts, fee, both tags, routing
-  addresses, and invoice ID
+  addresses, invoice ID, and `last_valid_blue_score` when the settled payment
+  was v4 with a signed cutoff
 - a missing canonical receipt returns `status: "unknown"` and `receipt: null`
 - a malformed ID returns the existing JSON-RPC invalid-params error (`-32602`)
 
@@ -287,6 +329,5 @@ feature parity, and DRC is not a stablecoin by virtue of this payment module.
 
 ## Next bounded slice
 
-Add a contract-free DRC payment expiry/`LastLedgerSequence` bound so stale
-signed payments can fail deterministically without introducing paths, partial
-payments, issued assets, contracts, or credential-based authorization.
+Credential-based `DepositPreauth`, recurring pull payments, and cross-asset
+routing remain out of scope for the native DRC payment lane.
