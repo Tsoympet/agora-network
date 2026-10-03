@@ -10,7 +10,7 @@ The acceptance layer is the sole authority for which transactions mutate state, 
 2. Fully validate auth even for soft-skipped transfers.
 3. Mutate UTXO **only** for `Accepted` txs.
 4. Emit `BlockAcceptanceRecord` with UTXO, account, stake, OVL execution, DRC
-   payment, and authenticated DA statuses aligned to each lane.
+   payment/policy, and authenticated DA statuses aligned to each lane.
 5. Persist `acceptance/<block_hash>` in the same atomic `WriteBatch` as `utxo_diff/<block_hash>` and issued supply.
 
 ## Statuses
@@ -26,7 +26,9 @@ The acceptance layer is the sole authority for which transactions mutate state, 
 
 TLT remains UTXO. OVL/DRC use parallel account/stake lanes; OVL execution,
 DRC payments, and provenance-only DA authorizations have dedicated lanes.
-Apply mutates only `Accepted` operations. DA bodies use
+DRC policy operations execute before payments and share the DRC account nonce.
+Apply mutates only `Accepted` operations. Policy bodies use
+`agora-block-body-v6`; DA bodies retain
 `agora-block-body-v5`; their `(source, sequence)` key and per-operator replay
 nonce follow the same Virtual first-winner rule. Exact duplicate means the
 same signed authorization ID, not merely matching source data.

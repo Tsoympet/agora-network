@@ -1,6 +1,6 @@
 use agora_types::{
-    AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcPaymentTx, Hash, OvlExecutionTx,
-    SignedStakeTx, Transaction,
+    AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcAccountPolicyTx, DrcPaymentTx,
+    Hash, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -34,6 +34,8 @@ pub enum NetworkMessage {
     OvlExecution(OvlExecutionTx),
     /// Appended in Trident protocol v4; native DRC payment envelope.
     DrcPayment(DrcPaymentTx),
+    /// Appended in Trident protocol v8; owner-authorized DRC recipient policy.
+    DrcAccountPolicy(DrcAccountPolicyTx),
 }
 
 impl NetworkMessage {
@@ -55,6 +57,7 @@ impl NetworkMessage {
             && block.ovl_executions.is_empty()
             && block.drc_payments.is_empty()
             && block.data_commitments.is_empty()
+            && block.drc_account_policies.is_empty()
         {
             Self::CompactBlock {
                 header: block.header.clone(),
@@ -69,7 +72,10 @@ impl NetworkMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agora_types::{Address, DataAvailabilityCommitment, DataCommitmentAuthorization, Hash};
+    use agora_types::{
+        Address, Amount, DataAvailabilityCommitment, DataCommitmentAuthorization,
+        DrcAccountPolicyTx, Hash,
+    };
 
     #[test]
     fn compact_and_get_block_roundtrip() {
@@ -206,6 +212,15 @@ mod tests {
         assert_eq!(NetworkMessage::DrcPayment(payment).encode()[0], 9);
         let message = NetworkMessage::DrcPayment(source_tagged);
         assert_eq!(message.encode()[0], 9);
+        assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+
+        let policy = DrcAccountPolicyTx::set_require_destination_tag(
+            Address([4; 20]),
+            Amount::from_base_units(1),
+            0,
+        );
+        let message = NetworkMessage::DrcAccountPolicy(policy);
+        assert_eq!(message.encode()[0], 10);
         assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
     }
 }

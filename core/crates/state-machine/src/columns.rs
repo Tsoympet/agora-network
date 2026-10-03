@@ -49,7 +49,8 @@ impl ColumnFamily {
 /// - `9` — canonical Hub, Passport, Grant, and Mission registry summary
 /// - `10` — authenticated DA commitment/index/replay state and revert journal
 /// - `11` — root-committed exact-delivery DRC receipt index
-pub const SCHEMA_VERSION: u32 = 11;
+/// - `12` — owner-authorized DRC recipient policy and payment-v3 tag presence
+pub const SCHEMA_VERSION: u32 = 12;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {

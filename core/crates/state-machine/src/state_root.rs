@@ -13,6 +13,7 @@ use crate::accounts::account_root;
 use crate::columns::ColumnFamily;
 use crate::community_state::canonical_community_root;
 use crate::data_availability::data_availability_root;
+use crate::drc_policy::drc_account_policy_root;
 use crate::finality_store::load_finalized_blue_score;
 use crate::governance_state::governance_treasury_root;
 use crate::payments::drc_payment_root;
@@ -20,7 +21,7 @@ use crate::staking::{build_snapshot, load_epoch};
 use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
 
 /// Domain tag for the composed state root (versioned).
-pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v5";
+pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v6";
 
 /// Deterministic UTXO-set commitment (sorted outpoint keys).
 pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
@@ -54,9 +55,9 @@ pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
 /// Tip-block acceptance commitment (empty record hash if missing).
 pub fn acceptance_root(store: &StateStore, tip_block: &Hash) -> Result<Hash, StateError> {
     match load_acceptance(store, tip_block)? {
-        Some(rec) => Ok(Hash::hash_borsh(&(b"acceptance-v3", &rec))),
+        Some(rec) => Ok(Hash::hash_borsh(&(b"acceptance-v4", &rec))),
         None => Ok(Hash::hash_borsh(&(
-            b"acceptance-v3",
+            b"acceptance-v4",
             tip_block,
             &[] as &[u8],
         ))),
@@ -81,6 +82,7 @@ pub fn compose_trident_state_root(
     let epoch_drc = load_epoch(store, NativeAssetId::DRC)?;
     let ovl_stake = build_snapshot(store, NativeAssetId::OVL, epoch_ovl)?.commitment();
     let drc_stake = build_snapshot(store, NativeAssetId::DRC, epoch_drc)?.commitment();
+    let drc_account_policies = drc_account_policy_root(store)?;
     let drc_payments = drc_payment_root(store)?;
     let acceptance = acceptance_root(store, tip_block)?;
     let finality_tip = finalized_tip_commitment(store)?;
@@ -96,6 +98,7 @@ pub fn compose_trident_state_root(
         drc_accounts,
         ovl_stake,
         drc_stake,
+        drc_account_policies,
         drc_payments,
         acceptance,
         finality_tip,

@@ -6,8 +6,8 @@ use agora_governance::{
     CivicSnapshot, ProposalKind, TopicCategory, VoteChoice,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, BlockHeader, DrcPaymentReceipt, DrcPaymentTx, Hash,
-    OutPoint, OvlExecutionTx, Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
+    DrcPaymentReceipt, DrcPaymentTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -172,6 +172,12 @@ pub trait RpcBackend: Send {
     fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError>;
     fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError>;
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError>;
+    fn submit_drc_account_policy(&mut self, tx: DrcAccountPolicyTx) -> Result<Hash, RpcError>;
+    /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
+    fn get_drc_account_policy(
+        &self,
+        account: &Address,
+    ) -> Result<Option<(DrcAccountPolicy, u64)>, RpcError>;
     /// Root-committed canonical settlement only; pending is intentionally out of scope.
     fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError>;
     /// Exact recipient/invoice lookup; never scans or reports pending payments.
@@ -262,6 +268,8 @@ pub struct InMemoryBackend {
     drc_payment_receipts: HashMap<Hash, DrcPaymentReceipt>,
     /// Recipient-scoped invoice key → signed payment id, mirroring canonical storage.
     drc_payment_invoice_index: HashMap<(Address, Hash), Hash>,
+    /// Canonical DRC policy and shared account nonce for RPC tests.
+    drc_account_policies: HashMap<Address, (DrcAccountPolicy, u64)>,
     template_bits: u32,
     fund_nonce: u64,
     civic: Mutex<CivicSnapshot>,
@@ -278,6 +286,7 @@ impl Default for InMemoryBackend {
             tx_index: HashMap::new(),
             drc_payment_receipts: HashMap::new(),
             drc_payment_invoice_index: HashMap::new(),
+            drc_account_policies: HashMap::new(),
             template_bits: 0,
             fund_nonce: 0,
             civic: Mutex::new(CivicSnapshot::genesis(10_000)),
@@ -323,6 +332,15 @@ impl InMemoryBackend {
         }
         self.drc_payment_receipts
             .insert(receipt.payment_id, receipt);
+    }
+
+    pub fn insert_drc_account_policy(
+        &mut self,
+        account: Address,
+        policy: DrcAccountPolicy,
+        nonce: u64,
+    ) {
+        self.drc_account_policies.insert(account, (policy, nonce));
     }
 
     pub fn insert_block(&mut self, block: Block) {
@@ -469,6 +487,19 @@ impl RpcBackend for InMemoryBackend {
         ))
     }
 
+    fn submit_drc_account_policy(&mut self, _tx: DrcAccountPolicyTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC account policies".into(),
+        ))
+    }
+
+    fn get_drc_account_policy(
+        &self,
+        account: &Address,
+    ) -> Result<Option<(DrcAccountPolicy, u64)>, RpcError> {
+        Ok(self.drc_account_policies.get(account).copied())
+    }
+
     fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError> {
         Ok(self.drc_payment_receipts.get(payment_id).cloned())
     }
@@ -560,6 +591,7 @@ impl RpcBackend for InMemoryBackend {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         })
     }
 

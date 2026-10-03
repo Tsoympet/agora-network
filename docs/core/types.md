@@ -28,6 +28,7 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | `OvlExecutionTx` | Signed, chain-bound OVL value/execution envelope with gas limits |
 | `DrcPaymentTx` / `DrcPaymentOutboxEvent` | Versioned signed DRC settlement and deterministic source/destination-tag routing event |
 | `DrcPaymentReceipt` / `DrcPaymentResult` | Versioned exact full-delivery result; no partial-delivery variant |
+| `DrcAccountPolicyTx` / `DrcAccountPolicy` | Owner-authorized DRC destination-tag requirement operation and canonical state |
 | `DataAvailabilityCommitment` | Versioned Borsh integrity/provenance payload for explicitly non-canonical source data |
 | `DataCommitmentAuthorization` | secp256k1 operator authorization bound to L1 chain, genesis, fingerprint, and replay nonce |
 | `TransactionBody` | Signable subset (no auth material) |
@@ -40,8 +41,9 @@ See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../as
 - `Transaction::tx_id()` = SHA-256(borsh(tx))
 - `Block::id()` = SHA-256(borsh(header))
 - `Block::compute_tx_root` = pairwise merkle over tx ids
-- `Block::compute_body_root` = legacy root when appended lanes are empty; DA
-  entries activate `agora-block-body-v5` over ordered authorization IDs
+- `Block::compute_body_root` = legacy root when appended lanes are empty; DRC
+  policy entries activate `agora-block-body-v6` over the unchanged v5 root and
+  ordered policy-operation IDs
 
 `DataCommitmentSource` uses explicit stable Borsh discriminants; future variants
 must be appended. `Block` deserialization accepts older bodies that end before

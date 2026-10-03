@@ -141,4 +141,25 @@ mod tests {
             sign_drc_payment_bound(&mut unsupported, &keypair, "agora-dev", &Hash::ZERO).is_err()
         );
     }
+
+    #[test]
+    fn drc_payment_v3_authenticates_destination_tag_presence_and_zero() {
+        let keypair = keypair();
+        let genesis = Hash([7; 32]);
+        let mut tx = DrcPaymentTx::unsigned_v3(
+            keypair.address(),
+            Address([2; 20]),
+            Amount::from_base_units(3),
+            Amount::from_base_units(1),
+            Some(0),
+            None,
+            Hash::ZERO,
+            0,
+        );
+        sign_drc_payment_bound(&mut tx, &keypair, "agora-dev", &genesis).unwrap();
+        verify_drc_payment_bound(&tx, "agora-dev", &genesis).unwrap();
+
+        tx.destination_tag = None;
+        assert!(verify_drc_payment_bound(&tx, "agora-dev", &genesis).is_err());
+    }
 }

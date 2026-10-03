@@ -3,13 +3,15 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::{
-    AccountTransfer, DataCommitmentAuthorization, DrcPaymentTx, Hash, OvlExecutionTx,
-    SignedStakeTx, Transaction,
+    AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcPaymentTx, Hash,
+    OvlExecutionTx, SignedStakeTx, Transaction,
 };
 
-/// Explicit version/domain for bodies carrying authenticated DA commitments.
-pub const TRIDENT_BLOCK_BODY_VERSION: u16 = 5;
-pub const TRIDENT_BLOCK_BODY_DOMAIN: &[u8] = b"agora-block-body-v5";
+/// Explicit version/domain for bodies carrying DRC account-policy operations.
+pub const TRIDENT_BLOCK_BODY_VERSION: u16 = 6;
+pub const TRIDENT_BLOCK_BODY_DOMAIN: &[u8] = b"agora-block-body-v6";
+const TRIDENT_BLOCK_BODY_V5_VERSION: u16 = 5;
+const TRIDENT_BLOCK_BODY_V5_DOMAIN: &[u8] = b"agora-block-body-v5";
 
 /// Block header for Agora's BlockDAG tips.
 ///
@@ -54,6 +56,9 @@ pub struct Block {
     /// Provenance-bound, operator-authorized data commitments.
     #[serde(default)]
     pub data_commitments: Vec<DataCommitmentAuthorization>,
+    /// Owner-authorized, contract-free DRC recipient-policy operations.
+    #[serde(default)]
+    pub drc_account_policies: Vec<DrcAccountPolicyTx>,
 }
 
 impl Block {
@@ -67,6 +72,7 @@ impl Block {
             ovl_executions: Vec::new(),
             drc_payments: Vec::new(),
             data_commitments: Vec::new(),
+            drc_account_policies: Vec::new(),
         }
     }
 
@@ -103,8 +109,25 @@ impl Block {
     ///
     /// UTXO-only blocks keep the legacy merkle root; account/stake-only bodies
     /// retain v2; OVL execution uses v3; DRC payments use v4; authenticated
-    /// data commitments use v5.
+    /// data commitments use v5; DRC account policies use v6.
     pub fn compute_body_root(&self) -> Hash {
+        if !self.drc_account_policies.is_empty() {
+            let policy_ids: Vec<Hash> = self
+                .drc_account_policies
+                .iter()
+                .map(DrcAccountPolicyTx::policy_tx_id)
+                .collect();
+            return Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_DOMAIN,
+                TRIDENT_BLOCK_BODY_VERSION,
+                self.compute_body_root_v5(),
+                policy_ids,
+            ));
+        }
+        self.compute_body_root_v5()
+    }
+
+    fn compute_body_root_v5(&self) -> Hash {
         if !self.data_commitments.is_empty() {
             let authorization_ids: Vec<Hash> = self
                 .data_commitments
@@ -112,8 +135,8 @@ impl Block {
                 .map(DataCommitmentAuthorization::authorization_id)
                 .collect();
             return Hash::hash_borsh(&(
-                TRIDENT_BLOCK_BODY_DOMAIN,
-                TRIDENT_BLOCK_BODY_VERSION,
+                TRIDENT_BLOCK_BODY_V5_DOMAIN,
+                TRIDENT_BLOCK_BODY_V5_VERSION,
                 self.compute_body_root_v4(),
                 authorization_ids,
             ));
@@ -186,6 +209,7 @@ impl BorshDeserialize for Block {
             ovl_executions: deserialize_trailing_vec(reader)?,
             drc_payments: deserialize_trailing_vec(reader)?,
             data_commitments: deserialize_trailing_vec(reader)?,
+            drc_account_policies: deserialize_trailing_vec(reader)?,
         })
     }
 }
@@ -231,7 +255,7 @@ fn deserialize_optional_len<R: borsh::io::Read>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{Address, Amount, DataAvailabilityCommitment, DrcPaymentTx};
+    use crate::{Address, Amount, DataAvailabilityCommitment, DrcAccountPolicyTx, DrcPaymentTx};
 
     use super::*;
 
@@ -338,8 +362,8 @@ mod tests {
         assert_eq!(
             first,
             Hash::hash_borsh(&(
-                TRIDENT_BLOCK_BODY_DOMAIN,
-                TRIDENT_BLOCK_BODY_VERSION,
+                TRIDENT_BLOCK_BODY_V5_DOMAIN,
+                TRIDENT_BLOCK_BODY_V5_VERSION,
                 legacy,
                 vec![block.data_commitments[0].authorization_id()]
             ))
@@ -347,6 +371,44 @@ mod tests {
 
         block.data_commitments[0].replay_nonce += 1;
         assert_ne!(block.compute_body_root(), first);
+        let bytes = borsh::to_vec(&block).unwrap();
+        assert_eq!(Block::try_from_slice(&bytes).unwrap(), block);
+    }
+
+    #[test]
+    fn drc_policy_activates_body_root_v6_and_commits_action() {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        let legacy = block.compute_body_root();
+        block
+            .drc_account_policies
+            .push(DrcAccountPolicyTx::set_require_destination_tag(
+                Address([7; 20]),
+                Amount::from_base_units(1),
+                2,
+            ));
+        let set_root = block.compute_body_root();
+        assert_eq!(
+            set_root,
+            Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_DOMAIN,
+                TRIDENT_BLOCK_BODY_VERSION,
+                legacy,
+                vec![block.drc_account_policies[0].policy_tx_id()]
+            ))
+        );
+        block.drc_account_policies[0].action =
+            crate::DrcAccountPolicyAction::ClearRequireDestinationTag;
+        assert_ne!(block.compute_body_root(), set_root);
         let bytes = borsh::to_vec(&block).unwrap();
         assert_eq!(Block::try_from_slice(&bytes).unwrap(), block);
     }
@@ -365,6 +427,17 @@ mod tests {
         stake_ops: Vec<SignedStakeTx>,
         ovl_executions: Vec<OvlExecutionTx>,
         drc_payments: Vec<DrcPaymentTx>,
+    }
+
+    #[derive(BorshSerialize)]
+    struct LegacyV5Block {
+        header: BlockHeader,
+        transactions: Vec<Transaction>,
+        account_transfers: Vec<AccountTransfer>,
+        stake_ops: Vec<SignedStakeTx>,
+        ovl_executions: Vec<OvlExecutionTx>,
+        drc_payments: Vec<DrcPaymentTx>,
+        data_commitments: Vec<DataCommitmentAuthorization>,
     }
 
     #[test]
@@ -389,6 +462,7 @@ mod tests {
         assert!(decoded.ovl_executions.is_empty());
         assert!(decoded.drc_payments.is_empty());
         assert!(decoded.data_commitments.is_empty());
+        assert!(decoded.drc_account_policies.is_empty());
     }
 
     #[test]
@@ -422,6 +496,31 @@ mod tests {
         assert_eq!(decoded.header, legacy.header);
         assert_eq!(decoded.drc_payments, vec![payment]);
         assert!(decoded.data_commitments.is_empty());
+        assert!(decoded.drc_account_policies.is_empty());
+    }
+
+    #[test]
+    fn legacy_v5_block_bytes_decode_with_empty_policy_lane() {
+        let legacy = LegacyV5Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![Hash([7; 32])],
+                timestamp_ms: 8,
+                bits: 9,
+                nonce: 10,
+                tx_root: Hash([11; 32]),
+            },
+            transactions: Vec::new(),
+            account_transfers: Vec::new(),
+            stake_ops: Vec::new(),
+            ovl_executions: Vec::new(),
+            drc_payments: Vec::new(),
+            data_commitments: Vec::new(),
+        };
+        let decoded = Block::try_from_slice(&borsh::to_vec(&legacy).unwrap()).unwrap();
+        assert_eq!(decoded.header, legacy.header);
+        assert!(decoded.data_commitments.is_empty());
+        assert!(decoded.drc_account_policies.is_empty());
     }
 
     #[test]

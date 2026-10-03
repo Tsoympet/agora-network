@@ -120,6 +120,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         }
     }
 

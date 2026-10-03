@@ -8,6 +8,7 @@ mod amount;
 mod asset;
 mod block;
 mod data_availability;
+mod drc_policy;
 mod execution;
 mod finality;
 mod hash;
@@ -29,6 +30,11 @@ pub use data_availability::{
     DA_COMMITMENT_AUTHORIZATION_ID_DOMAIN, DA_COMMITMENT_AUTHORIZATION_VERSION,
     DA_COMMITMENT_PAYLOAD_DOMAIN, DA_COMMITMENT_VERSION, MAX_DA_CHAIN_ID_BYTES,
 };
+pub use drc_policy::{
+    DrcAccountPolicy, DrcAccountPolicyAction, DrcAccountPolicyError, DrcAccountPolicyTx,
+    DRC_ACCOUNT_POLICY_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_STATE_VERSION,
+    DRC_ACCOUNT_POLICY_TX_VERSION,
+};
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
     CheckpointAttestation, CheckpointBody, CheckpointState, FinalityCertificate,
@@ -42,8 +48,9 @@ pub use hrp::{
 pub use passport::{PassportAttestation, PassportCategory, PASSPORT_ATTESTATION_DOMAIN};
 pub use payment::{
     DrcPaymentEnvelopeError, DrcPaymentOutboxEvent, DrcPaymentReceipt, DrcPaymentReceiptError,
-    DrcPaymentResult, DrcPaymentTx, DRC_PAYMENT_LEGACY_VERSION, DRC_PAYMENT_RECEIPT_VERSION,
-    DRC_PAYMENT_SIGNING_DOMAIN, DRC_PAYMENT_V1_SIGNING_DOMAIN, DRC_PAYMENT_V2_SIGNING_DOMAIN,
+    DrcPaymentResult, DrcPaymentTx, DRC_PAYMENT_LEGACY_VERSION, DRC_PAYMENT_RECEIPT_LEGACY_VERSION,
+    DRC_PAYMENT_RECEIPT_VERSION, DRC_PAYMENT_SIGNING_DOMAIN, DRC_PAYMENT_SOURCE_TAG_VERSION,
+    DRC_PAYMENT_V1_SIGNING_DOMAIN, DRC_PAYMENT_V2_SIGNING_DOMAIN, DRC_PAYMENT_V3_SIGNING_DOMAIN,
     DRC_PAYMENT_VERSION,
 };
 pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
@@ -124,6 +131,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -144,6 +152,9 @@ mod ts_export {
         "CheckpointAttestation.ts",
         "DataAvailabilityCommitment.ts",
         "DataCommitmentAuthorization.ts",
+        "DrcAccountPolicy.ts",
+        "DrcAccountPolicyAction.ts",
+        "DrcAccountPolicyTx.ts",
         "DrcPaymentReceipt.ts",
         "DrcPaymentResult.ts",
         "DrcPaymentTx.ts",
@@ -189,6 +200,9 @@ mod ts_export {
         DataCommitmentSource::export_all().expect("export DataCommitmentSource");
         DataAvailabilityCommitment::export_all().expect("export DataAvailabilityCommitment");
         DataCommitmentAuthorization::export_all().expect("export DataCommitmentAuthorization");
+        DrcAccountPolicyAction::export_all().expect("export DrcAccountPolicyAction");
+        DrcAccountPolicyTx::export_all().expect("export DrcAccountPolicyTx");
+        DrcAccountPolicy::export_all().expect("export DrcAccountPolicy");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");
@@ -208,11 +222,13 @@ mod ts_export {
         )
         .expect("read DRC payment binding");
         assert!(payment_binding.contains("source_tag: number | null"));
+        assert!(payment_binding.contains("destination_tag: number | null"));
         let outbox_binding = fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings/DrcPaymentOutboxEvent.ts"),
         )
         .expect("read DRC outbox binding");
         assert!(outbox_binding.contains("source_tag: number | null"));
+        assert!(outbox_binding.contains("destination_tag: number | null"));
         let receipt_binding = fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings/DrcPaymentReceipt.ts"),
         )
@@ -220,5 +236,12 @@ mod ts_export {
         assert!(receipt_binding.contains("requested_amount: Amount"));
         assert!(receipt_binding.contains("delivered_amount: Amount"));
         assert!(receipt_binding.contains("source_tag: number | null"));
+        assert!(receipt_binding.contains("destination_tag: number | null"));
+        let policy_binding = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings/DrcAccountPolicyTx.ts"),
+        )
+        .expect("read DRC account-policy binding");
+        assert!(policy_binding.contains("action: DrcAccountPolicyAction"));
+        assert!(!policy_binding.contains("private"));
     }
 }

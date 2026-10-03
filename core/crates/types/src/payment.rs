@@ -9,27 +9,34 @@ use crate::{Address, Amount, Hash};
 
 /// Frozen legacy payment envelope version.
 pub const DRC_PAYMENT_LEGACY_VERSION: u32 = 1;
-/// Current payment envelope version; v2 adds an authenticated optional source tag.
-pub const DRC_PAYMENT_VERSION: u32 = 2;
+/// Frozen v2 payment envelope; adds an authenticated optional source tag.
+pub const DRC_PAYMENT_SOURCE_TAG_VERSION: u32 = 2;
+/// Current payment envelope; v3 makes destination-tag presence explicit.
+pub const DRC_PAYMENT_VERSION: u32 = 3;
+/// Frozen exact-delivery receipt version for payment v1/v2.
+pub const DRC_PAYMENT_RECEIPT_LEGACY_VERSION: u32 = 1;
 /// Current durable exact-delivery receipt version.
-pub const DRC_PAYMENT_RECEIPT_VERSION: u32 = 1;
+pub const DRC_PAYMENT_RECEIPT_VERSION: u32 = 2;
 /// Frozen domain separator for v1 network-bound DRC payment signatures.
 pub const DRC_PAYMENT_V1_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v1";
 /// Domain separator for v2 network-bound DRC payment signatures.
 pub const DRC_PAYMENT_V2_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v2";
+/// Domain separator for v3 network-bound DRC payment signatures.
+pub const DRC_PAYMENT_V3_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v3";
 /// Backward-compatible name for the frozen v1 signing domain.
 pub const DRC_PAYMENT_SIGNING_DOMAIN: &[u8] = DRC_PAYMENT_V1_SIGNING_DOMAIN;
 
 /// Signed account-based DRC payment.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
 pub struct DrcPaymentTx {
     pub version: u32,
     pub from: Address,
     pub to: Address,
     pub amount: Amount,
     pub fee: Amount,
-    /// `0` indicates that the destination does not require a tag.
-    pub destination_tag: u32,
+    /// Recipient-local routing metadata. `Some(0)` is distinct from no tag in v3.
+    pub destination_tag: Option<u32>,
     /// Optional sender-local routing metadata. `Some(0)` is distinct from no source tag.
     #[serde(default)]
     pub source_tag: Option<u32>,
@@ -46,7 +53,9 @@ impl DrcPaymentTx {
             DRC_PAYMENT_LEGACY_VERSION if self.source_tag.is_some() => {
                 Err(DrcPaymentEnvelopeError::LegacySourceTag)
             }
-            DRC_PAYMENT_LEGACY_VERSION | DRC_PAYMENT_VERSION => Ok(()),
+            DRC_PAYMENT_LEGACY_VERSION | DRC_PAYMENT_SOURCE_TAG_VERSION | DRC_PAYMENT_VERSION => {
+                Ok(())
+            }
             version => Err(DrcPaymentEnvelopeError::UnsupportedVersion(version)),
         }
     }
@@ -62,15 +71,33 @@ impl DrcPaymentTx {
                 self.to,
                 self.amount,
                 self.fee,
-                self.destination_tag,
+                self.legacy_destination_tag(),
                 self.invoice_id,
                 self.nonce,
             ))
             .expect("borsh serialize DRC payment v1 body");
         }
 
+        if self.version == DRC_PAYMENT_SOURCE_TAG_VERSION {
+            return borsh::to_vec(&(
+                DRC_PAYMENT_V2_SIGNING_DOMAIN,
+                chain_id,
+                genesis.as_bytes(),
+                self.version,
+                self.from,
+                self.to,
+                self.amount,
+                self.fee,
+                self.legacy_destination_tag(),
+                self.source_tag,
+                self.invoice_id,
+                self.nonce,
+            ))
+            .expect("borsh serialize DRC payment v2 body");
+        }
+
         borsh::to_vec(&(
-            DRC_PAYMENT_V2_SIGNING_DOMAIN,
+            DRC_PAYMENT_V3_SIGNING_DOMAIN,
             chain_id,
             genesis.as_bytes(),
             self.version,
@@ -83,7 +110,22 @@ impl DrcPaymentTx {
             self.invoice_id,
             self.nonce,
         ))
-        .expect("borsh serialize DRC payment v2 body")
+        .expect("borsh serialize DRC payment v3 body")
+    }
+
+    fn legacy_destination_tag(&self) -> u32 {
+        self.destination_tag.unwrap_or(0)
+    }
+
+    /// Destination-tag value authenticated by this envelope's version.
+    ///
+    /// Frozen v1/v2 encode `0` as absence; only v3 can authenticate `Some(0)`.
+    pub fn authenticated_destination_tag(&self) -> Option<u32> {
+        if self.version <= DRC_PAYMENT_SOURCE_TAG_VERSION {
+            self.destination_tag.filter(|tag| *tag != 0)
+        } else {
+            self.destination_tag
+        }
     }
 
     /// Hashes the complete signed envelope, including authorization material.
@@ -108,7 +150,7 @@ impl DrcPaymentTx {
             to,
             amount,
             fee,
-            destination_tag,
+            destination_tag: (destination_tag != 0).then_some(destination_tag),
             source_tag: None,
             invoice_id,
             nonce,
@@ -130,6 +172,33 @@ impl DrcPaymentTx {
         nonce: u64,
     ) -> Self {
         Self {
+            version: DRC_PAYMENT_SOURCE_TAG_VERSION,
+            from,
+            to,
+            amount,
+            fee,
+            destination_tag: (destination_tag != 0).then_some(destination_tag),
+            source_tag,
+            invoice_id,
+            nonce,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+        }
+    }
+
+    /// Construct a v3 payment with explicit destination-tag presence.
+    #[allow(clippy::too_many_arguments)]
+    pub fn unsigned_v3(
+        from: Address,
+        to: Address,
+        amount: Amount,
+        fee: Amount,
+        destination_tag: Option<u32>,
+        source_tag: Option<u32>,
+        invoice_id: Hash,
+        nonce: u64,
+    ) -> Self {
+        Self {
             version: DRC_PAYMENT_VERSION,
             from,
             to,
@@ -145,7 +214,7 @@ impl DrcPaymentTx {
     }
 }
 
-/// A v2-only field may never be smuggled into the frozen v1 signing layout.
+/// Versioned fields may never be smuggled into an older frozen signing layout.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Error)]
 pub enum DrcPaymentEnvelopeError {
     #[error("unsupported DRC payment version {0}")]
@@ -161,7 +230,11 @@ impl BorshSerialize for DrcPaymentTx {
         BorshSerialize::serialize(&self.to, writer)?;
         BorshSerialize::serialize(&self.amount, writer)?;
         BorshSerialize::serialize(&self.fee, writer)?;
-        BorshSerialize::serialize(&self.destination_tag, writer)?;
+        if self.version <= DRC_PAYMENT_SOURCE_TAG_VERSION {
+            BorshSerialize::serialize(&self.legacy_destination_tag(), writer)?;
+        } else {
+            BorshSerialize::serialize(&self.destination_tag, writer)?;
+        }
         if self.version != DRC_PAYMENT_LEGACY_VERSION {
             BorshSerialize::serialize(&self.source_tag, writer)?;
         }
@@ -179,7 +252,12 @@ impl BorshDeserialize for DrcPaymentTx {
         let to = Address::deserialize_reader(reader)?;
         let amount = Amount::deserialize_reader(reader)?;
         let fee = Amount::deserialize_reader(reader)?;
-        let destination_tag = u32::deserialize_reader(reader)?;
+        let destination_tag = if version <= DRC_PAYMENT_SOURCE_TAG_VERSION {
+            let tag = u32::deserialize_reader(reader)?;
+            (tag != 0).then_some(tag)
+        } else {
+            Option::<u32>::deserialize_reader(reader)?
+        };
         let source_tag = if version == DRC_PAYMENT_LEGACY_VERSION {
             None
         } else {
@@ -226,9 +304,7 @@ impl DrcPaymentResult {
 ///
 /// This type is separate from [`DrcPaymentOutboxEvent`] so the frozen outbox-v1
 /// encoding remains unchanged.
-#[derive(
-    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
-)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct DrcPaymentReceipt {
     pub version: u32,
@@ -242,14 +318,18 @@ pub struct DrcPaymentReceipt {
     pub fee_paid: Amount,
     #[serde(default)]
     pub source_tag: Option<u32>,
-    pub destination_tag: u32,
+    pub destination_tag: Option<u32>,
     pub invoice_id: Hash,
 }
 
 impl DrcPaymentReceipt {
     pub fn delivered_exact(tx: &DrcPaymentTx) -> Self {
         Self {
-            version: DRC_PAYMENT_RECEIPT_VERSION,
+            version: if tx.version <= DRC_PAYMENT_SOURCE_TAG_VERSION {
+                DRC_PAYMENT_RECEIPT_LEGACY_VERSION
+            } else {
+                DRC_PAYMENT_RECEIPT_VERSION
+            },
             payment_id: tx.payment_id(),
             payment_version: tx.version,
             result: DrcPaymentResult::DeliveredExact,
@@ -259,14 +339,17 @@ impl DrcPaymentReceipt {
             delivered_amount: tx.amount,
             fee_paid: tx.fee,
             source_tag: tx.source_tag,
-            destination_tag: tx.destination_tag,
+            destination_tag: tx.authenticated_destination_tag(),
             invoice_id: tx.invoice_id,
         }
     }
 
     /// Fail closed if stored bytes could imply anything other than full delivery.
     pub fn validate_exact(&self) -> Result<(), DrcPaymentReceiptError> {
-        if self.version != DRC_PAYMENT_RECEIPT_VERSION {
+        if !matches!(
+            self.version,
+            DRC_PAYMENT_RECEIPT_LEGACY_VERSION | DRC_PAYMENT_RECEIPT_VERSION
+        ) {
             return Err(DrcPaymentReceiptError::UnsupportedVersion(self.version));
         }
         if !matches!(self.result, DrcPaymentResult::DeliveredExact) {
@@ -282,9 +365,86 @@ impl DrcPaymentReceipt {
             DRC_PAYMENT_LEGACY_VERSION if self.source_tag.is_some() => {
                 Err(DrcPaymentReceiptError::LegacySourceTag)
             }
-            DRC_PAYMENT_LEGACY_VERSION | DRC_PAYMENT_VERSION => Ok(()),
+            DRC_PAYMENT_LEGACY_VERSION | DRC_PAYMENT_SOURCE_TAG_VERSION
+                if self.destination_tag == Some(0) =>
+            {
+                Err(DrcPaymentReceiptError::LegacyDestinationTagZero)
+            }
+            DRC_PAYMENT_LEGACY_VERSION | DRC_PAYMENT_SOURCE_TAG_VERSION
+                if self.version == DRC_PAYMENT_RECEIPT_LEGACY_VERSION =>
+            {
+                Ok(())
+            }
+            DRC_PAYMENT_VERSION if self.version == DRC_PAYMENT_RECEIPT_VERSION => Ok(()),
+            DRC_PAYMENT_LEGACY_VERSION | DRC_PAYMENT_SOURCE_TAG_VERSION | DRC_PAYMENT_VERSION => {
+                Err(DrcPaymentReceiptError::VersionMismatch)
+            }
             version => Err(DrcPaymentReceiptError::UnsupportedPaymentVersion(version)),
         }
+    }
+}
+
+impl BorshSerialize for DrcPaymentReceipt {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> Result<(), borsh::io::Error> {
+        BorshSerialize::serialize(&self.version, writer)?;
+        BorshSerialize::serialize(&self.payment_id, writer)?;
+        BorshSerialize::serialize(&self.payment_version, writer)?;
+        BorshSerialize::serialize(&self.result, writer)?;
+        BorshSerialize::serialize(&self.from, writer)?;
+        BorshSerialize::serialize(&self.to, writer)?;
+        BorshSerialize::serialize(&self.requested_amount, writer)?;
+        BorshSerialize::serialize(&self.delivered_amount, writer)?;
+        BorshSerialize::serialize(&self.fee_paid, writer)?;
+        BorshSerialize::serialize(&self.source_tag, writer)?;
+        BorshSerialize::serialize(&self.destination_tag.unwrap_or(0), writer)?;
+        BorshSerialize::serialize(&self.invoice_id, writer)?;
+        if self.version != DRC_PAYMENT_RECEIPT_LEGACY_VERSION {
+            BorshSerialize::serialize(&self.destination_tag, writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl BorshDeserialize for DrcPaymentReceipt {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let version = u32::deserialize_reader(reader)?;
+        let payment_id = Hash::deserialize_reader(reader)?;
+        let payment_version = u32::deserialize_reader(reader)?;
+        let result = DrcPaymentResult::deserialize_reader(reader)?;
+        let from = Address::deserialize_reader(reader)?;
+        let to = Address::deserialize_reader(reader)?;
+        let requested_amount = Amount::deserialize_reader(reader)?;
+        let delivered_amount = Amount::deserialize_reader(reader)?;
+        let fee_paid = Amount::deserialize_reader(reader)?;
+        let source_tag = Option::<u32>::deserialize_reader(reader)?;
+        let legacy_destination_tag = u32::deserialize_reader(reader)?;
+        let invoice_id = Hash::deserialize_reader(reader)?;
+        let destination_tag = if version == DRC_PAYMENT_RECEIPT_LEGACY_VERSION {
+            (legacy_destination_tag != 0).then_some(legacy_destination_tag)
+        } else {
+            let tag = Option::<u32>::deserialize_reader(reader)?;
+            if tag.unwrap_or(0) != legacy_destination_tag {
+                return Err(borsh::io::Error::new(
+                    borsh::io::ErrorKind::InvalidData,
+                    "DRC receipt destination-tag extension mismatch",
+                ));
+            }
+            tag
+        };
+        Ok(Self {
+            version,
+            payment_id,
+            payment_version,
+            result,
+            from,
+            to,
+            requested_amount,
+            delivered_amount,
+            fee_paid,
+            source_tag,
+            destination_tag,
+            invoice_id,
+        })
     }
 }
 
@@ -302,6 +462,10 @@ pub enum DrcPaymentReceiptError {
     UnsupportedPaymentVersion(u32),
     #[error("DRC payment v1 receipt cannot carry a source tag")]
     LegacySourceTag,
+    #[error("DRC payment v1/v2 receipt cannot distinguish destination tag 0 from no tag")]
+    LegacyDestinationTagZero,
+    #[error("DRC payment and receipt versions are incompatible")]
+    VersionMismatch,
 }
 
 /// Durable notification emitted after accepting a DRC payment.
@@ -316,7 +480,7 @@ pub struct DrcPaymentOutboxEvent {
     pub amount: Amount,
     #[serde(default)]
     pub source_tag: Option<u32>,
-    pub destination_tag: u32,
+    pub destination_tag: Option<u32>,
     pub invoice_id: Hash,
 }
 
@@ -333,7 +497,7 @@ impl DrcPaymentOutboxEvent {
             to: tx.to,
             amount: tx.amount,
             source_tag: tx.source_tag,
-            destination_tag: tx.destination_tag,
+            destination_tag: tx.authenticated_destination_tag(),
             invoice_id: tx.invoice_id,
         }
     }
@@ -341,16 +505,19 @@ impl DrcPaymentOutboxEvent {
 
 impl BorshSerialize for DrcPaymentOutboxEvent {
     fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> Result<(), borsh::io::Error> {
-        // v1 storage bytes are frozen; v2 is an explicit trailing extension.
+        // v1/v2 storage prefixes are frozen; v3 adds an explicit trailing tag option.
         BorshSerialize::serialize(&self.payment_id, writer)?;
         BorshSerialize::serialize(&self.from, writer)?;
         BorshSerialize::serialize(&self.to, writer)?;
         BorshSerialize::serialize(&self.amount, writer)?;
-        BorshSerialize::serialize(&self.destination_tag, writer)?;
+        BorshSerialize::serialize(&self.destination_tag.unwrap_or(0), writer)?;
         BorshSerialize::serialize(&self.invoice_id, writer)?;
         if self.payment_version != DRC_PAYMENT_LEGACY_VERSION {
             BorshSerialize::serialize(&self.payment_version, writer)?;
             BorshSerialize::serialize(&self.source_tag, writer)?;
+        }
+        if self.payment_version >= DRC_PAYMENT_VERSION {
+            BorshSerialize::serialize(&self.destination_tag, writer)?;
         }
         Ok(())
     }
@@ -362,19 +529,33 @@ impl BorshDeserialize for DrcPaymentOutboxEvent {
         let from = Address::deserialize_reader(reader)?;
         let to = Address::deserialize_reader(reader)?;
         let amount = Amount::deserialize_reader(reader)?;
-        let destination_tag = u32::deserialize_reader(reader)?;
+        let legacy_destination_tag = u32::deserialize_reader(reader)?;
         let invoice_id = Hash::deserialize_reader(reader)?;
         let payment_version =
             deserialize_optional_u32(reader)?.unwrap_or(DRC_PAYMENT_LEGACY_VERSION);
         let source_tag = match payment_version {
             DRC_PAYMENT_LEGACY_VERSION => None,
-            DRC_PAYMENT_VERSION => Option::<u32>::deserialize_reader(reader)?,
+            DRC_PAYMENT_SOURCE_TAG_VERSION | DRC_PAYMENT_VERSION => {
+                Option::<u32>::deserialize_reader(reader)?
+            }
             version => {
                 return Err(borsh::io::Error::new(
                     borsh::io::ErrorKind::InvalidData,
                     format!("unsupported DRC outbox payment version {version}"),
                 ));
             }
+        };
+        let destination_tag = if payment_version >= DRC_PAYMENT_VERSION {
+            let tag = Option::<u32>::deserialize_reader(reader)?;
+            if tag.unwrap_or(0) != legacy_destination_tag {
+                return Err(borsh::io::Error::new(
+                    borsh::io::ErrorKind::InvalidData,
+                    "DRC outbox destination-tag extension mismatch",
+                ));
+            }
+            tag
+        } else {
+            (legacy_destination_tag != 0).then_some(legacy_destination_tag)
         };
         Ok(Self {
             payment_id,
@@ -476,7 +657,7 @@ mod tests {
             to: tx.to,
             amount: tx.amount,
             fee: tx.fee,
-            destination_tag: tx.destination_tag,
+            destination_tag: tx.destination_tag.unwrap(),
             invoice_id: tx.invoice_id,
             nonce: tx.nonce,
             public_key: tx.public_key.clone(),
@@ -581,6 +762,11 @@ mod tests {
             legacy_with_source.validate_envelope_version(),
             Err(DrcPaymentEnvelopeError::LegacySourceTag)
         );
+
+        let mut legacy_tag_zero = legacy_payment();
+        legacy_tag_zero.destination_tag = Some(0);
+        legacy_tag_zero.validate_envelope_version().unwrap();
+        assert_eq!(legacy_tag_zero.authenticated_destination_tag(), None);
     }
 
     #[test]
@@ -606,7 +792,7 @@ mod tests {
         let event = DrcPaymentOutboxEvent::from_tx(&tx);
 
         assert_eq!(event.payment_id, tx.payment_id());
-        assert_eq!(event.payment_version, DRC_PAYMENT_VERSION);
+        assert_eq!(event.payment_version, DRC_PAYMENT_SOURCE_TAG_VERSION);
         assert_eq!(event.from, tx.from);
         assert_eq!(event.to, tx.to);
         assert_eq!(event.amount, tx.amount);
@@ -629,7 +815,7 @@ mod tests {
             from: event.from,
             to: event.to,
             amount: event.amount,
-            destination_tag: event.destination_tag,
+            destination_tag: event.destination_tag.unwrap(),
             invoice_id: event.invoice_id,
         })
         .unwrap();
@@ -654,9 +840,9 @@ mod tests {
         );
         let receipt = DrcPaymentReceipt::delivered_exact(&tx);
         let expected = borsh::to_vec(&DrcPaymentReceiptV1 {
-            version: DRC_PAYMENT_RECEIPT_VERSION,
+            version: DRC_PAYMENT_RECEIPT_LEGACY_VERSION,
             payment_id: tx.payment_id(),
-            payment_version: DRC_PAYMENT_VERSION,
+            payment_version: DRC_PAYMENT_SOURCE_TAG_VERSION,
             result: DrcPaymentResult::DeliveredExact,
             from: tx.from,
             to: tx.to,
@@ -664,7 +850,7 @@ mod tests {
             delivered_amount: tx.amount,
             fee_paid: tx.fee,
             source_tag: tx.source_tag,
-            destination_tag: tx.destination_tag,
+            destination_tag: tx.destination_tag.unwrap(),
             invoice_id: tx.invoice_id,
         })
         .unwrap();
@@ -677,6 +863,54 @@ mod tests {
         );
         receipt.validate_exact().unwrap();
         assert_eq!(receipt.result.as_str(), "delivered_exact");
+    }
+
+    #[test]
+    fn v3_distinguishes_missing_destination_tag_from_some_zero() {
+        let missing = DrcPaymentTx::unsigned_v3(
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(3),
+            Amount::from_base_units(1),
+            None,
+            Some(4),
+            Hash([5; 32]),
+            6,
+        );
+        let tagged_zero = DrcPaymentTx::unsigned_v3(
+            missing.from,
+            missing.to,
+            missing.amount,
+            missing.fee,
+            Some(0),
+            missing.source_tag,
+            missing.invoice_id,
+            missing.nonce,
+        );
+
+        assert_ne!(missing.payment_id(), tagged_zero.payment_id());
+        for tx in [missing, tagged_zero] {
+            tx.validate_envelope_version().unwrap();
+            let bytes = borsh::to_vec(&tx).unwrap();
+            assert_eq!(DrcPaymentTx::try_from_slice(&bytes).unwrap(), tx);
+
+            let receipt = DrcPaymentReceipt::delivered_exact(&tx);
+            assert_eq!(receipt.version, DRC_PAYMENT_RECEIPT_VERSION);
+            assert_eq!(receipt.destination_tag, tx.destination_tag);
+            receipt.validate_exact().unwrap();
+            let receipt_bytes = borsh::to_vec(&receipt).unwrap();
+            assert_eq!(
+                DrcPaymentReceipt::try_from_slice(&receipt_bytes).unwrap(),
+                receipt
+            );
+
+            let event = DrcPaymentOutboxEvent::from_tx(&tx);
+            let event_bytes = borsh::to_vec(&event).unwrap();
+            assert_eq!(
+                DrcPaymentOutboxEvent::try_from_slice(&event_bytes).unwrap(),
+                event
+            );
+        }
     }
 
     #[test]

@@ -46,6 +46,7 @@ async fn announce_triggers_getblock_and_full_serve() {
         ovl_executions: vec![],
         drc_payments: vec![],
         data_commitments: vec![],
+        drc_account_policies: vec![],
     };
     let hash = block.id();
 

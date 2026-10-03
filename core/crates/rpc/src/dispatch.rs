@@ -1,6 +1,6 @@
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, DrcPaymentReceipt, DrcPaymentTx, Hash, OvlExecutionTx,
-    Transaction,
+    AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcPaymentReceipt, DrcPaymentTx,
+    Hash, OvlExecutionTx, Transaction,
 };
 use serde_json::{json, Value};
 
@@ -141,6 +141,37 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     "status": if receipt.is_some() { "settled" } else { "unknown" },
                     "receipt": receipt.as_ref().map(drc_payment_receipt_to_json),
                 }))
+            }
+            RpcMethod::SubmitDrcAccountPolicy => {
+                let raw = req
+                    .params
+                    .get("policy")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcAccountPolicyTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_account_policy(tx)?;
+                Ok(json!({ "policy_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcAccountPolicy => {
+                let account = param_address(&req.params, "account")?;
+                match self.backend.get_drc_account_policy(&account)? {
+                    Some((policy, nonce)) => Ok(json!({
+                        "account": account.to_bech32(),
+                        "status": "known",
+                        "policy": {
+                            "version": policy.version,
+                            "require_destination_tag": policy.require_destination_tag,
+                        },
+                        "account_nonce": nonce,
+                    })),
+                    None => Ok(json!({
+                        "account": account.to_bech32(),
+                        "status": "unknown",
+                        "policy": null,
+                        "account_nonce": null,
+                    })),
+                }
             }
             RpcMethod::GetBalance => {
                 let address = param_address(&req.params, "address")?;
@@ -341,6 +372,7 @@ fn block_to_explorer_json(block: &Block) -> Value {
         "stake_op_count": block.stake_ops.len(),
         "ovl_execution_count": block.ovl_executions.len(),
         "drc_payment_count": block.drc_payments.len(),
+        "drc_account_policy_count": block.drc_account_policies.len(),
         "transactions": transactions,
     })
 }
@@ -674,7 +706,9 @@ fn param_topic_category(params: &Value) -> Result<agora_governance::TopicCategor
 mod tests {
     use super::*;
     use crate::backend::InMemoryBackend;
-    use agora_types::{Block, BlockHeader, DrcPaymentTx, TxOut};
+    use agora_types::{
+        Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx, DrcPaymentTx, TxOut,
+    };
 
     #[test]
     fn tips_balance_submit_fund() {
@@ -694,6 +728,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -806,6 +841,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -837,6 +873,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {
@@ -1040,6 +1077,80 @@ mod tests {
             });
             assert_eq!(response.error.unwrap().code, -32602);
         }
+    }
+
+    #[test]
+    fn drc_account_policy_rpc_handles_known_unknown_and_malformed_params() {
+        let known = Address([7; 20]);
+        let unknown = Address([8; 20]);
+        let mut backend = InMemoryBackend::new();
+        backend.insert_drc_account_policy(
+            known,
+            DrcAccountPolicy {
+                version: agora_types::DRC_ACCOUNT_POLICY_STATE_VERSION,
+                require_destination_tag: true,
+            },
+            9,
+        );
+        let mut rpc = RpcDispatcher::new(backend);
+
+        let response = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getDrcAccountPolicy".into(),
+            params: json!({ "account": known.to_hex() }),
+        });
+        assert_eq!(
+            response.result.unwrap(),
+            json!({
+                "account": known.to_bech32(),
+                "status": "known",
+                "policy": {
+                    "version": agora_types::DRC_ACCOUNT_POLICY_STATE_VERSION,
+                    "require_destination_tag": true,
+                },
+                "account_nonce": 9,
+            })
+        );
+
+        let response = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getDrcAccountPolicy".into(),
+            params: json!([unknown.to_bech32()]),
+        });
+        assert_eq!(
+            response.result.unwrap(),
+            json!({
+                "account": unknown.to_bech32(),
+                "status": "unknown",
+                "policy": null,
+                "account_nonce": null,
+            })
+        );
+
+        for params in [json!({}), json!({"account": 7}), json!({"account": "abcd"})] {
+            let response = rpc.handle(RpcRequest {
+                id: Some(json!(3)),
+                method: "agora_getDrcAccountPolicy".into(),
+                params,
+            });
+            assert_eq!(response.error.unwrap().code, -32602);
+        }
+
+        let malformed_submit = rpc.handle(RpcRequest {
+            id: Some(json!(4)),
+            method: "agora_submitDrcAccountPolicy".into(),
+            params: json!({ "policy": { "version": 1 } }),
+        });
+        assert_eq!(malformed_submit.error.unwrap().code, -32602);
+
+        let valid =
+            DrcAccountPolicyTx::set_require_destination_tag(known, Amount::from_base_units(1), 9);
+        let rejected = rpc.handle(RpcRequest {
+            id: Some(json!(5)),
+            method: "agora_submitDrcAccountPolicy".into(),
+            params: json!({ "policy": valid }),
+        });
+        assert_eq!(rejected.error.unwrap().code, -32001);
     }
 
     #[test]
