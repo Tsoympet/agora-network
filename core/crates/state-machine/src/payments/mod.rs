@@ -741,7 +741,7 @@ mod tests {
             Hash::ZERO,
             0,
         );
-        unsupported.version += 1;
+        unsupported.version = agora_types::DRC_PAYMENT_VERSION + 1;
 
         let mut legacy_with_source = DrcPaymentTx::unsigned(
             agora_types::Address([1; 20]),
