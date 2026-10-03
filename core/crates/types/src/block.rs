@@ -362,7 +362,7 @@ mod tests {
         assert_eq!(
             first,
             Hash::hash_borsh(&(
-                b"agora-block-body-v5",
+                b"agora-block-body-v5".as_slice(),
                 5u16,
                 legacy,
                 vec![block.data_commitments[0].authorization_id()]
