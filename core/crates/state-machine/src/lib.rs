@@ -14,13 +14,15 @@ mod drc_account_auth;
 mod drc_deposit_preauth;
 mod drc_escrow;
 #[cfg(test)]
-mod drc_escrow_hardening_multisign_tests;
-#[cfg(test)]
 mod drc_escrow_auth_cutoff_tranche_tests;
 #[cfg(test)]
-mod drc_escrow_terminal_tests;
+mod drc_escrow_hardening_multisign_tests;
 #[cfg(test)]
 mod drc_escrow_hardening_tests;
+#[cfg(test)]
+mod drc_escrow_multisign_adversary_matrix;
+#[cfg(test)]
+mod drc_escrow_terminal_tests;
 #[cfg(test)]
 mod drc_escrow_test_harness;
 #[cfg(test)]
