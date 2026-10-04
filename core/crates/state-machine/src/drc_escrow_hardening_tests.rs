@@ -266,25 +266,24 @@ mod policy_timing {
             &ctx,
             Some(0),
         );
-        let mut batch2 = WriteBatch::new();
-        let mut journal2 = AccountJournal::default();
-        assert!(crate::drc_escrow::apply_drc_escrow_create(
-            &store,
-            &zero_tag,
-            &ctx,
-            1,
-            &mut batch2,
-            &mut journal2
-        )
-        .is_err());
+        let mut block0 = coinbase(vec![Hash::ZERO], &owner);
+        block0.drc_escrow_creates.push(zero_tag);
+        apply_escrow_block(&store, block0, 1, &ctx);
 
+        let owner_nonce = crate::accounts::load_account(
+            &store,
+            agora_types::NativeAssetId::DRC,
+            &owner.address(),
+        )
+        .unwrap()
+        .nonce;
         let tagged = signed_create(
             &owner,
             recipient.address(),
             10,
             None,
             Some(50),
-            0,
+            owner_nonce,
             &ctx,
             Some(7),
         );

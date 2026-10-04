@@ -288,4 +288,303 @@ pub mod support {
             })
             .sum()
     }
+
+    pub fn assert_escrow_snapshot_unchanged(
+        store: &StateStore,
+        owner: &KeyPair,
+        recipient: &KeyPair,
+        before: &EscrowSnapshot,
+    ) {
+        let after = snapshot_escrow_state(store, owner, recipient);
+        assert_eq!(after.owner_balance, before.owner_balance);
+        assert_eq!(after.recipient_balance, before.recipient_balance);
+        assert_eq!(after.owner_nonce, before.owner_nonce);
+        assert_eq!(after.escrow_root, before.escrow_root);
+        assert_eq!(after.state_root, before.state_root);
+        assert_eq!(after.live_count, before.live_count);
+    }
+
+    pub fn reject_escrow_apply_preserving_state(
+        store: &StateStore,
+        owner: &KeyPair,
+        recipient: &KeyPair,
+        block: &Block,
+        ctx: &TxAuthContext,
+        before: &EscrowSnapshot,
+    ) {
+        if agora_types::validate_drc_multisign_attachment_lane(block, &ctx.chain_id, &ctx.genesis)
+            .is_err()
+        {
+            assert_escrow_snapshot_unchanged(store, owner, recipient, before);
+            return;
+        }
+        assert!(
+            apply_block_batched_with_auth_at_blue_score(store, block, 50, Some(ctx), 50).is_err()
+        );
+        assert_escrow_snapshot_unchanged(store, owner, recipient, before);
+    }
+
+    pub fn spendable_plus_locked(
+        store: &StateStore,
+        owner: &KeyPair,
+        recipient: &KeyPair,
+    ) -> u64 {
+        load_account(store, NativeAssetId::DRC, &owner.address())
+            .unwrap()
+            .balance
+            + load_account(store, NativeAssetId::DRC, &recipient.address())
+                .unwrap()
+                .balance
+            + locked_escrow_total(store, &owner.address())
+    }
+}
+
+#[cfg(test)]
+pub mod multisign {
+    use agora_crypto::{sign_drc_multisign_participant_bound, sign_drc_signer_list_bound, KeyPair};
+    use agora_types::{
+        materialize_drc_multisign_attachments, Amount, Block, DrcEscrowCreateTx, DrcMultisignAuth, DrcMultisignEntry,
+        DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId, DRC_ESCROW_CREATE_TX_VERSION,
+        DRC_MULTISIGN_AUTH_VERSION,
+    };
+
+    use super::support::{coinbase, signed_cancel, signed_finish, EscrowSnapshot};
+    use crate::accounts::load_account;
+    use crate::apply::TxAuthContext;
+    use crate::drc_escrow_test_harness::support::reject_escrow_apply_preserving_state;
+    use crate::drc_signer_list::apply_drc_signer_list;
+    use crate::store::WriteBatch;
+    use crate::{AccountJournal, StateStore};
+
+    pub fn install_signer_list(
+        store: &StateStore,
+        master: &KeyPair,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) {
+        let nonce = load_account(store, NativeAssetId::DRC, &master.address())
+            .unwrap()
+            .nonce;
+        install_signer_list_at_nonce(store, master, signers, ctx, nonce);
+    }
+
+    pub fn install_signer_list_at_nonce(
+        store: &StateStore,
+        master: &KeyPair,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+        nonce: u64,
+    ) {
+        let total: u16 = signers.iter().map(|(_, w)| w).sum();
+        let mut install = DrcSignerListTx::unsigned_set(
+            master.address(),
+            agora_types::canonical_sorted_entries(
+                &signers
+                    .iter()
+                    .map(|(kp, weight)| DrcSignerListEntry {
+                        signer: kp.address(),
+                        weight: *weight,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            u32::from(total),
+            Amount::ZERO,
+            nonce,
+        );
+        sign_drc_signer_list_bound(&mut install, master, &ctx.chain_id, &ctx.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_signer_list(store, &install, ctx, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+    }
+
+    pub fn multisign_bundle(
+        owner: agora_types::Address,
+        signing_bytes: &[u8],
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> DrcMultisignAuth {
+        let mut entries = Vec::new();
+        for (kp, _) in signers {
+            let (signer, public_key, signature) = sign_drc_multisign_participant_bound(
+                owner,
+                signing_bytes,
+                kp,
+                &ctx.chain_id,
+                &ctx.genesis,
+            )
+            .unwrap();
+            entries.push(DrcMultisignEntry {
+                signer,
+                public_key,
+                signature,
+            });
+        }
+        entries.sort_by_key(|e| e.signer.0);
+        DrcMultisignAuth {
+            version: DRC_MULTISIGN_AUTH_VERSION,
+            signing_for: owner,
+            signatures: entries,
+        }
+    }
+
+    pub fn base_multisign_create_block(
+        store: &StateStore,
+        master: &KeyPair,
+        recipient: &KeyPair,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        install_signer_list(store, master, signers, ctx);
+        let nonce = load_account(store, NativeAssetId::DRC, &master.address())
+            .unwrap()
+            .nonce;
+        let mut create = DrcEscrowCreateTx {
+            version: DRC_ESCROW_CREATE_TX_VERSION,
+            owner: master.address(),
+            recipient: recipient.address(),
+            amount: Amount::from_base_units(10),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            finish_after_blue_score: None,
+            cancel_after_blue_score: Some(100),
+            nonce,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+        };
+        create.public_key.clear();
+        create.signature.clear();
+        create.multisign = Some(multisign_bundle(
+            master.address(),
+            &create.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
+            signers,
+            ctx,
+        ));
+        let mut block = coinbase(vec![Hash::ZERO], master);
+        block.drc_escrow_creates.push(create);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block
+    }
+
+    pub fn base_multisign_finish_block(
+        store: &StateStore,
+        master: &KeyPair,
+        _recipient: &KeyPair,
+        escrow_id: Hash,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        install_signer_list(store, master, signers, ctx);
+        let nonce = load_account(store, NativeAssetId::DRC, &master.address())
+            .unwrap()
+            .nonce;
+        let mut finish = signed_finish(master, escrow_id, nonce, ctx);
+        finish.public_key.clear();
+        finish.signature.clear();
+        finish.multisign = Some(multisign_bundle(
+            master.address(),
+            &finish.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
+            signers,
+            ctx,
+        ));
+        let mut block = coinbase(vec![Hash::ZERO], master);
+        block.drc_escrow_finishes.push(finish);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block
+    }
+
+    pub fn multisign_finish_block(
+        store: &StateStore,
+        submitter: &KeyPair,
+        escrow_id: Hash,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        let nonce = load_account(store, NativeAssetId::DRC, &submitter.address())
+            .unwrap()
+            .nonce;
+        let mut finish = signed_finish(submitter, escrow_id, nonce, ctx);
+        finish.public_key.clear();
+        finish.signature.clear();
+        finish.multisign = Some(multisign_bundle(
+            submitter.address(),
+            &finish.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
+            signers,
+            ctx,
+        ));
+        let mut block = coinbase(vec![Hash::ZERO], submitter);
+        block.drc_escrow_finishes.push(finish);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block
+    }
+
+    pub fn multisign_cancel_block(
+        store: &StateStore,
+        submitter: &KeyPair,
+        coinbase_payout: &KeyPair,
+        escrow_id: Hash,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        let nonce = load_account(store, NativeAssetId::DRC, &submitter.address())
+            .unwrap()
+            .nonce;
+        let mut cancel = signed_cancel(submitter, escrow_id, nonce, ctx);
+        cancel.public_key.clear();
+        cancel.signature.clear();
+        cancel.multisign = Some(multisign_bundle(
+            submitter.address(),
+            &cancel.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
+            signers,
+            ctx,
+        ));
+        let mut block = coinbase(vec![Hash::ZERO], coinbase_payout);
+        block.drc_escrow_cancels.push(cancel);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block
+    }
+
+    pub fn base_multisign_cancel_block(
+        store: &StateStore,
+        submitter: &KeyPair,
+        owner: &KeyPair,
+        _recipient: &KeyPair,
+        escrow_id: Hash,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        install_signer_list(store, submitter, signers, ctx);
+        let nonce = load_account(store, NativeAssetId::DRC, &submitter.address())
+            .unwrap()
+            .nonce;
+        let mut cancel = signed_cancel(submitter, escrow_id, nonce, ctx);
+        cancel.public_key.clear();
+        cancel.signature.clear();
+        cancel.multisign = Some(multisign_bundle(
+            submitter.address(),
+            &cancel.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
+            signers,
+            ctx,
+        ));
+        let mut block = coinbase(vec![Hash::ZERO], owner);
+        block.drc_escrow_cancels.push(cancel);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block
+    }
+
+    pub fn reject_preserving(
+        store: &StateStore,
+        owner: &KeyPair,
+        recipient: &KeyPair,
+        mut block: Block,
+        ctx: &TxAuthContext,
+        before: &EscrowSnapshot,
+    ) {
+        block.header.tx_root = block.compute_body_root();
+        reject_escrow_apply_preserving_state(store, owner, recipient, &block, ctx, before);
+    }
 }

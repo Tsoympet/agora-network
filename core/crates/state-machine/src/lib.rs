@@ -16,6 +16,8 @@ mod drc_escrow;
 #[cfg(test)]
 mod drc_escrow_hardening_multisign_tests;
 #[cfg(test)]
+mod drc_escrow_auth_cutoff_tranche_tests;
+#[cfg(test)]
 mod drc_escrow_hardening_tests;
 #[cfg(test)]
 mod drc_escrow_test_harness;
