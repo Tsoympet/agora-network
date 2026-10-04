@@ -207,14 +207,14 @@ mod same_block_lane {
 
 #[cfg(test)]
 mod policy_timing {
-    use agora_crypto::sign_drc_account_policy_bound;
-    use agora_types::{DrcAccountPolicyTx, Hash};
     use crate::drc_escrow_test_harness::support::{
         apply_escrow_block, auth, coinbase, fund, key, signed_create,
     };
     use crate::drc_policy::apply_drc_account_policy;
     use crate::store::WriteBatch;
     use crate::{AccountJournal, StateStore};
+    use agora_crypto::sign_drc_account_policy_bound;
+    use agora_types::{DrcAccountPolicyTx, Hash};
 
     #[test]
     fn require_dest_tag_at_create_including_zero_tag() {
@@ -298,11 +298,9 @@ mod reorg_journal {
     use agora_types::Hash;
 
     use crate::apply::{apply_block_batched_with_auth_at_blue_score, revert_journal_batched};
-    use crate::drc_escrow::{load_drc_escrow_live};
+    use crate::drc_escrow::load_drc_escrow_live;
     use crate::drc_escrow_test_harness::support::TIP;
-    use crate::drc_escrow_test_harness::support::{
-        auth, coinbase, fund, key, signed_create,
-    };
+    use crate::drc_escrow_test_harness::support::{auth, coinbase, fund, key, signed_create};
     use crate::state_root::compose_trident_state_root;
     use crate::StateStore;
 

@@ -2622,3 +2622,7 @@ mod tests {
         assert_eq!(unknown["status"], json!("unknown"));
     }
 }
+
+#[cfg(test)]
+#[path = "drc_escrow_template_tests.rs"]
+mod drc_escrow_template_tests;

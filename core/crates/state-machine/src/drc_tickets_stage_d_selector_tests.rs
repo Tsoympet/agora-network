@@ -15,8 +15,8 @@ mod selector_replay_version {
         lookup_drc_ticket_point, plan_drc_mempool_reservation, DrcTicketPointStatus,
     };
     use crate::drc_tickets_test_harness::support::{
-        auth, coinbase, fund, key, mint_ticket,
-        reject_block_preserving_ticket_state, snapshot_ticket_state,
+        auth, coinbase, fund, key, mint_ticket, reject_block_preserving_ticket_state,
+        snapshot_ticket_state,
     };
     use crate::store::WriteBatch;
     use crate::{apply_drc_ticket_create, AccountJournal, StateStore};

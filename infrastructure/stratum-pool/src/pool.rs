@@ -122,7 +122,67 @@ mod tests {
             data_commitments: vec![],
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
+            drc_multisign_attachments: vec![],
         }
+    }
+
+    fn escrow_attachment_block(tx_root: Hash) -> Block {
+        let mut block = empty_block(1, tx_root);
+        block
+            .drc_escrow_creates
+            .push(agora_types::DrcEscrowCreateTx {
+                version: agora_types::DRC_ESCROW_CREATE_TX_VERSION,
+                owner: agora_types::Address([3; 20]),
+                recipient: agora_types::Address([4; 20]),
+                amount: agora_types::Amount::from_base_units(1),
+                fee: agora_types::Amount::from_base_units(1),
+                destination_tag: None,
+                source_tag: None,
+                invoice_id: Hash::ZERO,
+                finish_after_blue_score: None,
+                cancel_after_blue_score: Some(10),
+                nonce: 0,
+                account_sequence: None,
+                public_key: vec![],
+                signature: vec![],
+                multisign: None,
+            });
+        block
+            .drc_multisign_attachments
+            .push(agora_types::DrcMultisignBlockAttachment {
+                version: agora_types::DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
+                key: agora_types::DrcMultisignAttachmentKey {
+                    version: agora_types::DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
+                    kind: agora_types::DrcMultisignOperationKind::DrcEscrowCreate,
+                    signing_commitment: Hash([5; 32]),
+                },
+                auth: agora_types::DrcMultisignAuth {
+                    version: agora_types::DRC_MULTISIGN_AUTH_VERSION,
+                    signing_for: agora_types::Address([3; 20]),
+                    signatures: vec![],
+                },
+            });
+        block
+    }
+
+    #[test]
+    fn stratum_job_preserves_escrow_lane_body_root() {
+        let mut pool = StratumPool::new();
+        let mut block = escrow_attachment_block(Hash::ZERO);
+        block.header.tx_root = block.compute_body_root();
+        let job = pool.create_job(block.clone(), 1);
+        assert_eq!(job.block.drc_escrow_creates.len(), 1);
+        assert_eq!(job.block.drc_multisign_attachments.len(), 1);
+        assert_eq!(job.block.header.tx_root, block.header.tx_root);
+        let solved = job.with_nonce(3);
+        assert_eq!(solved.header.tx_root, block.header.tx_root);
+        assert_eq!(solved.drc_escrow_creates.len(), 1);
     }
 
     #[test]

@@ -17,9 +17,7 @@ pub mod support {
 
     use crate::accounts::{credit_account_into, load_account};
     use crate::apply::{apply_block_batched_with_auth_at_blue_score, TxAuthContext};
-    use crate::drc_escrow::{
-        drc_escrow_root, escrow_owner_index_key, lookup_drc_escrow_point,
-    };
+    use crate::drc_escrow::{drc_escrow_root, escrow_owner_index_key, lookup_drc_escrow_point};
     use crate::state_root::compose_trident_state_root;
     use crate::store::WriteBatch;
     use crate::StateStore;
@@ -349,11 +347,7 @@ pub mod support {
         assert_escrow_snapshot_unchanged(store, owner, recipient, before);
     }
 
-    pub fn spendable_plus_locked(
-        store: &StateStore,
-        owner: &KeyPair,
-        recipient: &KeyPair,
-    ) -> u64 {
+    pub fn spendable_plus_locked(store: &StateStore, owner: &KeyPair, recipient: &KeyPair) -> u64 {
         load_account(store, NativeAssetId::DRC, &owner.address())
             .unwrap()
             .balance
@@ -368,9 +362,9 @@ pub mod support {
 pub mod multisign {
     use agora_crypto::{sign_drc_multisign_participant_bound, sign_drc_signer_list_bound, KeyPair};
     use agora_types::{
-        materialize_drc_multisign_attachments, Amount, Block, DrcEscrowCreateTx, DrcMultisignAuth, DrcMultisignEntry,
-        DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId, DRC_ESCROW_CREATE_TX_VERSION,
-        DRC_MULTISIGN_AUTH_VERSION,
+        materialize_drc_multisign_attachments, Amount, Block, DrcEscrowCreateTx, DrcMultisignAuth,
+        DrcMultisignEntry, DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId,
+        DRC_ESCROW_CREATE_TX_VERSION, DRC_MULTISIGN_AUTH_VERSION,
     };
 
     use super::support::{coinbase, signed_cancel, signed_finish, EscrowSnapshot};

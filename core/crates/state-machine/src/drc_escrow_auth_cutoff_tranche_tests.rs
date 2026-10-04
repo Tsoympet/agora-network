@@ -2,10 +2,8 @@
 
 #[cfg(test)]
 mod dest_tag_and_invoice {
-    
-    use agora_types::{
-        DrcEscrowCreateTx, DrcEscrowError, Hash, DRC_ESCROW_CREATE_TX_VERSION,
-    };
+
+    use agora_types::{DrcEscrowCreateTx, DrcEscrowError, Hash, DRC_ESCROW_CREATE_TX_VERSION};
     use borsh::BorshDeserialize;
 
     use crate::accounts::load_account;
@@ -30,8 +28,13 @@ mod dest_tag_and_invoice {
             agora_types::Amount::ZERO,
             0,
         );
-        agora_crypto::sign_drc_account_policy_bound(&mut pol, &recipient, &ctx.chain_id, &ctx.genesis)
-            .unwrap();
+        agora_crypto::sign_drc_account_policy_bound(
+            &mut pol,
+            &recipient,
+            &ctx.chain_id,
+            &ctx.genesis,
+        )
+        .unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         crate::drc_policy::apply_drc_account_policy(&store, &pol, &ctx, &mut batch, &mut journal)
@@ -109,7 +112,7 @@ mod cutoff_deterministic {
 
     use crate::accounts::load_account;
     use crate::apply::apply_block_batched_virtual_at_blue_score;
-    use crate::drc_escrow::{apply_drc_escrow_finish, apply_drc_escrow_cancel};
+    use crate::drc_escrow::{apply_drc_escrow_cancel, apply_drc_escrow_finish};
     use crate::drc_escrow_test_harness::support::{
         apply_escrow_block, auth, coinbase, create_live_escrow, fund, key, signed_cancel,
         signed_create, signed_finish,
@@ -176,7 +179,16 @@ mod cutoff_deterministic {
         let recipient = key(13);
         fund(&store, &owner, 2_000);
         let ctx = auth();
-        let create = signed_create(&owner, recipient.address(), 10, None, Some(30), 0, &ctx, None);
+        let create = signed_create(
+            &owner,
+            recipient.address(),
+            10,
+            None,
+            Some(30),
+            0,
+            &ctx,
+            None,
+        );
         let id = create.escrow_id();
         let mut block = coinbase(vec![Hash::ZERO], &owner);
         block.drc_escrow_creates.push(create);
@@ -224,7 +236,8 @@ mod cutoff_deterministic {
         let mut block = coinbase(vec![Hash::ZERO], &owner);
         block.drc_escrow_finishes.push(finish);
         block.header.tx_root = block.compute_body_root();
-        let v = apply_block_batched_virtual_at_blue_score(&store, &block, 50, Some(&ctx), 25).unwrap();
+        let v =
+            apply_block_batched_virtual_at_blue_score(&store, &block, 50, Some(&ctx), 25).unwrap();
         use agora_types::TransactionAcceptance;
         assert_eq!(
             v.acceptance.drc_escrow_finish_statuses[0],
@@ -239,8 +252,7 @@ mod cutoff_deterministic {
         let recipient = key(21);
         fund(&store, &owner, 2_000);
         let ctx = auth();
-        let (id, _) =
-            create_live_escrow(&store, &owner, &recipient, 10, None, Some(30), 1, &ctx);
+        let (id, _) = create_live_escrow(&store, &owner, &recipient, 10, None, Some(30), 1, &ctx);
         assert!(!apply_at(&store, id, "cancel", 29, &owner, &ctx));
         assert!(apply_at(&store, id, "cancel", 30, &owner, &ctx));
     }
@@ -288,10 +300,10 @@ mod policy_composition {
     use agora_types::{DrcAccountPolicyTx, DrcDepositPreauthTx, Hash, NativeAssetId};
 
     use crate::accounts::load_account;
-    use crate::drc_escrow::{load_drc_escrow_live, apply_drc_escrow_finish};
+    use crate::drc_escrow::{apply_drc_escrow_finish, load_drc_escrow_live};
     use crate::drc_escrow_test_harness::support::{
-        apply_escrow_block, auth, coinbase, create_live_escrow, fund, key, signed_create,
-        signed_finish, snapshot_escrow_state, assert_escrow_snapshot_unchanged,
+        apply_escrow_block, assert_escrow_snapshot_unchanged, auth, coinbase, create_live_escrow,
+        fund, key, signed_create, signed_finish, snapshot_escrow_state,
     };
     use crate::store::WriteBatch;
     use crate::{AccountJournal, StateStore};
@@ -314,17 +326,21 @@ mod policy_composition {
         sign_drc_account_policy_bound(&mut pol, &recipient, &ctx.chain_id, &ctx.genesis).unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
-        crate::drc_policy::apply_drc_account_policy(&store, &pol, &ctx, &mut batch, &mut journal).unwrap();
+        crate::drc_policy::apply_drc_account_policy(&store, &pol, &ctx, &mut batch, &mut journal)
+            .unwrap();
         store.write_batch(batch).unwrap();
         let (id, _) = create_live_escrow(&store, &owner, &recipient, 50, None, Some(99), 1, &ctx);
         let snap = snapshot_escrow_state(&store, &owner, &recipient);
         let finish = signed_finish(&finisher, id, 0, &ctx);
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
-        assert!(apply_drc_escrow_finish(&store, &finish, &ctx, 1, &mut batch, &mut journal).is_err());
+        assert!(
+            apply_drc_escrow_finish(&store, &finish, &ctx, 1, &mut batch, &mut journal).is_err()
+        );
         assert_escrow_snapshot_unchanged(&store, &owner, &recipient, &snap);
-        let recipient_nonce =
-            load_account(&store, NativeAssetId::DRC, &recipient.address()).unwrap().nonce;
+        let recipient_nonce = load_account(&store, NativeAssetId::DRC, &recipient.address())
+            .unwrap()
+            .nonce;
         let mut pre = DrcDepositPreauthTx::authorize(
             recipient.address(),
             owner.address(),
@@ -334,14 +350,22 @@ mod policy_composition {
         sign_drc_deposit_preauth_bound(&mut pre, &recipient, &ctx.chain_id, &ctx.genesis).unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
-        crate::drc_deposit_preauth::apply_drc_deposit_preauth(&store, &pre, &ctx, &mut batch, &mut journal).unwrap();
+        crate::drc_deposit_preauth::apply_drc_deposit_preauth(
+            &store,
+            &pre,
+            &ctx,
+            &mut batch,
+            &mut journal,
+        )
+        .unwrap();
         store.write_batch(batch).unwrap();
         let finish2 = signed_finish(&finisher, id, 0, &ctx);
         let mut block = coinbase(vec![Hash::ZERO], &owner);
         block.drc_escrow_finishes.push(finish2);
         apply_escrow_block(&store, block, 2, &ctx);
-        let recipient_balance =
-            load_account(&store, NativeAssetId::DRC, &recipient.address()).unwrap().balance;
+        let recipient_balance = load_account(&store, NativeAssetId::DRC, &recipient.address())
+            .unwrap()
+            .balance;
         assert_eq!(recipient_balance, 1 + 50);
         assert!(load_drc_escrow_live(&store, &id).unwrap().is_none());
     }
@@ -353,23 +377,39 @@ mod policy_composition {
         let recipient = key(34);
         fund(&store, &owner, 2_000);
         let ctx = auth();
-        let create = signed_create(&owner, recipient.address(), 10, None, Some(50), 0, &ctx, None);
+        let create = signed_create(
+            &owner,
+            recipient.address(),
+            10,
+            None,
+            Some(50),
+            0,
+            &ctx,
+            None,
+        );
         let id = create.escrow_id();
         let mut block = coinbase(vec![Hash::ZERO], &owner);
         block.drc_escrow_creates.push(create);
         apply_escrow_block(&store, block, 1, &ctx);
-        let mut pol = DrcAccountPolicyTx::set_require_destination_tag(recipient.address(), agora_types::Amount::ZERO, 0);
+        let mut pol = DrcAccountPolicyTx::set_require_destination_tag(
+            recipient.address(),
+            agora_types::Amount::ZERO,
+            0,
+        );
         sign_drc_account_policy_bound(&mut pol, &recipient, &ctx.chain_id, &ctx.genesis).unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
-        crate::drc_policy::apply_drc_account_policy(&store, &pol, &ctx, &mut batch, &mut journal).unwrap();
+        crate::drc_policy::apply_drc_account_policy(&store, &pol, &ctx, &mut batch, &mut journal)
+            .unwrap();
         store.write_batch(batch).unwrap();
         let finish = signed_finish(&owner, id, 1, &ctx);
         let mut block2 = coinbase(vec![Hash::ZERO], &owner);
         block2.drc_escrow_finishes.push(finish);
         apply_escrow_block(&store, block2, 2, &ctx);
         assert_eq!(
-            load_account(&store, NativeAssetId::DRC, &recipient.address()).unwrap().balance,
+            load_account(&store, NativeAssetId::DRC, &recipient.address())
+                .unwrap()
+                .balance,
             10
         );
     }
@@ -394,11 +434,25 @@ mod policy_composition {
             .unwrap();
         store.write_batch(batch).unwrap();
         let snap = snapshot_escrow_state(&store, &owner, &recipient);
-        let create = signed_create(&owner, recipient.address(), 10, None, Some(50), 0, &ctx, None);
+        let create = signed_create(
+            &owner,
+            recipient.address(),
+            10,
+            None,
+            Some(50),
+            0,
+            &ctx,
+            None,
+        );
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         assert!(crate::drc_escrow::apply_drc_escrow_create(
-            &store, &create, &ctx, 1, &mut batch, &mut journal
+            &store,
+            &create,
+            &ctx,
+            1,
+            &mut batch,
+            &mut journal
         )
         .is_err());
         assert_escrow_snapshot_unchanged(&store, &owner, &recipient, &snap);
@@ -407,7 +461,7 @@ mod policy_composition {
 
 #[cfg(test)]
 mod value_conservation {
-    use agora_types::{DRC_MAX_LIVE_ESCROWS_PER_ACCOUNT, Hash, NativeAssetId};
+    use agora_types::{Hash, NativeAssetId, DRC_MAX_LIVE_ESCROWS_PER_ACCOUNT};
 
     use crate::accounts::load_account;
     use crate::drc_escrow_test_harness::support::{
@@ -445,15 +499,36 @@ mod value_conservation {
             nonce += 1;
         }
         assert_eq!(count_live_escrows(&store, &owner.address()), 32);
-        let fail = signed_create(&owner, recipient.address(), 1, None, Some(9999), nonce, &ctx, None);
+        let fail = signed_create(
+            &owner,
+            recipient.address(),
+            1,
+            None,
+            Some(9999),
+            nonce,
+            &ctx,
+            None,
+        );
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         assert!(crate::drc_escrow::apply_drc_escrow_create(
-            &store, &fail, &ctx, 1, &mut batch, &mut journal
+            &store,
+            &fail,
+            &ctx,
+            1,
+            &mut batch,
+            &mut journal
         )
         .is_err());
 
-        let cancel = signed_cancel(&owner, ids[0], load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap().nonce, &ctx);
+        let cancel = signed_cancel(
+            &owner,
+            ids[0],
+            load_account(&store, NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .nonce,
+            &ctx,
+        );
         let mut block = coinbase(vec![Hash::ZERO], &owner);
         block.drc_escrow_cancels.push(cancel);
         apply_escrow_block(&store, block, 200, &ctx);
@@ -463,7 +538,9 @@ mod value_conservation {
             1,
             None,
             Some(5000),
-            load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap().nonce,
+            load_account(&store, NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .nonce,
             &ctx,
             None,
         );
@@ -483,19 +560,45 @@ mod value_conservation {
         fund(&store, &owner, 500);
         fund(&store, &helper, 20);
         let ctx = auth();
-        let create = signed_create(&owner, recipient.address(), 100, None, Some(50), 0, &ctx, None);
+        let create = signed_create(
+            &owner,
+            recipient.address(),
+            100,
+            None,
+            Some(50),
+            0,
+            &ctx,
+            None,
+        );
         let id = create.escrow_id();
         let mut block = coinbase(vec![Hash::ZERO], &owner);
         block.drc_escrow_creates.push(create);
         apply_escrow_block(&store, block, 1, &ctx);
-        let owner_after = load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap().balance;
+        let owner_after = load_account(&store, NativeAssetId::DRC, &owner.address())
+            .unwrap()
+            .balance;
         let finish = signed_finish(&helper, id, 0, &ctx);
         let mut block2 = coinbase(vec![Hash::ZERO], &owner);
         block2.drc_escrow_finishes.push(finish);
         apply_escrow_block(&store, block2, 1, &ctx);
-        assert_eq!(load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap().balance, owner_after);
-        assert_eq!(load_account(&store, NativeAssetId::DRC, &recipient.address()).unwrap().balance, 100);
-        assert_eq!(load_account(&store, NativeAssetId::DRC, &helper.address()).unwrap().balance, 19);
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .balance,
+            owner_after
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &recipient.address())
+                .unwrap()
+                .balance,
+            100
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &helper.address())
+                .unwrap()
+                .balance,
+            19
+        );
     }
 
     #[test]
@@ -508,7 +611,16 @@ mod value_conservation {
         fund(&store, &helper, 20);
         let ctx = auth();
         let owner_before = load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
-        let create = signed_create(&owner, recipient.address(), 100, None, Some(50), 0, &ctx, None);
+        let create = signed_create(
+            &owner,
+            recipient.address(),
+            100,
+            None,
+            Some(50),
+            0,
+            &ctx,
+            None,
+        );
         let id = create.escrow_id();
         let mut block = coinbase(vec![Hash::ZERO], &owner);
         block.drc_escrow_creates.push(create);
@@ -521,10 +633,17 @@ mod value_conservation {
         block2.drc_escrow_cancels.push(cancel);
         apply_escrow_block(&store, block2, 50, &ctx);
         assert_eq!(
-            load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap().balance,
+            load_account(&store, NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .balance,
             owner_after_create.balance + 100
         );
-        assert_eq!(load_account(&store, NativeAssetId::DRC, &helper.address()).unwrap().balance, 19);
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &helper.address())
+                .unwrap()
+                .balance,
+            19
+        );
     }
 }
 
@@ -534,12 +653,13 @@ mod multisign_adversary {
 
     use crate::accounts::load_account;
     use crate::drc_escrow_test_harness::multisign::{
-        self, base_multisign_cancel_block, base_multisign_create_block, base_multisign_finish_block,
-        install_signer_list, multisign_cancel_block, multisign_finish_block, reject_preserving,
+        self, base_multisign_cancel_block, base_multisign_create_block,
+        base_multisign_finish_block, install_signer_list, multisign_cancel_block,
+        multisign_finish_block, reject_preserving,
     };
     use crate::drc_escrow_test_harness::support::{
-        apply_escrow_block, auth, create_live_escrow, fund, key, snapshot_escrow_state,
-        assert_escrow_snapshot_unchanged,
+        apply_escrow_block, assert_escrow_snapshot_unchanged, auth, create_live_escrow, fund, key,
+        snapshot_escrow_state,
     };
     use crate::store::WriteBatch;
     use crate::{AccountJournal, StateStore};
@@ -556,48 +676,78 @@ mod multisign_adversary {
                 fund(&store, &master, 100_000);
                 let ctx = auth();
                 let signers: &[(&agora_crypto::KeyPair, u16)] = &[(&s1, 1), (&s2, 2)];
-                let mut block = base_multisign_create_block(&store, &master, &recipient, signers, &ctx);
+                let mut block =
+                    base_multisign_create_block(&store, &master, &recipient, signers, &ctx);
                 let before = snapshot_escrow_state(&store, &master, &recipient);
-                let tamper: fn(&mut agora_types::Block, &agora_crypto::KeyPair, &[(&agora_crypto::KeyPair, u16)], &crate::apply::TxAuthContext) = $tamper;
+                let tamper: fn(
+                    &mut agora_types::Block,
+                    &agora_crypto::KeyPair,
+                    &[(&agora_crypto::KeyPair, u16)],
+                    &crate::apply::TxAuthContext,
+                ) = $tamper;
                 tamper(&mut block, &master, signers, &ctx);
                 reject_preserving(&store, &master, &recipient, block, &ctx, &before);
             }
         };
     }
 
-    escrow_create_multisign_case!(escrow_create_multisign_rejects_missing_attachment, |block, _, _, _| {
-        block.drc_multisign_attachments.clear()
-    });
-    escrow_create_multisign_case!(escrow_create_multisign_rejects_duplicate_attachment, |block, _, _, _| {
-        block.drc_multisign_attachments.push(block.drc_multisign_attachments[0].clone())
-    });
-    escrow_create_multisign_case!(escrow_create_multisign_rejects_orphan_attachment, |block, _, _, _| {
-        block.drc_escrow_creates.clear()
-    });
-    escrow_create_multisign_case!(escrow_create_multisign_rejects_wrong_kind, |block, _, _, _| {
-        block.drc_multisign_attachments[0].key.kind = DrcMultisignOperationKind::DrcTicketCreate
-    });
-    escrow_create_multisign_case!(escrow_create_multisign_rejects_mixed_single_and_multisign, |block, master, _, _| {
-        block.drc_escrow_creates[0].public_key = master.public_key_bytes().to_vec();
-        block.drc_escrow_creates[0].signature = vec![1; 64];
-    });
-    escrow_create_multisign_case!(escrow_create_multisign_rejects_tampered_signature, |block, _, _, _| {
-        block.drc_multisign_attachments[0].auth.signatures[0].signature[0] ^= 0xff
-    });
-    escrow_create_multisign_case!(escrow_create_multisign_rejects_below_quorum, |block, master, _, ctx| {
-        let signing = block.drc_escrow_creates[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
-        block.drc_multisign_attachments[0].auth =
-            multisign::multisign_bundle(master.address(), &signing, &[(&key(88), 1)], ctx);
-    });
-    escrow_create_multisign_case!(escrow_create_multisign_rejects_foreign_signer, |block, master, _, ctx| {
-        let signing = block.drc_escrow_creates[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
-        block.drc_multisign_attachments[0].auth = multisign::multisign_bundle(
-            master.address(),
-            &signing,
-            &[(&key(90), 1), (&key(91), 2)],
-            ctx,
-        );
-    });
+    escrow_create_multisign_case!(
+        escrow_create_multisign_rejects_missing_attachment,
+        |block, _, _, _| { block.drc_multisign_attachments.clear() }
+    );
+    escrow_create_multisign_case!(
+        escrow_create_multisign_rejects_duplicate_attachment,
+        |block, _, _, _| {
+            block
+                .drc_multisign_attachments
+                .push(block.drc_multisign_attachments[0].clone())
+        }
+    );
+    escrow_create_multisign_case!(
+        escrow_create_multisign_rejects_orphan_attachment,
+        |block, _, _, _| { block.drc_escrow_creates.clear() }
+    );
+    escrow_create_multisign_case!(
+        escrow_create_multisign_rejects_wrong_kind,
+        |block, _, _, _| {
+            block.drc_multisign_attachments[0].key.kind = DrcMultisignOperationKind::DrcTicketCreate
+        }
+    );
+    escrow_create_multisign_case!(
+        escrow_create_multisign_rejects_mixed_single_and_multisign,
+        |block, master, _, _| {
+            block.drc_escrow_creates[0].public_key = master.public_key_bytes().to_vec();
+            block.drc_escrow_creates[0].signature = vec![1; 64];
+        }
+    );
+    escrow_create_multisign_case!(
+        escrow_create_multisign_rejects_tampered_signature,
+        |block, _, _, _| {
+            block.drc_multisign_attachments[0].auth.signatures[0].signature[0] ^= 0xff
+        }
+    );
+    escrow_create_multisign_case!(
+        escrow_create_multisign_rejects_below_quorum,
+        |block, master, _, ctx| {
+            let signing =
+                block.drc_escrow_creates[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+            block.drc_multisign_attachments[0].auth =
+                multisign::multisign_bundle(master.address(), &signing, &[(&key(88), 1)], ctx);
+        }
+    );
+    escrow_create_multisign_case!(
+        escrow_create_multisign_rejects_foreign_signer,
+        |block, master, _, ctx| {
+            let signing =
+                block.drc_escrow_creates[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+            block.drc_multisign_attachments[0].auth = multisign::multisign_bundle(
+                master.address(),
+                &signing,
+                &[(&key(90), 1), (&key(91), 2)],
+                ctx,
+            );
+        }
+    );
 
     #[test]
     fn escrow_create_multisign_positive_apply_borsh_body_root() {
@@ -675,17 +825,27 @@ mod multisign_adversary {
         };
     }
 
-    escrow_finish_multisign_case!(escrow_finish_multisign_rejects_wrong_signing_for, |block, _, _, _| {
-        block.drc_multisign_attachments[0].auth.signing_for = key(99).address();
-    });
-    escrow_finish_multisign_case!(escrow_finish_multisign_rejects_missing_attachment, |block, _, _, _| {
-        block.drc_multisign_attachments.clear();
-    });
-    escrow_finish_multisign_case!(escrow_finish_multisign_rejects_below_quorum, |block, master, _, ctx| {
-        let signing = block.drc_escrow_finishes[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
-        block.drc_multisign_attachments[0].auth =
-            multisign::multisign_bundle(master.address(), &signing, &[(&key(100), 1)], ctx);
-    });
+    escrow_finish_multisign_case!(
+        escrow_finish_multisign_rejects_wrong_signing_for,
+        |block, _, _, _| {
+            block.drc_multisign_attachments[0].auth.signing_for = key(99).address();
+        }
+    );
+    escrow_finish_multisign_case!(
+        escrow_finish_multisign_rejects_missing_attachment,
+        |block, _, _, _| {
+            block.drc_multisign_attachments.clear();
+        }
+    );
+    escrow_finish_multisign_case!(
+        escrow_finish_multisign_rejects_below_quorum,
+        |block, master, _, ctx| {
+            let signing =
+                block.drc_escrow_finishes[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+            block.drc_multisign_attachments[0].auth =
+                multisign::multisign_bundle(master.address(), &signing, &[(&key(100), 1)], ctx);
+        }
+    );
 
     macro_rules! escrow_cancel_multisign_case {
         ($name:ident, $tamper:expr) => {
@@ -704,8 +864,7 @@ mod multisign_adversary {
                 let signers: &[(&agora_crypto::KeyPair, u16)] = &[(&s1, 1)];
                 install_signer_list(&store, &helper, signers, &ctx);
                 let before = snapshot_escrow_state(&store, &master, &recipient);
-                let mut block =
-                    multisign_cancel_block(&store, &helper, &master, id, signers, &ctx);
+                let mut block = multisign_cancel_block(&store, &helper, &master, id, signers, &ctx);
                 let tamper: fn(
                     &mut agora_types::Block,
                     &agora_crypto::KeyPair,
@@ -718,16 +877,25 @@ mod multisign_adversary {
         };
     }
 
-    escrow_cancel_multisign_case!(escrow_cancel_multisign_rejects_wrong_kind, |block, _, _, _| {
-        block.drc_multisign_attachments[0].key.kind = DrcMultisignOperationKind::DrcEscrowCreate;
-    });
-    escrow_cancel_multisign_case!(escrow_cancel_multisign_rejects_tampered_signature, |block, _, _, _| {
-        block.drc_multisign_attachments[0].auth.signatures[0].signature[0] ^= 0xff;
-    });
+    escrow_cancel_multisign_case!(
+        escrow_cancel_multisign_rejects_wrong_kind,
+        |block, _, _, _| {
+            block.drc_multisign_attachments[0].key.kind =
+                DrcMultisignOperationKind::DrcEscrowCreate;
+        }
+    );
+    escrow_cancel_multisign_case!(
+        escrow_cancel_multisign_rejects_tampered_signature,
+        |block, _, _, _| {
+            block.drc_multisign_attachments[0].auth.signatures[0].signature[0] ^= 0xff;
+        }
+    );
 
     #[test]
     fn disabled_master_escrow_create_rejected_with_regular_key_recovery() {
-        use agora_crypto::{sign_drc_account_policy_bound, sign_drc_escrow_create_bound, sign_drc_regular_key_bound};
+        use agora_crypto::{
+            sign_drc_account_policy_bound, sign_drc_escrow_create_bound, sign_drc_regular_key_bound,
+        };
         use agora_types::DrcAccountPolicyTx;
         use agora_types::DrcRegularKeyTx;
         let store = StateStore::open_in_memory();
@@ -746,13 +914,25 @@ mod multisign_adversary {
         sign_drc_regular_key_bound(&mut reg, &master, &ctx.chain_id, &ctx.genesis).unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
-        crate::drc_regular_key::apply_drc_regular_key(&store, &reg, &ctx, &mut batch, &mut journal).unwrap();
+        crate::drc_regular_key::apply_drc_regular_key(&store, &reg, &ctx, &mut batch, &mut journal)
+            .unwrap();
         store.write_batch(batch).unwrap();
-        let mut disable = DrcAccountPolicyTx::set_master_key_disabled(master.address(), agora_types::Amount::ZERO, 1);
+        let mut disable = DrcAccountPolicyTx::set_master_key_disabled(
+            master.address(),
+            agora_types::Amount::ZERO,
+            1,
+        );
         sign_drc_account_policy_bound(&mut disable, &master, &ctx.chain_id, &ctx.genesis).unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
-        crate::drc_policy::apply_drc_account_policy(&store, &disable, &ctx, &mut batch, &mut journal).unwrap();
+        crate::drc_policy::apply_drc_account_policy(
+            &store,
+            &disable,
+            &ctx,
+            &mut batch,
+            &mut journal,
+        )
+        .unwrap();
         store.write_batch(batch).unwrap();
         let before = snapshot_escrow_state(&store, &master, &recipient);
         let nonce = load_account(&store, agora_types::NativeAssetId::DRC, &master.address())
@@ -771,7 +951,12 @@ mod multisign_adversary {
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         assert!(crate::drc_escrow::apply_drc_escrow_create(
-            &store, &create, &ctx, 1, &mut batch, &mut journal
+            &store,
+            &create,
+            &ctx,
+            1,
+            &mut batch,
+            &mut journal
         )
         .is_err());
         assert_escrow_snapshot_unchanged(&store, &master, &recipient, &before);
@@ -779,7 +964,12 @@ mod multisign_adversary {
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         assert!(crate::drc_escrow::apply_drc_escrow_create(
-            &store, &create, &ctx, 1, &mut batch, &mut journal
+            &store,
+            &create,
+            &ctx,
+            1,
+            &mut batch,
+            &mut journal
         )
         .is_ok());
     }
@@ -787,30 +977,46 @@ mod multisign_adversary {
 
 #[cfg(test)]
 mod ticket_matrix {
-    use agora_crypto::{sign_drc_escrow_create_bound, sign_drc_escrow_finish_bound, sign_drc_ticket_create_bound};
+    use agora_crypto::{
+        sign_drc_escrow_create_bound, sign_drc_escrow_finish_bound, sign_drc_ticket_create_bound,
+    };
     use agora_types::{
-        DrcAccountSequenceSelector, DrcTicketCreateTx, Hash,
-        DRC_ESCROW_CREATE_TICKET_VERSION, DRC_ESCROW_FINISH_TICKET_VERSION,
+        DrcAccountSequenceSelector, DrcTicketCreateTx, Hash, DRC_ESCROW_CREATE_TICKET_VERSION,
+        DRC_ESCROW_FINISH_TICKET_VERSION,
     };
 
     use crate::apply::apply_block_batched_with_auth_at_blue_score;
+    use crate::drc_escrow_test_harness::support::{
+        apply_escrow_block, assert_escrow_snapshot_unchanged, auth, coinbase, fund, key,
+        snapshot_escrow_state,
+    };
     use crate::drc_mempool::lookup_drc_ticket_point;
     use crate::drc_ticket::load_drc_account_tickets;
-    use crate::drc_escrow_test_harness::support::{
-        apply_escrow_block, auth, coinbase, fund, key,
-        snapshot_escrow_state, assert_escrow_snapshot_unchanged,
-    };
     use crate::store::WriteBatch;
     use crate::{AccountJournal, StateStore};
 
-    fn mint_ticket(store: &StateStore, owner: &agora_crypto::KeyPair, ctx: &crate::apply::TxAuthContext) -> u64 {
-        let nonce = crate::accounts::load_account(store, agora_types::NativeAssetId::DRC, &owner.address()).unwrap().nonce;
-        let mut create = DrcTicketCreateTx::unsigned(owner.address(), agora_types::Amount::ZERO, nonce);
+    fn mint_ticket(
+        store: &StateStore,
+        owner: &agora_crypto::KeyPair,
+        ctx: &crate::apply::TxAuthContext,
+    ) -> u64 {
+        let nonce =
+            crate::accounts::load_account(store, agora_types::NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .nonce;
+        let mut create =
+            DrcTicketCreateTx::unsigned(owner.address(), agora_types::Amount::ZERO, nonce);
         sign_drc_ticket_create_bound(&mut create, owner, &ctx.chain_id, &ctx.genesis).unwrap();
         let mut block = coinbase(vec![Hash::ZERO], owner);
         block.drc_ticket_creates.push(create);
         block.header.tx_root = block.compute_body_root();
-        store.write_batch(apply_block_batched_with_auth_at_blue_score(store, &block, 50, Some(ctx), 50).unwrap().batch).unwrap();
+        store
+            .write_batch(
+                apply_block_batched_with_auth_at_blue_score(store, &block, 50, Some(ctx), 50)
+                    .unwrap()
+                    .batch,
+            )
+            .unwrap();
         nonce + 1
     }
 
@@ -844,7 +1050,9 @@ mod ticket_matrix {
         let mut block = coinbase(vec![Hash::ZERO], &owner);
         block.drc_escrow_creates.push(create);
         apply_escrow_block(&store, block, 1, &ctx);
-        assert!(!load_drc_account_tickets(&store, &owner.address()).unwrap().contains(&seq));
+        assert!(!load_drc_account_tickets(&store, &owner.address())
+            .unwrap()
+            .contains(&seq));
         let seq2 = mint_ticket(&store, &owner, &ctx);
         let mut finish = agora_types::DrcEscrowFinishTx {
             version: DRC_ESCROW_FINISH_TICKET_VERSION,
@@ -891,7 +1099,12 @@ mod ticket_matrix {
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         assert!(crate::drc_escrow::apply_drc_escrow_create(
-            &store, &create, &ctx, 1, &mut batch, &mut journal
+            &store,
+            &create,
+            &ctx,
+            1,
+            &mut batch,
+            &mut journal
         )
         .is_err());
         assert_escrow_snapshot_unchanged(&store, &owner, &key(83), &before);
@@ -979,7 +1192,12 @@ mod ticket_matrix {
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         assert!(crate::drc_escrow::apply_drc_escrow_create(
-            &store, &create2, &ctx, 1, &mut batch, &mut journal
+            &store,
+            &create2,
+            &ctx,
+            1,
+            &mut batch,
+            &mut journal
         )
         .is_err());
         assert_escrow_snapshot_unchanged(&store, &owner, &recipient, &snap);
@@ -1020,7 +1238,12 @@ mod ticket_matrix {
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         assert!(crate::drc_escrow::apply_drc_escrow_create(
-            &store, &create, &ctx, 1, &mut batch, &mut journal
+            &store,
+            &create,
+            &ctx,
+            1,
+            &mut batch,
+            &mut journal
         )
         .is_err());
         assert_escrow_snapshot_unchanged(&store, &owner, &key(91), &snap);

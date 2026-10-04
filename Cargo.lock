@@ -179,6 +179,7 @@ dependencies = [
  "agora-types",
  "borsh",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -207,6 +208,7 @@ name = "agora-p2p"
 version = "0.1.0"
 dependencies = [
  "agora-crypto",
+ "agora-state-machine",
  "agora-types",
  "borsh",
  "futures",

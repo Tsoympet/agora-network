@@ -49,7 +49,10 @@ fn network_message_escrow_variants_borsh_roundtrip() {
     ] {
         let bytes = msg.encode();
         let decoded = NetworkMessage::decode(&bytes).expect("decode escrow gossip");
-        assert_eq!(std::mem::discriminant(&msg), std::mem::discriminant(&decoded));
+        assert_eq!(
+            std::mem::discriminant(&msg),
+            std::mem::discriminant(&decoded)
+        );
     }
 }
 
