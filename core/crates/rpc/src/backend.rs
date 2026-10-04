@@ -7,8 +7,8 @@ use agora_governance::{
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
-    DrcDepositPreauthTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash,
-    OutPoint, OvlExecutionTx, Transaction, TxOut,
+    DrcDepositPreauthTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -185,6 +185,8 @@ pub trait RpcBackend: Send {
     fn submit_drc_deposit_preauth(&mut self, tx: DrcDepositPreauthTx) -> Result<Hash, RpcError>;
     fn submit_drc_regular_key(&mut self, tx: DrcRegularKeyTx) -> Result<Hash, RpcError>;
     fn submit_drc_signer_list(&mut self, tx: DrcSignerListTx) -> Result<Hash, RpcError>;
+    fn submit_drc_ticket_create(&mut self, tx: DrcTicketCreateTx) -> Result<Hash, RpcError>;
+    fn get_drc_ticket(&self, owner: &Address, ticket_sequence: u64) -> Result<Value, RpcError>;
     /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
     fn get_drc_account_policy(
         &self,
@@ -549,6 +551,19 @@ impl RpcBackend for InMemoryBackend {
         Err(RpcError::Rejected(
             "in-memory backend does not admit DRC signer-list operations".into(),
         ))
+    }
+
+    fn submit_drc_ticket_create(&mut self, _tx: DrcTicketCreateTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC ticket creates".into(),
+        ))
+    }
+
+    fn get_drc_ticket(&self, _owner: &Address, _ticket_sequence: u64) -> Result<Value, RpcError> {
+        Ok(json!({
+            "status": "unknown",
+            "ticket_sequence": null,
+        }))
     }
 
     fn get_drc_account_policy(

@@ -32,8 +32,8 @@ use tracing::{info, warn};
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
     admit_account_transfer, admit_drc_account_policy, admit_drc_deposit_preauth, admit_drc_payment,
-    admit_drc_regular_key, admit_drc_signer_list, admit_ovl_execution, admit_stake_tx,
-    admit_transaction, NodeBackend, NodeBackendConfig,
+    admit_drc_regular_key, admit_drc_signer_list, admit_drc_ticket_create, admit_ovl_execution,
+    admit_stake_tx, admit_transaction, NodeBackend, NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::storage_policy::StoragePolicy;
@@ -1092,6 +1092,16 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "DRC signer-list gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcTicketCreate(tx) => {
+                        match admit_drc_ticket_create(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, ticket_create = %id.to_hex(), "DRC ticket-create gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC ticket-create gossip rejected");
                             }
                         }
                     }

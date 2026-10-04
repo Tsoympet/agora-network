@@ -372,7 +372,8 @@ impl NetworkNode {
             | NetworkMessage::DrcAccountPolicy(_)
             | NetworkMessage::DrcDepositPreauth(_)
             | NetworkMessage::DrcRegularKey(_)
-            | NetworkMessage::DrcSignerList(_) => {
+            | NetworkMessage::DrcSignerList(_)
+            | NetworkMessage::DrcTicketCreate(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

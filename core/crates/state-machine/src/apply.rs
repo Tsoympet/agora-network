@@ -2929,8 +2929,9 @@ mod tests {
         }
         store.write_batch(funding).unwrap();
 
-        let merchant_nonce =
-            load_account(&store, NativeAssetId::DRC, &merchant.address()).unwrap().nonce;
+        let merchant_nonce = load_account(&store, NativeAssetId::DRC, &merchant.address())
+            .unwrap()
+            .nonce;
 
         let mut set = DrcAccountPolicyTx::set_require_destination_tag(
             merchant.address(),

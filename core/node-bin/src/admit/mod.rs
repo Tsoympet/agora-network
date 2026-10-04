@@ -187,6 +187,7 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_deposit_preauths: &'a [agora_types::DrcDepositPreauthTx],
     pub drc_regular_keys: &'a [agora_types::DrcRegularKeyTx],
     pub drc_signer_lists: &'a [agora_types::DrcSignerListTx],
+    pub drc_ticket_creates: &'a [agora_types::DrcTicketCreateTx],
 }
 
 impl ChainState {
@@ -550,6 +551,7 @@ impl ChainState {
             drc_deposit_preauths: lanes.drc_deposit_preauths.to_vec(),
             drc_regular_keys: lanes.drc_regular_keys.to_vec(),
             drc_signer_lists: lanes.drc_signer_lists.to_vec(),
+            drc_ticket_creates: lanes.drc_ticket_creates.to_vec(),
             drc_multisign_attachments: Vec::new(),
         };
         if let Some(ctx) = self.auth.as_ref() {
@@ -1907,6 +1909,7 @@ impl ChainState {
                 drc_deposit_preauth_meta_before: journal.drc_deposit_preauth_meta_before,
                 drc_regular_key_meta_before: journal.drc_regular_key_meta_before,
                 drc_signer_list_meta_before: journal.drc_signer_list_meta_before,
+                drc_ticket_meta_before: journal.drc_ticket_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

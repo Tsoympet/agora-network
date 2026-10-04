@@ -1,14 +1,14 @@
 # DRC Tickets (rippled 2.5.0 subset)
 
 **Maturity:** Experimental · Single-node prototype  
-**Public submission:** **Unavailable until Stage B** (no mempool/RPC ticket create/use/reservation).  
+**Public submission:** **Stage B** — mempool reservation, gossip, mining templates, `agora_submitDrcTicketCreate`, `agora_getDrcTicket`.  
 **Not XRPL wire/API parity** — no `TicketBatch`, reserve math, or ledger object wire shapes.
 
 ## Pinned rippled intent (2.5.0)
 
 Rippled **Tickets** let an account enqueue future sequence numbers so signed transactions can execute **out of order** while each ticket is **single-use**. Creation consumes sequence space; spending a ticket does not advance the account’s current sequence.
 
-## Agora Trident subset (Stage A — consensus core on `cursor/drc-tickets-cdcf`)
+## Agora Trident subset
 
 | Topic | Agora behavior |
 |--------|----------------|
@@ -24,7 +24,7 @@ Rippled **Tickets** let an account enqueue future sequence numbers so signed tra
 | State | Sorted per-owner ticket sets in `agora-drc-ticket-root-v1` inside composed state root |
 | Body | `agora-block-body-v12` when `drc_ticket_creates` non-empty |
 
-### Ticket-capable operation versions (Stage A)
+### Ticket-capable operation versions
 
 | Family | Version |
 |--------|---------|
@@ -55,10 +55,19 @@ Legacy versions remain byte-for-byte; `Ticket` selectors on legacy versions are 
 
 Multisign attachments (consensus lane, after body lanes in block encoding) include `DrcTicketCreate` operation kind **8** with the same signing-commitment rules as other DRC ops.
 
-### Stage B (not in this branch)
+### Stage B public admission (mempool / RPC — not consensus authority)
 
-- Mempool admission, reservation/template RPC, `agora_submitDrcTicketCreate`, `agora_getDrcAccountTickets`  
-- Fail-closed until complete reservation support lands
+| Policy | Behavior |
+|--------|----------|
+| Ticket create | Reserves owner account nonce **and** prospective ticket sequence `N+1` until eviction or inclusion |
+| Nonce spend | One pending operation per DRC owner (unchanged) |
+| Ticket spend | One pending consumer per `(owner, ticket_sequence)`; ticket must be **live on canonical state** |
+| Same-block create→use via public paths | **Rejected** — spend before create confirms returns mempool error; miners may still pair create+use in one **consensus** block |
+| RPC submit | `agora_submitDrcTicketCreate` with param `ticket_create` (Borsh/JSON envelope) |
+| RPC lookup | `agora_getDrcTicket(owner, ticket_sequence)` → `status`: `live` or `unknown` (consumed vs never-created not distinguished); malformed params → JSON-RPC `-32602` |
+| Gossip | `NetworkMessage::DrcTicketCreate` (Trident protocol **v15** mesh) |
+
+**Exclusions (unchanged):** no batch create, cancel, expiry, or ticket enumeration.
 
 ### Deviations from rippled
 

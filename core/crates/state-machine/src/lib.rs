@@ -17,6 +17,7 @@ mod drc_master_key_disable_hardening_tests;
 #[cfg(test)]
 mod drc_master_key_disable_tests;
 mod drc_master_key_recovery;
+mod drc_mempool;
 mod drc_multisig_tests;
 #[cfg(test)]
 mod drc_multisign_attachment_tests;
@@ -30,6 +31,8 @@ mod drc_ticket;
 mod drc_ticket_tests;
 #[cfg(test)]
 mod drc_tickets_stage_a_tests;
+#[cfg(test)]
+mod drc_tickets_stage_b_tests;
 mod error;
 mod execution;
 mod finality_store;
@@ -91,6 +94,10 @@ pub use drc_deposit_preauth::{
     drc_deposit_preauth_root, load_drc_deposit_preauth, load_known_drc_deposit_authorization,
     DrcDepositAuthorization, DRC_DEPOSIT_PREAUTH_ROOT_DOMAIN,
 };
+pub use drc_mempool::{
+    drc_ticket_sequence_for_create_nonce, lookup_drc_ticket_point, plan_drc_mempool_reservation,
+    DrcMempoolReservation, DrcTicketPointStatus,
+};
 pub use drc_policy::{
     apply_drc_account_policy, drc_account_policy_key, drc_account_policy_meta_keys,
     drc_account_policy_root, load_drc_account_policy, load_known_drc_account_policy,
@@ -106,6 +113,7 @@ pub use drc_signer_list::{
     drc_signer_list_root, load_drc_account_signer_list, load_known_drc_account_signer_summary,
     DRC_SIGNER_LIST_ROOT_DOMAIN,
 };
+pub use drc_ticket::{apply_drc_ticket_create, load_drc_account_tickets};
 pub use error::StateError;
 pub use execution::{
     apply_ovl_execution, execution_fee, OvlExecutionReceipt, OVL_EXECUTION_VERSION,

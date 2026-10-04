@@ -1,7 +1,7 @@
 use agora_types::{
     AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcDepositPreauthTx,
-    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash, OvlExecutionTx,
-    Transaction,
+    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
+    OvlExecutionTx, Transaction,
 };
 use serde_json::{json, Value};
 
@@ -251,6 +251,24 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
                 let id = self.backend.submit_drc_signer_list(tx)?;
                 Ok(json!({ "signer_list_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcTicketCreate => {
+                let raw = req
+                    .params
+                    .get("ticket_create")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcTicketCreateTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_ticket_create(tx)?;
+                Ok(json!({ "ticket_create_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcTicket => {
+                let owner = param_address(&req.params, "owner")?;
+                let ticket_sequence = param_u64(&req.params, "ticket_sequence")?;
+                self.backend.get_drc_ticket(&owner, ticket_sequence)
             }
             RpcMethod::GetDrcAccountSignerList => {
                 let account = param_address(&req.params, "account")?;

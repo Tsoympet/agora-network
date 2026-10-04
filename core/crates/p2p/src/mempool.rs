@@ -1,9 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use agora_types::{
-    AccountTransfer, Address, Block, DrcAccountPolicyTx, DrcDepositPreauthAction,
-    DrcDepositPreauthTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash, NativeAssetId,
-    OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
+    resolve_drc_account_sequence, AccountTransfer, Address, Block, DrcAccountPolicyTx,
+    DrcAccountSequence, DrcDepositPreauthAction, DrcDepositPreauthTx, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, NativeAssetId, OutPoint,
+    OvlExecutionTx, SignedStakeTx, Transaction, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
+    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 
 use crate::P2pError;
@@ -30,6 +34,11 @@ pub struct Mempool {
     drc_deposit_preauth_txs: HashMap<Hash, DrcDepositPreauthTx>,
     drc_regular_key_txs: HashMap<Hash, DrcRegularKeyTx>,
     drc_signer_list_txs: HashMap<Hash, DrcSignerListTx>,
+    drc_ticket_create_txs: HashMap<Hash, DrcTicketCreateTx>,
+    /// One pending consumer per `(owner, ticket_sequence)`.
+    reserved_tickets: HashSet<(Address, u64)>,
+    /// How each DRC lane operation reserved its sender slot (release on eviction).
+    drc_slot_reservations: HashMap<Hash, DrcSlotReservation>,
     /// Payments admitted while canonical or pending DepositAuth is enabled.
     deposit_auth_required_payments: HashSet<Hash>,
     /// Payments whose source has a canonical dormant/active preauthorization.
@@ -37,6 +46,16 @@ pub struct Mempool {
     /// Every OVL/DRC account lane shares the same per-asset account nonce.
     reserved_accounts: HashSet<(NativeAssetId, Address)>,
     max_size: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrcSlotReservation {
+    AccountNonce,
+    Ticket(u64),
+    /// Pending ticket-create: reserves owner nonce and the prospective ticket sequence.
+    TicketCreate {
+        ticket_sequence: u64,
+    },
 }
 
 impl Mempool {
@@ -53,6 +72,9 @@ impl Mempool {
             drc_deposit_preauth_txs: HashMap::new(),
             drc_regular_key_txs: HashMap::new(),
             drc_signer_list_txs: HashMap::new(),
+            drc_ticket_create_txs: HashMap::new(),
+            reserved_tickets: HashSet::new(),
+            drc_slot_reservations: HashMap::new(),
             deposit_auth_required_payments: HashSet::new(),
             deposit_preauthorized_payments: HashSet::new(),
             reserved_accounts: HashSet::new(),
@@ -70,6 +92,7 @@ impl Mempool {
             + self.drc_deposit_preauth_txs.len()
             + self.drc_regular_key_txs.len()
             + self.drc_signer_list_txs.len()
+            + self.drc_ticket_create_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -86,6 +109,99 @@ impl Mempool {
             || self.drc_deposit_preauth_txs.contains_key(tx_id)
             || self.drc_regular_key_txs.contains_key(tx_id)
             || self.drc_signer_list_txs.contains_key(tx_id)
+            || self.drc_ticket_create_txs.contains_key(tx_id)
+    }
+
+    pub fn ticket_consumer_reserved(&self, owner: &Address, ticket_sequence: u64) -> bool {
+        self.reserved_tickets.contains(&(*owner, ticket_sequence))
+    }
+
+    fn reserve_drc_slot(
+        &mut self,
+        tx_id: Hash,
+        owner: Address,
+        reservation: DrcSlotReservation,
+    ) -> Result<(), P2pError> {
+        match reservation {
+            DrcSlotReservation::AccountNonce => {
+                if !self.reserved_accounts.insert((NativeAssetId::DRC, owner)) {
+                    return Err(P2pError::MempoolRejected(
+                        "account already has a pending nonce".into(),
+                    ));
+                }
+            }
+            DrcSlotReservation::Ticket(sequence) => {
+                if !self.reserved_tickets.insert((owner, sequence)) {
+                    return Err(P2pError::MempoolRejected(format!(
+                        "DRC ticket {sequence} already has a pending consumer"
+                    )));
+                }
+            }
+            DrcSlotReservation::TicketCreate { ticket_sequence } => {
+                if !self.reserved_accounts.insert((NativeAssetId::DRC, owner)) {
+                    return Err(P2pError::MempoolRejected(
+                        "account already has a pending nonce".into(),
+                    ));
+                }
+                if !self.reserved_tickets.insert((owner, ticket_sequence)) {
+                    self.reserved_accounts.remove(&(NativeAssetId::DRC, owner));
+                    return Err(P2pError::MempoolRejected(format!(
+                        "DRC ticket {ticket_sequence} already reserved"
+                    )));
+                }
+            }
+        }
+        self.drc_slot_reservations.insert(tx_id, reservation);
+        Ok(())
+    }
+
+    fn release_drc_slot(&mut self, tx_id: &Hash, owner: Address) {
+        let Some(reservation) = self.drc_slot_reservations.remove(tx_id) else {
+            return;
+        };
+        match reservation {
+            DrcSlotReservation::AccountNonce => {
+                self.reserved_accounts.remove(&(NativeAssetId::DRC, owner));
+            }
+            DrcSlotReservation::Ticket(sequence) => {
+                self.reserved_tickets.remove(&(owner, sequence));
+            }
+            DrcSlotReservation::TicketCreate { ticket_sequence } => {
+                self.reserved_accounts.remove(&(NativeAssetId::DRC, owner));
+                self.reserved_tickets.remove(&(owner, ticket_sequence));
+            }
+        }
+    }
+
+    fn drc_sender_reservation_from_selector(
+        _owner: Address,
+        version: u32,
+        ticket_capable_version: u32,
+        nonce: u64,
+        account_sequence: Option<agora_types::DrcAccountSequenceSelector>,
+    ) -> Result<DrcSlotReservation, P2pError> {
+        let selector =
+            resolve_drc_account_sequence(version, ticket_capable_version, nonce, account_sequence)
+                .map_err(|error| P2pError::MempoolRejected(error.to_string()))?;
+        Ok(match selector.kind {
+            DrcAccountSequence::Nonce => DrcSlotReservation::AccountNonce,
+            DrcAccountSequence::Ticket => DrcSlotReservation::Ticket(selector.value),
+        })
+    }
+
+    fn drc_account_transfer_reservation(
+        tx: &AccountTransfer,
+    ) -> Result<DrcSlotReservation, P2pError> {
+        if tx.asset != NativeAssetId::DRC {
+            return Ok(DrcSlotReservation::AccountNonce);
+        }
+        Self::drc_sender_reservation_from_selector(
+            tx.from,
+            tx.version,
+            ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
     }
 
     /// Outpoints already claimed by mempool transactions.
@@ -165,11 +281,16 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        let key = (tx.asset, tx.from);
-        if !self.reserved_accounts.insert(key) {
-            return Err(P2pError::MempoolRejected(
-                "account already has a pending nonce".into(),
-            ));
+        if tx.asset == NativeAssetId::DRC && tx.version >= ACCOUNT_TRANSFER_DRC_TICKET_VERSION {
+            let reservation = Self::drc_account_transfer_reservation(&tx)?;
+            self.reserve_drc_slot(id, tx.from, reservation)?;
+        } else {
+            let key = (tx.asset, tx.from);
+            if !self.reserved_accounts.insert(key) {
+                return Err(P2pError::MempoolRejected(
+                    "account already has a pending nonce".into(),
+                ));
+            }
         }
         self.account_txs.insert(id, tx);
         Ok(id)
@@ -184,11 +305,22 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        let key = (tx.asset, tx.actor);
-        if !self.reserved_accounts.insert(key) {
-            return Err(P2pError::MempoolRejected(
-                "account already has a pending nonce".into(),
-            ));
+        if tx.asset == NativeAssetId::DRC && tx.version >= STAKE_TX_TICKET_VERSION {
+            let reservation = Self::drc_sender_reservation_from_selector(
+                tx.actor,
+                tx.version,
+                STAKE_TX_TICKET_VERSION,
+                tx.nonce,
+                tx.account_sequence,
+            )?;
+            self.reserve_drc_slot(id, tx.actor, reservation)?;
+        } else {
+            let key = (tx.asset, tx.actor);
+            if !self.reserved_accounts.insert(key) {
+                return Err(P2pError::MempoolRejected(
+                    "account already has a pending nonce".into(),
+                ));
+            }
         }
         self.stake_txs.insert(id, tx);
         Ok(id)
@@ -314,12 +446,14 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        let key = (NativeAssetId::DRC, tx.from);
-        if !self.reserved_accounts.insert(key) {
-            return Err(P2pError::MempoolRejected(
-                "account already has a pending nonce".into(),
-            ));
-        }
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.from,
+            tx.version,
+            DRC_PAYMENT_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_drc_slot(id, tx.from, reservation)?;
         if deposit_auth_required {
             self.deposit_auth_required_payments.insert(id);
         }
@@ -342,12 +476,14 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        let key = (NativeAssetId::DRC, tx.account);
-        if !self.reserved_accounts.insert(key) {
-            return Err(P2pError::MempoolRejected(
-                "account already has a pending nonce".into(),
-            ));
-        }
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.account,
+            tx.version,
+            DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_drc_slot(id, tx.account, reservation)?;
         let account = tx.account;
         let requires_destination_tag = tx.action.destination_tag_requirement() == Some(true);
         let enables_deposit_auth = tx.action.deposit_auth_requirement() == Some(true);
@@ -396,12 +532,14 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        let key = (NativeAssetId::DRC, tx.owner);
-        if !self.reserved_accounts.insert(key) {
-            return Err(P2pError::MempoolRejected(
-                "account already has a pending nonce".into(),
-            ));
-        }
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.owner,
+            tx.version,
+            DRC_REGULAR_KEY_TICKET_TX_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_drc_slot(id, tx.owner, reservation)?;
         self.drc_regular_key_txs.insert(id, tx);
         Ok(id)
     }
@@ -414,12 +552,14 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        let key = (NativeAssetId::DRC, tx.owner);
-        if !self.reserved_accounts.insert(key) {
-            return Err(P2pError::MempoolRejected(
-                "account already has a pending nonce".into(),
-            ));
-        }
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.owner,
+            tx.version,
+            DRC_SIGNER_LIST_TICKET_TX_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_drc_slot(id, tx.owner, reservation)?;
         self.drc_signer_list_txs.insert(id, tx);
         Ok(id)
     }
@@ -432,12 +572,14 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        let key = (NativeAssetId::DRC, tx.owner);
-        if !self.reserved_accounts.insert(key) {
-            return Err(P2pError::MempoolRejected(
-                "account already has a pending nonce".into(),
-            ));
-        }
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.owner,
+            tx.version,
+            DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_drc_slot(id, tx.owner, reservation)?;
         let owner = tx.owner;
         let source = tx.authorized_source;
         let revokes = tx.action == DrcDepositPreauthAction::Unauthorize;
@@ -462,11 +604,39 @@ impl Mempool {
 
     fn remove_payment(&mut self, payment_id: &Hash) -> Option<DrcPaymentTx> {
         let payment = self.payment_txs.remove(payment_id)?;
-        self.reserved_accounts
-            .remove(&(NativeAssetId::DRC, payment.from));
+        self.release_drc_slot(payment_id, payment.from);
         self.deposit_auth_required_payments.remove(payment_id);
         self.deposit_preauthorized_payments.remove(payment_id);
         Some(payment)
+    }
+
+    pub fn admit_drc_ticket_create(&mut self, tx: DrcTicketCreateTx) -> Result<Hash, P2pError> {
+        tx.validate_structure()
+            .map_err(|error| P2pError::MempoolRejected(error.to_string()))?;
+        let id = tx.ticket_create_tx_id();
+        if self.drc_ticket_create_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let ticket_sequence = tx
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| P2pError::MempoolRejected("DRC ticket sequence overflow".into()))?;
+        self.reserve_drc_slot(
+            id,
+            tx.owner,
+            DrcSlotReservation::TicketCreate { ticket_sequence },
+        )?;
+        self.drc_ticket_create_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    pub fn remove_drc_ticket_create(&mut self, id: &Hash) -> Option<DrcTicketCreateTx> {
+        let tx = self.drc_ticket_create_txs.remove(id)?;
+        self.release_drc_slot(id, tx.owner);
+        Some(tx)
     }
 
     /// Drop the lowest-fee resident if its fee is strictly below `fee`.
@@ -680,6 +850,22 @@ impl Mempool {
         txs
     }
 
+    pub fn select_drc_ticket_creates(&self, max: usize) -> Vec<DrcTicketCreateTx> {
+        let mut txs: Vec<_> = self.drc_ticket_create_txs.values().cloned().collect();
+        txs.sort_by(|a, b| {
+            b.fee
+                .as_base_units()
+                .cmp(&a.fee.as_base_units())
+                .then_with(|| {
+                    a.ticket_create_tx_id()
+                        .as_bytes()
+                        .cmp(b.ticket_create_tx_id().as_bytes())
+                })
+        });
+        txs.truncate(max);
+        txs
+    }
+
     /// Drop included txs and any remaining pool txs that spend the same outpoints.
     pub fn evict_for_block(&mut self, block: &Block) {
         self.reconcile_payments_for_block_policies(block);
@@ -695,15 +881,25 @@ impl Mempool {
         for tx in &block.account_transfers {
             consumed_account_nonces.insert((tx.asset, tx.from));
             let id = tx.transfer_id();
-            if self.account_txs.remove(&id).is_some() {
-                self.reserved_accounts.remove(&(tx.asset, tx.from));
+            if let Some(removed) = self.account_txs.remove(&id) {
+                if self.drc_slot_reservations.contains_key(&id) {
+                    self.release_drc_slot(&id, removed.from);
+                } else {
+                    self.reserved_accounts
+                        .remove(&(removed.asset, removed.from));
+                }
             }
         }
         for tx in &block.stake_ops {
             consumed_account_nonces.insert((tx.asset, tx.actor));
             let id = tx.stake_tx_id();
-            if self.stake_txs.remove(&id).is_some() {
-                self.reserved_accounts.remove(&(tx.asset, tx.actor));
+            if let Some(removed) = self.stake_txs.remove(&id) {
+                if self.drc_slot_reservations.contains_key(&id) {
+                    self.release_drc_slot(&id, removed.actor);
+                } else {
+                    self.reserved_accounts
+                        .remove(&(removed.asset, removed.actor));
+                }
             }
         }
         for tx in &block.ovl_executions {
@@ -723,32 +919,71 @@ impl Mempool {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
             let id = tx.regular_key_tx_id();
             if self.drc_regular_key_txs.remove(&id).is_some() {
-                self.reserved_accounts
-                    .remove(&(NativeAssetId::DRC, tx.owner));
+                self.release_drc_slot(&id, tx.owner);
             }
+        }
+        for tx in &block.drc_signer_lists {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
+            let id = tx.signer_list_tx_id();
+            if self.drc_signer_list_txs.remove(&id).is_some() {
+                self.release_drc_slot(&id, tx.owner);
+            }
+        }
+        for tx in &block.drc_ticket_creates {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
+            let id = tx.ticket_create_tx_id();
+            let _ = self.remove_drc_ticket_create(&id);
         }
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
             let id = tx.policy_tx_id();
             if self.drc_policy_txs.remove(&id).is_some() {
-                self.reserved_accounts
-                    .remove(&(NativeAssetId::DRC, tx.account));
+                self.release_drc_slot(&id, tx.account);
             }
         }
         for tx in &block.drc_deposit_preauths {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
             let id = tx.preauth_tx_id();
             if self.drc_deposit_preauth_txs.remove(&id).is_some() {
-                self.reserved_accounts
-                    .remove(&(NativeAssetId::DRC, tx.owner));
+                self.release_drc_slot(&id, tx.owner);
             }
         }
         // A peer block can consume a nonce with a different operation than the
         // local resident. Evict every now-stale operation sharing that nonce.
-        self.account_txs
-            .retain(|_, tx| !consumed_account_nonces.contains(&(tx.asset, tx.from)));
-        self.stake_txs
-            .retain(|_, tx| !consumed_account_nonces.contains(&(tx.asset, tx.actor)));
+        let stale_accounts: Vec<(Hash, Address, NativeAssetId)> = self
+            .account_txs
+            .iter()
+            .filter_map(|(id, tx)| {
+                consumed_account_nonces
+                    .contains(&(tx.asset, tx.from))
+                    .then_some((*id, tx.from, tx.asset))
+            })
+            .collect();
+        for (id, from, asset) in stale_accounts {
+            self.account_txs.remove(&id);
+            if self.drc_slot_reservations.contains_key(&id) {
+                self.release_drc_slot(&id, from);
+            } else {
+                self.reserved_accounts.remove(&(asset, from));
+            }
+        }
+        let stale_stakes: Vec<(Hash, Address, NativeAssetId)> = self
+            .stake_txs
+            .iter()
+            .filter_map(|(id, tx)| {
+                consumed_account_nonces
+                    .contains(&(tx.asset, tx.actor))
+                    .then_some((*id, tx.actor, tx.asset))
+            })
+            .collect();
+        for (id, actor, asset) in stale_stakes {
+            self.stake_txs.remove(&id);
+            if self.drc_slot_reservations.contains_key(&id) {
+                self.release_drc_slot(&id, actor);
+            } else {
+                self.reserved_accounts.remove(&(asset, actor));
+            }
+        }
         self.execution_txs
             .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::OVL, tx.from)));
         let stale_payments: Vec<Hash> = self
@@ -763,12 +998,70 @@ impl Mempool {
         for id in stale_payments {
             self.remove_payment(&id);
         }
-        self.drc_policy_txs
-            .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.account)));
-        self.drc_deposit_preauth_txs
-            .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.owner)));
-        self.drc_regular_key_txs
-            .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.owner)));
+        let stale_policies: Vec<(Hash, Address)> = self
+            .drc_policy_txs
+            .iter()
+            .filter_map(|(id, tx)| {
+                consumed_account_nonces
+                    .contains(&(NativeAssetId::DRC, tx.account))
+                    .then_some((*id, tx.account))
+            })
+            .collect();
+        for (id, account) in stale_policies {
+            self.drc_policy_txs.remove(&id);
+            self.release_drc_slot(&id, account);
+        }
+        let stale_preauths: Vec<(Hash, Address)> = self
+            .drc_deposit_preauth_txs
+            .iter()
+            .filter_map(|(id, tx)| {
+                consumed_account_nonces
+                    .contains(&(NativeAssetId::DRC, tx.owner))
+                    .then_some((*id, tx.owner))
+            })
+            .collect();
+        for (id, owner) in stale_preauths {
+            self.drc_deposit_preauth_txs.remove(&id);
+            self.release_drc_slot(&id, owner);
+        }
+        let stale_regular_keys: Vec<(Hash, Address)> = self
+            .drc_regular_key_txs
+            .iter()
+            .filter_map(|(id, tx)| {
+                consumed_account_nonces
+                    .contains(&(NativeAssetId::DRC, tx.owner))
+                    .then_some((*id, tx.owner))
+            })
+            .collect();
+        for (id, owner) in stale_regular_keys {
+            self.drc_regular_key_txs.remove(&id);
+            self.release_drc_slot(&id, owner);
+        }
+        let stale_signer_lists: Vec<(Hash, Address)> = self
+            .drc_signer_list_txs
+            .iter()
+            .filter_map(|(id, tx)| {
+                consumed_account_nonces
+                    .contains(&(NativeAssetId::DRC, tx.owner))
+                    .then_some((*id, tx.owner))
+            })
+            .collect();
+        for (id, owner) in stale_signer_lists {
+            self.drc_signer_list_txs.remove(&id);
+            self.release_drc_slot(&id, owner);
+        }
+        let stale_ticket_creates: Vec<Hash> = self
+            .drc_ticket_create_txs
+            .iter()
+            .filter_map(|(id, tx)| {
+                consumed_account_nonces
+                    .contains(&(NativeAssetId::DRC, tx.owner))
+                    .then_some(*id)
+            })
+            .collect();
+        for id in stale_ticket_creates {
+            let _ = self.remove_drc_ticket_create(&id);
+        }
         for key in consumed_account_nonces {
             self.reserved_accounts.remove(&key);
         }
@@ -1384,5 +1677,43 @@ mod tests {
         assert!(pool
             .admit_payment_with_deposit_auth(payment, true, true)
             .is_err());
+    }
+
+    #[test]
+    fn drc_ticket_create_reserves_nonce_and_prospective_sequence() {
+        let owner = Address([3; 20]);
+        let create = DrcTicketCreateTx::unsigned(owner, Amount::from_base_units(1), 0);
+        let mut pool = Mempool::new(8);
+        let id = pool.admit_drc_ticket_create(create).unwrap();
+        assert!(pool.account_reserved(NativeAssetId::DRC, &owner));
+        assert!(pool.ticket_consumer_reserved(&owner, 1));
+        pool.remove_drc_ticket_create(&id).unwrap();
+        assert!(!pool.account_reserved(NativeAssetId::DRC, &owner));
+        assert!(!pool.ticket_consumer_reserved(&owner, 1));
+    }
+
+    #[test]
+    fn duplicate_ticket_consumer_rejected_in_mempool() {
+        let owner = Address([4; 20]);
+        let mut pay_a = DrcPaymentTx::unsigned_v4(
+            owner,
+            Address([5; 20]),
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+            None,
+        );
+        pay_a.version = DRC_PAYMENT_TICKET_VERSION;
+        pay_a.account_sequence = Some(agora_types::DrcAccountSequenceSelector::ticket(9));
+        let mut pay_b = pay_a.clone();
+        pay_b.nonce = 1;
+        let mut pool = Mempool::new(8);
+        pool.admit_payment(pay_a.clone()).unwrap();
+        assert!(pool.ticket_consumer_reserved(&owner, 9));
+        pay_b.amount = Amount::from_base_units(2);
+        assert!(pool.admit_payment(pay_b).is_err());
     }
 }
