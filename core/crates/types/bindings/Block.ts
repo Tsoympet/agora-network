@@ -8,6 +8,7 @@ import type { DrcMultisignBlockAttachment } from "./DrcMultisignBlockAttachment"
 import type { DrcPaymentTx } from "./DrcPaymentTx";
 import type { DrcRegularKeyTx } from "./DrcRegularKeyTx";
 import type { DrcSignerListTx } from "./DrcSignerListTx";
+import type { DrcTicketCreateTx } from "./DrcTicketCreateTx";
 import type { OvlExecutionTx } from "./OvlExecutionTx";
 import type { SignedStakeTx } from "./SignedStakeTx";
 import type { Transaction } from "./Transaction";
@@ -56,6 +57,10 @@ drc_regular_keys: Array<DrcRegularKeyTx>,
  * Owner-authorized DRC weighted signer-list operations.
  */
 drc_signer_lists: Array<DrcSignerListTx>,
+/**
+ * Owner-authorized DRC ticket creation (one ticket per operation).
+ */
+drc_ticket_creates: Array<DrcTicketCreateTx>,
 /**
  * Detached, body-root-committed DRC multisign authorization (consensus lane).
  */

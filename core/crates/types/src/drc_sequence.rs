@@ -81,4 +81,27 @@ pub enum DrcAccountSequenceError {
     UnknownTicket,
     #[error("duplicate DRC ticket sequence")]
     DuplicateTicket,
+    #[error("ticket sequence selector requires a ticket-capable operation version")]
+    TicketSelectorOnLegacyVersion,
+    #[error("ticket-capable operation version requires account_sequence")]
+    MissingAccountSequence,
+}
+
+/// Resolve the bound sequence for a DRC account operation envelope.
+pub fn resolve_drc_account_sequence(
+    version: u32,
+    ticket_capable_version: u32,
+    nonce: u64,
+    account_sequence: Option<DrcAccountSequenceSelector>,
+) -> Result<DrcAccountSequenceSelector, DrcAccountSequenceError> {
+    if version >= ticket_capable_version {
+        let selector = account_sequence.ok_or(DrcAccountSequenceError::MissingAccountSequence)?;
+        selector.validate()?;
+        Ok(selector)
+    } else {
+        if account_sequence.is_some_and(|s| s.kind == DrcAccountSequence::Ticket) {
+            return Err(DrcAccountSequenceError::TicketSelectorOnLegacyVersion);
+        }
+        Ok(DrcAccountSequenceSelector::nonce(nonce))
+    }
 }

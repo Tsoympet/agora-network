@@ -8,12 +8,16 @@ use ts_rs::TS;
 use crate::drc_multisign::{
     read_multisign_trailer, write_multisign_trailer, DrcMultisignAuth, DRC_SIGNER_LIST_MAX_ENTRIES,
 };
+use crate::drc_sequence::DrcAccountSequenceSelector;
 use crate::{Address, Amount, Hash};
 
 pub const DRC_SIGNER_LIST_TX_VERSION: u32 = 1;
+/// Ticket-aware signer-list operations bind an explicit sequence selector.
+pub const DRC_SIGNER_LIST_TICKET_TX_VERSION: u32 = 2;
 pub const DRC_SIGNER_LIST_STATE_VERSION: u32 = 1;
 pub const DRC_SIGNER_LIST_TX_TYPE: &[u8] = b"drc_signer_list";
 pub const DRC_SIGNER_LIST_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-signer-list-v1";
+pub const DRC_SIGNER_LIST_V2_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-signer-list-v2";
 
 #[derive(
     Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
@@ -60,6 +64,8 @@ pub struct DrcSignerListTx {
     pub entries: Vec<DrcSignerListEntry>,
     pub fee: Amount,
     pub nonce: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_sequence: Option<DrcAccountSequenceSelector>,
     pub public_key: Vec<u8>,
     pub signature: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,8 +74,17 @@ pub struct DrcSignerListTx {
 
 impl DrcSignerListTx {
     pub fn validate_structure(&self) -> Result<(), DrcSignerListError> {
-        if self.version != DRC_SIGNER_LIST_TX_VERSION {
+        if self.version != DRC_SIGNER_LIST_TX_VERSION
+            && self.version != DRC_SIGNER_LIST_TICKET_TX_VERSION
+        {
             return Err(DrcSignerListError::UnsupportedVersion(self.version));
+        }
+        if self.version == DRC_SIGNER_LIST_TX_VERSION
+            && self
+                .account_sequence
+                .is_some_and(|s| s.kind == crate::drc_sequence::DrcAccountSequence::Ticket)
+        {
+            return Err(DrcSignerListError::TicketSelectorOnLegacyVersion);
         }
         if self.owner == Address::ZERO {
             return Err(DrcSignerListError::ZeroOwner);
@@ -88,6 +103,25 @@ impl DrcSignerListTx {
     }
 
     pub fn signing_bytes_bound(&self, chain_id: &str, genesis: &Hash) -> Vec<u8> {
+        if self.version >= DRC_SIGNER_LIST_TICKET_TX_VERSION {
+            let sequence = self
+                .account_sequence
+                .expect("signer-list v2 requires account_sequence");
+            return borsh::to_vec(&(
+                DRC_SIGNER_LIST_V2_SIGNING_DOMAIN,
+                chain_id,
+                genesis.as_bytes(),
+                DRC_SIGNER_LIST_TX_TYPE,
+                self.version,
+                self.owner,
+                self.action,
+                self.quorum,
+                &self.entries,
+                self.fee,
+                sequence,
+            ))
+            .expect("borsh serialize DRC signer-list v2 body");
+        }
         borsh::to_vec(&(
             DRC_SIGNER_LIST_SIGNING_DOMAIN,
             chain_id,
@@ -126,6 +160,7 @@ impl DrcSignerListTx {
             public_key: Vec::new(),
             signature: Vec::new(),
             multisign: None,
+            account_sequence: None,
         }
     }
 
@@ -141,6 +176,7 @@ impl DrcSignerListTx {
             public_key: Vec::new(),
             signature: Vec::new(),
             multisign: None,
+            account_sequence: None,
         }
     }
 }
@@ -153,7 +189,16 @@ impl BorshSerialize for DrcSignerListTx {
         BorshSerialize::serialize(&self.quorum, writer)?;
         BorshSerialize::serialize(&self.entries, writer)?;
         BorshSerialize::serialize(&self.fee, writer)?;
-        BorshSerialize::serialize(&self.nonce, writer)?;
+        if self.version >= DRC_SIGNER_LIST_TICKET_TX_VERSION {
+            BorshSerialize::serialize(
+                &self
+                    .account_sequence
+                    .expect("signer-list v2 missing account_sequence"),
+                writer,
+            )?;
+        } else {
+            BorshSerialize::serialize(&self.nonce, writer)?;
+        }
         BorshSerialize::serialize(&self.public_key, writer)?;
         BorshSerialize::serialize(&self.signature, writer)?;
         write_multisign_trailer(&self.multisign, writer)
@@ -162,14 +207,29 @@ impl BorshSerialize for DrcSignerListTx {
 
 impl BorshDeserialize for DrcSignerListTx {
     fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let version = u32::deserialize_reader(reader)?;
+        let owner = Address::deserialize_reader(reader)?;
+        let action = DrcSignerListAction::deserialize_reader(reader)?;
+        let quorum = u32::deserialize_reader(reader)?;
+        let entries = Vec::<DrcSignerListEntry>::deserialize_reader(reader)?;
+        let fee = Amount::deserialize_reader(reader)?;
+        let (nonce, account_sequence) = if version >= DRC_SIGNER_LIST_TICKET_TX_VERSION {
+            (
+                0,
+                Some(DrcAccountSequenceSelector::deserialize_reader(reader)?),
+            )
+        } else {
+            (u64::deserialize_reader(reader)?, None)
+        };
         Ok(Self {
-            version: u32::deserialize_reader(reader)?,
-            owner: Address::deserialize_reader(reader)?,
-            action: DrcSignerListAction::deserialize_reader(reader)?,
-            quorum: u32::deserialize_reader(reader)?,
-            entries: Vec::<DrcSignerListEntry>::deserialize_reader(reader)?,
-            fee: Amount::deserialize_reader(reader)?,
-            nonce: u64::deserialize_reader(reader)?,
+            version,
+            owner,
+            action,
+            quorum,
+            entries,
+            fee,
+            nonce,
+            account_sequence,
             public_key: Vec::<u8>::deserialize_reader(reader)?,
             signature: Vec::<u8>::deserialize_reader(reader)?,
             multisign: read_multisign_trailer(reader)?,
@@ -280,4 +340,6 @@ pub enum DrcSignerListError {
     ImpossibleQuorum,
     #[error("persisted signer-list entries are not in canonical order")]
     EntriesNotCanonicalOrder,
+    #[error("ticket sequence selector requires a ticket-capable operation version")]
+    TicketSelectorOnLegacyVersion,
 }

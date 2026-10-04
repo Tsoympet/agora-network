@@ -47,7 +47,8 @@ pub use data_availability::{
 pub use drc_deposit_preauth::{
     DrcDepositPreauth, DrcDepositPreauthAction, DrcDepositPreauthError, DrcDepositPreauthTx,
     DRC_DEPOSIT_PREAUTH_SIGNING_DOMAIN, DRC_DEPOSIT_PREAUTH_STATE_VERSION,
-    DRC_DEPOSIT_PREAUTH_TX_TYPE, DRC_DEPOSIT_PREAUTH_TX_VERSION,
+    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TX_TYPE,
+    DRC_DEPOSIT_PREAUTH_TX_VERSION, DRC_DEPOSIT_PREAUTH_V2_SIGNING_DOMAIN,
 };
 pub use drc_multisign::{
     read_multisign_trailer, validate_exclusive_authorization, write_multisign_trailer,
@@ -58,10 +59,11 @@ pub use drc_multisign::{
 pub use drc_multisign_attachment::{
     attachment_key_for_account_transfer, attachment_key_for_deposit_preauth,
     attachment_key_for_payment, attachment_key_for_policy, attachment_key_for_regular_key,
-    attachment_key_for_signer_list, attachment_key_for_stake, drc_multisign_attachment_key,
-    drc_multisign_signing_commitment, DrcMultisignAttachmentError, DrcMultisignAttachmentKey,
-    DrcMultisignBlockAttachment, DrcMultisignOperationKind, DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
-    DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION, DRC_MULTISIGN_SIGNING_COMMITMENT_DOMAIN,
+    attachment_key_for_signer_list, attachment_key_for_stake, attachment_key_for_ticket_create,
+    drc_multisign_attachment_key, drc_multisign_signing_commitment, DrcMultisignAttachmentError,
+    DrcMultisignAttachmentKey, DrcMultisignBlockAttachment, DrcMultisignOperationKind,
+    DRC_MULTISIGN_ATTACHMENT_KEY_VERSION, DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
+    DRC_MULTISIGN_SIGNING_COMMITMENT_DOMAIN,
 };
 pub use drc_multisign_lane::{
     drc_multisign_attachment_capacity, materialize_drc_multisign_attachments,
@@ -72,24 +74,27 @@ pub use drc_policy::{
     DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION, DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION,
     DRC_ACCOUNT_POLICY_MASTER_KEY_STATE_VERSION, DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION,
     DRC_ACCOUNT_POLICY_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_STATE_VERSION,
-    DRC_ACCOUNT_POLICY_TX_TYPE, DRC_ACCOUNT_POLICY_TX_VERSION,
-    DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_V2_SIGNING_DOMAIN,
-    DRC_ACCOUNT_POLICY_V3_SIGNING_DOMAIN,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_ACCOUNT_POLICY_TX_TYPE,
+    DRC_ACCOUNT_POLICY_TX_VERSION, DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN,
+    DRC_ACCOUNT_POLICY_V2_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_V3_SIGNING_DOMAIN,
+    DRC_ACCOUNT_POLICY_V4_SIGNING_DOMAIN,
 };
 pub use drc_regular_key::{
     DrcAccountRegularKey, DrcRegularKeyAction, DrcRegularKeyError, DrcRegularKeyTx,
-    DRC_REGULAR_KEY_SIGNING_DOMAIN, DRC_REGULAR_KEY_STATE_VERSION, DRC_REGULAR_KEY_TX_TYPE,
-    DRC_REGULAR_KEY_TX_VERSION,
+    DRC_REGULAR_KEY_SIGNING_DOMAIN, DRC_REGULAR_KEY_STATE_VERSION,
+    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_REGULAR_KEY_TX_TYPE, DRC_REGULAR_KEY_TX_VERSION,
+    DRC_REGULAR_KEY_V2_SIGNING_DOMAIN,
 };
 pub use drc_sequence::{
-    DrcAccountSequence, DrcAccountSequenceError, DrcAccountSequenceSelector,
-    DRC_MAX_OUTSTANDING_TICKETS_PER_ACCOUNT,
+    resolve_drc_account_sequence, DrcAccountSequence, DrcAccountSequenceError,
+    DrcAccountSequenceSelector, DRC_MAX_OUTSTANDING_TICKETS_PER_ACCOUNT,
 };
 pub use drc_signer_list::{
     canonical_sorted_entries, validate_signer_list_payload, DrcAccountSignerList,
     DrcSignerListAction, DrcSignerListEntry, DrcSignerListError, DrcSignerListTx,
-    DRC_SIGNER_LIST_SIGNING_DOMAIN, DRC_SIGNER_LIST_STATE_VERSION, DRC_SIGNER_LIST_TX_TYPE,
-    DRC_SIGNER_LIST_TX_VERSION,
+    DRC_SIGNER_LIST_SIGNING_DOMAIN, DRC_SIGNER_LIST_STATE_VERSION,
+    DRC_SIGNER_LIST_TICKET_TX_VERSION, DRC_SIGNER_LIST_TX_TYPE, DRC_SIGNER_LIST_TX_VERSION,
+    DRC_SIGNER_LIST_V2_SIGNING_DOMAIN,
 };
 pub use drc_ticket::{
     DrcAccountTickets, DrcTicketCreateError, DrcTicketCreateTx, DRC_TICKET_CREATE_SIGNING_DOMAIN,
@@ -111,10 +116,14 @@ pub use payment::{
     DrcPaymentResult, DrcPaymentTx, DRC_PAYMENT_DESTINATION_TAG_VERSION,
     DRC_PAYMENT_LEGACY_VERSION, DRC_PAYMENT_RECEIPT_DESTINATION_TAG_VERSION,
     DRC_PAYMENT_RECEIPT_LEGACY_VERSION, DRC_PAYMENT_RECEIPT_VERSION, DRC_PAYMENT_SIGNING_DOMAIN,
-    DRC_PAYMENT_SOURCE_TAG_VERSION, DRC_PAYMENT_V1_SIGNING_DOMAIN, DRC_PAYMENT_V2_SIGNING_DOMAIN,
-    DRC_PAYMENT_V3_SIGNING_DOMAIN, DRC_PAYMENT_V4_SIGNING_DOMAIN, DRC_PAYMENT_VERSION,
+    DRC_PAYMENT_SOURCE_TAG_VERSION, DRC_PAYMENT_TICKET_VERSION, DRC_PAYMENT_V1_SIGNING_DOMAIN,
+    DRC_PAYMENT_V2_SIGNING_DOMAIN, DRC_PAYMENT_V3_SIGNING_DOMAIN, DRC_PAYMENT_V4_SIGNING_DOMAIN,
+    DRC_PAYMENT_V5_SIGNING_DOMAIN, DRC_PAYMENT_VERSION,
 };
-pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
+pub use stake::{
+    SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN, STAKE_TX_SIGNING_DOMAIN_V2,
+    STAKE_TX_TICKET_VERSION, STAKE_TX_VERSION,
+};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 pub use treasury::{TreasuryBalance, TreasuryId};
 

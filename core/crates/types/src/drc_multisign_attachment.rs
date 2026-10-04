@@ -7,7 +7,8 @@ use ts_rs::TS;
 
 use crate::{
     AccountTransfer, DrcAccountPolicyTx, DrcDepositPreauthTx, DrcMultisignAuth, DrcMultisignError,
-    DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash, NativeAssetId, SignedStakeTx,
+    DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, NativeAssetId,
+    SignedStakeTx,
 };
 
 pub const DRC_MULTISIGN_ATTACHMENT_KEY_VERSION: u32 = 1;
@@ -41,6 +42,7 @@ pub enum DrcMultisignOperationKind {
     DrcAccountPolicy = 5,
     DrcDepositPreauth = 6,
     DrcPayment = 7,
+    DrcTicketCreate = 8,
 }
 
 impl DrcMultisignOperationKind {
@@ -53,6 +55,7 @@ impl DrcMultisignOperationKind {
             Self::DrcAccountPolicy => "drc_account_policy",
             Self::DrcDepositPreauth => "drc_deposit_preauth",
             Self::DrcPayment => "drc_payment",
+            Self::DrcTicketCreate => "drc_ticket_create",
         }
     }
 }
@@ -227,6 +230,17 @@ pub fn attachment_key_for_payment(
 ) -> DrcMultisignAttachmentKey {
     drc_multisign_attachment_key(
         DrcMultisignOperationKind::DrcPayment,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_ticket_create(
+    tx: &DrcTicketCreateTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcTicketCreate,
         &tx.signing_bytes_bound(chain_id, genesis),
     )
 }
