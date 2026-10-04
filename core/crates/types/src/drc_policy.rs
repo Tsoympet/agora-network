@@ -12,14 +12,20 @@ use crate::{Address, Amount, Hash};
 pub const DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION: u32 = 1;
 /// Current account-policy envelope; adds DepositAuth set/clear actions.
 pub const DRC_ACCOUNT_POLICY_TX_VERSION: u32 = 2;
+/// Master-key disable set/clear (DRC-scoped; rippled `asfDisableMaster` subset).
+pub const DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION: u32 = 3;
 /// Frozen destination-tag-only persisted policy encoding.
 pub const DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION: u32 = 1;
 /// Current persisted policy encoding; appends `deposit_auth_required`.
 pub const DRC_ACCOUNT_POLICY_STATE_VERSION: u32 = 2;
+/// Persisted policy encoding; appends `master_key_disabled`.
+pub const DRC_ACCOUNT_POLICY_MASTER_KEY_STATE_VERSION: u32 = 3;
 /// Frozen v1 signature domain.
 pub const DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-account-policy-v1";
 /// V2 signature domain for DepositAuth policy actions.
 pub const DRC_ACCOUNT_POLICY_V2_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-account-policy-v2";
+/// V3 signature domain for master-key disable policy actions.
+pub const DRC_ACCOUNT_POLICY_V3_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-account-policy-v3";
 /// Backward-compatible name for the frozen v1 signing domain.
 pub const DRC_ACCOUNT_POLICY_SIGNING_DOMAIN: &[u8] = DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN;
 /// Explicit operation type bound by v2 signatures.
@@ -38,6 +44,8 @@ pub enum DrcAccountPolicyAction {
     ClearRequireDestinationTag = 1,
     SetDepositAuthRequired = 2,
     ClearDepositAuthRequired = 3,
+    SetMasterKeyDisabled = 4,
+    ClearMasterKeyDisabled = 5,
 }
 
 impl DrcAccountPolicyAction {
@@ -46,6 +54,7 @@ impl DrcAccountPolicyAction {
             Self::SetRequireDestinationTag => Some(true),
             Self::ClearRequireDestinationTag => Some(false),
             Self::SetDepositAuthRequired | Self::ClearDepositAuthRequired => None,
+            Self::SetMasterKeyDisabled | Self::ClearMasterKeyDisabled => None,
         }
     }
 
@@ -54,6 +63,15 @@ impl DrcAccountPolicyAction {
             Self::SetDepositAuthRequired => Some(true),
             Self::ClearDepositAuthRequired => Some(false),
             Self::SetRequireDestinationTag | Self::ClearRequireDestinationTag => None,
+            Self::SetMasterKeyDisabled | Self::ClearMasterKeyDisabled => None,
+        }
+    }
+
+    pub const fn master_key_disabled_requirement(self) -> Option<bool> {
+        match self {
+            Self::SetMasterKeyDisabled => Some(true),
+            Self::ClearMasterKeyDisabled => Some(false),
+            _ => None,
         }
     }
 
@@ -63,6 +81,8 @@ impl DrcAccountPolicyAction {
             Self::ClearRequireDestinationTag => "clear_require_destination_tag",
             Self::SetDepositAuthRequired => "set_deposit_auth_required",
             Self::ClearDepositAuthRequired => "clear_deposit_auth_required",
+            Self::SetMasterKeyDisabled => "set_master_key_disabled",
+            Self::ClearMasterKeyDisabled => "clear_master_key_disabled",
         }
     }
 }
@@ -97,14 +117,25 @@ impl DrcAccountPolicyTx {
                 DRC_ACCOUNT_POLICY_TX_VERSION,
                 DrcAccountPolicyAction::SetDepositAuthRequired
                 | DrcAccountPolicyAction::ClearDepositAuthRequired,
+            )
+            | (
+                DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION,
+                DrcAccountPolicyAction::SetMasterKeyDisabled
+                | DrcAccountPolicyAction::ClearMasterKeyDisabled,
             ) => Ok(()),
-            (DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION | DRC_ACCOUNT_POLICY_TX_VERSION, action) => {
-                Err(DrcAccountPolicyError::ActionVersionMismatch {
-                    version: self.version,
-                    action,
-                })
+            (
+                DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION
+                | DRC_ACCOUNT_POLICY_TX_VERSION
+                | DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION,
+                action,
+            ) => Err(DrcAccountPolicyError::ActionVersionMismatch {
+                version: self.version,
+                action,
+            }),
+            (_, _) if self.version > DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION => {
+                Err(DrcAccountPolicyError::UnsupportedVersion(self.version))
             }
-            _ => Err(DrcAccountPolicyError::UnsupportedVersion(self.version)),
+            (version, _) => Err(DrcAccountPolicyError::UnsupportedVersion(version)),
         }
     }
 
@@ -121,6 +152,20 @@ impl DrcAccountPolicyTx {
                 self.nonce,
             ))
             .expect("borsh serialize DRC account-policy v1 body");
+        }
+        if self.version == DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION {
+            return borsh::to_vec(&(
+                DRC_ACCOUNT_POLICY_V3_SIGNING_DOMAIN,
+                chain_id,
+                genesis.as_bytes(),
+                DRC_ACCOUNT_POLICY_TX_TYPE,
+                self.version,
+                self.account,
+                self.action,
+                self.fee,
+                self.nonce,
+            ))
+            .expect("borsh serialize DRC account-policy v3 body");
         }
         borsh::to_vec(&(
             DRC_ACCOUNT_POLICY_V2_SIGNING_DOMAIN,
@@ -198,6 +243,28 @@ impl DrcAccountPolicyTx {
         tx.version = DRC_ACCOUNT_POLICY_TX_VERSION;
         tx
     }
+
+    pub fn set_master_key_disabled(account: Address, fee: Amount, nonce: u64) -> Self {
+        let mut tx = Self::unsigned(
+            account,
+            DrcAccountPolicyAction::SetMasterKeyDisabled,
+            fee,
+            nonce,
+        );
+        tx.version = DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION;
+        tx
+    }
+
+    pub fn clear_master_key_disabled(account: Address, fee: Amount, nonce: u64) -> Self {
+        let mut tx = Self::unsigned(
+            account,
+            DrcAccountPolicyAction::ClearMasterKeyDisabled,
+            fee,
+            nonce,
+        );
+        tx.version = DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION;
+        tx
+    }
 }
 
 impl BorshSerialize for DrcAccountPolicyTx {
@@ -237,6 +304,9 @@ pub struct DrcAccountPolicy {
     /// Incoming non-self payments require an address preauthorization when enabled.
     #[serde(default)]
     pub deposit_auth_required: bool,
+    /// When set, the owner master secp256k1 key cannot authorize DRC account operations.
+    #[serde(default)]
+    pub master_key_disabled: bool,
 }
 
 impl Default for DrcAccountPolicy {
@@ -247,6 +317,7 @@ impl Default for DrcAccountPolicy {
             version: DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION,
             require_destination_tag: false,
             deposit_auth_required: false,
+            master_key_disabled: false,
         }
     }
 }
@@ -254,11 +325,28 @@ impl Default for DrcAccountPolicy {
 impl DrcAccountPolicy {
     pub fn validate(&self) -> Result<(), DrcAccountPolicyError> {
         match self.version {
-            DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION if self.deposit_auth_required => {
-                Err(DrcAccountPolicyError::LegacyDepositAuth)
+            DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION
+                if self.deposit_auth_required || self.master_key_disabled =>
+            {
+                Err(DrcAccountPolicyError::LegacyExtendedField)
             }
-            DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION | DRC_ACCOUNT_POLICY_STATE_VERSION => Ok(()),
+            DRC_ACCOUNT_POLICY_STATE_VERSION if self.master_key_disabled => {
+                Err(DrcAccountPolicyError::V2MasterKeyDisabled)
+            }
+            DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION
+            | DRC_ACCOUNT_POLICY_STATE_VERSION
+            | DRC_ACCOUNT_POLICY_MASTER_KEY_STATE_VERSION => Ok(()),
             version => Err(DrcAccountPolicyError::UnsupportedStateVersion(version)),
+        }
+    }
+
+    pub fn canonical_state_version(&self) -> u32 {
+        if self.master_key_disabled {
+            DRC_ACCOUNT_POLICY_MASTER_KEY_STATE_VERSION
+        } else if self.deposit_auth_required {
+            DRC_ACCOUNT_POLICY_STATE_VERSION
+        } else {
+            DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION
         }
     }
 }
@@ -267,10 +355,14 @@ impl BorshSerialize for DrcAccountPolicy {
     fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> Result<(), borsh::io::Error> {
         self.validate()
             .map_err(|error| borsh::io::Error::new(borsh::io::ErrorKind::InvalidData, error))?;
-        BorshSerialize::serialize(&self.version, writer)?;
+        let version = self.canonical_state_version();
+        BorshSerialize::serialize(&version, writer)?;
         BorshSerialize::serialize(&self.require_destination_tag, writer)?;
-        if self.version == DRC_ACCOUNT_POLICY_STATE_VERSION {
+        if version >= DRC_ACCOUNT_POLICY_STATE_VERSION {
             BorshSerialize::serialize(&self.deposit_auth_required, writer)?;
+        }
+        if version >= DRC_ACCOUNT_POLICY_MASTER_KEY_STATE_VERSION {
+            BorshSerialize::serialize(&self.master_key_disabled, writer)?;
         }
         Ok(())
     }
@@ -280,9 +372,13 @@ impl BorshDeserialize for DrcAccountPolicy {
     fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
         let version = u32::deserialize_reader(reader)?;
         let require_destination_tag = bool::deserialize_reader(reader)?;
-        let deposit_auth_required = match version {
-            DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION => false,
-            DRC_ACCOUNT_POLICY_STATE_VERSION => bool::deserialize_reader(reader)?,
+        let (deposit_auth_required, master_key_disabled) = match version {
+            DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION => (false, false),
+            DRC_ACCOUNT_POLICY_STATE_VERSION => (bool::deserialize_reader(reader)?, false),
+            DRC_ACCOUNT_POLICY_MASTER_KEY_STATE_VERSION => (
+                bool::deserialize_reader(reader)?,
+                bool::deserialize_reader(reader)?,
+            ),
             _ => {
                 return Err(borsh::io::Error::new(
                     borsh::io::ErrorKind::InvalidData,
@@ -294,6 +390,7 @@ impl BorshDeserialize for DrcAccountPolicy {
             version,
             require_destination_tag,
             deposit_auth_required,
+            master_key_disabled,
         })
     }
 }
@@ -309,6 +406,10 @@ pub enum DrcAccountPolicyError {
         version: u32,
         action: DrcAccountPolicyAction,
     },
+    #[error("DRC account-policy v1 state cannot carry extended fields")]
+    LegacyExtendedField,
+    #[error("DRC account-policy v2 state cannot carry master-key disable")]
+    V2MasterKeyDisabled,
     #[error("DRC account-policy v1 state cannot carry DepositAuth")]
     LegacyDepositAuth,
 }
@@ -341,10 +442,10 @@ mod tests {
     fn policy_version_fails_closed() {
         let mut tx =
             DrcAccountPolicyTx::set_require_destination_tag(Address([1; 20]), Amount::ZERO, 0);
-        tx.version = DRC_ACCOUNT_POLICY_TX_VERSION + 1;
+        tx.version = DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION + 1;
         assert_eq!(
             tx.validate_version(),
-            Err(DrcAccountPolicyError::UnsupportedVersion(3))
+            Err(DrcAccountPolicyError::UnsupportedVersion(4))
         );
     }
 
@@ -360,6 +461,7 @@ mod tests {
             version: DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION,
             require_destination_tag: true,
             deposit_auth_required: false,
+            master_key_disabled: false,
         };
         let expected = borsh::to_vec(&FrozenPolicyV1 {
             version: DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION,
@@ -391,6 +493,7 @@ mod tests {
             version: DRC_ACCOUNT_POLICY_STATE_VERSION,
             require_destination_tag: true,
             deposit_auth_required: true,
+            master_key_disabled: false,
         };
         state.validate().unwrap();
         let bytes = borsh::to_vec(&state).unwrap();

@@ -166,6 +166,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                             "version": policy.version,
                             "require_destination_tag": policy.require_destination_tag,
                             "deposit_auth_required": policy.deposit_auth_required,
+                            "master_key_disabled": policy.master_key_disabled,
                         },
                         "account_nonce": nonce,
                     })),
@@ -1285,6 +1286,7 @@ mod tests {
                 version: agora_types::DRC_ACCOUNT_POLICY_STATE_VERSION,
                 require_destination_tag: true,
                 deposit_auth_required: true,
+                master_key_disabled: false,
             },
             9,
         );
@@ -1304,6 +1306,7 @@ mod tests {
                     "version": agora_types::DRC_ACCOUNT_POLICY_STATE_VERSION,
                     "require_destination_tag": true,
                     "deposit_auth_required": true,
+                    "master_key_disabled": false,
                 },
                 "account_nonce": 9,
             })

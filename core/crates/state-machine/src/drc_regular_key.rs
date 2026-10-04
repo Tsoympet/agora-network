@@ -9,6 +9,7 @@ use crate::accounts::{account_exists, load_account, put_account_into, AccountJou
 use crate::apply::TxAuthContext;
 use crate::columns::ColumnFamily;
 use crate::drc_account_auth::verify_drc_regular_key_operation;
+use crate::drc_master_key_recovery::ensure_no_lockout_after_regular_key;
 use crate::store::WriteBatch;
 use crate::{StateError, StateStore};
 
@@ -94,6 +95,7 @@ pub fn apply_drc_regular_key(
     journal: &mut AccountJournal,
 ) -> Result<Option<Address>, StateError> {
     verify_drc_regular_key_operation(store, tx, auth)?;
+    ensure_no_lockout_after_regular_key(store, tx)?;
 
     if !account_exists(store, NativeAssetId::DRC, &tx.owner)? {
         return Err(StateError::InvalidTx(

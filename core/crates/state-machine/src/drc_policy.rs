@@ -1,10 +1,7 @@
 //! Recipient-controlled DRC account-policy state and transition.
 
 use crate::drc_account_auth::verify_drc_account_policy_operation;
-use agora_types::{
-    Address, DrcAccountPolicy, DrcAccountPolicyTx, Hash, NativeAssetId,
-    DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION, DRC_ACCOUNT_POLICY_STATE_VERSION,
-};
+use agora_types::{Address, DrcAccountPolicy, DrcAccountPolicyTx, Hash, NativeAssetId};
 use borsh::BorshDeserialize;
 
 use crate::accounts::{
@@ -126,15 +123,11 @@ pub fn apply_drc_account_policy(
     }
     if let Some(deposit_auth_required) = tx.action.deposit_auth_requirement() {
         policy.deposit_auth_required = deposit_auth_required;
-        policy.version = if deposit_auth_required {
-            DRC_ACCOUNT_POLICY_STATE_VERSION
-        } else {
-            // Once DepositAuth is clear, v1 can represent the complete policy
-            // again. Downgrading avoids two roots for the same effective flags
-            // while preserving the frozen v1 bytes.
-            DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION
-        };
     }
+    if let Some(master_key_disabled) = tx.action.master_key_disabled_requirement() {
+        policy.master_key_disabled = master_key_disabled;
+    }
+    policy.version = policy.canonical_state_version();
     policy
         .validate()
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
@@ -147,7 +140,8 @@ pub fn apply_drc_account_policy(
     account.balance -= tx.fee.as_base_units();
     account.nonce = next_nonce;
     put_account_into(batch, NativeAssetId::DRC, &tx.account, &account)?;
-    if policy.require_destination_tag || policy.deposit_auth_required {
+    if policy.require_destination_tag || policy.deposit_auth_required || policy.master_key_disabled
+    {
         batch.put_cf(
             ColumnFamily::Meta,
             &drc_account_policy_key(&tx.account),
@@ -164,7 +158,7 @@ pub fn apply_drc_account_policy(
 #[cfg(test)]
 mod tests {
     use agora_crypto::{sign_drc_account_policy_bound, KeyPair};
-    use agora_types::{Amount, DrcAccountPolicyTx};
+    use agora_types::{Amount, DrcAccountPolicyTx, DRC_ACCOUNT_POLICY_STATE_VERSION};
 
     use super::*;
     use crate::accounts::{credit_account_into, load_account};

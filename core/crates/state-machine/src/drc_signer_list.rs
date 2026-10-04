@@ -10,6 +10,7 @@ use crate::accounts::{account_exists, load_account, put_account_into, AccountJou
 use crate::apply::TxAuthContext;
 use crate::columns::ColumnFamily;
 use crate::drc_account_auth::verify_drc_signer_list_operation;
+use crate::drc_master_key_recovery::ensure_no_lockout_after_signer_list;
 use crate::store::WriteBatch;
 use crate::{StateError, StateStore};
 
@@ -101,6 +102,7 @@ pub fn apply_drc_signer_list(
     journal: &mut AccountJournal,
 ) -> Result<Option<DrcAccountSignerList>, StateError> {
     verify_drc_signer_list_operation(store, tx, auth)?;
+    ensure_no_lockout_after_signer_list(store, tx)?;
 
     if !account_exists(store, NativeAssetId::DRC, &tx.owner)? {
         return Err(StateError::InvalidTx(
