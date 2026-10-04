@@ -10,8 +10,12 @@ mod block_zero;
 mod columns;
 mod community_state;
 mod data_availability;
+mod drc_account_auth;
 mod drc_deposit_preauth;
 mod drc_policy;
+mod drc_regular_key;
+#[cfg(test)]
+mod drc_regular_key_tests;
 mod error;
 mod execution;
 mod finality_store;
@@ -77,6 +81,11 @@ pub use drc_policy::{
     apply_drc_account_policy, drc_account_policy_key, drc_account_policy_meta_keys,
     drc_account_policy_root, load_drc_account_policy, load_known_drc_account_policy,
     DRC_ACCOUNT_POLICY_ROOT_DOMAIN,
+};
+pub use drc_regular_key::{
+    apply_drc_regular_key, drc_regular_key_meta_key, drc_regular_key_meta_keys,
+    drc_regular_key_root, load_drc_account_regular_key, load_known_drc_account_keys,
+    DRC_REGULAR_KEY_ROOT_DOMAIN,
 };
 pub use error::StateError;
 pub use execution::{

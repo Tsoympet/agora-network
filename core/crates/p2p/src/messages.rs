@@ -1,6 +1,7 @@
 use agora_types::{
     AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcAccountPolicyTx,
-    DrcDepositPreauthTx, DrcPaymentTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
+    DrcDepositPreauthTx, DrcPaymentTx, DrcRegularKeyTx, Hash, OvlExecutionTx, SignedStakeTx,
+    Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -38,6 +39,8 @@ pub enum NetworkMessage {
     DrcAccountPolicy(DrcAccountPolicyTx),
     /// Appended in Trident protocol v9; address-based DRC deposit preauthorization.
     DrcDepositPreauth(DrcDepositPreauthTx),
+    /// Appended in Trident protocol v11; DRC regular-key rotation.
+    DrcRegularKey(DrcRegularKeyTx),
 }
 
 impl NetworkMessage {
@@ -61,6 +64,7 @@ impl NetworkMessage {
             && block.data_commitments.is_empty()
             && block.drc_account_policies.is_empty()
             && block.drc_deposit_preauths.is_empty()
+            && block.drc_regular_keys.is_empty()
         {
             Self::CompactBlock {
                 header: block.header.clone(),

@@ -3,8 +3,8 @@
 //! Bonding debits liquid account balances into staking locks. OVL and DRC sets
 //! never share stake or combine via prices.
 
+use crate::drc_account_auth::verify_drc_stake_operation;
 use agora_consensus::{SlashPolicy, ValidatorEvidence};
-use agora_crypto::verify_stake_tx_bound;
 use agora_types::{
     Address, CheckpointAttestation, Hash, NativeAssetId, SignedStakeTx, StakeOpKind,
 };
@@ -713,8 +713,7 @@ pub fn apply_signed_stake_tx(
     if tx.asset != params.asset {
         return Err(StateError::InvalidTx("stake asset mismatch".into()));
     }
-    verify_stake_tx_bound(tx, &auth.chain_id, &auth.genesis)
-        .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+    verify_drc_stake_operation(store, tx, auth)?;
 
     let acct = load_account(store, tx.asset, &tx.actor)?;
     if acct.nonce != tx.nonce {

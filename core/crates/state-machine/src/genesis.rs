@@ -88,6 +88,7 @@ impl GenesisBuilder {
             data_commitments: vec![],
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
         }
     }
 

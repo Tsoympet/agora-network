@@ -73,6 +73,7 @@ mod tests {
             data_availability_meta_before: Vec::new(),
             drc_policy_meta_before: Vec::new(),
             drc_deposit_preauth_meta_before: Vec::new(),
+            drc_regular_key_meta_before: Vec::new(),
         };
         store_utxo_journal(&store, &hash, &journal).unwrap();
         let loaded = load_utxo_journal(&store, &hash).unwrap().unwrap();

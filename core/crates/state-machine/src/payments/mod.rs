@@ -3,7 +3,7 @@
 //! This is an L1 account payment module. It does not import the historical
 //! district-chain ledger, PoW, bridge attestors, or transport cryptography.
 
-use agora_crypto::verify_drc_payment_bound;
+use crate::drc_account_auth::verify_drc_payment_operation;
 use agora_types::{DrcPaymentOutboxEvent, DrcPaymentReceipt, DrcPaymentTx, Hash, NativeAssetId};
 use borsh::BorshDeserialize;
 
@@ -220,8 +220,7 @@ pub(crate) fn apply_drc_payment_with_blue_score(
     if tx.amount.as_base_units() == 0 {
         return Err(StateError::InvalidTx("zero DRC payment".into()));
     }
-    verify_drc_payment_bound(tx, &auth.chain_id, &auth.genesis)
-        .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+    verify_drc_payment_operation(store, tx, auth)?;
     if tx.version == DRC_PAYMENT_VERSION {
         let score = application_blue_score.ok_or_else(|| {
             StateError::InvalidTx(
@@ -499,7 +498,7 @@ mod tests {
         sign_drc_payment_bound(&mut tx, &alice, &auth.chain_id, &auth.genesis).unwrap();
         let signed_bytes = borsh::to_vec(&tx).unwrap();
         let tx = DrcPaymentTx::try_from_slice(&signed_bytes).unwrap();
-        verify_drc_payment_bound(&tx, &auth.chain_id, &auth.genesis).unwrap();
+        agora_crypto::verify_drc_payment_bound(&tx, &auth.chain_id, &auth.genesis).unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         let receipt = apply_drc_payment(&store, &tx, &auth, &mut batch, &mut journal).unwrap();

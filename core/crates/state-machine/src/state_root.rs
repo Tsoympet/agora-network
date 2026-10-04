@@ -16,6 +16,7 @@ use crate::community_state::canonical_community_root;
 use crate::data_availability::data_availability_root;
 use crate::drc_deposit_preauth::drc_deposit_preauth_root;
 use crate::drc_policy::drc_account_policy_root;
+use crate::drc_regular_key::drc_regular_key_root;
 use crate::finality_store::load_finalized_blue_score;
 use crate::governance_state::governance_treasury_root;
 use crate::payments::drc_payment_root;
@@ -23,7 +24,7 @@ use crate::staking::{build_snapshot, load_epoch};
 use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
 
 /// Domain tag for the composed state root (versioned).
-pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v8";
+pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v9";
 
 /// Deterministic UTXO-set commitment (sorted outpoint keys).
 pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
@@ -84,6 +85,7 @@ pub fn compose_trident_state_root(
     let epoch_drc = load_epoch(store, NativeAssetId::DRC)?;
     let ovl_stake = build_snapshot(store, NativeAssetId::OVL, epoch_ovl)?.commitment();
     let drc_stake = build_snapshot(store, NativeAssetId::DRC, epoch_drc)?.commitment();
+    let drc_regular_keys = drc_regular_key_root(store)?;
     let drc_account_policies = drc_account_policy_root(store)?;
     let drc_deposit_preauths = drc_deposit_preauth_root(store)?;
     let drc_payments = drc_payment_root(store)?;
@@ -101,6 +103,7 @@ pub fn compose_trident_state_root(
         drc_accounts,
         ovl_stake,
         drc_stake,
+        drc_regular_keys,
         drc_account_policies,
         drc_deposit_preauths,
         drc_payments,

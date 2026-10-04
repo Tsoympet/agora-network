@@ -1,6 +1,6 @@
 use agora_types::{
     AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcDepositPreauthTx,
-    DrcPaymentReceipt, DrcPaymentTx, Hash, OvlExecutionTx, Transaction,
+    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, Hash, OvlExecutionTx, Transaction,
 };
 use serde_json::{json, Value};
 
@@ -208,6 +208,34 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                         "preauthorized": null,
                         "deposit_auth_required": null,
                         "deposit_authorized": null,
+                    })),
+                }
+            }
+            RpcMethod::SubmitDrcRegularKey => {
+                let raw = req
+                    .params
+                    .get("regular_key")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcRegularKeyTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_regular_key(tx)?;
+                Ok(json!({ "regular_key_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcAccountKeys => {
+                let account = param_address(&req.params, "account")?;
+                match self.backend.get_drc_account_keys(&account)? {
+                    Some((regular_key, nonce)) => Ok(json!({
+                        "account": account.to_bech32(),
+                        "status": "known",
+                        "regular_key": regular_key.map(|key| key.to_bech32()),
+                        "account_nonce": nonce,
+                    })),
+                    None => Ok(json!({
+                        "account": account.to_bech32(),
+                        "status": "unknown",
+                        "regular_key": null,
+                        "account_nonce": null,
                     })),
                 }
             }
@@ -803,6 +831,7 @@ mod tests {
             data_commitments: vec![],
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -917,6 +946,7 @@ mod tests {
             data_commitments: vec![],
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -950,6 +980,7 @@ mod tests {
             data_commitments: vec![],
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {

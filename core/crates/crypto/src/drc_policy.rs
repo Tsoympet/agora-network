@@ -2,8 +2,8 @@
 
 use agora_types::{DrcAccountPolicyTx, Hash};
 
-use crate::address::address_from_pubkey;
-use crate::{CryptoError, KeyPair, PublicKeyBytes, SignatureBytes};
+use crate::drc_operation::verify_bound_secp256k1;
+use crate::{CryptoError, KeyPair};
 
 pub fn sign_drc_account_policy_bound(
     tx: &mut DrcAccountPolicyTx,
@@ -13,10 +13,6 @@ pub fn sign_drc_account_policy_bound(
 ) -> Result<(), CryptoError> {
     tx.validate_version()
         .map_err(|_| CryptoError::InvalidTransactionAuth)?;
-    if keypair.address() != tx.account {
-        return Err(CryptoError::InvalidTransactionAuth);
-    }
-
     let signature = keypair.sign(&tx.signing_bytes_bound(chain_id, genesis))?;
     tx.public_key = keypair.public_key_bytes().to_vec();
     tx.signature = signature.to_vec();
@@ -30,22 +26,11 @@ pub fn verify_drc_account_policy_bound(
 ) -> Result<(), CryptoError> {
     tx.validate_version()
         .map_err(|_| CryptoError::InvalidTransactionAuth)?;
-    if tx.public_key.len() != 33 || tx.signature.len() != 64 {
-        return Err(CryptoError::InvalidTransactionAuth);
-    }
-
-    let mut public_key: PublicKeyBytes = [0; 33];
-    public_key.copy_from_slice(&tx.public_key);
-    let mut signature: SignatureBytes = [0; 64];
-    signature.copy_from_slice(&tx.signature);
-    KeyPair::verify(
-        &public_key,
+    verify_bound_secp256k1(
+        &tx.public_key,
+        &tx.signature,
         &tx.signing_bytes_bound(chain_id, genesis),
-        &signature,
     )?;
-    if address_from_pubkey(&public_key) != tx.account {
-        return Err(CryptoError::InvalidTransactionAuth);
-    }
     Ok(())
 }
 
@@ -100,18 +85,10 @@ mod tests {
     }
 
     #[test]
-    fn wrong_owner_and_unknown_version_are_rejected_before_signing() {
+    fn unknown_version_is_rejected_before_signing() {
         let owner = keypair(1);
-        let other = keypair(2);
-        let mut wrong_owner =
+        let mut unsupported =
             DrcAccountPolicyTx::set_require_destination_tag(owner.address(), Amount::ZERO, 0);
-        assert!(
-            sign_drc_account_policy_bound(&mut wrong_owner, &other, "agora-dev", &Hash::ZERO)
-                .is_err()
-        );
-        assert!(wrong_owner.public_key.is_empty());
-
-        let mut unsupported = wrong_owner;
         unsupported.version += 1;
         assert!(
             sign_drc_account_policy_bound(&mut unsupported, &owner, "agora-dev", &Hash::ZERO)

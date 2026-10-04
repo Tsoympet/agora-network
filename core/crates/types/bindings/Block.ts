@@ -5,6 +5,7 @@ import type { DataCommitmentAuthorization } from "./DataCommitmentAuthorization"
 import type { DrcAccountPolicyTx } from "./DrcAccountPolicyTx";
 import type { DrcDepositPreauthTx } from "./DrcDepositPreauthTx";
 import type { DrcPaymentTx } from "./DrcPaymentTx";
+import type { DrcRegularKeyTx } from "./DrcRegularKeyTx";
 import type { OvlExecutionTx } from "./OvlExecutionTx";
 import type { SignedStakeTx } from "./SignedStakeTx";
 import type { Transaction } from "./Transaction";
@@ -44,4 +45,8 @@ drc_account_policies: Array<DrcAccountPolicyTx>,
 /**
  * Owner-authorized, address-based DRC deposit preauthorizations.
  */
-drc_deposit_preauths: Array<DrcDepositPreauthTx>, };
+drc_deposit_preauths: Array<DrcDepositPreauthTx>,
+/**
+ * Owner-authorized DRC regular-key rotation operations.
+ */
+drc_regular_keys: Array<DrcRegularKeyTx>, };
