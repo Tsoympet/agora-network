@@ -9,7 +9,7 @@
 | EscrowCreate locks XRP from owner | **Yes:** locks native **DRC** from owner into a typed escrow object |
 | FinishAfter / CancelAfter time fields | **Yes:** `finish_after_blue_score` / `cancel_after_blue_score` only (GHOSTDAG blue score, never wall clock) |
 | Third-party EscrowFinish | **Yes:** any funded DRC account may submit finish and pay its own fee/sequence |
-| EscrowCancel by owner | **Yes:** cancel must be signed by the escrow **owner** (not third party) |
+| Third-party EscrowCancel | **Yes (rippled 2.5.0):** any funded DRC account may submit cancel after `CancelAfter`; submitter pays fee/sequence; locked DRC returns to escrow **owner** only ([XRPL EscrowCancel](https://xrpl.org/docs/references/protocol/transactions/types/escrowcancel)) |
 | CryptoConditions / hashlocks | **Excluded** |
 | Issued assets / trust lines | **Excluded** (DRC native only) |
 | Hooks / callbacks / predicates | **Excluded** |
@@ -27,7 +27,7 @@ Let `S` be the containing block’s canonical GHOSTDAG blue score.
 - **Cancel** allowed iff:
   - live escrow exists and is unsettled;
   - `cancel_after` is `Some(C)` and `S >= C`;
-  - submitter is the escrow owner (master/regular/multisign + master-disable rules).
+  - submitter is any funded DRC account authorized like other DRC ops (master/regular/multisign + master-disable rules on **submitter**, not owner).
 
 If only `cancel_after` is set (no finish_after), finish is allowed for all `S < C`.
 

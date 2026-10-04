@@ -842,7 +842,6 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("insufficient DRC escrow-cancel balance")
                 || msg.contains("DRC escrow finish not yet allowed")
                 || msg.contains("DRC escrow cancel not yet allowed")
-                || msg.contains("DRC escrow cancel owner mismatch")
         }
         _ => false,
     }
@@ -1167,7 +1166,7 @@ fn apply_trident_lanes(
             } else {
                 Vec::new()
             };
-            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.owner))?;
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.submitter))?;
             let mut op_batch = WriteBatch::new();
             let mut acct_journal = AccountJournal::default();
             match apply_drc_escrow_cancel(

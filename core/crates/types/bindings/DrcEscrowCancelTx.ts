@@ -5,4 +5,8 @@ import type { DrcAccountSequenceSelector } from "./DrcAccountSequenceSelector";
 import type { DrcMultisignAuth } from "./DrcMultisignAuth";
 import type { Hash } from "./Hash";
 
-export type DrcEscrowCancelTx = { version: number, owner: Address, escrow_id: Hash, fee: Amount, nonce: bigint, account_sequence: DrcAccountSequenceSelector | null, public_key: Array<number>, signature: Array<number>, multisign: DrcMultisignAuth | null, };
+export type DrcEscrowCancelTx = { version: number,
+/**
+ * Any funded DRC account may submit cancel (rippled EscrowCancel); value returns to escrow owner.
+ */
+submitter: Address, escrow_id: Hash, fee: Amount, nonce: bigint, account_sequence: DrcAccountSequenceSelector | null, public_key: Array<number>, signature: Array<number>, multisign: DrcMultisignAuth | null, };

@@ -144,7 +144,7 @@ impl DrcEscrowCreateTx {
     }
 
     pub fn authenticated_destination_tag(&self) -> Option<u32> {
-        self.destination_tag
+        self.destination_tag.filter(|tag| *tag != 0)
     }
 }
 
@@ -297,7 +297,8 @@ impl BorshDeserialize for DrcEscrowFinishTx {
 #[serde(deny_unknown_fields)]
 pub struct DrcEscrowCancelTx {
     pub version: u32,
-    pub owner: Address,
+    /// Any funded DRC account may submit cancel (rippled EscrowCancel); value returns to escrow owner.
+    pub submitter: Address,
     pub escrow_id: Hash,
     pub fee: Amount,
     pub nonce: u64,
@@ -323,7 +324,7 @@ impl DrcEscrowCancelTx {
         {
             return Err(DrcEscrowError::TicketSelectorOnLegacyVersion);
         }
-        if self.owner == Address::ZERO || self.escrow_id == Hash::ZERO {
+        if self.submitter == Address::ZERO || self.escrow_id == Hash::ZERO {
             return Err(DrcEscrowError::ZeroAddress);
         }
         Ok(())
@@ -340,7 +341,7 @@ impl DrcEscrowCancelTx {
                 genesis.as_bytes(),
                 DRC_ESCROW_CANCEL_TX_TYPE,
                 self.version,
-                self.owner,
+                self.submitter,
                 self.escrow_id,
                 self.fee,
                 sequence,
@@ -353,7 +354,7 @@ impl DrcEscrowCancelTx {
             genesis.as_bytes(),
             DRC_ESCROW_CANCEL_TX_TYPE,
             self.version,
-            self.owner,
+            self.submitter,
             self.escrow_id,
             self.fee,
             self.nonce,
@@ -369,7 +370,7 @@ impl DrcEscrowCancelTx {
 impl BorshSerialize for DrcEscrowCancelTx {
     fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> Result<(), borsh::io::Error> {
         BorshSerialize::serialize(&self.version, writer)?;
-        BorshSerialize::serialize(&self.owner, writer)?;
+        BorshSerialize::serialize(&self.submitter, writer)?;
         BorshSerialize::serialize(&self.escrow_id, writer)?;
         BorshSerialize::serialize(&self.fee, writer)?;
         BorshSerialize::serialize(&self.nonce, writer)?;
@@ -384,7 +385,7 @@ impl BorshDeserialize for DrcEscrowCancelTx {
     fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
         Ok(Self {
             version: u32::deserialize_reader(reader)?,
-            owner: Address::deserialize_reader(reader)?,
+            submitter: Address::deserialize_reader(reader)?,
             escrow_id: Hash::deserialize_reader(reader)?,
             fee: Amount::deserialize_reader(reader)?,
             nonce: u64::deserialize_reader(reader)?,

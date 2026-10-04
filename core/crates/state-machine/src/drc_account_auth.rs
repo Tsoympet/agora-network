@@ -426,7 +426,7 @@ pub fn verify_drc_escrow_cancel_operation(
     }
     verify_multisign_or_single(
         store,
-        &tx.owner,
+        &tx.submitter,
         &tx.public_key,
         &tx.signature,
         &tx.multisign,

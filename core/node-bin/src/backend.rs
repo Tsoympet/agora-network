@@ -541,7 +541,7 @@ pub(crate) fn admit_drc_escrow_cancel(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-    if pool.account_reserved(NativeAssetId::DRC, &tx.owner) {
+    if pool.account_reserved(NativeAssetId::DRC, &tx.submitter) {
         return Err(RpcError::Rejected(
             "DRC account already has a pending nonce".into(),
         ));

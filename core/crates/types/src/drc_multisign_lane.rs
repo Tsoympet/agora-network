@@ -261,7 +261,7 @@ pub fn materialize_drc_multisign_attachments(
             tx.public_key.clear();
             tx.signature.clear();
             let key = attachment_key_for_escrow_cancel(tx, chain_id, genesis);
-            push_materialized(&mut attachments, key, tx.owner, auth)?;
+            push_materialized(&mut attachments, key, tx.submitter, auth)?;
         } else if needs_attachment(&tx.public_key, &tx.signature, &None) {
             return Err(DrcMultisignAttachmentError::MissingAttachment);
         }
@@ -496,7 +496,7 @@ fn owner_for_key(
     }
     for tx in &block.drc_escrow_cancels {
         if attachment_key_for_escrow_cancel(tx, chain_id, genesis) == key {
-            return Ok(tx.owner);
+            return Ok(tx.submitter);
         }
     }
     Err(DrcMultisignAttachmentError::OrphanAttachment)

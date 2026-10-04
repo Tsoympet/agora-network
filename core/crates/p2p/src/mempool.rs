@@ -711,7 +711,7 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        self.reserve_drc_slot(id, tx.owner, DrcSlotReservation::AccountNonce)?;
+        self.reserve_drc_slot(id, tx.submitter, DrcSlotReservation::AccountNonce)?;
         self.drc_escrow_cancel_txs.insert(id, tx);
         Ok(id)
     }
@@ -731,7 +731,7 @@ impl Mempool {
 
     pub fn remove_drc_escrow_cancel(&mut self, id: &Hash) -> Option<DrcEscrowCancelTx> {
         let tx = self.drc_escrow_cancel_txs.remove(id)?;
-        self.release_drc_slot(id, tx.owner);
+        self.release_drc_slot(id, tx.submitter);
         Some(tx)
     }
 
@@ -1062,7 +1062,7 @@ impl Mempool {
             let _ = self.remove_drc_escrow_finish(&id);
         }
         for tx in &block.drc_escrow_cancels {
-            consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.submitter));
             let id = tx.cancel_tx_id();
             let _ = self.remove_drc_escrow_cancel(&id);
         }
@@ -1917,5 +1917,98 @@ mod tests {
         pay.account_sequence = Some(agora_types::DrcAccountSequenceSelector::ticket(1));
         assert!(pool.admit_payment(pay).is_ok());
         assert!(pool.ticket_consumer_reserved(&owner, 1));
+    }
+
+    #[test]
+    fn pending_escrow_create_blocks_finish_and_cancel_in_mempool() {
+        let owner = Address([10; 20]);
+        let recipient = Address([11; 20]);
+        let create = DrcEscrowCreateTx {
+            version: agora_types::DRC_ESCROW_CREATE_TX_VERSION,
+            owner,
+            recipient,
+            amount: Amount::from_base_units(10),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            finish_after_blue_score: None,
+            cancel_after_blue_score: Some(100),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let finish = DrcEscrowFinishTx {
+            version: agora_types::DRC_ESCROW_FINISH_TX_VERSION,
+            submitter: owner,
+            escrow_id: create.escrow_id(),
+            fee: Amount::from_base_units(1),
+            nonce: 1,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let cancel = DrcEscrowCancelTx {
+            version: agora_types::DRC_ESCROW_CANCEL_TX_VERSION,
+            submitter: owner,
+            escrow_id: create.escrow_id(),
+            fee: Amount::from_base_units(1),
+            nonce: 1,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(16);
+        pool.admit_drc_escrow_create(create).unwrap();
+        assert!(pool.pending_escrow_create(&finish.escrow_id));
+        assert!(pool.admit_drc_escrow_finish(finish).is_err());
+        assert!(pool.admit_drc_escrow_cancel(cancel).is_err());
+    }
+
+    #[test]
+    fn escrow_cancel_reserves_submitter_nonce_not_owner() {
+        let owner = Address([12; 20]);
+        let helper = Address([13; 20]);
+        let create = DrcEscrowCreateTx {
+            version: agora_types::DRC_ESCROW_CREATE_TX_VERSION,
+            owner,
+            recipient: Address([14; 20]),
+            amount: Amount::from_base_units(5),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            finish_after_blue_score: None,
+            cancel_after_blue_score: Some(50),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let cancel = DrcEscrowCancelTx {
+            version: agora_types::DRC_ESCROW_CANCEL_TX_VERSION,
+            submitter: helper,
+            escrow_id: create.escrow_id(),
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(8);
+        let create_id = create.escrow_id();
+        pool.admit_drc_escrow_create(create).unwrap();
+        pool.remove_drc_escrow_create(&create_id);
+        let cancel_id = pool.admit_drc_escrow_cancel(cancel).unwrap();
+        assert!(pool.account_reserved(NativeAssetId::DRC, &helper));
+        assert!(!pool.account_reserved(NativeAssetId::DRC, &owner));
+        pool.remove_drc_escrow_cancel(&cancel_id).unwrap();
+        assert!(!pool.account_reserved(NativeAssetId::DRC, &helper));
     }
 }

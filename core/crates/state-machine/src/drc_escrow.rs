@@ -433,11 +433,6 @@ pub fn apply_drc_escrow_cancel(
     ensure_unsettled(store, &tx.escrow_id)?;
     let live = load_drc_escrow_live(store, &tx.escrow_id)?
         .ok_or_else(|| StateError::InvalidTx("unknown DRC escrow".into()))?;
-    if live.owner != tx.owner {
-        return Err(StateError::InvalidTx(
-            "DRC escrow cancel owner mismatch".into(),
-        ));
-    }
 
     if !escrow_cancel_allowed(application_blue_score, live.cancel_after_blue_score) {
         return Err(StateError::InvalidTx(
@@ -445,7 +440,7 @@ pub fn apply_drc_escrow_cancel(
         ));
     }
 
-    let mut owner = load_account(store, NativeAssetId::DRC, &tx.owner)?;
+    let mut submitter = load_account(store, NativeAssetId::DRC, &tx.submitter)?;
     let sequence_ctx = if tx.version >= DRC_ESCROW_CANCEL_TICKET_VERSION {
         let selector = resolve_drc_account_sequence(
             tx.version,
@@ -454,47 +449,54 @@ pub fn apply_drc_escrow_cancel(
             tx.account_sequence,
         )
         .map_err(|e| StateError::InvalidTx(e.to_string()))?;
-        Some(begin_drc_account_sequence(store, &tx.owner, selector)?)
+        Some(begin_drc_account_sequence(store, &tx.submitter, selector)?)
     } else {
-        if owner.nonce != tx.nonce {
+        if submitter.nonce != tx.nonce {
             return Err(StateError::InvalidTx(format!(
                 "bad DRC escrow-cancel nonce: got {} expected {}",
-                tx.nonce, owner.nonce
+                tx.nonce, submitter.nonce
             )));
         }
         None
     };
 
-    if owner.balance < tx.fee.as_base_units() {
+    if submitter.balance < tx.fee.as_base_units() {
         return Err(StateError::InvalidTx(
             "insufficient DRC escrow-cancel balance".into(),
         ));
     }
+
+    let mut owner = load_account(store, NativeAssetId::DRC, &live.owner)?;
     let new_owner_balance = owner
         .balance
-        .checked_sub(tx.fee.as_base_units())
-        .and_then(|b| b.checked_add(live.amount.as_base_units()))
-        .ok_or_else(|| StateError::InvalidTx("DRC escrow cancel balance overflow".into()))?;
+        .checked_add(live.amount.as_base_units())
+        .ok_or_else(|| StateError::InvalidTx("DRC escrow cancel owner balance overflow".into()))?;
 
     journal
         .before
-        .push((NativeAssetId::DRC, tx.owner, owner.clone()));
-    owner.balance = new_owner_balance;
+        .push((NativeAssetId::DRC, tx.submitter, submitter.clone()));
+    journal
+        .before
+        .push((NativeAssetId::DRC, live.owner, owner.clone()));
+
+    submitter.balance -= tx.fee.as_base_units();
     if let Some(ctx) = sequence_ctx {
         finish_drc_account_sequence(
             batch,
-            &tx.owner,
-            &mut owner,
+            &tx.submitter,
+            &mut submitter,
             ctx.consumption,
             &ctx.tickets_before,
         )?;
     } else {
-        owner.nonce = owner
+        submitter.nonce = submitter
             .nonce
             .checked_add(1)
             .ok_or_else(|| StateError::InvalidTx("DRC escrow-cancel nonce overflow".into()))?;
     }
-    put_account_into(batch, NativeAssetId::DRC, &tx.owner, &owner)?;
+    owner.balance = new_owner_balance;
+    put_account_into(batch, NativeAssetId::DRC, &tx.submitter, &submitter)?;
+    put_account_into(batch, NativeAssetId::DRC, &live.owner, &owner)?;
 
     settle_escrow(
         store,
