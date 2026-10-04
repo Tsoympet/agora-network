@@ -864,6 +864,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -980,6 +981,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -1015,6 +1017,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {

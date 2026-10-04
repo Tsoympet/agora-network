@@ -12,8 +12,9 @@ mod community_state;
 mod data_availability;
 mod drc_account_auth;
 mod drc_deposit_preauth;
-#[cfg(test)]
 mod drc_multisig_tests;
+#[cfg(test)]
+mod drc_multisign_attachment_tests;
 mod drc_policy;
 mod drc_regular_key;
 #[cfg(test)]

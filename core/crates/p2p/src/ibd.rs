@@ -442,6 +442,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         }
     }
 

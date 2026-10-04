@@ -67,6 +67,8 @@ impl NetworkMessage {
             && block.drc_account_policies.is_empty()
             && block.drc_deposit_preauths.is_empty()
             && block.drc_regular_keys.is_empty()
+            && block.drc_signer_lists.is_empty()
+            && block.drc_multisign_attachments.is_empty()
         {
             Self::CompactBlock {
                 header: block.header.clone(),

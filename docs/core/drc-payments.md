@@ -368,8 +368,15 @@ Pinned `rippled` 2.5.0 `SignerListSet` / `MultiSign` baseline with explicit devi
 - master and regular-key single signatures remain valid recovery paths
 - multisign uses domain `agora-trident-drc-multisign-participant-v1` binding
   `signing_for`, chain ID, genesis, operation signing bytes, and version
-- detached `DrcMultisignAuth` trailer (`0x01` marker + Borsh) on in-scope operations;
-  frozen single-signature Borsh bytes are unchanged at EOF
+- consensus bodies carry detached authorization in `drc_multisign_attachments`
+  (Borsh lane, body-root v11); operation vec elements stay byte-stable (no inline
+  multisign in lane Borsh). Mempool/RPC JSON may hold `multisign` until template
+  materialization strips it into attachments keyed by
+  `(DrcMultisignOperationKind, signing_commitment)` where
+  `signing_commitment = Hash(domain, key_version, kind, signing_bytes_bound(...))`
+- attachments are strictly sorted by `(kind, signing_commitment)`, capped at one
+  per eligible in-scope DRC operation (≤32 auth entries per bundle); orphans,
+  duplicates, mixed inline+attachment, and wrong-kind/owner keys fail before mutation
 - exactly one of single-signature or multisign authorization; mixed envelopes fail closed
 - signer-list **Set** may be authorized by master, regular key, or multisign on the
   **currently installed** list; signers that exist only on the **new** list cannot
@@ -391,9 +398,12 @@ account transfers → OVL executions → stake ops → DRC regular-key ops
 
 Signer-list state commits to `agora-drc-signer-list-root-v1` inside composed state root
 `agora-trident-state-root-v10`. Body commitment uses `agora-block-body-v10` when the
-lane is non-empty. Trident protocol v12, state transition `agora-trident-state-v13`,
-transaction signing `agora-trident-tx-v6`, and Experimental datadir schema v16 isolate
-this slice.
+signer-list lane is non-empty and `agora-block-body-v11` when
+`drc_multisign_attachments` is non-empty (attachment leaf IDs commit full auth bytes).
+Trident protocol v13, state transition `agora-trident-state-v14`, transaction signing
+`agora-trident-tx-v7`, and Experimental datadir schema v17 isolate this slice.
+Multisign is usable on mined blocks once template materialization and P2P full-body
+transport carry the attachment lane (Single-node prototype).
 
 `agora_submitDrcSignerList` admits a fully signed operation.
 `agora_getDrcAccountSignerList` returns `quorum`, `entry_count`, and `account_nonce`

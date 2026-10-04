@@ -52,7 +52,8 @@ impl ColumnFamily {
 /// - `12` — owner-authorized DRC recipient policy and payment-v3 tag presence
 /// - `13` — address-based DRC DepositAuth preauthorization records and journals
 /// - `14` — signed DRC payment-v4 GHOSTDAG blue-score expiry metadata
-pub const SCHEMA_VERSION: u32 = 16;
+/// - `16` — DRC weighted signer lists + detached multisign authorization lane
+pub const SCHEMA_VERSION: u32 = 17;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {

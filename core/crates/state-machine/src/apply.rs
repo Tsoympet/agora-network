@@ -800,6 +800,25 @@ fn apply_trident_lanes(
         )));
     }
 
+    let working_block = if let Some(ctx) = auth {
+        agora_types::validate_drc_multisign_attachment_lane(block, &ctx.chain_id, &ctx.genesis)
+            .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+        if block.drc_multisign_attachments.is_empty() {
+            block.clone()
+        } else {
+            agora_types::merge_drc_multisign_attachments(block.clone(), &ctx.chain_id, &ctx.genesis)
+                .map_err(|e| StateError::InvalidTx(e.to_string()))?
+        }
+    } else {
+        if !block.drc_multisign_attachments.is_empty() {
+            return Err(StateError::InvalidTx(
+                "DRC multisign attachment lane requires network-bound auth".into(),
+            ));
+        }
+        block.clone()
+    };
+    let block = &working_block;
+
     // Sequential visibility without committing the consensus batch early.
     let lane = store.cow_overlay();
     let mut account_statuses = Vec::with_capacity(block.account_transfers.len());
@@ -1781,6 +1800,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -1975,6 +1995,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -2078,6 +2099,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -2148,6 +2170,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -2227,6 +2250,7 @@ mod tests {
                 drc_deposit_preauths: vec![],
                 drc_regular_keys: vec![],
                 drc_signer_lists: vec![],
+                drc_multisign_attachments: vec![],
             },
             1,
             None,
@@ -2305,6 +2329,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -2401,6 +2426,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -2479,6 +2505,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -2571,6 +2598,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -2689,6 +2717,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -3314,6 +3343,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 

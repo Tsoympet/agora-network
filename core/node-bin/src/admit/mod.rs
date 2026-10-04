@@ -550,7 +550,16 @@ impl ChainState {
             drc_deposit_preauths: lanes.drc_deposit_preauths.to_vec(),
             drc_regular_keys: lanes.drc_regular_keys.to_vec(),
             drc_signer_lists: lanes.drc_signer_lists.to_vec(),
+            drc_multisign_attachments: Vec::new(),
         };
+        if let Some(ctx) = self.auth.as_ref() {
+            agora_types::materialize_drc_multisign_attachments(
+                &mut block,
+                &ctx.chain_id,
+                &ctx.genesis,
+            )
+            .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+        }
         block.header.tx_root = block.compute_body_root();
         Ok(block)
     }

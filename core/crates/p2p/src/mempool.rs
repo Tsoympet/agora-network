@@ -1028,6 +1028,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -1092,6 +1093,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));
