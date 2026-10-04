@@ -166,6 +166,31 @@ pub mod support {
         block.id()
     }
 
+    pub fn apply_block_capture(
+        store: &StateStore,
+        mut block: Block,
+        blue_score: u64,
+        ctx: &TxAuthContext,
+    ) -> (
+        Hash,
+        crate::apply::UtxoJournal,
+        crate::BlockAcceptanceRecord,
+    ) {
+        block.header.tx_root = block.compute_body_root();
+        let result =
+            apply_block_batched_with_auth_at_blue_score(store, &block, 50, Some(ctx), blue_score)
+                .unwrap();
+        store.write_batch(result.batch).unwrap();
+        crate::store_acceptance(store, &block.id(), &result.acceptance).unwrap();
+        (block.id(), result.journal, result.acceptance)
+    }
+
+    pub fn revert_journal(store: &StateStore, journal: &crate::apply::UtxoJournal) {
+        store
+            .write_batch(crate::apply::revert_journal_batched(journal).unwrap())
+            .unwrap();
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn create_live_escrow(
         store: &StateStore,

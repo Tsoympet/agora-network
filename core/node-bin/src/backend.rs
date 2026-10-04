@@ -2553,4 +2553,72 @@ mod tests {
             assert!(!pool.ticket_consumer_reserved(&owner, 1));
         }
     }
+
+    #[test]
+    fn drc_escrow_submit_and_point_query_end_to_end() {
+        use agora_crypto::{sign_drc_escrow_create_bound, KeyPair};
+        use agora_types::{DrcEscrowCreateTx, Hash, DRC_ESCROW_CREATE_TX_VERSION};
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let owner = KeyPair::from_secret_bytes(&[40; 32]).unwrap();
+        let recipient = KeyPair::from_secret_bytes(&[41; 32]).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &owner.address(),
+            Amount::from_base_units(10_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(
+            chain,
+            store.clone(),
+            Arc::new(Mutex::new(Mempool::new(64))),
+            backend_config(genesis),
+        );
+        let auth = backend.tx_auth();
+        let mut create = DrcEscrowCreateTx {
+            version: DRC_ESCROW_CREATE_TX_VERSION,
+            owner: owner.address(),
+            recipient: recipient.address(),
+            amount: Amount::from_base_units(25),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            finish_after_blue_score: None,
+            cancel_after_blue_score: Some(100),
+            nonce: 0,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+        };
+        sign_drc_escrow_create_bound(&mut create, &owner, &auth.chain_id, &auth.genesis).unwrap();
+        let escrow_id = backend.submit_drc_escrow_create(create).unwrap();
+        assert_eq!(
+            backend.get_drc_escrow(&escrow_id).unwrap()["status"],
+            json!("unknown")
+        );
+        assert!(backend
+            .mempool
+            .lock()
+            .unwrap()
+            .pending_escrow_create(&escrow_id));
+        let unknown = backend.get_drc_escrow(&Hash([0xab; 32])).unwrap();
+        assert_eq!(unknown["status"], json!("unknown"));
+    }
 }

@@ -346,6 +346,8 @@ mod reorg_journal {
 #[cfg(feature = "rocksdb")]
 #[cfg(test)]
 mod rocksdb_reopen {
+    use agora_types::Hash;
+
     use crate::drc_escrow::{
         load_drc_escrow_live, load_drc_escrow_receipt, lookup_drc_escrow_point,
     };

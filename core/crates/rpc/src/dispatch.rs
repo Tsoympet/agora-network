@@ -1758,4 +1758,59 @@ mod tests {
         });
         assert_eq!(receipt.result.unwrap()["status"], json!("unknown"));
     }
+
+    #[test]
+    fn submit_drc_escrow_malformed_structure_returns_invalid_params() {
+        let mut backend = InMemoryBackend::new();
+        let genesis = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
+            data_commitments: vec![],
+            drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
+            drc_multisign_attachments: vec![],
+        };
+        backend.insert_block(genesis);
+        let mut rpc = RpcDispatcher::new(backend);
+        let bad = rpc.handle(RpcRequest {
+            id: Some(json!(94)),
+            method: "agora_submitDrcEscrowCreate".into(),
+            params: json!({"owner": "not-an-address"}),
+        });
+        assert_eq!(bad.error.as_ref().unwrap().code, -32602);
+        let invoice = rpc.handle(RpcRequest {
+            id: Some(json!(95)),
+            method: "agora_submitDrcEscrowCreate".into(),
+            params: json!({
+                "version": 1,
+                "owner": agora_types::Address([1;20]).to_bech32(),
+                "recipient": agora_types::Address([2;20]).to_bech32(),
+                "amount": "1",
+                "fee": "1",
+                "invoice_id": Hash([9;32]).to_hex(),
+                "cancel_after_blue_score": 10,
+                "nonce": 0,
+                "public_key": "",
+                "signature": ""
+            }),
+        });
+        assert_eq!(invoice.error.as_ref().unwrap().code, -32602);
+    }
 }

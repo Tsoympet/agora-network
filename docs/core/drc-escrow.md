@@ -53,7 +53,7 @@ After ticket creates, consensus applies in order:
 2. `drc_escrow_finishes`
 3. `drc_escrow_cancels`
 
-Same-block create→finish/cancel is allowed deterministically via the overlay (mempool remains fail-closed for pending create without inclusion).
+Same-block create→finish/cancel is allowed deterministically via the overlay (mempool remains fail-closed for pending create without inclusion). Pending finish and cancel exclude each other on the same escrow id in the public mempool.
 
 ## RPC
 
