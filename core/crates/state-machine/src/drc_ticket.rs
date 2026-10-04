@@ -4,7 +4,7 @@ use agora_types::{
     Address, DrcAccountSequence, DrcAccountSequenceSelector, DrcAccountTickets, DrcTicketCreateTx,
     NativeAssetId, DRC_MAX_OUTSTANDING_TICKETS_PER_ACCOUNT, DRC_TICKET_STATE_VERSION,
 };
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::BorshDeserialize;
 
 use crate::accounts::{load_account, put_account_into, AccountJournal, AccountState};
 use crate::apply::TxAuthContext;
@@ -125,7 +125,7 @@ pub fn validate_drc_account_sequence(
         }
         DrcAccountSequence::Ticket => {
             let tickets = load_drc_account_tickets(store, owner)?;
-            if !tickets.iter().any(|seq| *seq == selector.value) {
+            if !tickets.contains(&selector.value) {
                 return Err(StateError::InvalidTx(format!(
                     "unknown DRC ticket sequence {}",
                     selector.value
@@ -163,6 +163,35 @@ pub fn commit_drc_sequence_consumption(
     }
 }
 
+pub fn finish_drc_account_sequence(
+    batch: &mut WriteBatch,
+    owner: &Address,
+    account: &mut AccountState,
+    consumption: DrcSequenceConsumption,
+    tickets_before: &[u64],
+) -> Result<(), StateError> {
+    commit_drc_sequence_consumption(batch, owner, account, consumption, tickets_before)
+}
+
+/// Sequence plan captured before balance/policy checks so rejection leaves tickets untouched.
+pub struct DrcSequenceApplyContext {
+    pub consumption: DrcSequenceConsumption,
+    pub tickets_before: Vec<u64>,
+}
+
+pub fn begin_drc_account_sequence(
+    store: &StateStore,
+    owner: &Address,
+    selector: DrcAccountSequenceSelector,
+) -> Result<DrcSequenceApplyContext, StateError> {
+    let tickets_before = load_drc_account_tickets(store, owner)?;
+    let consumption = validate_drc_account_sequence(store, owner, selector)?;
+    Ok(DrcSequenceApplyContext {
+        consumption,
+        tickets_before,
+    })
+}
+
 pub fn apply_drc_ticket_create(
     store: &StateStore,
     tx: &DrcTicketCreateTx,
@@ -194,7 +223,7 @@ pub fn apply_drc_ticket_create(
         .ok_or_else(|| StateError::InvalidTx("DRC ticket-create nonce overflow".into()))?;
 
     let mut tickets = load_drc_account_tickets(store, &tx.owner)?;
-    if tickets.iter().any(|seq| *seq == ticket_sequence) {
+    if tickets.contains(&ticket_sequence) {
         return Err(StateError::InvalidTx(format!(
             "duplicate DRC ticket sequence {ticket_sequence}"
         )));

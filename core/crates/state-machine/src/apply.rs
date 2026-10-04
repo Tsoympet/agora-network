@@ -20,6 +20,7 @@ use crate::drc_master_key_recovery::assert_drc_recovery_invariant;
 use crate::drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys};
 use crate::drc_regular_key::{apply_drc_regular_key, drc_regular_key_meta_keys};
 use crate::drc_signer_list::{apply_drc_signer_list, drc_signer_list_meta_keys};
+use crate::drc_ticket::{apply_drc_ticket_create, drc_ticket_meta_keys};
 use crate::execution::apply_ovl_execution;
 use crate::payments::{apply_drc_payment_with_blue_score, payment_meta_keys};
 use crate::staking::{
@@ -81,6 +82,8 @@ pub struct UtxoJournal {
     pub drc_regular_key_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     /// Signer-list keys before Accepted list operations.
     pub drc_signer_list_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    /// DRC ticket-set keys before Accepted ticket-create operations.
+    pub drc_ticket_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -156,6 +159,24 @@ struct UtxoJournalV8 {
     drc_regular_key_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
+/// Multi-lane journal before DRC ticket metadata.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct UtxoJournalV9 {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+    fees: u64,
+    subsidy: u64,
+    coinbase_total: u64,
+    account_before: Vec<(NativeAssetId, Address, AccountState)>,
+    stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    data_availability_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_policy_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_deposit_preauth_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_regular_key_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_signer_list_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
 /// Multi-lane journal before DRC regular-key metadata.
 #[derive(Debug, Clone, BorshDeserialize)]
 struct UtxoJournalV7 {
@@ -192,6 +213,24 @@ impl UtxoJournal {
         if let Ok(j) = Self::try_from_slice(bytes) {
             return Ok(j);
         }
+        if let Ok(v9) = UtxoJournalV9::try_from_slice(bytes) {
+            return Ok(Self {
+                spent: v9.spent,
+                created: v9.created,
+                fees: v9.fees,
+                subsidy: v9.subsidy,
+                coinbase_total: v9.coinbase_total,
+                account_before: v9.account_before,
+                stake_meta_before: v9.stake_meta_before,
+                payment_meta_before: v9.payment_meta_before,
+                data_availability_meta_before: v9.data_availability_meta_before,
+                drc_policy_meta_before: v9.drc_policy_meta_before,
+                drc_deposit_preauth_meta_before: v9.drc_deposit_preauth_meta_before,
+                drc_regular_key_meta_before: v9.drc_regular_key_meta_before,
+                drc_signer_list_meta_before: v9.drc_signer_list_meta_before,
+                drc_ticket_meta_before: Vec::new(),
+            });
+        }
         if let Ok(v8) = UtxoJournalV8::try_from_slice(bytes) {
             return Ok(Self {
                 spent: v8.spent,
@@ -207,6 +246,7 @@ impl UtxoJournal {
                 drc_deposit_preauth_meta_before: v8.drc_deposit_preauth_meta_before,
                 drc_regular_key_meta_before: v8.drc_regular_key_meta_before,
                 drc_signer_list_meta_before: Vec::new(),
+                drc_ticket_meta_before: Vec::new(),
             });
         }
         if let Ok(v7) = UtxoJournalV7::try_from_slice(bytes) {
@@ -224,6 +264,7 @@ impl UtxoJournal {
                 drc_deposit_preauth_meta_before: v7.drc_deposit_preauth_meta_before,
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
+                drc_ticket_meta_before: Vec::new(),
             });
         }
         if let Ok(v6) = UtxoJournalV6::try_from_slice(bytes) {
@@ -241,6 +282,7 @@ impl UtxoJournal {
                 drc_deposit_preauth_meta_before: Vec::new(),
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
+                drc_ticket_meta_before: Vec::new(),
             });
         }
         if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
@@ -258,6 +300,7 @@ impl UtxoJournal {
                 drc_deposit_preauth_meta_before: Vec::new(),
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
+                drc_ticket_meta_before: Vec::new(),
             });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
@@ -275,6 +318,7 @@ impl UtxoJournal {
                 drc_deposit_preauth_meta_before: Vec::new(),
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
+                drc_ticket_meta_before: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -292,6 +336,7 @@ impl UtxoJournal {
                 drc_deposit_preauth_meta_before: Vec::new(),
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
+                drc_ticket_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -309,6 +354,7 @@ impl UtxoJournal {
                 drc_deposit_preauth_meta_before: Vec::new(),
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
+                drc_ticket_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -327,6 +373,7 @@ impl UtxoJournal {
             drc_deposit_preauth_meta_before: Vec::new(),
             drc_regular_key_meta_before: Vec::new(),
             drc_signer_list_meta_before: Vec::new(),
+            drc_ticket_meta_before: Vec::new(),
         })
     }
 }
@@ -654,6 +701,7 @@ fn apply_block_batched_mode(
     );
 
     let (
+        drc_ticket_create_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -685,7 +733,7 @@ fn apply_block_batched_mode(
             data_commitment_statuses,
             drc_regular_key_statuses,
             drc_signer_list_statuses,
-            drc_ticket_create_statuses: Vec::new(),
+            drc_ticket_create_statuses,
             drc_policy_statuses,
             drc_deposit_preauth_statuses,
         },
@@ -741,6 +789,7 @@ type TridentLaneAcceptances = (
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
 );
 
 /// Apply canonical Trident lanes and credit only Accepted fees to reward pools.
@@ -753,7 +802,8 @@ fn apply_trident_lanes(
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
 ) -> Result<TridentLaneAcceptances, StateError> {
-    if block.account_transfers.is_empty()
+    if block.drc_ticket_creates.is_empty()
+        && block.account_transfers.is_empty()
         && block.ovl_executions.is_empty()
         && block.drc_payments.is_empty()
         && block.data_commitments.is_empty()
@@ -773,9 +823,11 @@ fn apply_trident_lanes(
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         ));
     }
-    if (!block.stake_ops.is_empty()
+    if (!block.drc_ticket_creates.is_empty()
+        || !block.stake_ops.is_empty()
         || !block.ovl_executions.is_empty()
         || !block.drc_payments.is_empty()
         || !block.drc_account_policies.is_empty()
@@ -823,6 +875,7 @@ fn apply_trident_lanes(
 
     // Sequential visibility without committing the consensus batch early.
     let lane = store.cow_overlay();
+    let mut drc_ticket_create_statuses = Vec::with_capacity(block.drc_ticket_creates.len());
     let mut account_statuses = Vec::with_capacity(block.account_transfers.len());
     let mut execution_statuses = Vec::with_capacity(block.ovl_executions.len());
     let mut stake_statuses = Vec::with_capacity(block.stake_ops.len());
@@ -840,6 +893,46 @@ fn apply_trident_lanes(
     let mut seen_policy_ids: HashSet<Hash> = HashSet::new();
     let mut seen_deposit_preauth_ids: HashSet<Hash> = HashSet::new();
     let mut seen_payment_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_ticket_create_ids: HashSet<Hash> = HashSet::new();
+
+    // Ticket creates observe pre-block key/list/policy auth state; minted tickets are
+    // visible to every later lane in this block via the copy-on-write overlay.
+    for tx in &block.drc_ticket_creates {
+        let id = tx.ticket_create_tx_id();
+        let ctx = auth.expect("DRC ticket-create auth checked above");
+        let meta_before = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.owner))?;
+        let mut op_batch = WriteBatch::new();
+        let mut acct_journal = AccountJournal::default();
+        match apply_drc_ticket_create(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
+            Ok(_) => {
+                if tx.fee.as_base_units() > 0 {
+                    let pool_snap =
+                        snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                    journal.stake_meta_before.extend(pool_snap);
+                    credit_fee_share_to_reward_pool(
+                        &lane,
+                        &mut op_batch,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
+                }
+                lane.write_batch(op_batch.clone())?;
+                batch.append(op_batch);
+                journal.account_before.extend(acct_journal.before);
+                journal.drc_ticket_meta_before.extend(meta_before);
+                seen_ticket_create_ids.insert(id);
+                drc_ticket_create_statuses.push(TransactionAcceptance::Accepted);
+            }
+            Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                if seen_ticket_create_ids.contains(&id) {
+                    drc_ticket_create_statuses.push(TransactionAcceptance::ExactDuplicate);
+                } else {
+                    drc_ticket_create_statuses.push(TransactionAcceptance::ConflictLost);
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
 
     for tx in &block.account_transfers {
         let id = tx.transfer_id();
@@ -1187,6 +1280,7 @@ fn apply_trident_lanes(
     }
 
     Ok((
+        drc_ticket_create_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -1561,6 +1655,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
         }
     }
     for (key, prior) in journal.drc_signer_list_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
+    for (key, prior) in journal.drc_ticket_meta_before.iter().rev() {
         match prior {
             Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
             None => batch.delete_cf(ColumnFamily::Meta, key),
@@ -2829,10 +2929,13 @@ mod tests {
         }
         store.write_batch(funding).unwrap();
 
+        let merchant_nonce =
+            load_account(&store, NativeAssetId::DRC, &merchant.address()).unwrap().nonce;
+
         let mut set = DrcAccountPolicyTx::set_require_destination_tag(
             merchant.address(),
             Amount::from_base_units(1),
-            0,
+            merchant_nonce,
         );
         sign_drc_account_policy_bound(&mut set, &merchant, &auth.chain_id, &auth.genesis).unwrap();
         let mut missing = DrcPaymentTx::unsigned_v3(
@@ -2854,7 +2957,7 @@ mod tests {
             None,
             None,
             Hash::ZERO,
-            0,
+            merchant_nonce,
         );
         sign_drc_payment_bound(
             &mut shared_nonce_conflict,

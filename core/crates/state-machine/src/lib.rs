@@ -28,6 +28,8 @@ mod drc_signer_list;
 mod drc_ticket;
 #[cfg(test)]
 mod drc_ticket_tests;
+#[cfg(test)]
+mod drc_tickets_stage_a_tests;
 mod error;
 mod execution;
 mod finality_store;

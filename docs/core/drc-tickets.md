@@ -1,57 +1,73 @@
 # DRC Tickets (rippled 2.5.0 subset)
 
 **Maturity:** Experimental · Single-node prototype  
+**Public submission:** **Unavailable until Stage B** (no mempool/RPC ticket create/use/reservation).  
 **Not XRPL wire/API parity** — no `TicketBatch`, reserve math, or ledger object wire shapes.
 
 ## Pinned rippled intent (2.5.0)
 
 Rippled **Tickets** let an account enqueue future sequence numbers so signed transactions can execute **out of order** while each ticket is **single-use**. Creation consumes sequence space; spending a ticket does not advance the account’s current sequence.
 
-## Agora Trident subset (phase 2 — in progress on `cursor/drc-tickets-cdcf`)
+## Agora Trident subset (Stage A — consensus core on `cursor/drc-tickets-cdcf`)
 
 | Topic | Agora behavior |
 |--------|----------------|
 | Scope | DRC account lanes only; OVL/TLT unchanged |
 | Create | Dedicated `DrcTicketCreateTx` lane; **exactly one** ticket per operation |
 | Create auth | Master / regular / multisign (same central verifier); **nonce-only** (never consumes a ticket) |
-| Sequence rule | Create at ordinary nonce `N` mints ticket sequence `N+1`, advances account nonce to `N+2` (checked overflow) |
-| Cap | `DRC_MAX_OUTSTANDING_TICKETS_PER_ACCOUNT = 32` (no account reserve in this slice) |
-| Spend | New operation versions bind `DrcAccountSequenceSelector`: `Nonce(n)` or `Ticket(seq)` in signing + Borsh |
+| Sequence rule | Create at ordinary nonce `N` mints ticket sequence `N+1`, advances account nonce to `N+2` |
+| Cap | `DRC_MAX_OUTSTANDING_TICKETS_PER_ACCOUNT = 32` |
+| Spend | Ticket-capable operation versions bind `DrcAccountSequenceSelector`: `Nonce(n)` or `Ticket(seq)` in signing + Borsh |
 | Ticket spend | Removes ticket; **does not** bump ordinary nonce |
 | Nonce spend | Unchanged sequential semantics |
-| Expiry/cancel | **None** in this slice; cap bounds live state |
-| State | Sorted per-owner ticket sets committed in `agora-drc-ticket-root-v1` inside composed state root |
+| Atomic helper | `begin_drc_account_sequence` validates; `finish_drc_account_sequence` commits only after all later checks pass |
+| State | Sorted per-owner ticket sets in `agora-drc-ticket-root-v1` inside composed state root |
 | Body | `agora-block-body-v12` when `drc_ticket_creates` non-empty |
 
-### Lane order (same block)
+### Ticket-capable operation versions (Stage A)
 
-1. Regular keys  
-2. Signer lists  
-3. **Ticket creates**  
-4. Account transfers  
-5. Stake  
-6. OVL execution  
-7. Policy  
+| Family | Version |
+|--------|---------|
+| Account transfer | **v3** |
+| Stake (DRC) | **v2** |
+| Regular key | **v2** |
+| Signer list | **v2** |
+| Account policy | **v4** (all actions) |
+| Deposit preauth | **v2** |
+| Payment | **v5** |
+
+Legacy versions remain byte-for-byte; `Ticket` selectors on legacy versions are rejected.
+
+### Canonical mined lane order (same block)
+
+1. **Ticket create** (uses **pre-block** regular-key / signer-list / policy for auth)  
+2. Account transfer  
+3. OVL execution  
+4. Stake  
+5. Regular key  
+6. Signer list  
+7. Account policy  
 8. Deposit preauth  
-9. Payments  
-10. Multisign attachments  
+9. Payment  
+10. Data availability  
 
-Same-block **create then spend** is supported when create lanes run before spend lanes in that block (overlay visible to later lanes).
+**Tradeoff:** Ticket creation intentionally uses pre-block key/list/policy state so it cannot be authorized by signer-list or policy mutations in the same block. Tickets minted in step 1 are visible to all later lanes via the copy-on-write overlay (including spend in transfer/stake/payment/etc.).
+
+Multisign attachments (consensus lane, after body lanes in block encoding) include `DrcTicketCreate` operation kind **8** with the same signing-commitment rules as other DRC ops.
+
+### Stage B (not in this branch)
+
+- Mempool admission, reservation/template RPC, `agora_submitDrcTicketCreate`, `agora_getDrcAccountTickets`  
+- Fail-closed until complete reservation support lands
 
 ### Deviations from rippled
 
 - No batch ticket creation, cancellation, or expiration  
 - Hard cap 32 instead of owner reserve  
-- secp256k1-only; no `lsf` / `tec` classes  
-- Explicit versioned envelopes per operation family (no unsigned sidecar)
+- secp256k1-only  
+- Explicit versioned envelopes per operation family
 
-### Version artifacts (target)
+### Version artifacts
 
 - Trident protocol **v15**, tx signing **v9**, state transition **`agora-trident-state-v16`**, body **v12**  
-- Account transfer **v3** (DRC ticket selector) — **landed**  
-- Remaining DRC lanes: stake, regular key, signer list, policy, preauth, payment **v+1 with selector** — **tracked** on branch
-
-### RPC (target)
-
-- `agora_submitDrcTicketCreate`, `agora_getDrcAccountTickets` (point lookup, no enumeration)  
-- Malformed params: `-32602`
+- `UtxoJournal` migration **v9** adds `drc_ticket_meta_before` for reorg rollback

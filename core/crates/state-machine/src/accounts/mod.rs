@@ -153,10 +153,8 @@ pub(crate) fn apply_account_transfer_checked(
         ));
     }
 
-    use crate::drc_ticket::{
-        commit_drc_sequence_consumption, load_drc_account_tickets, validate_drc_account_sequence,
-    };
-    use agora_types::ACCOUNT_TRANSFER_DRC_TICKET_VERSION;
+    use crate::drc_ticket::{begin_drc_account_sequence, finish_drc_account_sequence};
+    use agora_types::{resolve_drc_account_sequence, ACCOUNT_TRANSFER_DRC_TICKET_VERSION};
 
     if tx.version >= ACCOUNT_TRANSFER_DRC_TICKET_VERSION && tx.asset != NativeAssetId::DRC {
         return Err(StateError::InvalidTx(
@@ -167,13 +165,15 @@ pub(crate) fn apply_account_transfer_checked(
     let mut from = load_account(store, tx.asset, &tx.from)?;
     let mut to = load_account(store, tx.asset, &tx.to)?;
 
-    let drc_sequence = if tx.asset == NativeAssetId::DRC {
-        let selector = tx
-            .effective_drc_sequence()
-            .map_err(|error| StateError::InvalidTx(error.into()))?;
-        let tickets_before = load_drc_account_tickets(store, &tx.from)?;
-        let consumption = validate_drc_account_sequence(store, &tx.from, selector)?;
-        Some((consumption, tickets_before))
+    let sequence_ctx = if tx.asset == NativeAssetId::DRC {
+        let selector = resolve_drc_account_sequence(
+            tx.version,
+            ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+        Some(begin_drc_account_sequence(store, &tx.from, selector)?)
     } else {
         if from.nonce != tx.nonce {
             return Err(StateError::InvalidTx(format!(
@@ -201,8 +201,14 @@ pub(crate) fn apply_account_transfer_checked(
     journal.before.push((tx.asset, tx.to, to.clone()));
 
     from.balance -= debit;
-    if let Some((consumption, tickets_before)) = drc_sequence {
-        commit_drc_sequence_consumption(batch, &tx.from, &mut from, consumption, &tickets_before)?;
+    if let Some(ctx) = sequence_ctx {
+        finish_drc_account_sequence(
+            batch,
+            &tx.from,
+            &mut from,
+            ctx.consumption,
+            &ctx.tickets_before,
+        )?;
     } else {
         from.nonce = from
             .nonce
