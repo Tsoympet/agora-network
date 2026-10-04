@@ -2,12 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use agora_types::{
     resolve_drc_account_sequence, AccountTransfer, Address, Block, DrcAccountPolicyTx,
-    DrcAccountSequence, DrcDepositPreauthAction, DrcDepositPreauthTx, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, NativeAssetId, OutPoint,
-    OvlExecutionTx, SignedStakeTx, Transaction, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
-    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
-    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
-    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    DrcAccountSequence, DrcDepositPreauthAction, DrcDepositPreauthTx, DrcEscrowCancelTx,
+    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
+    ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
+    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
+    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 
 use crate::P2pError;
@@ -35,6 +35,11 @@ pub struct Mempool {
     drc_regular_key_txs: HashMap<Hash, DrcRegularKeyTx>,
     drc_signer_list_txs: HashMap<Hash, DrcSignerListTx>,
     drc_ticket_create_txs: HashMap<Hash, DrcTicketCreateTx>,
+    drc_escrow_create_txs: HashMap<Hash, DrcEscrowCreateTx>,
+    drc_escrow_finish_txs: HashMap<Hash, DrcEscrowFinishTx>,
+    drc_escrow_cancel_txs: HashMap<Hash, DrcEscrowCancelTx>,
+    /// Mempool-only: escrow ids with a pending create not yet canonical.
+    pending_escrow_ids: HashSet<Hash>,
     /// One pending consumer per `(owner, ticket_sequence)`.
     reserved_tickets: HashSet<(Address, u64)>,
     /// How each DRC lane operation reserved its sender slot (release on eviction).
@@ -73,6 +78,10 @@ impl Mempool {
             drc_regular_key_txs: HashMap::new(),
             drc_signer_list_txs: HashMap::new(),
             drc_ticket_create_txs: HashMap::new(),
+            drc_escrow_create_txs: HashMap::new(),
+            drc_escrow_finish_txs: HashMap::new(),
+            drc_escrow_cancel_txs: HashMap::new(),
+            pending_escrow_ids: HashSet::new(),
             reserved_tickets: HashSet::new(),
             drc_slot_reservations: HashMap::new(),
             deposit_auth_required_payments: HashSet::new(),
@@ -93,6 +102,9 @@ impl Mempool {
             + self.drc_regular_key_txs.len()
             + self.drc_signer_list_txs.len()
             + self.drc_ticket_create_txs.len()
+            + self.drc_escrow_create_txs.len()
+            + self.drc_escrow_finish_txs.len()
+            + self.drc_escrow_cancel_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -110,6 +122,9 @@ impl Mempool {
             || self.drc_regular_key_txs.contains_key(tx_id)
             || self.drc_signer_list_txs.contains_key(tx_id)
             || self.drc_ticket_create_txs.contains_key(tx_id)
+            || self.drc_escrow_create_txs.contains_key(tx_id)
+            || self.drc_escrow_finish_txs.contains_key(tx_id)
+            || self.drc_escrow_cancel_txs.contains_key(tx_id)
     }
 
     pub fn ticket_consumer_reserved(&self, owner: &Address, ticket_sequence: u64) -> bool {
@@ -639,6 +654,108 @@ impl Mempool {
         Some(tx)
     }
 
+    pub fn pending_escrow_create(&self, escrow_id: &Hash) -> bool {
+        self.pending_escrow_ids.contains(escrow_id)
+    }
+
+    pub fn admit_drc_escrow_create(&mut self, tx: DrcEscrowCreateTx) -> Result<Hash, P2pError> {
+        tx.validate_structure()
+            .map_err(|e| P2pError::MempoolRejected(e.to_string()))?;
+        let id = tx.escrow_id();
+        if self.drc_escrow_create_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        self.reserve_drc_slot(id, tx.owner, DrcSlotReservation::AccountNonce)?;
+        self.pending_escrow_ids.insert(id);
+        self.drc_escrow_create_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    pub fn admit_drc_escrow_finish(&mut self, tx: DrcEscrowFinishTx) -> Result<Hash, P2pError> {
+        tx.validate_structure()
+            .map_err(|e| P2pError::MempoolRejected(e.to_string()))?;
+        if self.pending_escrow_ids.contains(&tx.escrow_id) {
+            return Err(P2pError::MempoolRejected(
+                "mempool rejects escrow finish while create is pending (same-block is consensus-only)"
+                    .into(),
+            ));
+        }
+        let id = tx.finish_tx_id();
+        if self.drc_escrow_finish_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        self.reserve_drc_slot(id, tx.submitter, DrcSlotReservation::AccountNonce)?;
+        self.drc_escrow_finish_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    pub fn admit_drc_escrow_cancel(&mut self, tx: DrcEscrowCancelTx) -> Result<Hash, P2pError> {
+        tx.validate_structure()
+            .map_err(|e| P2pError::MempoolRejected(e.to_string()))?;
+        if self.pending_escrow_ids.contains(&tx.escrow_id) {
+            return Err(P2pError::MempoolRejected(
+                "mempool rejects escrow cancel while create is pending (same-block is consensus-only)"
+                    .into(),
+            ));
+        }
+        let id = tx.cancel_tx_id();
+        if self.drc_escrow_cancel_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        self.reserve_drc_slot(id, tx.owner, DrcSlotReservation::AccountNonce)?;
+        self.drc_escrow_cancel_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    pub fn remove_drc_escrow_create(&mut self, id: &Hash) -> Option<DrcEscrowCreateTx> {
+        let tx = self.drc_escrow_create_txs.remove(id)?;
+        self.pending_escrow_ids.remove(id);
+        self.release_drc_slot(id, tx.owner);
+        Some(tx)
+    }
+
+    pub fn remove_drc_escrow_finish(&mut self, id: &Hash) -> Option<DrcEscrowFinishTx> {
+        let tx = self.drc_escrow_finish_txs.remove(id)?;
+        self.release_drc_slot(id, tx.submitter);
+        Some(tx)
+    }
+
+    pub fn remove_drc_escrow_cancel(&mut self, id: &Hash) -> Option<DrcEscrowCancelTx> {
+        let tx = self.drc_escrow_cancel_txs.remove(id)?;
+        self.release_drc_slot(id, tx.owner);
+        Some(tx)
+    }
+
+    pub fn select_drc_escrow_creates(&self, max: usize) -> Vec<DrcEscrowCreateTx> {
+        let mut txs: Vec<_> = self.drc_escrow_create_txs.values().cloned().collect();
+        txs.sort_by(|a, b| a.escrow_id().as_bytes().cmp(b.escrow_id().as_bytes()));
+        txs.truncate(max);
+        txs
+    }
+
+    pub fn select_drc_escrow_finishes(&self, max: usize) -> Vec<DrcEscrowFinishTx> {
+        let mut txs: Vec<_> = self.drc_escrow_finish_txs.values().cloned().collect();
+        txs.sort_by(|a, b| a.finish_tx_id().as_bytes().cmp(b.finish_tx_id().as_bytes()));
+        txs.truncate(max);
+        txs
+    }
+
+    pub fn select_drc_escrow_cancels(&self, max: usize) -> Vec<DrcEscrowCancelTx> {
+        let mut txs: Vec<_> = self.drc_escrow_cancel_txs.values().cloned().collect();
+        txs.sort_by(|a, b| a.cancel_tx_id().as_bytes().cmp(b.cancel_tx_id().as_bytes()));
+        txs.truncate(max);
+        txs
+    }
+
     /// Drop the lowest-fee resident if its fee is strictly below `fee`.
     /// Returns true when space was made.
     fn evict_lowest_below(&mut self, fee: u64) -> bool {
@@ -933,6 +1050,21 @@ impl Mempool {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
             let id = tx.ticket_create_tx_id();
             let _ = self.remove_drc_ticket_create(&id);
+        }
+        for tx in &block.drc_escrow_creates {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
+            let id = tx.escrow_id();
+            let _ = self.remove_drc_escrow_create(&id);
+        }
+        for tx in &block.drc_escrow_finishes {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.submitter));
+            let id = tx.finish_tx_id();
+            let _ = self.remove_drc_escrow_finish(&id);
+        }
+        for tx in &block.drc_escrow_cancels {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
+            let id = tx.cancel_tx_id();
+            let _ = self.remove_drc_escrow_cancel(&id);
         }
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
@@ -1322,6 +1454,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
@@ -1388,6 +1523,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);

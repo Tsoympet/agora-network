@@ -3,4 +3,4 @@
 /**
  * Type tag disambiguates attachment keys across DRC operation lanes.
  */
-export type DrcMultisignOperationKind = "DrcAccountTransfer" | "DrcStake" | "DrcRegularKey" | "DrcSignerList" | "DrcAccountPolicy" | "DrcDepositPreauth" | "DrcPayment" | "DrcTicketCreate";
+export type DrcMultisignOperationKind = "DrcAccountTransfer" | "DrcStake" | "DrcRegularKey" | "DrcSignerList" | "DrcAccountPolicy" | "DrcDepositPreauth" | "DrcPayment" | "DrcTicketCreate" | "DrcEscrowCreate" | "DrcEscrowFinish" | "DrcEscrowCancel";

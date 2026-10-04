@@ -1,7 +1,7 @@
 use agora_types::{
     AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcDepositPreauthTx,
-    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
-    OvlExecutionTx, Transaction,
+    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentReceipt, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, OvlExecutionTx, Transaction,
 };
 use serde_json::{json, Value};
 
@@ -268,6 +268,53 @@ impl<B: RpcBackend> RpcDispatcher<B> {
             RpcMethod::GetDrcTicket => {
                 let (owner, ticket_sequence) = drc_ticket_params(&req.params)?;
                 self.backend.get_drc_ticket(&owner, ticket_sequence)
+            }
+            RpcMethod::SubmitDrcEscrowCreate => {
+                let raw = req
+                    .params
+                    .get("escrow_create")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcEscrowCreateTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_escrow_create(tx)?;
+                Ok(json!({ "escrow_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcEscrowFinish => {
+                let raw = req
+                    .params
+                    .get("escrow_finish")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcEscrowFinishTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_escrow_finish(tx)?;
+                Ok(json!({ "finish_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcEscrowCancel => {
+                let raw = req
+                    .params
+                    .get("escrow_cancel")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcEscrowCancelTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_escrow_cancel(tx)?;
+                Ok(json!({ "cancel_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcEscrow => {
+                let escrow_id = param_hash(&req.params, "escrow_id")?;
+                self.backend.get_drc_escrow(&escrow_id)
+            }
+            RpcMethod::GetDrcEscrowReceipt => {
+                let escrow_id = param_hash(&req.params, "escrow_id")?;
+                self.backend.get_drc_escrow_receipt(&escrow_id)
             }
             RpcMethod::GetDrcAccountSignerList => {
                 let account = param_address(&req.params, "account")?;
@@ -913,6 +960,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
@@ -1031,6 +1081,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
@@ -1068,6 +1121,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);

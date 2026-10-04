@@ -19,7 +19,7 @@ pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
 /// v15 adds DRC ticket-create lane; v14 adds DRC master-key disable policy.
 pub const TRIDENT_PROTOCOL_VERSION: u32 = 15;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v9";
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v16";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v17";
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
 
 /// Canonical network fingerprint hash (pre-Trident / genesis v2).
@@ -83,7 +83,7 @@ mod tests {
         assert_ne!(v2, t1);
         assert_eq!(
             t1.to_hex(),
-            "379bb6363378385d30a42469f8cc35c95ddeb47cacc80964a1a6435a7acecbe5"
+            "06c2aae45e69ca2e7523a9796d275e2a5f0e782a216aff7ed69a4323bf4b9fb9"
         );
         let t2 = trident_network_fingerprint("agora-trident-testnet-2", &genesis, &policy);
         assert_ne!(t1, t2);
@@ -101,6 +101,6 @@ mod tests {
         assert_ne!(t1, prior);
         assert_eq!(TRIDENT_PROTOCOL_VERSION, 15);
         assert_eq!(TRIDENT_TX_SIGNING_VERSION, "agora-trident-tx-v9");
-        assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v16");
+        assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v17");
     }
 }
