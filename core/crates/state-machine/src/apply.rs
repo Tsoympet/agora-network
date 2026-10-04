@@ -766,6 +766,11 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("duplicate DRC deposit preauthorization")
                 || msg.contains("missing DRC deposit preauthorization")
                 || msg.contains("DRC deposit authorization required")
+                || msg.contains("bad DRC account nonce")
+                || msg.contains("unknown DRC ticket sequence")
+                || msg.contains("bad DRC ticket-create nonce")
+                || msg.contains("duplicate DRC ticket sequence")
+                || msg.contains("DRC outstanding ticket cap exceeded")
         }
         _ => false,
     }
@@ -936,6 +941,11 @@ fn apply_trident_lanes(
 
     for tx in &block.account_transfers {
         let id = tx.transfer_id();
+        let drc_ticket_snap = if tx.asset == NativeAssetId::DRC {
+            snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.from))?
+        } else {
+            Vec::new()
+        };
         let mut op_batch = WriteBatch::new();
         let mut acct_journal = AccountJournal::default();
         match apply_account_transfer_checked(&lane, tx, auth, &mut op_batch, &mut acct_journal) {
@@ -953,6 +963,9 @@ fn apply_trident_lanes(
                 lane.write_batch(op_batch.clone())?;
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
+                if tx.asset == NativeAssetId::DRC {
+                    journal.drc_ticket_meta_before.extend(drc_ticket_snap);
+                }
                 seen_account_ids.insert(id);
                 account_statuses.push(TransactionAcceptance::Accepted);
             }
@@ -1006,6 +1019,11 @@ fn apply_trident_lanes(
         let params = params_for_stake_asset(tx.asset)?;
         let actor_before = load_account(&lane, tx.asset, &tx.actor)?;
         let snap = snapshot_meta_keys(&lane, &stake_meta_keys_touched(tx))?;
+        let drc_ticket_snap = if tx.asset == NativeAssetId::DRC {
+            snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.actor))?
+        } else {
+            Vec::new()
+        };
         let mut op_batch = WriteBatch::new();
         match apply_signed_stake_tx(&lane, &mut op_batch, tx, ctx, &params) {
             Ok(()) => {
@@ -1015,6 +1033,9 @@ fn apply_trident_lanes(
                     .account_before
                     .push((tx.asset, tx.actor, actor_before));
                 journal.stake_meta_before.extend(snap);
+                if tx.asset == NativeAssetId::DRC {
+                    journal.drc_ticket_meta_before.extend(drc_ticket_snap);
+                }
                 seen_stake_ids.insert(id);
                 stake_statuses.push(TransactionAcceptance::Accepted);
             }
@@ -1035,6 +1056,7 @@ fn apply_trident_lanes(
         let id = tx.regular_key_tx_id();
         let ctx = auth.expect("DRC regular-key auth checked above");
         let meta_before = snapshot_meta_keys(&lane, &drc_regular_key_meta_keys(tx))?;
+        let drc_ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.owner))?;
         let mut op_batch = WriteBatch::new();
         let mut acct_journal = AccountJournal::default();
         match apply_drc_regular_key(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
@@ -1055,6 +1077,7 @@ fn apply_trident_lanes(
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
                 journal.drc_regular_key_meta_before.extend(meta_before);
+                journal.drc_ticket_meta_before.extend(drc_ticket_snap);
                 seen_regular_key_ids.insert(id);
                 drc_regular_key_statuses.push(TransactionAcceptance::Accepted);
             }
@@ -1074,6 +1097,7 @@ fn apply_trident_lanes(
         let id = tx.signer_list_tx_id();
         let ctx = auth.expect("DRC signer-list auth checked above");
         let meta_before = snapshot_meta_keys(&lane, &drc_signer_list_meta_keys(tx))?;
+        let drc_ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.owner))?;
         let mut op_batch = WriteBatch::new();
         let mut acct_journal = AccountJournal::default();
         match apply_drc_signer_list(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
@@ -1094,6 +1118,7 @@ fn apply_trident_lanes(
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
                 journal.drc_signer_list_meta_before.extend(meta_before);
+                journal.drc_ticket_meta_before.extend(drc_ticket_snap);
                 seen_signer_list_ids.insert(id);
                 drc_signer_list_statuses.push(TransactionAcceptance::Accepted);
             }
@@ -1114,6 +1139,7 @@ fn apply_trident_lanes(
         let id = tx.policy_tx_id();
         let ctx = auth.expect("DRC account-policy auth checked above");
         let meta_before = snapshot_meta_keys(&lane, &drc_account_policy_meta_keys(tx))?;
+        let drc_ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.account))?;
         let mut op_batch = WriteBatch::new();
         let mut acct_journal = AccountJournal::default();
         match apply_drc_account_policy(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
@@ -1134,6 +1160,7 @@ fn apply_trident_lanes(
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
                 journal.drc_policy_meta_before.extend(meta_before);
+                journal.drc_ticket_meta_before.extend(drc_ticket_snap);
                 seen_policy_ids.insert(id);
                 drc_policy_statuses.push(TransactionAcceptance::Accepted);
             }
@@ -1154,6 +1181,7 @@ fn apply_trident_lanes(
         let id = tx.preauth_tx_id();
         let ctx = auth.expect("DRC deposit-preauthorization auth checked above");
         let meta_before = snapshot_meta_keys(&lane, &drc_deposit_preauth_meta_keys(tx))?;
+        let drc_ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.owner))?;
         let mut op_batch = WriteBatch::new();
         let mut acct_journal = AccountJournal::default();
         match apply_drc_deposit_preauth(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
@@ -1173,6 +1201,7 @@ fn apply_trident_lanes(
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
                 journal.drc_deposit_preauth_meta_before.extend(meta_before);
+                journal.drc_ticket_meta_before.extend(drc_ticket_snap);
                 seen_deposit_preauth_ids.insert(id);
                 drc_deposit_preauth_statuses.push(TransactionAcceptance::Accepted);
             }
@@ -1191,6 +1220,7 @@ fn apply_trident_lanes(
         let id = tx.payment_id();
         let ctx = auth.expect("payment auth checked above");
         let meta_before = snapshot_meta_keys(&lane, &payment_meta_keys(tx))?;
+        let drc_ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.from))?;
         let mut op_batch = WriteBatch::new();
         let mut acct_journal = AccountJournal::default();
         match apply_drc_payment_with_blue_score(
@@ -1215,6 +1245,7 @@ fn apply_trident_lanes(
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
                 journal.payment_meta_before.extend(meta_before);
+                journal.drc_ticket_meta_before.extend(drc_ticket_snap);
                 seen_payment_ids.insert(id);
                 payment_statuses.push(TransactionAcceptance::Accepted);
             }

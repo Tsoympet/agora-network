@@ -92,4 +92,30 @@ mod tests {
             vec![1]
         );
     }
+
+    #[test]
+    fn mempool_ticket_spend_allowed_after_canonical_create() {
+        let store = StateStore::open_in_memory();
+        let owner = key(4);
+        fund(&store, &owner, 200);
+        let ctx = auth();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        let mut create = DrcTicketCreateTx::unsigned(owner.address(), Amount::ZERO, 0);
+        sign_drc_ticket_create_bound(&mut create, &owner, &ctx.chain_id, &ctx.genesis).unwrap();
+        apply_drc_ticket_create(&store, &create, &ctx, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+        assert_eq!(
+            plan_drc_mempool_reservation(
+                &store,
+                &owner.address(),
+                DRC_PAYMENT_TICKET_VERSION,
+                DRC_PAYMENT_TICKET_VERSION,
+                0,
+                Some(DrcAccountSequenceSelector::ticket(1)),
+            )
+            .unwrap(),
+            crate::drc_mempool::DrcMempoolReservation::Ticket { sequence: 1 }
+        );
+    }
 }

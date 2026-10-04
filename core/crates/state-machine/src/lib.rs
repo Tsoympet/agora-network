@@ -33,6 +33,8 @@ mod drc_ticket_tests;
 mod drc_tickets_stage_a_tests;
 #[cfg(test)]
 mod drc_tickets_stage_b_tests;
+#[cfg(test)]
+mod drc_tickets_stage_c_tests;
 mod error;
 mod execution;
 mod finality_store;
