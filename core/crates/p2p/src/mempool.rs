@@ -1716,4 +1716,68 @@ mod tests {
         pay_b.amount = Amount::from_base_units(2);
         assert!(pool.admit_payment(pay_b).is_err());
     }
+
+    #[test]
+    fn pending_ticket_create_blocks_prospective_ticket_consumer() {
+        let owner = Address([6; 20]);
+        let create = DrcTicketCreateTx::unsigned(owner, Amount::from_base_units(1), 0);
+        let mut pay = DrcPaymentTx::unsigned_v4(
+            owner,
+            Address([7; 20]),
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+            None,
+        );
+        pay.version = DRC_PAYMENT_TICKET_VERSION;
+        pay.account_sequence = Some(agora_types::DrcAccountSequenceSelector::ticket(1));
+        let mut pool = Mempool::new(8);
+        pool.admit_drc_ticket_create(create).unwrap();
+        assert!(pool.ticket_consumer_reserved(&owner, 1));
+        assert!(pool.admit_payment(pay).is_err());
+    }
+
+    #[test]
+    fn ticket_create_block_inclusion_releases_create_and_consumer_reservations() {
+        let owner = Address([8; 20]);
+        let create = DrcTicketCreateTx::unsigned(owner, Amount::from_base_units(1), 0);
+        let mut pool = Mempool::new(8);
+        let id = pool.admit_drc_ticket_create(create.clone()).unwrap();
+        assert!(pool.account_reserved(NativeAssetId::DRC, &owner));
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 1,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.drc_ticket_creates.push(create);
+        block.header.tx_root = block.compute_body_root();
+        pool.evict_for_block(&block);
+        assert!(!pool.contains(&id));
+        assert!(!pool.account_reserved(NativeAssetId::DRC, &owner));
+        assert!(!pool.ticket_consumer_reserved(&owner, 1));
+        let mut pay = DrcPaymentTx::unsigned_v4(
+            owner,
+            Address([9; 20]),
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+            None,
+        );
+        pay.version = DRC_PAYMENT_TICKET_VERSION;
+        pay.account_sequence = Some(agora_types::DrcAccountSequenceSelector::ticket(1));
+        assert!(pool.admit_payment(pay).is_ok());
+        assert!(pool.ticket_consumer_reserved(&owner, 1));
+    }
 }

@@ -1457,9 +1457,9 @@ mod tests {
     use agora_crypto::{
         derive_bip44, seed_from_mnemonic, sign_account_transfer_bound,
         sign_drc_account_policy_bound, sign_drc_deposit_preauth_bound, sign_drc_payment_bound,
-        sign_ovl_execution_bound, sign_transaction_bound, Bip44Path,
+        sign_ovl_execution_bound, sign_transaction_bound, Bip44Path, KeyPair,
     };
-    use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder};
+    use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder, WriteBatch};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
     use borsh::BorshDeserialize;
 
@@ -2277,6 +2277,68 @@ mod tests {
         match err {
             RpcError::Rejected(msg) => assert!(msg.contains("mainnet")),
             other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn drc_ticket_create_admit_and_block_eviction_release_reservations() {
+        use agora_crypto::sign_drc_ticket_create_bound;
+        use agora_state_machine::TxAuthContext;
+        use agora_types::{BlockHeader, DrcTicketCreateTx, NativeAssetId};
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let kp = KeyPair::from_secret_bytes(&[0x44; 32]).unwrap();
+        let owner = kp.address();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &owner,
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "dev".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let mut create = DrcTicketCreateTx::unsigned(owner, Amount::from_base_units(1), 0);
+        sign_drc_ticket_create_bound(&mut create, &kp, &auth.chain_id, &auth.genesis).unwrap();
+        let id = admit_drc_ticket_create(
+            store.as_ref(),
+            &mempool,
+            create.clone(),
+            &auth,
+        )
+        .unwrap();
+        {
+            let pool = mempool.lock().unwrap();
+            assert!(pool.account_reserved(NativeAssetId::DRC, &owner));
+            assert!(pool.ticket_consumer_reserved(&owner, 1));
+        }
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 1,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.drc_ticket_creates.push(create);
+        block.header.tx_root = block.compute_body_root();
+        {
+            let mut pool = mempool.lock().unwrap();
+            pool.evict_for_block(&block);
+            assert!(!pool.contains(&id));
+            assert!(!pool.account_reserved(NativeAssetId::DRC, &owner));
+            assert!(!pool.ticket_consumer_reserved(&owner, 1));
         }
     }
 }
