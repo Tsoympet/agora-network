@@ -5,7 +5,7 @@ mod semantic_seven_families {
     use agora_crypto::{
         sign_account_transfer_bound, sign_drc_account_policy_bound, sign_drc_deposit_preauth_bound,
         sign_drc_payment_bound, sign_drc_regular_key_bound, sign_drc_signer_list_bound,
-        sign_stake_tx_bound, KeyPair,
+        sign_stake_tx_bound,
     };
     use agora_types::{
         AccountTransfer, Amount, DrcAccountPolicyTx, DrcAccountSequenceSelector,
@@ -16,7 +16,7 @@ mod semantic_seven_families {
         DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
     };
 
-    use crate::accounts::{credit_account_into, load_account};
+    use crate::accounts::load_account;
     use crate::apply::{apply_block_batched_with_auth_at_blue_score, TxAuthContext};
     use crate::drc_regular_key::apply_drc_regular_key;
     use crate::drc_tickets_test_harness::support::{
