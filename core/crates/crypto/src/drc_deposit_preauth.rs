@@ -132,7 +132,7 @@ mod tests {
                 ..valid.clone()
             },
             DrcDepositPreauthTx {
-                version: agora_types::DRC_DEPOSIT_PREAUTH_TX_VERSION + 1,
+                version: agora_types::DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION + 1,
                 ..valid.clone()
             },
             DrcDepositPreauthTx {
@@ -152,5 +152,22 @@ mod tests {
             )
             .is_err());
         }
+    }
+
+    #[test]
+    fn ticket_capable_version_signs_with_account_sequence_selector() {
+        use agora_types::DrcAccountSequenceSelector;
+        let owner = keypair(1);
+        let source = keypair(2);
+        let mut tx = DrcDepositPreauthTx::authorize(
+            owner.address(),
+            source.address(),
+            Amount::from_base_units(1),
+            0,
+        );
+        tx.version = agora_types::DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION;
+        tx.account_sequence = Some(DrcAccountSequenceSelector::nonce(0));
+        sign_drc_deposit_preauth_bound(&mut tx, &owner, "agora-dev", &Hash::ZERO).unwrap();
+        verify_drc_deposit_preauth_bound(&tx, "agora-dev", &Hash::ZERO).unwrap();
     }
 }
