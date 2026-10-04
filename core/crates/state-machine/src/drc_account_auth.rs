@@ -23,6 +23,11 @@ pub fn authorize_drc_account_operator(
     signer: &Address,
 ) -> Result<(), StateError> {
     if signer == owner {
+        if drc_master_key_disabled(store, owner)? {
+            return Err(StateError::InvalidTx(
+                "DRC master key is disabled for this account".into(),
+            ));
+        }
         return Ok(());
     }
     let Some(regular_key) = load_drc_account_regular_key(store, owner)? else {
