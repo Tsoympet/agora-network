@@ -33,7 +33,7 @@ If only `cancel_after` is set (no finish_after), finish is allowed for all `S < 
 
 ## Policy interaction (DepositAuth / RequireDestTag)
 
-- **Create:** if recipient `RequireDestTag` is active, create must carry an authenticated destination tag (payment v3 semantics). DepositAuth is **not** evaluated at create (funds remain with owner-side lock).
+- **Create:** if recipient `RequireDestTag` is active, create must carry an authenticated destination tag (`Option<u32>` semantics: `Some(0)` is a present tag). DepositAuth is **not** evaluated at create (funds remain with owner-side lock).
 - **Finish:** recipient DepositAuth is evaluated with **escrow owner** as deposit source against canonical preauthorization state at finish time. Policy failure rejects finish and leaves escrow/value untouched.
 - **Cancel:** no DepositAuth path (return to owner).
 
@@ -43,6 +43,7 @@ If only `cancel_after` is set (no finish_after), finish is allowed for all `S < 
 - **Live cap:** at most **32** live escrows per owner (no XRPL reserve model).
 - **Supply:** locked amounts leave spendable owner balance but remain supply-accounted via `drc_escrow_root` until finish or cancel.
 - **Receipts:** immutable `DrcEscrowReceipt` records exact finish/cancel delivery with routing metadata.
+- **Invoice IDs:** escrow v1 forbids non-zero `invoice_id` on create (field must be `Hash::ZERO`). Escrow does **not** participate in the recipient-scoped payment invoice index; merchant invoice lookup remains payment-only.
 
 ## Block lanes (body v13)
 

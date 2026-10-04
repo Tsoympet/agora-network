@@ -92,6 +92,9 @@ impl DrcEscrowCreateTx {
             return Err(DrcEscrowError::ZeroAmount);
         }
         validate_escrow_time_bounds(self.finish_after_blue_score, self.cancel_after_blue_score)?;
+        if self.invoice_id != Hash::ZERO {
+            return Err(DrcEscrowError::NonZeroInvoiceNotSupported);
+        }
         Ok(())
     }
 
@@ -143,8 +146,12 @@ impl DrcEscrowCreateTx {
         Hash::hash_borsh(self)
     }
 
+    /// Optional destination tag authenticated on the wire (`Option<u32>` from v1).
+    ///
+    /// Unlike legacy payment v1/v2, escrow never encodes absence as bare `0`; `Some(0)` is a
+    /// present tag and satisfies RequireDestTag when policy is active.
     pub fn authenticated_destination_tag(&self) -> Option<u32> {
-        self.destination_tag.filter(|tag| *tag != 0)
+        self.destination_tag
     }
 }
 
@@ -517,4 +524,60 @@ pub enum DrcEscrowError {
     BlueScoreBoundOverflow,
     #[error("finish_after must be strictly less than cancel_after")]
     FinishNotBeforeCancel,
+    #[error("escrow v1 does not support merchant invoice_id (must be zero)")]
+    NonZeroInvoiceNotSupported,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Address;
+
+    #[test]
+    fn authenticated_destination_tag_some_zero_is_present() {
+        let tx = DrcEscrowCreateTx {
+            version: DRC_ESCROW_CREATE_TX_VERSION,
+            owner: Address([1; 20]),
+            recipient: Address([2; 20]),
+            amount: Amount::from_base_units(1),
+            fee: Amount::ZERO,
+            destination_tag: Some(0),
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            finish_after_blue_score: None,
+            cancel_after_blue_score: Some(10),
+            nonce: 0,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+        };
+        assert_eq!(tx.authenticated_destination_tag(), Some(0));
+        assert!(tx.validate_structure().is_ok());
+    }
+
+    #[test]
+    fn nonzero_invoice_id_rejected_at_structure() {
+        let tx = DrcEscrowCreateTx {
+            version: DRC_ESCROW_CREATE_TX_VERSION,
+            owner: Address([1; 20]),
+            recipient: Address([2; 20]),
+            amount: Amount::from_base_units(1),
+            fee: Amount::ZERO,
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash([3; 32]),
+            finish_after_blue_score: None,
+            cancel_after_blue_score: Some(10),
+            nonce: 0,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+        };
+        assert!(matches!(
+            tx.validate_structure(),
+            Err(DrcEscrowError::NonZeroInvoiceNotSupported)
+        ));
+    }
 }
