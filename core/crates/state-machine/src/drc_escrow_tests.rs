@@ -47,6 +47,7 @@ mod tests {
         store.write_batch(batch).unwrap();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn signed_create(
         owner: &KeyPair,
         recipient: agora_types::Address,
@@ -220,7 +221,7 @@ mod tests {
 
         let mut cancel = DrcEscrowCancelTx {
             version: agora_types::DRC_ESCROW_CANCEL_TX_VERSION,
-            owner: owner.address(),
+            submitter: owner.address(),
             escrow_id: id,
             fee: Amount::from_base_units(1),
             nonce: 1,
@@ -241,8 +242,6 @@ mod tests {
                 .unwrap()
                 .balance,
             balance_after_create
-                .checked_sub(cancel.fee.as_base_units())
-                .unwrap()
                 .checked_add(create.amount.as_base_units())
                 .unwrap()
         );
@@ -277,6 +276,55 @@ mod tests {
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
         assert!(apply_drc_escrow_create(&store, &fail, &ctx, 1, &mut batch, &mut journal).is_err());
+    }
+
+    #[test]
+    fn third_party_cancel_submitter_semantics() {
+        let store = StateStore::open_in_memory();
+        let owner = key(16);
+        let recipient = key(17);
+        let stranger = key(18);
+        fund(&store, &owner, 900);
+        fund(&store, &stranger, 50);
+        let ctx = auth();
+        let create = signed_create(&owner, recipient.address(), 100, None, Some(25), 0, &ctx);
+        let id = create.escrow_id();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_escrow_create(&store, &create, &ctx, 1, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+        let owner_after = load_account(&store, NativeAssetId::DRC, &owner.address())
+            .unwrap()
+            .balance;
+
+        let mut cancel = DrcEscrowCancelTx {
+            version: agora_types::DRC_ESCROW_CANCEL_TX_VERSION,
+            submitter: stranger.address(),
+            escrow_id: id,
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+        };
+        sign_drc_escrow_cancel_bound(&mut cancel, &stranger, &ctx.chain_id, &ctx.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_escrow_cancel(&store, &cancel, &ctx, 25, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .balance,
+            owner_after + 100
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &stranger.address())
+                .unwrap()
+                .balance,
+            49
+        );
     }
 
     #[test]

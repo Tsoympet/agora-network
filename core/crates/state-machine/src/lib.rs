@@ -14,6 +14,12 @@ mod drc_account_auth;
 mod drc_deposit_preauth;
 mod drc_escrow;
 #[cfg(test)]
+mod drc_escrow_hardening_multisign_tests;
+#[cfg(test)]
+mod drc_escrow_hardening_tests;
+#[cfg(test)]
+mod drc_escrow_test_harness;
+#[cfg(test)]
 mod drc_escrow_tests;
 #[cfg(test)]
 mod drc_master_key_disable_hardening_tests;
