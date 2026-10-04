@@ -685,6 +685,7 @@ fn apply_block_batched_mode(
             data_commitment_statuses,
             drc_regular_key_statuses,
             drc_signer_list_statuses,
+            drc_ticket_create_statuses: Vec::new(),
             drc_policy_statuses,
             drc_deposit_preauth_statuses,
         },
@@ -1804,6 +1805,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
 
@@ -1999,6 +2001,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
@@ -2103,6 +2106,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
@@ -2174,6 +2178,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -2254,6 +2259,7 @@ mod tests {
                 drc_deposit_preauths: vec![],
                 drc_regular_keys: vec![],
                 drc_signer_lists: vec![],
+                drc_ticket_creates: vec![],
                 drc_multisign_attachments: vec![],
             },
             1,
@@ -2333,6 +2339,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
@@ -2430,6 +2437,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -2509,6 +2517,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         let mut block = block;
@@ -2602,6 +2611,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -2721,6 +2731,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -3347,6 +3358,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();

@@ -4,10 +4,13 @@ use ts_rs::TS;
 
 use crate::{
     AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcDepositPreauthTx,
-    DrcMultisignBlockAttachment, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash,
-    OvlExecutionTx, SignedStakeTx, Transaction,
+    DrcMultisignBlockAttachment, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
+    Hash, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 
+/// Explicit version/domain for bodies carrying DRC ticket-create operations.
+pub const TRIDENT_BLOCK_BODY_V12_VERSION: u16 = 12;
+pub const TRIDENT_BLOCK_BODY_V12_DOMAIN: &[u8] = b"agora-block-body-v12";
 /// Explicit version/domain for bodies carrying detached DRC multisign attachments.
 pub const TRIDENT_BLOCK_BODY_V11_VERSION: u16 = 11;
 pub const TRIDENT_BLOCK_BODY_V11_DOMAIN: &[u8] = b"agora-block-body-v11";
@@ -80,6 +83,9 @@ pub struct Block {
     /// Owner-authorized DRC weighted signer-list operations.
     #[serde(default)]
     pub drc_signer_lists: Vec<DrcSignerListTx>,
+    /// Owner-authorized DRC ticket creation (one ticket per operation).
+    #[serde(default)]
+    pub drc_ticket_creates: Vec<DrcTicketCreateTx>,
     /// Detached, body-root-committed DRC multisign authorization (consensus lane).
     #[serde(default)]
     pub drc_multisign_attachments: Vec<DrcMultisignBlockAttachment>,
@@ -100,6 +106,7 @@ impl Block {
             drc_deposit_preauths: Vec::new(),
             drc_regular_keys: Vec::new(),
             drc_signer_lists: Vec::new(),
+            drc_ticket_creates: Vec::new(),
             drc_multisign_attachments: Vec::new(),
         }
     }
@@ -139,8 +146,26 @@ impl Block {
     /// retain v2; OVL execution uses v3; DRC payments use v4; authenticated
     /// data commitments use v5; DRC account policies use v6; address-based DRC
     /// deposit preauthorizations use v7; payment-v4 expiry uses v8; regular keys use v9;
-    /// signer lists use v10; detached multisign attachments use v11.
+    /// signer lists use v10; detached multisign attachments use v11; ticket creates use v12.
     pub fn compute_body_root(&self) -> Hash {
+        let inner = self.compute_body_root_with_multisign_attachments();
+        if !self.drc_ticket_creates.is_empty() {
+            let ticket_ids: Vec<Hash> = self
+                .drc_ticket_creates
+                .iter()
+                .map(DrcTicketCreateTx::ticket_create_tx_id)
+                .collect();
+            return Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V12_DOMAIN,
+                TRIDENT_BLOCK_BODY_V12_VERSION,
+                inner,
+                ticket_ids,
+            ));
+        }
+        inner
+    }
+
+    fn compute_body_root_with_multisign_attachments(&self) -> Hash {
         let inner = self.compute_body_root_with_signer_lists();
         if !self.drc_multisign_attachments.is_empty() {
             let attachment_ids: Vec<Hash> = self
@@ -335,6 +360,7 @@ impl BorshDeserialize for Block {
             drc_deposit_preauths: deserialize_trailing_vec(reader)?,
             drc_regular_keys: deserialize_trailing_vec(reader)?,
             drc_signer_lists: deserialize_trailing_vec(reader)?,
+            drc_ticket_creates: deserialize_trailing_vec(reader)?,
             drc_multisign_attachments: deserialize_trailing_vec(reader)?,
         })
     }

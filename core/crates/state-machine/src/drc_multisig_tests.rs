@@ -8,8 +8,7 @@ mod tests {
     };
     use agora_types::{
         canonical_sorted_entries, Amount, DrcMultisignAuth, DrcMultisignEntry, DrcPaymentTx,
-        DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId,
-        DRC_MULTISIGN_AUTH_VERSION,
+        DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId, DRC_MULTISIGN_AUTH_VERSION,
     };
 
     use crate::accounts::{credit_account_into, load_account};

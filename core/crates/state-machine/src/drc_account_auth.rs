@@ -7,7 +7,7 @@ use agora_crypto::{
 use agora_types::{
     validate_exclusive_authorization, AccountTransfer, Address, DrcAccountPolicyAction,
     DrcAccountPolicyTx, DrcDepositPreauthTx, DrcMultisignAuth, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, NativeAssetId, SignedStakeTx,
+    DrcSignerListTx, DrcTicketCreateTx, NativeAssetId, SignedStakeTx,
 };
 
 use crate::apply::TxAuthContext;
@@ -205,6 +205,32 @@ pub fn verify_drc_account_policy_operation(
             None,
         ),
     }
+}
+
+pub fn verify_drc_ticket_create_operation(
+    store: &StateStore,
+    tx: &DrcTicketCreateTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_ticket_create_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.owner,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )
 }
 
 pub fn verify_drc_deposit_preauth_operation(

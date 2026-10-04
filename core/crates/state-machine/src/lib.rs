@@ -25,6 +25,9 @@ mod drc_regular_key;
 #[cfg(test)]
 mod drc_regular_key_tests;
 mod drc_signer_list;
+mod drc_ticket;
+#[cfg(test)]
+mod drc_ticket_tests;
 mod error;
 mod execution;
 mod finality_store;

@@ -37,6 +37,8 @@ pub struct BlockAcceptanceRecord {
     pub drc_regular_key_statuses: Vec<TransactionAcceptance>,
     /// Aligned to `block.drc_signer_lists`.
     pub drc_signer_list_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.drc_ticket_creates`.
+    pub drc_ticket_create_statuses: Vec<TransactionAcceptance>,
 }
 
 #[derive(Debug, Clone, BorshDeserialize)]
@@ -140,6 +142,7 @@ impl BlockAcceptanceRecord {
                 drc_deposit_preauth_statuses: v8.drc_deposit_preauth_statuses,
                 drc_regular_key_statuses: v8.drc_regular_key_statuses,
                 drc_signer_list_statuses: Vec::new(),
+                drc_ticket_create_statuses: Vec::new(),
             });
         }
         if let Ok(v7) = MultiLaneV7AcceptanceRecord::try_from_slice(bytes) {
@@ -155,6 +158,7 @@ impl BlockAcceptanceRecord {
                 drc_deposit_preauth_statuses: v7.drc_deposit_preauth_statuses,
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
+                drc_ticket_create_statuses: Vec::new(),
             });
         }
         if let Ok(v6) = MultiLaneV6AcceptanceRecord::try_from_slice(bytes) {
@@ -170,6 +174,7 @@ impl BlockAcceptanceRecord {
                 drc_deposit_preauth_statuses: Vec::new(),
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
+                drc_ticket_create_statuses: Vec::new(),
             });
         }
         if let Ok(v5) = MultiLaneV5AcceptanceRecord::try_from_slice(bytes) {
@@ -185,6 +190,7 @@ impl BlockAcceptanceRecord {
                 drc_deposit_preauth_statuses: Vec::new(),
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
+                drc_ticket_create_statuses: Vec::new(),
             });
         }
         if let Ok(v4) = MultiLaneV4AcceptanceRecord::try_from_slice(bytes) {
@@ -200,6 +206,7 @@ impl BlockAcceptanceRecord {
                 drc_deposit_preauth_statuses: Vec::new(),
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
+                drc_ticket_create_statuses: Vec::new(),
             });
         }
         if let Ok(v3) = MultiLaneV3AcceptanceRecord::try_from_slice(bytes) {
@@ -215,6 +222,7 @@ impl BlockAcceptanceRecord {
                 drc_deposit_preauth_statuses: Vec::new(),
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
+                drc_ticket_create_statuses: Vec::new(),
             });
         }
         if let Ok(v2) = MultiLaneV2AcceptanceRecord::try_from_slice(bytes) {
@@ -230,6 +238,7 @@ impl BlockAcceptanceRecord {
                 drc_deposit_preauth_statuses: Vec::new(),
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
+                drc_ticket_create_statuses: Vec::new(),
             });
         }
         let legacy = LegacyBlockAcceptanceRecord::try_from_slice(bytes)
@@ -246,6 +255,7 @@ impl BlockAcceptanceRecord {
             drc_deposit_preauth_statuses: Vec::new(),
             drc_regular_key_statuses: Vec::new(),
             drc_signer_list_statuses: Vec::new(),
+            drc_ticket_create_statuses: Vec::new(),
         })
     }
 
@@ -384,6 +394,7 @@ mod tests {
             drc_deposit_preauth_statuses: vec![TransactionAcceptance::Accepted],
             drc_regular_key_statuses: vec![TransactionAcceptance::Accepted],
             drc_signer_list_statuses: vec![TransactionAcceptance::Accepted],
+            drc_ticket_create_statuses: vec![],
         };
         store_acceptance(&store, &rec.block_hash, &rec).unwrap();
         let loaded = load_acceptance(&store, &rec.block_hash).unwrap().unwrap();

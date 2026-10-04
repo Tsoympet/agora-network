@@ -14,7 +14,9 @@ mod drc_multisign_attachment;
 mod drc_multisign_lane;
 mod drc_policy;
 mod drc_regular_key;
+mod drc_sequence;
 mod drc_signer_list;
+mod drc_ticket;
 mod execution;
 mod finality;
 mod hash;
@@ -26,7 +28,10 @@ mod transaction;
 mod treasury;
 
 pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
-pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
+pub use account::{
+    AccountTransfer, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, ACCOUNT_TRANSFER_LEGACY_VERSION,
+    ACCOUNT_TRANSFER_VERSION, ACCOUNT_TX_SIGNING_DOMAIN, ACCOUNT_TX_SIGNING_DOMAIN_V3,
+};
 pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{
@@ -76,11 +81,19 @@ pub use drc_regular_key::{
     DRC_REGULAR_KEY_SIGNING_DOMAIN, DRC_REGULAR_KEY_STATE_VERSION, DRC_REGULAR_KEY_TX_TYPE,
     DRC_REGULAR_KEY_TX_VERSION,
 };
+pub use drc_sequence::{
+    DrcAccountSequence, DrcAccountSequenceError, DrcAccountSequenceSelector,
+    DRC_MAX_OUTSTANDING_TICKETS_PER_ACCOUNT,
+};
 pub use drc_signer_list::{
     canonical_sorted_entries, validate_signer_list_payload, DrcAccountSignerList,
     DrcSignerListAction, DrcSignerListEntry, DrcSignerListError, DrcSignerListTx,
     DRC_SIGNER_LIST_SIGNING_DOMAIN, DRC_SIGNER_LIST_STATE_VERSION, DRC_SIGNER_LIST_TX_TYPE,
     DRC_SIGNER_LIST_TX_VERSION,
+};
+pub use drc_ticket::{
+    DrcAccountTickets, DrcTicketCreateError, DrcTicketCreateTx, DRC_TICKET_CREATE_SIGNING_DOMAIN,
+    DRC_TICKET_CREATE_TX_TYPE, DRC_TICKET_CREATE_TX_VERSION, DRC_TICKET_STATE_VERSION,
 };
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
@@ -183,6 +196,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         assert_eq!(block.id(), header.hash());
