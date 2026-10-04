@@ -233,6 +233,10 @@ mod ts_export {
         "DrcAccountPolicy.ts",
         "DrcAccountPolicyAction.ts",
         "DrcAccountPolicyTx.ts",
+        "DrcAccountSequence.ts",
+        "DrcAccountSequenceSelector.ts",
+        "DrcAccountTickets.ts",
+        "DrcTicketCreateTx.ts",
         "DrcPaymentReceipt.ts",
         "DrcPaymentResult.ts",
         "DrcPaymentTx.ts",
@@ -284,6 +288,10 @@ mod ts_export {
         DrcAccountPolicyAction::export_all().expect("export DrcAccountPolicyAction");
         DrcAccountPolicyTx::export_all().expect("export DrcAccountPolicyTx");
         DrcAccountPolicy::export_all().expect("export DrcAccountPolicy");
+        DrcAccountSequence::export_all().expect("export DrcAccountSequence");
+        DrcAccountSequenceSelector::export_all().expect("export DrcAccountSequenceSelector");
+        DrcAccountTickets::export_all().expect("export DrcAccountTickets");
+        DrcTicketCreateTx::export_all().expect("export DrcTicketCreateTx");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");

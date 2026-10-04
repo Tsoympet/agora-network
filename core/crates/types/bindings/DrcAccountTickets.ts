@@ -4,7 +4,7 @@ import type { Address } from "./Address";
 /**
  * Canonical persisted ticket set for one owner (sorted sequences, capped).
  */
-export type DrcAccountTickets = { version: number, owner: Address, 
+export type DrcAccountTickets = { version: number, owner: Address,
 /**
  * Sorted strictly increasing ticket sequences.
  */

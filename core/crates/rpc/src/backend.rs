@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use agora_governance::{
@@ -301,6 +301,8 @@ pub struct InMemoryBackend {
     drc_account_policies: HashMap<Address, (DrcAccountPolicy, u64)>,
     /// Exact owner/source DepositAuth statuses for RPC tests.
     drc_deposit_preauths: HashMap<(Address, Address), DrcDepositPreauthStatus>,
+    /// Live `(owner, ticket_sequence)` pairs for `agora_getDrcTicket` RPC tests.
+    drc_live_tickets: HashSet<(Address, u64)>,
     template_bits: u32,
     fund_nonce: u64,
     civic: Mutex<CivicSnapshot>,
@@ -319,6 +321,7 @@ impl Default for InMemoryBackend {
             drc_payment_invoice_index: HashMap::new(),
             drc_account_policies: HashMap::new(),
             drc_deposit_preauths: HashMap::new(),
+            drc_live_tickets: HashSet::new(),
             template_bits: 0,
             fund_nonce: 0,
             civic: Mutex::new(CivicSnapshot::genesis(10_000)),
@@ -373,6 +376,10 @@ impl InMemoryBackend {
         nonce: u64,
     ) {
         self.drc_account_policies.insert(account, (policy, nonce));
+    }
+
+    pub fn insert_drc_live_ticket(&mut self, owner: Address, ticket_sequence: u64) {
+        self.drc_live_tickets.insert((owner, ticket_sequence));
     }
 
     pub fn insert_drc_deposit_preauth(
@@ -559,11 +566,24 @@ impl RpcBackend for InMemoryBackend {
         ))
     }
 
-    fn get_drc_ticket(&self, _owner: &Address, _ticket_sequence: u64) -> Result<Value, RpcError> {
-        Ok(json!({
-            "status": "unknown",
-            "ticket_sequence": null,
-        }))
+    fn get_drc_ticket(&self, owner: &Address, ticket_sequence: u64) -> Result<Value, RpcError> {
+        if *owner == Address::ZERO {
+            return Err(RpcError::InvalidParams("zero DRC ticket owner".into()));
+        }
+        let live = self.drc_live_tickets.contains(&(*owner, ticket_sequence));
+        Ok(if live {
+            json!({
+                "owner": owner.to_bech32(),
+                "ticket_sequence": ticket_sequence,
+                "status": "live",
+            })
+        } else {
+            json!({
+                "owner": owner.to_bech32(),
+                "ticket_sequence": ticket_sequence,
+                "status": "unknown",
+            })
+        })
     }
 
     fn get_drc_account_policy(
