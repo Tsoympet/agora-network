@@ -9,6 +9,7 @@ mod attestation;
 mod bip44;
 mod data_availability;
 mod drc_deposit_preauth;
+mod drc_escrow;
 mod drc_multisign;
 mod drc_operation;
 mod drc_policy;
@@ -34,6 +35,10 @@ pub use bip44::{
 };
 pub use data_availability::{sign_data_commitment_bound, verify_data_commitment_bound};
 pub use drc_deposit_preauth::{sign_drc_deposit_preauth_bound, verify_drc_deposit_preauth_bound};
+pub use drc_escrow::{
+    sign_drc_escrow_cancel_bound, sign_drc_escrow_create_bound, sign_drc_escrow_finish_bound,
+    verify_drc_escrow_cancel_bound, verify_drc_escrow_create_bound, verify_drc_escrow_finish_bound,
+};
 pub use drc_multisign::{
     sign_drc_multisign_participant_bound, validate_drc_operation_authorization_fields,
     verify_drc_multisign_against_list,

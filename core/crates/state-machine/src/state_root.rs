@@ -15,6 +15,7 @@ use crate::columns::ColumnFamily;
 use crate::community_state::canonical_community_root;
 use crate::data_availability::data_availability_root;
 use crate::drc_deposit_preauth::drc_deposit_preauth_root;
+use crate::drc_escrow::drc_escrow_root;
 use crate::drc_policy::drc_account_policy_root;
 use crate::drc_regular_key::drc_regular_key_root;
 use crate::drc_signer_list::drc_signer_list_root;
@@ -26,7 +27,7 @@ use crate::staking::{build_snapshot, load_epoch};
 use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
 
 /// Domain tag for the composed state root (versioned).
-pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v10";
+pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v11";
 
 /// Deterministic UTXO-set commitment (sorted outpoint keys).
 pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
@@ -90,6 +91,7 @@ pub fn compose_trident_state_root(
     let drc_regular_keys = drc_regular_key_root(store)?;
     let drc_signer_lists = drc_signer_list_root(store)?;
     let drc_tickets = drc_ticket_root(store)?;
+    let drc_escrow = drc_escrow_root(store)?;
     let drc_account_policies = drc_account_policy_root(store)?;
     let drc_deposit_preauths = drc_deposit_preauth_root(store)?;
     let drc_payments = drc_payment_root(store)?;
@@ -110,6 +112,7 @@ pub fn compose_trident_state_root(
         drc_regular_keys,
         drc_signer_lists,
         drc_tickets,
+        drc_escrow,
         drc_account_policies,
         drc_deposit_preauths,
         drc_payments,

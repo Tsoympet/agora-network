@@ -39,6 +39,12 @@ pub struct BlockAcceptanceRecord {
     pub drc_signer_list_statuses: Vec<TransactionAcceptance>,
     /// Aligned to `block.drc_ticket_creates`.
     pub drc_ticket_create_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.drc_escrow_creates`.
+    pub drc_escrow_create_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.drc_escrow_finishes`.
+    pub drc_escrow_finish_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.drc_escrow_cancels`.
+    pub drc_escrow_cancel_statuses: Vec<TransactionAcceptance>,
 }
 
 #[derive(Debug, Clone, BorshDeserialize)]
@@ -124,10 +130,45 @@ struct MultiLaneV8AcceptanceRecord {
     drc_regular_key_statuses: Vec<TransactionAcceptance>,
 }
 
+#[derive(Debug, Clone, BorshDeserialize)]
+struct MultiLaneV9AcceptanceRecord {
+    block_hash: Hash,
+    statuses: Vec<TransactionAcceptance>,
+    account_statuses: Vec<TransactionAcceptance>,
+    stake_statuses: Vec<TransactionAcceptance>,
+    execution_statuses: Vec<TransactionAcceptance>,
+    payment_statuses: Vec<TransactionAcceptance>,
+    data_commitment_statuses: Vec<TransactionAcceptance>,
+    drc_policy_statuses: Vec<TransactionAcceptance>,
+    drc_deposit_preauth_statuses: Vec<TransactionAcceptance>,
+    drc_regular_key_statuses: Vec<TransactionAcceptance>,
+    drc_signer_list_statuses: Vec<TransactionAcceptance>,
+    drc_ticket_create_statuses: Vec<TransactionAcceptance>,
+}
+
 impl BlockAcceptanceRecord {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(rec) = Self::try_from_slice(bytes) {
             return Ok(rec);
+        }
+        if let Ok(v9) = MultiLaneV9AcceptanceRecord::try_from_slice(bytes) {
+            return Ok(Self {
+                block_hash: v9.block_hash,
+                statuses: v9.statuses,
+                account_statuses: v9.account_statuses,
+                stake_statuses: v9.stake_statuses,
+                execution_statuses: v9.execution_statuses,
+                payment_statuses: v9.payment_statuses,
+                data_commitment_statuses: v9.data_commitment_statuses,
+                drc_policy_statuses: v9.drc_policy_statuses,
+                drc_deposit_preauth_statuses: v9.drc_deposit_preauth_statuses,
+                drc_regular_key_statuses: v9.drc_regular_key_statuses,
+                drc_signer_list_statuses: v9.drc_signer_list_statuses,
+                drc_ticket_create_statuses: v9.drc_ticket_create_statuses,
+                drc_escrow_create_statuses: Vec::new(),
+                drc_escrow_finish_statuses: Vec::new(),
+                drc_escrow_cancel_statuses: Vec::new(),
+            });
         }
         if let Ok(v8) = MultiLaneV8AcceptanceRecord::try_from_slice(bytes) {
             return Ok(Self {
@@ -143,6 +184,9 @@ impl BlockAcceptanceRecord {
                 drc_regular_key_statuses: v8.drc_regular_key_statuses,
                 drc_signer_list_statuses: Vec::new(),
                 drc_ticket_create_statuses: Vec::new(),
+                drc_escrow_create_statuses: Vec::new(),
+                drc_escrow_finish_statuses: Vec::new(),
+                drc_escrow_cancel_statuses: Vec::new(),
             });
         }
         if let Ok(v7) = MultiLaneV7AcceptanceRecord::try_from_slice(bytes) {
@@ -159,6 +203,9 @@ impl BlockAcceptanceRecord {
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
                 drc_ticket_create_statuses: Vec::new(),
+                drc_escrow_create_statuses: Vec::new(),
+                drc_escrow_finish_statuses: Vec::new(),
+                drc_escrow_cancel_statuses: Vec::new(),
             });
         }
         if let Ok(v6) = MultiLaneV6AcceptanceRecord::try_from_slice(bytes) {
@@ -175,6 +222,9 @@ impl BlockAcceptanceRecord {
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
                 drc_ticket_create_statuses: Vec::new(),
+                drc_escrow_create_statuses: Vec::new(),
+                drc_escrow_finish_statuses: Vec::new(),
+                drc_escrow_cancel_statuses: Vec::new(),
             });
         }
         if let Ok(v5) = MultiLaneV5AcceptanceRecord::try_from_slice(bytes) {
@@ -191,6 +241,9 @@ impl BlockAcceptanceRecord {
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
                 drc_ticket_create_statuses: Vec::new(),
+                drc_escrow_create_statuses: Vec::new(),
+                drc_escrow_finish_statuses: Vec::new(),
+                drc_escrow_cancel_statuses: Vec::new(),
             });
         }
         if let Ok(v4) = MultiLaneV4AcceptanceRecord::try_from_slice(bytes) {
@@ -207,6 +260,9 @@ impl BlockAcceptanceRecord {
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
                 drc_ticket_create_statuses: Vec::new(),
+                drc_escrow_create_statuses: Vec::new(),
+                drc_escrow_finish_statuses: Vec::new(),
+                drc_escrow_cancel_statuses: Vec::new(),
             });
         }
         if let Ok(v3) = MultiLaneV3AcceptanceRecord::try_from_slice(bytes) {
@@ -223,6 +279,9 @@ impl BlockAcceptanceRecord {
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
                 drc_ticket_create_statuses: Vec::new(),
+                drc_escrow_create_statuses: Vec::new(),
+                drc_escrow_finish_statuses: Vec::new(),
+                drc_escrow_cancel_statuses: Vec::new(),
             });
         }
         if let Ok(v2) = MultiLaneV2AcceptanceRecord::try_from_slice(bytes) {
@@ -239,6 +298,9 @@ impl BlockAcceptanceRecord {
                 drc_regular_key_statuses: Vec::new(),
                 drc_signer_list_statuses: Vec::new(),
                 drc_ticket_create_statuses: Vec::new(),
+                drc_escrow_create_statuses: Vec::new(),
+                drc_escrow_finish_statuses: Vec::new(),
+                drc_escrow_cancel_statuses: Vec::new(),
             });
         }
         let legacy = LegacyBlockAcceptanceRecord::try_from_slice(bytes)
@@ -256,6 +318,9 @@ impl BlockAcceptanceRecord {
             drc_regular_key_statuses: Vec::new(),
             drc_signer_list_statuses: Vec::new(),
             drc_ticket_create_statuses: Vec::new(),
+            drc_escrow_create_statuses: Vec::new(),
+            drc_escrow_finish_statuses: Vec::new(),
+            drc_escrow_cancel_statuses: Vec::new(),
         })
     }
 
@@ -395,6 +460,9 @@ mod tests {
             drc_regular_key_statuses: vec![TransactionAcceptance::Accepted],
             drc_signer_list_statuses: vec![TransactionAcceptance::Accepted],
             drc_ticket_create_statuses: vec![],
+            drc_escrow_create_statuses: vec![],
+            drc_escrow_finish_statuses: vec![],
+            drc_escrow_cancel_statuses: vec![],
         };
         store_acceptance(&store, &rec.block_hash, &rec).unwrap();
         let loaded = load_acceptance(&store, &rec.block_hash).unwrap().unwrap();

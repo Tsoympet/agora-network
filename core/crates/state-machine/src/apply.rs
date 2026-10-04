@@ -16,6 +16,10 @@ use crate::accounts::{
 use crate::columns::ColumnFamily;
 use crate::data_availability::{apply_data_commitment, revert_data_commitment_meta_into};
 use crate::drc_deposit_preauth::{apply_drc_deposit_preauth, drc_deposit_preauth_meta_keys};
+use crate::drc_escrow::{
+    apply_drc_escrow_cancel, apply_drc_escrow_create, apply_drc_escrow_finish,
+    escrow_meta_keys_for_create, escrow_meta_keys_for_settlement, load_drc_escrow_live,
+};
 use crate::drc_master_key_recovery::assert_drc_recovery_invariant;
 use crate::drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys};
 use crate::drc_regular_key::{apply_drc_regular_key, drc_regular_key_meta_keys};
@@ -84,6 +88,8 @@ pub struct UtxoJournal {
     pub drc_signer_list_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     /// DRC ticket-set keys before Accepted ticket-create operations.
     pub drc_ticket_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    /// DRC escrow live/settlement keys before Accepted escrow operations.
+    pub drc_escrow_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -159,6 +165,25 @@ struct UtxoJournalV8 {
     drc_regular_key_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
+/// Multi-lane journal before DRC escrow metadata.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct UtxoJournalV10 {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+    fees: u64,
+    subsidy: u64,
+    coinbase_total: u64,
+    account_before: Vec<(NativeAssetId, Address, AccountState)>,
+    stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    data_availability_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_policy_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_deposit_preauth_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_regular_key_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_signer_list_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_ticket_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
 /// Multi-lane journal before DRC ticket metadata.
 #[derive(Debug, Clone, BorshDeserialize)]
 struct UtxoJournalV9 {
@@ -213,6 +238,25 @@ impl UtxoJournal {
         if let Ok(j) = Self::try_from_slice(bytes) {
             return Ok(j);
         }
+        if let Ok(v10) = UtxoJournalV10::try_from_slice(bytes) {
+            return Ok(Self {
+                spent: v10.spent,
+                created: v10.created,
+                fees: v10.fees,
+                subsidy: v10.subsidy,
+                coinbase_total: v10.coinbase_total,
+                account_before: v10.account_before,
+                stake_meta_before: v10.stake_meta_before,
+                payment_meta_before: v10.payment_meta_before,
+                data_availability_meta_before: v10.data_availability_meta_before,
+                drc_policy_meta_before: v10.drc_policy_meta_before,
+                drc_deposit_preauth_meta_before: v10.drc_deposit_preauth_meta_before,
+                drc_regular_key_meta_before: v10.drc_regular_key_meta_before,
+                drc_signer_list_meta_before: v10.drc_signer_list_meta_before,
+                drc_ticket_meta_before: v10.drc_ticket_meta_before,
+                drc_escrow_meta_before: Vec::new(),
+            });
+        }
         if let Ok(v9) = UtxoJournalV9::try_from_slice(bytes) {
             return Ok(Self {
                 spent: v9.spent,
@@ -229,6 +273,7 @@ impl UtxoJournal {
                 drc_regular_key_meta_before: v9.drc_regular_key_meta_before,
                 drc_signer_list_meta_before: v9.drc_signer_list_meta_before,
                 drc_ticket_meta_before: Vec::new(),
+                drc_escrow_meta_before: Vec::new(),
             });
         }
         if let Ok(v8) = UtxoJournalV8::try_from_slice(bytes) {
@@ -247,6 +292,7 @@ impl UtxoJournal {
                 drc_regular_key_meta_before: v8.drc_regular_key_meta_before,
                 drc_signer_list_meta_before: Vec::new(),
                 drc_ticket_meta_before: Vec::new(),
+                drc_escrow_meta_before: Vec::new(),
             });
         }
         if let Ok(v7) = UtxoJournalV7::try_from_slice(bytes) {
@@ -265,6 +311,7 @@ impl UtxoJournal {
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
                 drc_ticket_meta_before: Vec::new(),
+                drc_escrow_meta_before: Vec::new(),
             });
         }
         if let Ok(v6) = UtxoJournalV6::try_from_slice(bytes) {
@@ -283,6 +330,7 @@ impl UtxoJournal {
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
                 drc_ticket_meta_before: Vec::new(),
+                drc_escrow_meta_before: Vec::new(),
             });
         }
         if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
@@ -301,6 +349,7 @@ impl UtxoJournal {
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
                 drc_ticket_meta_before: Vec::new(),
+                drc_escrow_meta_before: Vec::new(),
             });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
@@ -319,6 +368,7 @@ impl UtxoJournal {
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
                 drc_ticket_meta_before: Vec::new(),
+                drc_escrow_meta_before: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -337,6 +387,7 @@ impl UtxoJournal {
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
                 drc_ticket_meta_before: Vec::new(),
+                drc_escrow_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -355,6 +406,7 @@ impl UtxoJournal {
                 drc_regular_key_meta_before: Vec::new(),
                 drc_signer_list_meta_before: Vec::new(),
                 drc_ticket_meta_before: Vec::new(),
+                drc_escrow_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -374,6 +426,7 @@ impl UtxoJournal {
             drc_regular_key_meta_before: Vec::new(),
             drc_signer_list_meta_before: Vec::new(),
             drc_ticket_meta_before: Vec::new(),
+            drc_escrow_meta_before: Vec::new(),
         })
     }
 }
@@ -702,6 +755,9 @@ fn apply_block_batched_mode(
 
     let (
         drc_ticket_create_statuses,
+        drc_escrow_create_statuses,
+        drc_escrow_finish_statuses,
+        drc_escrow_cancel_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -734,6 +790,9 @@ fn apply_block_batched_mode(
             drc_regular_key_statuses,
             drc_signer_list_statuses,
             drc_ticket_create_statuses,
+            drc_escrow_create_statuses,
+            drc_escrow_finish_statuses,
+            drc_escrow_cancel_statuses,
             drc_policy_statuses,
             drc_deposit_preauth_statuses,
         },
@@ -771,6 +830,19 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("bad DRC ticket-create nonce")
                 || msg.contains("duplicate DRC ticket sequence")
                 || msg.contains("DRC outstanding ticket cap exceeded")
+                || msg.contains("duplicate DRC escrow id")
+                || msg.contains("unknown DRC escrow")
+                || msg.contains("DRC escrow already settled")
+                || msg.contains("DRC live escrow cap exceeded")
+                || msg.contains("bad DRC escrow-create nonce")
+                || msg.contains("insufficient DRC escrow-create balance")
+                || msg.contains("bad DRC escrow-finish nonce")
+                || msg.contains("insufficient DRC escrow-finish balance")
+                || msg.contains("bad DRC escrow-cancel nonce")
+                || msg.contains("insufficient DRC escrow-cancel balance")
+                || msg.contains("DRC escrow finish not yet allowed")
+                || msg.contains("DRC escrow cancel not yet allowed")
+                || msg.contains("DRC escrow cancel owner mismatch")
         }
         _ => false,
     }
@@ -795,6 +867,9 @@ type TridentLaneAcceptances = (
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
 );
 
 /// Apply canonical Trident lanes and credit only Accepted fees to reward pools.
@@ -808,6 +883,9 @@ fn apply_trident_lanes(
     journal: &mut UtxoJournal,
 ) -> Result<TridentLaneAcceptances, StateError> {
     if block.drc_ticket_creates.is_empty()
+        && block.drc_escrow_creates.is_empty()
+        && block.drc_escrow_finishes.is_empty()
+        && block.drc_escrow_cancels.is_empty()
         && block.account_transfers.is_empty()
         && block.ovl_executions.is_empty()
         && block.drc_payments.is_empty()
@@ -829,9 +907,15 @@ fn apply_trident_lanes(
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
         ));
     }
     if (!block.drc_ticket_creates.is_empty()
+        || !block.drc_escrow_creates.is_empty()
+        || !block.drc_escrow_finishes.is_empty()
+        || !block.drc_escrow_cancels.is_empty()
         || !block.stake_ops.is_empty()
         || !block.ovl_executions.is_empty()
         || !block.drc_payments.is_empty()
@@ -842,7 +926,7 @@ fn apply_trident_lanes(
         && auth.is_none()
     {
         return Err(StateError::InvalidTx(
-            "stake/execution/payment/policy/preauthorization/regular-key/signer-list ops require network-bound auth"
+            "stake/execution/payment/policy/preauthorization/regular-key/signer-list/escrow ops require network-bound auth"
                 .into(),
         ));
     }
@@ -881,6 +965,9 @@ fn apply_trident_lanes(
     // Sequential visibility without committing the consensus batch early.
     let lane = store.cow_overlay();
     let mut drc_ticket_create_statuses = Vec::with_capacity(block.drc_ticket_creates.len());
+    let mut drc_escrow_create_statuses = Vec::with_capacity(block.drc_escrow_creates.len());
+    let mut drc_escrow_finish_statuses = Vec::with_capacity(block.drc_escrow_finishes.len());
+    let mut drc_escrow_cancel_statuses = Vec::with_capacity(block.drc_escrow_cancels.len());
     let mut account_statuses = Vec::with_capacity(block.account_transfers.len());
     let mut execution_statuses = Vec::with_capacity(block.ovl_executions.len());
     let mut stake_statuses = Vec::with_capacity(block.stake_ops.len());
@@ -899,6 +986,10 @@ fn apply_trident_lanes(
     let mut seen_deposit_preauth_ids: HashSet<Hash> = HashSet::new();
     let mut seen_payment_ids: HashSet<Hash> = HashSet::new();
     let mut seen_ticket_create_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_escrow_create_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_escrow_finish_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_escrow_cancel_ids: HashSet<Hash> = HashSet::new();
+    let mut settled_escrow_ids: HashSet<Hash> = HashSet::new();
 
     // Ticket creates observe pre-block key/list/policy auth state; minted tickets are
     // visible to every later lane in this block via the copy-on-write overlay.
@@ -936,6 +1027,189 @@ fn apply_trident_lanes(
                 }
             }
             Err(err) => return Err(err),
+        }
+    }
+
+    let escrow_blue_score = if !block.drc_escrow_creates.is_empty()
+        || !block.drc_escrow_finishes.is_empty()
+        || !block.drc_escrow_cancels.is_empty()
+    {
+        Some(application_blue_score.ok_or_else(|| {
+            StateError::InvalidTx(
+                "DRC escrow operations require a consensus application blue score".into(),
+            )
+        })?)
+    } else {
+        None
+    };
+
+    if let Some(escrow_blue_score) = escrow_blue_score {
+        for tx in &block.drc_escrow_creates {
+            let id = tx.escrow_id();
+            let ctx = auth.expect("DRC escrow auth checked above");
+            let meta_before = snapshot_meta_keys(&lane, &escrow_meta_keys_for_create(tx))?;
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.owner))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_escrow_create(
+                &lane,
+                tx,
+                ctx,
+                escrow_blue_score,
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(_) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_escrow_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_escrow_create_ids.insert(id);
+                    drc_escrow_create_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_escrow_create_ids.contains(&id) {
+                        drc_escrow_create_statuses.push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_escrow_create_statuses.push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        for tx in &block.drc_escrow_finishes {
+            let id = tx.finish_tx_id();
+            if settled_escrow_ids.contains(&tx.escrow_id) {
+                drc_escrow_finish_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let ctx = auth.expect("DRC escrow auth checked above");
+            let live = load_drc_escrow_live(&lane, &tx.escrow_id)?;
+            let meta_before = if let Some(ref live) = live {
+                snapshot_meta_keys(
+                    &lane,
+                    &escrow_meta_keys_for_settlement(&live.escrow_id, &live.owner),
+                )?
+            } else {
+                Vec::new()
+            };
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.submitter))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_escrow_finish(
+                &lane,
+                tx,
+                ctx,
+                escrow_blue_score,
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(_) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_escrow_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_escrow_finish_ids.insert(id);
+                    settled_escrow_ids.insert(tx.escrow_id);
+                    drc_escrow_finish_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_escrow_finish_ids.contains(&id)
+                        || settled_escrow_ids.contains(&tx.escrow_id)
+                    {
+                        drc_escrow_finish_statuses.push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_escrow_finish_statuses.push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        for tx in &block.drc_escrow_cancels {
+            let id = tx.cancel_tx_id();
+            if settled_escrow_ids.contains(&tx.escrow_id) {
+                drc_escrow_cancel_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let ctx = auth.expect("DRC escrow auth checked above");
+            let live = load_drc_escrow_live(&lane, &tx.escrow_id)?;
+            let meta_before = if let Some(ref live) = live {
+                snapshot_meta_keys(
+                    &lane,
+                    &escrow_meta_keys_for_settlement(&live.escrow_id, &live.owner),
+                )?
+            } else {
+                Vec::new()
+            };
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.owner))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_escrow_cancel(
+                &lane,
+                tx,
+                ctx,
+                escrow_blue_score,
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(_) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_escrow_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_escrow_cancel_ids.insert(id);
+                    settled_escrow_ids.insert(tx.escrow_id);
+                    drc_escrow_cancel_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_escrow_cancel_ids.contains(&id)
+                        || settled_escrow_ids.contains(&tx.escrow_id)
+                    {
+                        drc_escrow_cancel_statuses.push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_escrow_cancel_statuses.push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
         }
     }
 
@@ -1312,6 +1586,9 @@ fn apply_trident_lanes(
 
     Ok((
         drc_ticket_create_statuses,
+        drc_escrow_create_statuses,
+        drc_escrow_finish_statuses,
+        drc_escrow_cancel_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -1697,6 +1974,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
             None => batch.delete_cf(ColumnFamily::Meta, key),
         }
     }
+    for (key, prior) in journal.drc_escrow_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
     Ok(batch)
 }
@@ -1937,6 +2220,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
 
@@ -2133,6 +2419,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
@@ -2238,6 +2527,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
@@ -2310,6 +2602,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -2391,6 +2686,9 @@ mod tests {
                 drc_regular_keys: vec![],
                 drc_signer_lists: vec![],
                 drc_ticket_creates: vec![],
+                drc_escrow_creates: vec![],
+                drc_escrow_finishes: vec![],
+                drc_escrow_cancels: vec![],
                 drc_multisign_attachments: vec![],
             },
             1,
@@ -2471,6 +2769,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
@@ -2569,6 +2870,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -2649,6 +2953,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let mut block = block;
@@ -2743,6 +3050,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -2863,6 +3173,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -3494,6 +3807,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();

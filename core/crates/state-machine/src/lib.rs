@@ -12,6 +12,9 @@ mod community_state;
 mod data_availability;
 mod drc_account_auth;
 mod drc_deposit_preauth;
+mod drc_escrow;
+#[cfg(test)]
+mod drc_escrow_tests;
 #[cfg(test)]
 mod drc_master_key_disable_hardening_tests;
 #[cfg(test)]
@@ -103,6 +106,10 @@ pub use drc_deposit_preauth::{
     apply_drc_deposit_preauth, drc_deposit_preauth_key, drc_deposit_preauth_meta_keys,
     drc_deposit_preauth_root, load_drc_deposit_preauth, load_known_drc_deposit_authorization,
     DrcDepositAuthorization, DRC_DEPOSIT_PREAUTH_ROOT_DOMAIN,
+};
+pub use drc_escrow::{
+    apply_drc_escrow_cancel, apply_drc_escrow_create, apply_drc_escrow_finish, drc_escrow_root,
+    load_drc_escrow_live, load_drc_escrow_receipt, lookup_drc_escrow_point,
 };
 pub use drc_mempool::{
     drc_ticket_sequence_for_create_nonce, lookup_drc_ticket_point, plan_drc_mempool_reservation,
