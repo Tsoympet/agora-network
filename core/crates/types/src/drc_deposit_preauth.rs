@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use ts_rs::TS;
 
+use crate::drc_multisign::{read_multisign_trailer, write_multisign_trailer, DrcMultisignAuth};
 use crate::{Address, Amount, Hash};
 
 /// First address-only DRC deposit-preauthorization envelope.
@@ -39,9 +40,7 @@ impl DrcDepositPreauthAction {
 }
 
 /// Owner-signed operation that grants or revokes one address-based preauthorization.
-#[derive(
-    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
-)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(deny_unknown_fields)]
 pub struct DrcDepositPreauthTx {
@@ -57,6 +56,8 @@ pub struct DrcDepositPreauthTx {
     pub nonce: u64,
     pub public_key: Vec<u8>,
     pub signature: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multisign: Option<DrcMultisignAuth>,
 }
 
 impl DrcDepositPreauthTx {
@@ -113,6 +114,7 @@ impl DrcDepositPreauthTx {
             nonce,
             public_key: Vec::new(),
             signature: Vec::new(),
+            multisign: None,
         }
     }
 
@@ -139,6 +141,36 @@ impl DrcDepositPreauthTx {
             fee,
             nonce,
         )
+    }
+}
+
+impl BorshSerialize for DrcDepositPreauthTx {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> Result<(), borsh::io::Error> {
+        BorshSerialize::serialize(&self.version, writer)?;
+        BorshSerialize::serialize(&self.owner, writer)?;
+        BorshSerialize::serialize(&self.action, writer)?;
+        BorshSerialize::serialize(&self.authorized_source, writer)?;
+        BorshSerialize::serialize(&self.fee, writer)?;
+        BorshSerialize::serialize(&self.nonce, writer)?;
+        BorshSerialize::serialize(&self.public_key, writer)?;
+        BorshSerialize::serialize(&self.signature, writer)?;
+        write_multisign_trailer(&self.multisign, writer)
+    }
+}
+
+impl BorshDeserialize for DrcDepositPreauthTx {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        Ok(Self {
+            version: u32::deserialize_reader(reader)?,
+            owner: Address::deserialize_reader(reader)?,
+            action: DrcDepositPreauthAction::deserialize_reader(reader)?,
+            authorized_source: Address::deserialize_reader(reader)?,
+            fee: Amount::deserialize_reader(reader)?,
+            nonce: u64::deserialize_reader(reader)?,
+            public_key: Vec::<u8>::deserialize_reader(reader)?,
+            signature: Vec::<u8>::deserialize_reader(reader)?,
+            multisign: read_multisign_trailer(reader)?,
+        })
     }
 }
 

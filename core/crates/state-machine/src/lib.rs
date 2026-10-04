@@ -12,10 +12,13 @@ mod community_state;
 mod data_availability;
 mod drc_account_auth;
 mod drc_deposit_preauth;
+#[cfg(test)]
+mod drc_multisig_tests;
 mod drc_policy;
 mod drc_regular_key;
 #[cfg(test)]
 mod drc_regular_key_tests;
+mod drc_signer_list;
 mod error;
 mod execution;
 mod finality_store;
@@ -86,6 +89,11 @@ pub use drc_regular_key::{
     apply_drc_regular_key, drc_regular_key_meta_key, drc_regular_key_meta_keys,
     drc_regular_key_root, load_drc_account_regular_key, load_known_drc_account_keys,
     DRC_REGULAR_KEY_ROOT_DOMAIN,
+};
+pub use drc_signer_list::{
+    apply_drc_signer_list, drc_signer_list_meta_key, drc_signer_list_meta_keys,
+    drc_signer_list_root, load_drc_account_signer_list, load_known_drc_account_signer_summary,
+    DRC_SIGNER_LIST_ROOT_DOMAIN,
 };
 pub use error::StateError;
 pub use execution::{

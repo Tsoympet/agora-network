@@ -49,6 +49,7 @@ async fn announce_triggers_getblock_and_full_serve() {
         drc_account_policies: vec![],
         drc_deposit_preauths: vec![],
         drc_regular_keys: vec![],
+        drc_signer_lists: vec![],
     };
     let hash = block.id();
 

@@ -7,8 +7,8 @@ use agora_governance::{
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
-    DrcDepositPreauthTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, Hash, OutPoint,
-    OvlExecutionTx, Transaction, TxOut,
+    DrcDepositPreauthTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash,
+    OutPoint, OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -184,6 +184,7 @@ pub trait RpcBackend: Send {
     fn submit_drc_account_policy(&mut self, tx: DrcAccountPolicyTx) -> Result<Hash, RpcError>;
     fn submit_drc_deposit_preauth(&mut self, tx: DrcDepositPreauthTx) -> Result<Hash, RpcError>;
     fn submit_drc_regular_key(&mut self, tx: DrcRegularKeyTx) -> Result<Hash, RpcError>;
+    fn submit_drc_signer_list(&mut self, tx: DrcSignerListTx) -> Result<Hash, RpcError>;
     /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
     fn get_drc_account_policy(
         &self,
@@ -199,6 +200,11 @@ pub trait RpcBackend: Send {
         &self,
         account: &Address,
     ) -> Result<Option<(Option<Address>, u64)>, RpcError>;
+    /// Returns quorum and entry count only (no signer enumeration).
+    fn get_drc_account_signer_list(
+        &self,
+        account: &Address,
+    ) -> Result<Option<(u32, u32, u64)>, RpcError>;
     /// Root-committed canonical settlement only; pending is intentionally out of scope.
     fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError>;
     /// Exact recipient/invoice lookup; never scans or reports pending payments.
@@ -539,6 +545,12 @@ impl RpcBackend for InMemoryBackend {
         ))
     }
 
+    fn submit_drc_signer_list(&mut self, _tx: DrcSignerListTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC signer-list operations".into(),
+        ))
+    }
+
     fn get_drc_account_policy(
         &self,
         account: &Address,
@@ -561,6 +573,13 @@ impl RpcBackend for InMemoryBackend {
         &self,
         _account: &Address,
     ) -> Result<Option<(Option<Address>, u64)>, RpcError> {
+        Ok(None)
+    }
+
+    fn get_drc_account_signer_list(
+        &self,
+        _account: &Address,
+    ) -> Result<Option<(u32, u32, u64)>, RpcError> {
         Ok(None)
     }
 
@@ -658,6 +677,7 @@ impl RpcBackend for InMemoryBackend {
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
         })
     }
 

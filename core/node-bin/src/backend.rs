@@ -18,13 +18,14 @@ use agora_rpc::{
 };
 use agora_state_machine::{
     apply_account_transfer, apply_drc_account_policy, apply_drc_deposit_preauth,
-    apply_drc_payment_at_blue_score, apply_drc_regular_key, apply_ovl_execution,
-    apply_signed_stake_tx, build_snapshot, canonical_community_root, governance_treasury_root,
-    list_grants as list_canonical_grants, list_hubs as list_canonical_hubs,
-    list_missions as list_canonical_missions, list_passport_attestations,
-    load_canonical_community_summary, load_canonical_governance_policy, load_drc_account_policy,
-    load_drc_deposit_preauth, load_drc_payment_by_invoice, load_drc_payment_receipt, load_epoch,
-    load_known_drc_account_keys, load_known_drc_account_policy,
+    apply_drc_payment_at_blue_score, apply_drc_regular_key, apply_drc_signer_list,
+    apply_ovl_execution, apply_signed_stake_tx, build_snapshot, canonical_community_root,
+    governance_treasury_root, list_grants as list_canonical_grants,
+    list_hubs as list_canonical_hubs, list_missions as list_canonical_missions,
+    list_passport_attestations, load_canonical_community_summary, load_canonical_governance_policy,
+    load_drc_account_policy, load_drc_deposit_preauth, load_drc_payment_by_invoice,
+    load_drc_payment_receipt, load_epoch, load_known_drc_account_keys,
+    load_known_drc_account_policy, load_known_drc_account_signer_summary,
     load_known_drc_deposit_authorization, load_protocol_treasuries, load_reward_pool,
     load_validator, lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth,
     AccountJournal, ColumnFamily, StakingParams, StateStore, TxAuthContext, WriteBatch,
@@ -32,7 +33,8 @@ use agora_state_machine::{
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAccountPolicy,
     DrcAccountPolicyTx, DrcDepositPreauthTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx,
-    Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction, TxOut,
+    DrcSignerListTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
+    TxOut,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -295,6 +297,35 @@ pub(crate) fn admit_drc_regular_key(
     apply_drc_regular_key(store, &tx, auth, &mut batch, &mut journal)
         .map_err(|error| RpcError::Rejected(format!("DRC regular key: {error}")))?;
     pool.admit_drc_regular_key(tx)
+        .map_err(|error| RpcError::Rejected(error.to_string()))
+}
+
+pub(crate) fn admit_drc_signer_list(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: DrcSignerListTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(NativeAssetId::DRC, &tx.owner) {
+        return Err(RpcError::Rejected(
+            "DRC account already has a pending nonce".into(),
+        ));
+    }
+    if tx.fee.as_base_units() < min_relay_fee() {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {} < min relay {}",
+            tx.fee.as_base_units(),
+            min_relay_fee()
+        )));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_drc_signer_list(store, &tx, auth, &mut batch, &mut journal)
+        .map_err(|error| RpcError::Rejected(format!("DRC signer list: {error}")))?;
+    pool.admit_drc_signer_list(tx)
         .map_err(|error| RpcError::Rejected(error.to_string()))
 }
 
@@ -664,6 +695,16 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_drc_signer_list(&mut self, tx: DrcSignerListTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_drc_signer_list(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcSignerList(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
     fn get_drc_account_policy(
         &self,
         account: &Address,
@@ -694,6 +735,14 @@ impl RpcBackend for NodeBackend {
         account: &Address,
     ) -> Result<Option<(Option<Address>, u64)>, RpcError> {
         load_known_drc_account_keys(self.store.as_ref(), account)
+            .map_err(|error| RpcError::Internal(error.to_string()))
+    }
+
+    fn get_drc_account_signer_list(
+        &self,
+        account: &Address,
+    ) -> Result<Option<(u32, u32, u64)>, RpcError> {
+        load_known_drc_account_signer_summary(self.store.as_ref(), account)
             .map_err(|error| RpcError::Internal(error.to_string()))
     }
 
@@ -775,6 +824,7 @@ impl RpcBackend for NodeBackend {
             drc_account_policies,
             drc_deposit_preauths,
             drc_regular_keys,
+            drc_signer_lists,
         ) = {
             let pool = self
                 .mempool
@@ -792,6 +842,7 @@ impl RpcBackend for NodeBackend {
                 pool.select_drc_account_policies(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_deposit_preauths(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_regular_keys(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_signer_lists(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         chain
@@ -806,6 +857,7 @@ impl RpcBackend for NodeBackend {
                     drc_account_policies: &drc_account_policies,
                     drc_deposit_preauths: &drc_deposit_preauths,
                     drc_regular_keys: &drc_regular_keys,
+                    drc_signer_lists: &drc_signer_lists,
                     ..BlockTemplateLanes::default()
                 },
             )

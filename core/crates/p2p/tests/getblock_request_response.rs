@@ -48,6 +48,7 @@ async fn direct_getblock_returns_full_block() {
         drc_account_policies: vec![],
         drc_deposit_preauths: vec![],
         drc_regular_keys: vec![],
+        drc_signer_lists: vec![],
     };
     let hash = block.id();
 

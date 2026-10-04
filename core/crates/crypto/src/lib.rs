@@ -9,9 +9,11 @@ mod attestation;
 mod bip44;
 mod data_availability;
 mod drc_deposit_preauth;
+mod drc_multisign;
 mod drc_operation;
 mod drc_policy;
 mod drc_regular_key;
+mod drc_signer_list;
 mod error;
 mod execution;
 mod keys;
@@ -31,9 +33,16 @@ pub use bip44::{
 };
 pub use data_availability::{sign_data_commitment_bound, verify_data_commitment_bound};
 pub use drc_deposit_preauth::{sign_drc_deposit_preauth_bound, verify_drc_deposit_preauth_bound};
+pub use drc_multisign::{
+    sign_drc_multisign_participant_bound, validate_drc_operation_authorization_fields,
+    verify_drc_multisign_against_list,
+};
 pub use drc_operation::verify_bound_secp256k1;
 pub use drc_policy::{sign_drc_account_policy_bound, verify_drc_account_policy_bound};
 pub use drc_regular_key::{sign_drc_regular_key_bound, verify_drc_regular_key_bound};
+pub use drc_signer_list::{
+    sign_drc_signer_list_bound, verify_drc_signer_list_single_signature_bound,
+};
 pub use error::CryptoError;
 pub use execution::{sign_ovl_execution_bound, verify_ovl_execution_bound};
 pub use keys::{parse_compressed_public_key, KeyPair, PublicKeyBytes, SignatureBytes};

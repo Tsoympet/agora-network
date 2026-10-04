@@ -2,6 +2,7 @@
 import type { Address } from "./Address";
 import type { Amount } from "./Amount";
 import type { DrcDepositPreauthAction } from "./DrcDepositPreauthAction";
+import type { DrcMultisignAuth } from "./DrcMultisignAuth";
 
 /**
  * Owner-signed operation that grants or revokes one address-based preauthorization.
@@ -22,4 +23,4 @@ fee: Amount,
 /**
  * Shared DRC nonce used by transfers, stake ops, policies, preauths, and payments.
  */
-nonce: bigint, public_key: Array<number>, signature: Array<number>, };
+nonce: bigint, public_key: Array<number>, signature: Array<number>, multisign: DrcMultisignAuth | null, };

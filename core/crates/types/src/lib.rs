@@ -9,8 +9,10 @@ mod asset;
 mod block;
 mod data_availability;
 mod drc_deposit_preauth;
+mod drc_multisign;
 mod drc_policy;
 mod drc_regular_key;
+mod drc_signer_list;
 mod execution;
 mod finality;
 mod hash;
@@ -37,6 +39,12 @@ pub use drc_deposit_preauth::{
     DRC_DEPOSIT_PREAUTH_SIGNING_DOMAIN, DRC_DEPOSIT_PREAUTH_STATE_VERSION,
     DRC_DEPOSIT_PREAUTH_TX_TYPE, DRC_DEPOSIT_PREAUTH_TX_VERSION,
 };
+pub use drc_multisign::{
+    read_multisign_trailer, validate_exclusive_authorization, write_multisign_trailer,
+    DrcMultisignAuth, DrcMultisignEntry, DrcMultisignError, DRC_MULTISIGN_AUTH_VERSION,
+    DRC_MULTISIGN_MAX_SIGNATURES, DRC_MULTISIGN_PARTICIPANT_DOMAIN, DRC_SIGNER_LIST_MAX_ENTRIES,
+    DRC_SIGNER_MAX_WEIGHT,
+};
 pub use drc_policy::{
     DrcAccountPolicy, DrcAccountPolicyAction, DrcAccountPolicyError, DrcAccountPolicyTx,
     DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION, DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION,
@@ -48,6 +56,12 @@ pub use drc_regular_key::{
     DrcAccountRegularKey, DrcRegularKeyAction, DrcRegularKeyError, DrcRegularKeyTx,
     DRC_REGULAR_KEY_SIGNING_DOMAIN, DRC_REGULAR_KEY_STATE_VERSION, DRC_REGULAR_KEY_TX_TYPE,
     DRC_REGULAR_KEY_TX_VERSION,
+};
+pub use drc_signer_list::{
+    canonical_sorted_entries, validate_signer_list_payload, DrcAccountSignerList,
+    DrcSignerListAction, DrcSignerListEntry, DrcSignerListError, DrcSignerListTx,
+    DRC_SIGNER_LIST_SIGNING_DOMAIN, DRC_SIGNER_LIST_STATE_VERSION, DRC_SIGNER_LIST_TX_TYPE,
+    DRC_SIGNER_LIST_TX_VERSION,
 };
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
@@ -149,6 +163,7 @@ mod tests {
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);

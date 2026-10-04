@@ -4,12 +4,15 @@ use ts_rs::TS;
 
 use crate::{
     AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcDepositPreauthTx,
-    DrcPaymentTx, DrcRegularKeyTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
+    DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash, OvlExecutionTx, SignedStakeTx,
+    Transaction,
 };
 
-/// Explicit version/domain for bodies carrying DRC regular-key operations.
-pub const TRIDENT_BLOCK_BODY_VERSION: u16 = 9;
-pub const TRIDENT_BLOCK_BODY_DOMAIN: &[u8] = b"agora-block-body-v9";
+/// Explicit version/domain for bodies carrying DRC signer-list operations.
+pub const TRIDENT_BLOCK_BODY_VERSION: u16 = 10;
+pub const TRIDENT_BLOCK_BODY_DOMAIN: &[u8] = b"agora-block-body-v10";
+const TRIDENT_BLOCK_BODY_V9_VERSION: u16 = 9;
+const TRIDENT_BLOCK_BODY_V9_DOMAIN: &[u8] = b"agora-block-body-v9";
 const TRIDENT_BLOCK_BODY_V8_VERSION: u16 = 8;
 const TRIDENT_BLOCK_BODY_V8_DOMAIN: &[u8] = b"agora-block-body-v8";
 const TRIDENT_BLOCK_BODY_V7_VERSION: u16 = 7;
@@ -71,6 +74,9 @@ pub struct Block {
     /// Owner-authorized DRC regular-key rotation operations.
     #[serde(default)]
     pub drc_regular_keys: Vec<DrcRegularKeyTx>,
+    /// Owner-authorized DRC weighted signer-list operations.
+    #[serde(default)]
+    pub drc_signer_lists: Vec<DrcSignerListTx>,
 }
 
 impl Block {
@@ -87,6 +93,7 @@ impl Block {
             drc_account_policies: Vec::new(),
             drc_deposit_preauths: Vec::new(),
             drc_regular_keys: Vec::new(),
+            drc_signer_lists: Vec::new(),
         }
     }
 
@@ -124,8 +131,27 @@ impl Block {
     /// UTXO-only blocks keep the legacy merkle root; account/stake-only bodies
     /// retain v2; OVL execution uses v3; DRC payments use v4; authenticated
     /// data commitments use v5; DRC account policies use v6; address-based DRC
-    /// deposit preauthorizations use v7; payment-v4 expiry uses v8; regular keys use v9.
+    /// deposit preauthorizations use v7; payment-v4 expiry uses v8; regular keys use v9;
+    /// signer lists use v10.
     pub fn compute_body_root(&self) -> Hash {
+        let inner = self.compute_body_root_with_regular_keys();
+        if !self.drc_signer_lists.is_empty() {
+            let signer_list_ids: Vec<Hash> = self
+                .drc_signer_lists
+                .iter()
+                .map(DrcSignerListTx::signer_list_tx_id)
+                .collect();
+            return Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_DOMAIN,
+                TRIDENT_BLOCK_BODY_VERSION,
+                inner,
+                signer_list_ids,
+            ));
+        }
+        inner
+    }
+
+    fn compute_body_root_with_regular_keys(&self) -> Hash {
         let inner = self.compute_body_root_with_payment_v4_expiry();
         if !self.drc_regular_keys.is_empty() {
             let regular_key_ids: Vec<Hash> = self
@@ -134,8 +160,8 @@ impl Block {
                 .map(DrcRegularKeyTx::regular_key_tx_id)
                 .collect();
             return Hash::hash_borsh(&(
-                TRIDENT_BLOCK_BODY_DOMAIN,
-                TRIDENT_BLOCK_BODY_VERSION,
+                TRIDENT_BLOCK_BODY_V9_DOMAIN,
+                TRIDENT_BLOCK_BODY_V9_VERSION,
                 inner,
                 regular_key_ids,
             ));
@@ -283,6 +309,7 @@ impl BorshDeserialize for Block {
             drc_account_policies: deserialize_trailing_vec(reader)?,
             drc_deposit_preauths: deserialize_trailing_vec(reader)?,
             drc_regular_keys: deserialize_trailing_vec(reader)?,
+            drc_signer_lists: deserialize_trailing_vec(reader)?,
         })
     }
 }
