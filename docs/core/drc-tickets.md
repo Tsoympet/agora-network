@@ -1,7 +1,7 @@
 # DRC Tickets (rippled 2.5.0 subset)
 
 **Maturity:** Experimental · Single-node prototype  
-**Public submission:** **Stage B** — mempool reservation, gossip, mining templates, `agora_submitDrcTicketCreate`, `agora_getDrcTicket`. **Stage C** — adversarial/security matrix, reorg journal correctness, RPC/P2P wire tests, full mined-block Borsh harness for all ticket-capable families.
+**Public submission:** **Stage B** — mempool reservation, gossip, mining templates, `agora_submitDrcTicketCreate`, `agora_getDrcTicket`. **Stage C/D** — adversarial matrix (semantic rejection per family, multisign attachment adversaries, selector/replay/version guards, mempool reservation lifecycle).
 **Not XRPL wire/API parity** — no `TicketBatch`, reserve math, or ledger object wire shapes.
 
 ## Pinned rippled intent (2.5.0)

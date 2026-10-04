@@ -35,6 +35,14 @@ mod drc_tickets_stage_a_tests;
 mod drc_tickets_stage_b_tests;
 #[cfg(test)]
 mod drc_tickets_stage_c_tests;
+#[cfg(test)]
+mod drc_tickets_stage_d_multisign_tests;
+#[cfg(test)]
+mod drc_tickets_stage_d_selector_tests;
+#[cfg(test)]
+mod drc_tickets_stage_d_semantic_tests;
+#[cfg(test)]
+mod drc_tickets_test_harness;
 mod error;
 mod execution;
 mod finality_store;

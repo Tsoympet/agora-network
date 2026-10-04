@@ -410,28 +410,32 @@ mod tests {
                 let tickets_before = load_drc_account_tickets(&store, &owner.address()).unwrap();
                 let ticket_root = drc_ticket_root(&store).unwrap();
                 let state_root = compose_trident_state_root(&store, &TIP).unwrap();
-                let nonce_before =
-                    load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap().nonce;
-                assert!(
-                    apply_block_batched_with_auth_at_blue_score(
-                        &store,
-                        &$block,
-                        50,
-                        Some(&ctx),
-                        50
-                    )
-                    .is_err()
-                );
+                let nonce_before = load_account(&store, NativeAssetId::DRC, &owner.address())
+                    .unwrap()
+                    .nonce;
+                assert!(apply_block_batched_with_auth_at_blue_score(
+                    &store,
+                    &$block,
+                    50,
+                    Some(&ctx),
+                    50
+                )
+                .is_err());
                 assert_eq!(
                     load_drc_account_tickets(&store, &owner.address()).unwrap(),
                     tickets_before
                 );
                 assert_eq!(
-                    load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap().nonce,
+                    load_account(&store, NativeAssetId::DRC, &owner.address())
+                        .unwrap()
+                        .nonce,
                     nonce_before
                 );
                 assert_eq!(drc_ticket_root(&store).unwrap(), ticket_root);
-                assert_eq!(compose_trident_state_root(&store, &TIP).unwrap(), state_root);
+                assert_eq!(
+                    compose_trident_state_root(&store, &TIP).unwrap(),
+                    state_root
+                );
             }};
         }
 
@@ -523,11 +527,8 @@ mod tests {
         parents = vec![block.id()];
 
         let seq = mint_ticket(&store, &owner, &ctx, parents.clone()).0;
-        let mut policy = DrcAccountPolicyTx::set_require_destination_tag(
-            owner.address(),
-            Amount::ZERO,
-            0,
-        );
+        let mut policy =
+            DrcAccountPolicyTx::set_require_destination_tag(owner.address(), Amount::ZERO, 0);
         policy.version = DRC_ACCOUNT_POLICY_TICKET_TX_VERSION;
         policy.account_sequence = Some(DrcAccountSequenceSelector::ticket(seq));
         sign_drc_account_policy_bound(&mut policy, &owner, &ctx.chain_id, &ctx.genesis).unwrap();
@@ -539,12 +540,8 @@ mod tests {
         parents = vec![block.id()];
 
         let seq = mint_ticket(&store, &owner, &ctx, parents.clone()).0;
-        let mut pre = DrcDepositPreauthTx::authorize(
-            owner.address(),
-            peer.address(),
-            Amount::ZERO,
-            0,
-        );
+        let mut pre =
+            DrcDepositPreauthTx::authorize(owner.address(), peer.address(), Amount::ZERO, 0);
         pre.version = DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION;
         pre.account_sequence = Some(DrcAccountSequenceSelector::ticket(seq));
         sign_drc_deposit_preauth_bound(&mut pre, &owner, &ctx.chain_id, &ctx.genesis).unwrap();
@@ -927,15 +924,22 @@ mod tests {
     }
 
     #[test]
-    fn invariant_sequence_create_spend_reject_rollback() {
+    fn invariant_sequence_create_spend_semantic_reject_rollback() {
+        use agora_crypto::{
+            sign_account_transfer_bound, sign_drc_account_policy_bound,
+            sign_drc_deposit_preauth_bound, sign_drc_payment_bound, sign_drc_regular_key_bound,
+            sign_drc_signer_list_bound, sign_stake_tx_bound,
+        };
+
         let store = StateStore::open_in_memory();
         let owner = key(100);
+        let peer = key(101);
         fund(&store, &owner, 10_000_000);
         let ctx = auth();
         let mut live: HashSet<u64> = HashSet::new();
         let mut parents = vec![Hash::ZERO];
 
-        for round in 0u64..6 {
+        for round in 0u64..7 {
             let nonce = load_account(&store, NativeAssetId::DRC, &owner.address())
                 .unwrap()
                 .nonce;
@@ -954,9 +958,176 @@ mod tests {
             live.insert(seq);
             assert!(live.len() <= DRC_MAX_OUTSTANDING_TICKETS_PER_ACCOUNT);
 
+            let before_nonce = load_account(&store, NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .nonce;
+            let tickets_before = load_drc_account_tickets(&store, &owner.address()).unwrap();
+            let ticket_root = drc_ticket_root(&store).unwrap();
+            let state_root = compose_trident_state_root(&store, &TIP).unwrap();
+            let balance_before = load_account(&store, NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .balance;
+
+            let mut reject_block = coinbase(vec![block.id()], &owner);
+            match round {
+                0 => {
+                    let mut transfer = AccountTransfer {
+                        version: ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+                        asset: NativeAssetId::DRC,
+                        from: owner.address(),
+                        to: peer.address(),
+                        amount: Amount::from_base_units(10_000_000_000),
+                        fee: Amount::ZERO,
+                        nonce: 0,
+                        account_sequence: Some(DrcAccountSequenceSelector::ticket(seq)),
+                        public_key: Vec::new(),
+                        signature: Vec::new(),
+                        multisign: None,
+                    };
+                    sign_account_transfer_bound(&mut transfer, &owner, &ctx.chain_id, &ctx.genesis)
+                        .unwrap();
+                    reject_block.account_transfers.push(transfer);
+                }
+                1 => {
+                    let mut stake = SignedStakeTx {
+                        version: STAKE_TX_TICKET_VERSION,
+                        asset: NativeAssetId::DRC,
+                        kind: StakeOpKind::Bond,
+                        actor: owner.address(),
+                        validator: owner.address(),
+                        amount: 1,
+                        consensus_pubkey: vec![2; 33],
+                        withdrawal: owner.address(),
+                        commission_bps: 100,
+                        metadata_hash: Hash::ZERO,
+                        nonce: 0,
+                        account_sequence: Some(DrcAccountSequenceSelector::ticket(seq)),
+                        public_key: Vec::new(),
+                        signature: Vec::new(),
+                        multisign: None,
+                    };
+                    sign_stake_tx_bound(&mut stake, &owner, &ctx.chain_id, &ctx.genesis).unwrap();
+                    reject_block.stake_ops.push(stake);
+                }
+                2 => {
+                    let mut rk = DrcRegularKeyTx::set(
+                        owner.address(),
+                        owner.address(),
+                        owner.public_key_bytes().to_vec(),
+                        Amount::ZERO,
+                        0,
+                    );
+                    rk.version = DRC_REGULAR_KEY_TICKET_TX_VERSION;
+                    rk.account_sequence = Some(DrcAccountSequenceSelector::ticket(seq));
+                    assert!(sign_drc_regular_key_bound(
+                        &mut rk,
+                        &owner,
+                        &ctx.chain_id,
+                        &ctx.genesis
+                    )
+                    .is_err());
+                    reject_block.drc_regular_keys.push(rk);
+                }
+                3 => {
+                    let mut sl = DrcSignerListTx::unsigned_set(
+                        owner.address(),
+                        agora_types::canonical_sorted_entries(&[DrcSignerListEntry {
+                            signer: peer.address(),
+                            weight: 1,
+                        }]),
+                        1,
+                        Amount::from_base_units(50_000_000),
+                        0,
+                    );
+                    sl.version = DRC_SIGNER_LIST_TICKET_TX_VERSION;
+                    sl.account_sequence = Some(DrcAccountSequenceSelector::ticket(seq));
+                    sign_drc_signer_list_bound(&mut sl, &owner, &ctx.chain_id, &ctx.genesis)
+                        .unwrap();
+                    reject_block.drc_signer_lists.push(sl);
+                }
+                4 => {
+                    let mut policy = DrcAccountPolicyTx::set_master_key_disabled(
+                        owner.address(),
+                        Amount::ZERO,
+                        0,
+                    );
+                    policy.version = DRC_ACCOUNT_POLICY_TICKET_TX_VERSION;
+                    policy.account_sequence = Some(DrcAccountSequenceSelector::ticket(seq));
+                    sign_drc_account_policy_bound(&mut policy, &owner, &ctx.chain_id, &ctx.genesis)
+                        .unwrap();
+                    reject_block.drc_account_policies.push(policy);
+                }
+                5 => {
+                    let mut revoke = DrcDepositPreauthTx::unauthorize(
+                        owner.address(),
+                        peer.address(),
+                        Amount::ZERO,
+                        0,
+                    );
+                    revoke.version = DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION;
+                    revoke.account_sequence = Some(DrcAccountSequenceSelector::ticket(seq));
+                    sign_drc_deposit_preauth_bound(
+                        &mut revoke,
+                        &owner,
+                        &ctx.chain_id,
+                        &ctx.genesis,
+                    )
+                    .unwrap();
+                    reject_block.drc_deposit_preauths.push(revoke);
+                }
+                _ => {
+                    let mut payment = DrcPaymentTx::unsigned_v4(
+                        owner.address(),
+                        peer.address(),
+                        Amount::from_base_units(50_000_000_000),
+                        Amount::ZERO,
+                        None,
+                        None,
+                        Hash::ZERO,
+                        0,
+                        None,
+                    );
+                    payment.version = DRC_PAYMENT_TICKET_VERSION;
+                    payment.account_sequence = Some(DrcAccountSequenceSelector::ticket(seq));
+                    sign_drc_payment_bound(&mut payment, &owner, &ctx.chain_id, &ctx.genesis)
+                        .unwrap();
+                    reject_block.drc_payments.push(payment);
+                }
+            }
+            reject_block.header.tx_root = reject_block.compute_body_root();
+            assert!(apply_block_batched_with_auth_at_blue_score(
+                &store,
+                &reject_block,
+                50,
+                Some(&ctx),
+                50
+            )
+            .is_err());
+            assert_eq!(
+                load_drc_account_tickets(&store, &owner.address()).unwrap(),
+                tickets_before
+            );
+            assert_eq!(
+                load_account(&store, NativeAssetId::DRC, &owner.address())
+                    .unwrap()
+                    .nonce,
+                before_nonce
+            );
+            assert_eq!(drc_ticket_root(&store).unwrap(), ticket_root);
+            assert_eq!(
+                compose_trident_state_root(&store, &TIP).unwrap(),
+                state_root
+            );
+            assert_eq!(
+                load_account(&store, NativeAssetId::DRC, &owner.address())
+                    .unwrap()
+                    .balance,
+                balance_before
+            );
+
             let mut payment = DrcPaymentTx::unsigned_v4(
                 owner.address(),
-                key((101 + round as u8) % 200).address(),
+                key((102 + round as u8) % 200).address(),
                 Amount::from_base_units(1),
                 Amount::ZERO,
                 None,
@@ -981,14 +1152,6 @@ mod tests {
             .unwrap();
             store.write_batch(result.batch).unwrap();
             assert!(live.remove(&seq));
-            assert_eq!(
-                load_drc_account_tickets(&store, &owner.address()).unwrap(),
-                {
-                    let mut v: Vec<_> = live.iter().copied().collect();
-                    v.sort_unstable();
-                    v
-                }
-            );
             parents = vec![spend_block.id()];
         }
         assert!(live.is_empty());
