@@ -1192,6 +1192,25 @@ mod tests {
     }
 
     #[test]
+    fn master_disable_policy_shares_nonce_without_mempool_recovery_overlay() {
+        use agora_types::DrcAccountPolicyTx;
+
+        let owner = Address([8; 20]);
+        let disable =
+            DrcAccountPolicyTx::set_master_key_disabled(owner, Amount::from_base_units(1), 0);
+        let clear =
+            DrcAccountPolicyTx::clear_master_key_disabled(owner, Amount::from_base_units(2), 0);
+
+        let mut pool = Mempool::new(4);
+        pool.admit_drc_policy(disable.clone()).unwrap();
+        assert!(
+            pool.admit_drc_policy(clear).is_err(),
+            "mempool does not model same-nonce recovery pairing; block apply orders lanes"
+        );
+        assert_eq!(pool.select_drc_account_policies(2), vec![disable]);
+    }
+
+    #[test]
     fn drc_policy_shares_nonce_and_has_no_mempool_replacement() {
         use agora_types::DrcAccountPolicyTx;
 

@@ -440,6 +440,15 @@ Single-node prototype (consensus + RPC query; not XRPL parity).
 
 `agora_getDrcAccountPolicy` exposes `master_key_disabled` alongside existing flags.
 
+**Mempool / mining templates (bounded, fail-closed):** account-lane admission reserves the
+owner shared nonce but does **not** simulate same-block recovery mutations (regular-key,
+signer-list, enable/clear) against a prospective overlay. Template builders must apply
+candidate blocks against canonical state (or an explicit copy-on-write overlay identical to
+consensus lane order). A locally queued `set_master_key_disabled` is therefore **not**
+safe to pair in one template with recovery ops that only exist in sibling pool entries at
+the same nonce — block apply remains authoritative, and invalid pairings fail closed at
+apply rather than producing a body that would lock the account.
+
 Regular-key state commits to `agora-drc-regular-key-root-v1` inside composed
 state root `agora-trident-state-root-v9`. Body commitment uses
 `agora-block-body-v9` when the lane is non-empty. Trident protocol v11,
