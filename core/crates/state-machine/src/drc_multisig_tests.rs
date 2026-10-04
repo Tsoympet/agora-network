@@ -8,7 +8,7 @@ mod tests {
     };
     use agora_types::{
         canonical_sorted_entries, Amount, DrcMultisignAuth, DrcMultisignEntry, DrcPaymentTx,
-        DrcSignerListAction, DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId,
+        DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId,
         DRC_MULTISIGN_AUTH_VERSION,
     };
 

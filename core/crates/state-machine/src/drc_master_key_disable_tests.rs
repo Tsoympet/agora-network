@@ -12,7 +12,7 @@ mod tests {
         DRC_ACCOUNT_POLICY_MASTER_KEY_STATE_VERSION,
     };
 
-    use crate::accounts::{credit_account_into, load_account};
+    use crate::accounts::credit_account_into;
     use crate::apply::TxAuthContext;
     use crate::drc_account_auth::{
         verify_drc_account_policy_operation, verify_drc_payment_operation,
@@ -20,7 +20,7 @@ mod tests {
     use crate::drc_policy::{
         apply_drc_account_policy, drc_account_policy_root, load_drc_account_policy,
     };
-    use crate::drc_regular_key::{apply_drc_regular_key, load_drc_account_regular_key};
+    use crate::drc_regular_key::apply_drc_regular_key;
     use crate::drc_signer_list::apply_drc_signer_list;
     use crate::store::WriteBatch;
     use crate::{AccountJournal, StateStore};

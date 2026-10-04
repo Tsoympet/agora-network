@@ -16,6 +16,7 @@ use crate::accounts::{
 use crate::columns::ColumnFamily;
 use crate::data_availability::{apply_data_commitment, revert_data_commitment_meta_into};
 use crate::drc_deposit_preauth::{apply_drc_deposit_preauth, drc_deposit_preauth_meta_keys};
+use crate::drc_master_key_recovery::assert_drc_recovery_invariant;
 use crate::drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys};
 use crate::drc_regular_key::{apply_drc_regular_key, drc_regular_key_meta_keys};
 use crate::drc_signer_list::{apply_drc_signer_list, drc_signer_list_meta_keys};
@@ -956,6 +957,7 @@ fn apply_trident_lanes(
                     )?;
                 }
                 lane.write_batch(op_batch.clone())?;
+                assert_drc_recovery_invariant(&lane, &tx.owner)?;
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
                 journal.drc_regular_key_meta_before.extend(meta_before);
@@ -994,6 +996,7 @@ fn apply_trident_lanes(
                     )?;
                 }
                 lane.write_batch(op_batch.clone())?;
+                assert_drc_recovery_invariant(&lane, &tx.owner)?;
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
                 journal.drc_signer_list_meta_before.extend(meta_before);
@@ -1033,6 +1036,7 @@ fn apply_trident_lanes(
                     )?;
                 }
                 lane.write_batch(op_batch.clone())?;
+                assert_drc_recovery_invariant(&lane, &tx.account)?;
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
                 journal.drc_policy_meta_before.extend(meta_before);

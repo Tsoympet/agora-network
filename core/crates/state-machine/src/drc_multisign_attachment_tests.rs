@@ -3,13 +3,13 @@
 #[cfg(test)]
 mod tests {
     use agora_crypto::{
-        sign_drc_multisign_participant_bound, sign_drc_payment_bound, sign_drc_signer_list_bound,
+        sign_drc_multisign_participant_bound, sign_drc_signer_list_bound,
         KeyPair,
     };
     use agora_types::{
         materialize_drc_multisign_attachments, merge_drc_multisign_attachments,
         validate_drc_multisign_attachment_lane, Amount, Block, BlockHeader, DrcMultisignAuth,
-        DrcMultisignBlockAttachment, DrcMultisignEntry, DrcMultisignOperationKind, DrcPaymentTx,
+        DrcMultisignEntry, DrcMultisignOperationKind, DrcPaymentTx,
         DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId, Transaction,
         DRC_MULTISIGN_AUTH_VERSION,
     };
@@ -17,7 +17,7 @@ mod tests {
 
     use crate::accounts::{credit_account_into, load_account};
     use crate::apply::{apply_block_batched_with_auth, TxAuthContext};
-    use crate::drc_signer_list::{apply_drc_signer_list, load_drc_account_signer_list};
+    use crate::drc_signer_list::apply_drc_signer_list;
     use crate::store::WriteBatch;
     use crate::{AccountJournal, StateStore};
 

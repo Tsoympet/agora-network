@@ -74,3 +74,16 @@ pub fn ensure_no_lockout_after_signer_list(
     };
     ensure_alternate_recovery(after_regular, after_list.as_ref())
 }
+
+/// While master-key disable is set, at least one alternate recovery path must exist.
+pub fn assert_drc_recovery_invariant(
+    store: &StateStore,
+    owner: &Address,
+) -> Result<(), StateError> {
+    if drc_master_key_disabled(store, owner)? && !has_alternate_recovery(store, owner)? {
+        return Err(StateError::InvalidTx(
+            "DRC master-key disable invariant violated: no alternate recovery".into(),
+        ));
+    }
+    Ok(())
+}
