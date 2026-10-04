@@ -9,6 +9,7 @@ mod asset;
 mod block;
 mod data_availability;
 mod drc_deposit_preauth;
+mod drc_escrow;
 mod drc_multisign;
 mod drc_multisign_attachment;
 mod drc_multisign_lane;
@@ -36,7 +37,8 @@ pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{
     Block, BlockHeader, TRIDENT_BLOCK_BODY_DOMAIN, TRIDENT_BLOCK_BODY_V11_DOMAIN,
-    TRIDENT_BLOCK_BODY_V11_VERSION, TRIDENT_BLOCK_BODY_VERSION,
+    TRIDENT_BLOCK_BODY_V11_VERSION, TRIDENT_BLOCK_BODY_V12_DOMAIN, TRIDENT_BLOCK_BODY_V12_VERSION,
+    TRIDENT_BLOCK_BODY_V13_DOMAIN, TRIDENT_BLOCK_BODY_V13_VERSION, TRIDENT_BLOCK_BODY_VERSION,
 };
 pub use data_availability::{
     DataAvailabilityCommitment, DataCommitmentAuthorization, DataCommitmentError,
@@ -50,6 +52,18 @@ pub use drc_deposit_preauth::{
     DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TX_TYPE,
     DRC_DEPOSIT_PREAUTH_TX_VERSION, DRC_DEPOSIT_PREAUTH_V2_SIGNING_DOMAIN,
 };
+pub use drc_escrow::{
+    escrow_cancel_allowed, escrow_finish_allowed, validate_escrow_time_bounds, DrcEscrowCancelTx,
+    DrcEscrowCreateTx, DrcEscrowError, DrcEscrowFinishTx, DrcEscrowLive, DrcEscrowOutcome,
+    DrcEscrowReceipt, DRC_ESCROW_CANCEL_SIGNING_DOMAIN, DRC_ESCROW_CANCEL_TICKET_SIGNING_DOMAIN,
+    DRC_ESCROW_CANCEL_TICKET_VERSION, DRC_ESCROW_CANCEL_TX_TYPE, DRC_ESCROW_CANCEL_TX_VERSION,
+    DRC_ESCROW_CREATE_SIGNING_DOMAIN, DRC_ESCROW_CREATE_TICKET_SIGNING_DOMAIN,
+    DRC_ESCROW_CREATE_TICKET_VERSION, DRC_ESCROW_CREATE_TX_TYPE, DRC_ESCROW_CREATE_TX_VERSION,
+    DRC_ESCROW_FINISH_SIGNING_DOMAIN, DRC_ESCROW_FINISH_TICKET_SIGNING_DOMAIN,
+    DRC_ESCROW_FINISH_TICKET_VERSION, DRC_ESCROW_FINISH_TX_TYPE, DRC_ESCROW_FINISH_TX_VERSION,
+    DRC_ESCROW_LIVE_STATE_VERSION, DRC_ESCROW_MAX_BLUE_SCORE_BOUND, DRC_ESCROW_RECEIPT_VERSION,
+    DRC_MAX_LIVE_ESCROWS_PER_ACCOUNT,
+};
 pub use drc_multisign::{
     read_multisign_trailer, validate_exclusive_authorization, write_multisign_trailer,
     DrcMultisignAuth, DrcMultisignEntry, DrcMultisignError, DRC_MULTISIGN_AUTH_VERSION,
@@ -58,12 +72,13 @@ pub use drc_multisign::{
 };
 pub use drc_multisign_attachment::{
     attachment_key_for_account_transfer, attachment_key_for_deposit_preauth,
-    attachment_key_for_payment, attachment_key_for_policy, attachment_key_for_regular_key,
-    attachment_key_for_signer_list, attachment_key_for_stake, attachment_key_for_ticket_create,
-    drc_multisign_attachment_key, drc_multisign_signing_commitment, DrcMultisignAttachmentError,
-    DrcMultisignAttachmentKey, DrcMultisignBlockAttachment, DrcMultisignOperationKind,
-    DRC_MULTISIGN_ATTACHMENT_KEY_VERSION, DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
-    DRC_MULTISIGN_SIGNING_COMMITMENT_DOMAIN,
+    attachment_key_for_escrow_cancel, attachment_key_for_escrow_create,
+    attachment_key_for_escrow_finish, attachment_key_for_payment, attachment_key_for_policy,
+    attachment_key_for_regular_key, attachment_key_for_signer_list, attachment_key_for_stake,
+    attachment_key_for_ticket_create, drc_multisign_attachment_key,
+    drc_multisign_signing_commitment, DrcMultisignAttachmentError, DrcMultisignAttachmentKey,
+    DrcMultisignBlockAttachment, DrcMultisignOperationKind, DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
+    DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION, DRC_MULTISIGN_SIGNING_COMMITMENT_DOMAIN,
 };
 pub use drc_multisign_lane::{
     drc_multisign_attachment_capacity, materialize_drc_multisign_attachments,
@@ -206,6 +221,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         assert_eq!(block.id(), header.hash());
@@ -237,6 +255,12 @@ mod ts_export {
         "DrcAccountSequenceSelector.ts",
         "DrcAccountTickets.ts",
         "DrcTicketCreateTx.ts",
+        "DrcEscrowCreateTx.ts",
+        "DrcEscrowFinishTx.ts",
+        "DrcEscrowCancelTx.ts",
+        "DrcEscrowLive.ts",
+        "DrcEscrowReceipt.ts",
+        "DrcEscrowOutcome.ts",
         "DrcPaymentReceipt.ts",
         "DrcPaymentResult.ts",
         "DrcPaymentTx.ts",
@@ -292,6 +316,12 @@ mod ts_export {
         DrcAccountSequenceSelector::export_all().expect("export DrcAccountSequenceSelector");
         DrcAccountTickets::export_all().expect("export DrcAccountTickets");
         DrcTicketCreateTx::export_all().expect("export DrcTicketCreateTx");
+        DrcEscrowCreateTx::export_all().expect("export DrcEscrowCreateTx");
+        DrcEscrowFinishTx::export_all().expect("export DrcEscrowFinishTx");
+        DrcEscrowCancelTx::export_all().expect("export DrcEscrowCancelTx");
+        DrcEscrowLive::export_all().expect("export DrcEscrowLive");
+        DrcEscrowReceipt::export_all().expect("export DrcEscrowReceipt");
+        DrcEscrowOutcome::export_all().expect("export DrcEscrowOutcome");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");
