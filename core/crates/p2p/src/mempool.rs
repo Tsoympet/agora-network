@@ -7,7 +7,9 @@ use agora_types::{
     DrcTicketCreateTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
     ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
     DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
-    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION,
+    DRC_ESCROW_CANCEL_TICKET_VERSION, DRC_ESCROW_CREATE_TICKET_VERSION,
+    DRC_ESCROW_FINISH_TICKET_VERSION, STAKE_TX_TICKET_VERSION,
 };
 
 use crate::P2pError;
@@ -40,6 +42,8 @@ pub struct Mempool {
     drc_escrow_cancel_txs: HashMap<Hash, DrcEscrowCancelTx>,
     /// Mempool-only: escrow ids with a pending create not yet canonical.
     pending_escrow_ids: HashSet<Hash>,
+    /// At most one pending finish or cancel per live escrow object id.
+    reserved_escrow_settlements: HashMap<Hash, Hash>,
     /// One pending consumer per `(owner, ticket_sequence)`.
     reserved_tickets: HashSet<(Address, u64)>,
     /// How each DRC lane operation reserved its sender slot (release on eviction).
@@ -82,6 +86,7 @@ impl Mempool {
             drc_escrow_finish_txs: HashMap::new(),
             drc_escrow_cancel_txs: HashMap::new(),
             pending_escrow_ids: HashSet::new(),
+            reserved_escrow_settlements: HashMap::new(),
             reserved_tickets: HashSet::new(),
             drc_slot_reservations: HashMap::new(),
             deposit_auth_required_payments: HashSet::new(),
@@ -658,6 +663,24 @@ impl Mempool {
         self.pending_escrow_ids.contains(escrow_id)
     }
 
+    pub fn escrow_settlement_reserved(&self, escrow_id: &Hash) -> bool {
+        self.reserved_escrow_settlements.contains_key(escrow_id)
+    }
+
+    fn reserve_escrow_settlement(&mut self, escrow_id: Hash, tx_id: Hash) -> Result<(), P2pError> {
+        if self.reserved_escrow_settlements.contains_key(&escrow_id) {
+            return Err(P2pError::MempoolRejected(
+                "escrow already has a pending finish or cancel".into(),
+            ));
+        }
+        self.reserved_escrow_settlements.insert(escrow_id, tx_id);
+        Ok(())
+    }
+
+    fn release_escrow_settlement(&mut self, escrow_id: &Hash) {
+        self.reserved_escrow_settlements.remove(escrow_id);
+    }
+
     pub fn admit_drc_escrow_create(&mut self, tx: DrcEscrowCreateTx) -> Result<Hash, P2pError> {
         tx.validate_structure()
             .map_err(|e| P2pError::MempoolRejected(e.to_string()))?;
@@ -668,7 +691,14 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        self.reserve_drc_slot(id, tx.owner, DrcSlotReservation::AccountNonce)?;
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.owner,
+            tx.version,
+            DRC_ESCROW_CREATE_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_drc_slot(id, tx.owner, reservation)?;
         self.pending_escrow_ids.insert(id);
         self.drc_escrow_create_txs.insert(id, tx);
         Ok(id)
@@ -690,7 +720,23 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        self.reserve_drc_slot(id, tx.submitter, DrcSlotReservation::AccountNonce)?;
+        if self.reserved_escrow_settlements.contains_key(&tx.escrow_id) {
+            return Err(P2pError::MempoolRejected(
+                "escrow already has a pending finish or cancel".into(),
+            ));
+        }
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.submitter,
+            tx.version,
+            DRC_ESCROW_FINISH_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_escrow_settlement(tx.escrow_id, id)?;
+        if let Err(e) = self.reserve_drc_slot(id, tx.submitter, reservation) {
+            self.release_escrow_settlement(&tx.escrow_id);
+            return Err(e);
+        }
         self.drc_escrow_finish_txs.insert(id, tx);
         Ok(id)
     }
@@ -711,7 +757,23 @@ impl Mempool {
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        self.reserve_drc_slot(id, tx.submitter, DrcSlotReservation::AccountNonce)?;
+        if self.reserved_escrow_settlements.contains_key(&tx.escrow_id) {
+            return Err(P2pError::MempoolRejected(
+                "escrow already has a pending finish or cancel".into(),
+            ));
+        }
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.submitter,
+            tx.version,
+            DRC_ESCROW_CANCEL_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_escrow_settlement(tx.escrow_id, id)?;
+        if let Err(e) = self.reserve_drc_slot(id, tx.submitter, reservation) {
+            self.release_escrow_settlement(&tx.escrow_id);
+            return Err(e);
+        }
         self.drc_escrow_cancel_txs.insert(id, tx);
         Ok(id)
     }
@@ -725,12 +787,14 @@ impl Mempool {
 
     pub fn remove_drc_escrow_finish(&mut self, id: &Hash) -> Option<DrcEscrowFinishTx> {
         let tx = self.drc_escrow_finish_txs.remove(id)?;
+        self.release_escrow_settlement(&tx.escrow_id);
         self.release_drc_slot(id, tx.submitter);
         Some(tx)
     }
 
     pub fn remove_drc_escrow_cancel(&mut self, id: &Hash) -> Option<DrcEscrowCancelTx> {
         let tx = self.drc_escrow_cancel_txs.remove(id)?;
+        self.release_escrow_settlement(&tx.escrow_id);
         self.release_drc_slot(id, tx.submitter);
         Some(tx)
     }
@@ -2010,5 +2074,66 @@ mod tests {
         assert!(!pool.account_reserved(NativeAssetId::DRC, &owner));
         pool.remove_drc_escrow_cancel(&cancel_id).unwrap();
         assert!(!pool.account_reserved(NativeAssetId::DRC, &helper));
+    }
+
+    #[test]
+    fn pending_escrow_finish_blocks_cancel_on_same_escrow_id() {
+        let owner = Address([15; 20]);
+        let escrow_id = Hash([16; 32]);
+        let finish = DrcEscrowFinishTx {
+            version: agora_types::DRC_ESCROW_FINISH_TX_VERSION,
+            submitter: owner,
+            escrow_id,
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let cancel = DrcEscrowCancelTx {
+            version: agora_types::DRC_ESCROW_CANCEL_TX_VERSION,
+            submitter: owner,
+            escrow_id,
+            fee: Amount::from_base_units(1),
+            nonce: 1,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(8);
+        pool.admit_drc_escrow_finish(finish).unwrap();
+        assert!(pool.escrow_settlement_reserved(&escrow_id));
+        assert!(pool.admit_drc_escrow_cancel(cancel).is_err());
+    }
+
+    #[test]
+    fn escrow_create_ticket_sequence_reserved_in_mempool() {
+        let owner = Address([17; 20]);
+        let create = DrcEscrowCreateTx {
+            version: DRC_ESCROW_CREATE_TICKET_VERSION,
+            owner,
+            recipient: Address([18; 20]),
+            amount: Amount::from_base_units(3),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            finish_after_blue_score: None,
+            cancel_after_blue_score: Some(40),
+            nonce: 0,
+            account_sequence: Some(agora_types::DrcAccountSequenceSelector::ticket(7)),
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(8);
+        let id = create.escrow_id();
+        pool.admit_drc_escrow_create(create).unwrap();
+        assert!(pool.ticket_consumer_reserved(&owner, 7));
+        assert!(pool.pending_escrow_create(&id));
+        pool.remove_drc_escrow_create(&id).unwrap();
+        assert!(!pool.ticket_consumer_reserved(&owner, 7));
     }
 }
