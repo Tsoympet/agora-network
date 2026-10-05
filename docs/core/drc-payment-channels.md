@@ -17,12 +17,12 @@ Deposit authorization: third-party **Payment** credits require `DepositPreauth`;
 | Asset | Native **DRC only** |
 | Keys | **secp256k1 compressed 33-byte** claim keys only (no Ed25519) |
 | Time | **`settle_delay_blue_scores`** and optional **`cancel_after_blue_score`** (GHOSTDAG blue score; **no** wall clock, Ripple Epoch, or mutable `Expiration`) |
-| **`tfRenew` / mutable expiration** | **Omitted** — fund may only extend **`cancel_after_blue_score`** forward when explicitly supported |
+| **`tfRenew` / mutable expiration** | **Omitted** — `PaymentChannelFund` adds locked XRP only; **`CancelAfter` is immutable** at create |
 | Create | Locks **positive** initial amount + owner fee/sequence; caps **32 live channels per owner** |
 | Channel ID | `Hash::hash_borsh(DrcPaymentChannelCreateTx)` |
-| Off-ledger claim | Domain-separated secp256k1: `chain_id`, `genesis`, `channel_id`, **`channel_version`**, **cumulative authorized amount** |
+| Off-ledger claim | Domain-separated secp256k1: `OFFLEDGER_CLAIM_DOMAIN`, `chain_id`, `genesis`, **`channel_id`**, **cumulative authorized amount** (no mutable channel version; funding does not invalidate prior signatures) |
 | On-chain claim | **Destination** submitter; verifies off-ledger sig; **`previous_claimed < cumulative ≤ total_funded`**; pays **destination fee** before delta transfer |
-| Close | **Owner** schedules finalize at `blue_score + settle_delay`; **destination** may **finalize immediately**; **any funded submitter** may **finalize** at/after scheduled finalize or **`cancel_after`** (inclusive boundaries documented in code) |
+| Close | **Owner** `OwnerScheduleClose` sets finalize at `blue_score + settle_delay`; **destination** `DestinationClose` finalizes immediately; **owner or destination** `Finalize` at/after scheduled finalize or **`cancel_after`** (inclusive). **Bounded deviation:** rippled allows additional close flag combinations; Agora pins the three explicit `close_kind` values only. |
 | Invoice | **`invoice_id` must be zero** |
 | Destination tag | `Option<u32>`; **`Some(0)` valid**; RequireDestTag enforced at **create** |
 | Query | Point lookup only (`channel_id`); **no enumeration** |

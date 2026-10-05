@@ -11,6 +11,10 @@ import type { DrcEscrowCancelTx } from "./DrcEscrowCancelTx";
 import type { DrcEscrowCreateTx } from "./DrcEscrowCreateTx";
 import type { DrcEscrowFinishTx } from "./DrcEscrowFinishTx";
 import type { DrcMultisignBlockAttachment } from "./DrcMultisignBlockAttachment";
+import type { DrcPaymentChannelClaimTx } from "./DrcPaymentChannelClaimTx";
+import type { DrcPaymentChannelCloseTx } from "./DrcPaymentChannelCloseTx";
+import type { DrcPaymentChannelCreateTx } from "./DrcPaymentChannelCreateTx";
+import type { DrcPaymentChannelFundTx } from "./DrcPaymentChannelFundTx";
 import type { DrcPaymentTx } from "./DrcPaymentTx";
 import type { DrcRegularKeyTx } from "./DrcRegularKeyTx";
 import type { DrcSignerListTx } from "./DrcSignerListTx";
@@ -91,6 +95,22 @@ drc_check_cashes: Array<DrcCheckCashTx>,
  * Authorized native DRC check cancels.
  */
 drc_check_cancels: Array<DrcCheckCancelTx>,
+/**
+ * Owner-authorized native DRC payment channel creates.
+ */
+drc_payment_channel_creates: Array<DrcPaymentChannelCreateTx>,
+/**
+ * Owner-authorized native DRC payment channel funds.
+ */
+drc_payment_channel_funds: Array<DrcPaymentChannelFundTx>,
+/**
+ * Destination-authorized native DRC payment channel claims.
+ */
+drc_payment_channel_claims: Array<DrcPaymentChannelClaimTx>,
+/**
+ * Authorized native DRC payment channel closes.
+ */
+drc_payment_channel_closes: Array<DrcPaymentChannelCloseTx>,
 /**
  * Detached, body-root-committed DRC multisign authorization (consensus lane).
  */

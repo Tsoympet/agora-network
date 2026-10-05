@@ -71,7 +71,9 @@ pub enum DrcPaymentChannelOutcome {
     Closed = 1,
 }
 
-pub fn validate_payment_channel_blue_score_bound(bound: Option<u64>) -> Result<(), DrcPaymentChannelError> {
+pub fn validate_payment_channel_blue_score_bound(
+    bound: Option<u64>,
+) -> Result<(), DrcPaymentChannelError> {
     if let Some(score) = bound {
         if score > DRC_PAYMENT_CHANNEL_MAX_BLUE_SCORE_BOUND {
             return Err(DrcPaymentChannelError::BlueScoreBoundOverflow);
@@ -102,7 +104,6 @@ pub fn payment_channel_offledger_claim_signing_bytes(
     chain_id: &str,
     genesis: &Hash,
     channel_id: &Hash,
-    channel_version: u64,
     cumulative_authorized: Amount,
 ) -> Vec<u8> {
     borsh::to_vec(&(
@@ -110,10 +111,33 @@ pub fn payment_channel_offledger_claim_signing_bytes(
         chain_id,
         genesis.as_bytes(),
         channel_id,
-        channel_version,
         cumulative_authorized,
     ))
     .expect("borsh payment channel off-ledger claim")
+}
+
+pub fn payment_channel_fund_submitter_allowed(submitter: Address, owner: Address) -> bool {
+    submitter == owner
+}
+
+pub fn payment_channel_claim_submitter_allowed(submitter: Address, destination: Address) -> bool {
+    submitter == destination
+}
+
+/// rippled: source may `tfClose` to start settle delay; destination may close immediately.
+/// Agora bounded subset: owner schedules; destination closes immediately; owner or destination
+/// may finalize once `payment_channel_finalize_allowed` is true (fund is owner-only).
+pub fn payment_channel_close_submitter_allowed(
+    close_kind: DrcPaymentChannelCloseKind,
+    submitter: Address,
+    owner: Address,
+    destination: Address,
+) -> bool {
+    match close_kind {
+        DrcPaymentChannelCloseKind::OwnerScheduleClose => submitter == owner,
+        DrcPaymentChannelCloseKind::DestinationClose => submitter == destination,
+        DrcPaymentChannelCloseKind::Finalize => submitter == owner || submitter == destination,
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
@@ -277,7 +301,6 @@ impl BorshDeserialize for DrcPaymentChannelCreateTx {
     }
 }
 
-
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct DrcPaymentChannelFundTx {
@@ -285,8 +308,6 @@ pub struct DrcPaymentChannelFundTx {
     pub submitter: Address,
     pub channel_id: Hash,
     pub amount: Amount,
-    #[serde(default)]
-    pub cancel_after_blue_score: Option<u64>,
     pub fee: Amount,
     pub nonce: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -314,6 +335,9 @@ impl DrcPaymentChannelFundTx {
         if self.submitter == Address::ZERO || self.channel_id == Hash::ZERO {
             return Err(DrcPaymentChannelError::ZeroAddress);
         }
+        if self.amount.as_base_units() == 0 {
+            return Err(DrcPaymentChannelError::ZeroAmount);
+        }
         Ok(())
     }
 
@@ -321,7 +345,7 @@ impl DrcPaymentChannelFundTx {
         if self.version >= DRC_PAYMENT_CHANNEL_FUND_TICKET_VERSION {
             let sequence = self
                 .account_sequence
-                .expect("check cash v2 requires account_sequence");
+                .expect("payment channel fund v2 requires account_sequence");
             return borsh::to_vec(&(
                 DRC_PAYMENT_CHANNEL_FUND_TICKET_SIGNING_DOMAIN,
                 chain_id,
@@ -331,11 +355,10 @@ impl DrcPaymentChannelFundTx {
                 self.submitter,
                 self.channel_id,
                 self.amount,
-                self.cancel_after_blue_score,
                 self.fee,
                 sequence,
             ))
-            .expect("borsh check cash v2");
+            .expect("borsh payment channel fund v2");
         }
         borsh::to_vec(&(
             DRC_PAYMENT_CHANNEL_FUND_SIGNING_DOMAIN,
@@ -346,11 +369,10 @@ impl DrcPaymentChannelFundTx {
             self.submitter,
             self.channel_id,
             self.amount,
-            self.cancel_after_blue_score,
             self.fee,
             self.nonce,
         ))
-        .expect("borsh check cash v1")
+        .expect("borsh payment channel fund v1")
     }
 
     pub fn fund_tx_id(&self) -> Hash {
@@ -364,7 +386,6 @@ impl BorshSerialize for DrcPaymentChannelFundTx {
         BorshSerialize::serialize(&self.submitter, writer)?;
         BorshSerialize::serialize(&self.channel_id, writer)?;
         BorshSerialize::serialize(&self.amount, writer)?;
-        BorshSerialize::serialize(&self.cancel_after_blue_score, writer)?;
         BorshSerialize::serialize(&self.fee, writer)?;
         BorshSerialize::serialize(&self.nonce, writer)?;
         BorshSerialize::serialize(&self.account_sequence, writer)?;
@@ -381,7 +402,6 @@ impl BorshDeserialize for DrcPaymentChannelFundTx {
             submitter: Address::deserialize_reader(reader)?,
             channel_id: Hash::deserialize_reader(reader)?,
             amount: Amount::deserialize_reader(reader)?,
-            cancel_after_blue_score: Option::<u64>::deserialize_reader(reader)?,
             fee: Amount::deserialize_reader(reader)?,
             nonce: u64::deserialize_reader(reader)?,
             account_sequence: Option::<DrcAccountSequenceSelector>::deserialize_reader(reader)?,
@@ -427,6 +447,12 @@ impl DrcPaymentChannelClaimTx {
         if self.submitter == Address::ZERO || self.channel_id == Hash::ZERO {
             return Err(DrcPaymentChannelError::ZeroAddress);
         }
+        if self.cumulative_authorized.as_base_units() == 0 {
+            return Err(DrcPaymentChannelError::ZeroAmount);
+        }
+        if self.channel_claim_signature.len() != 64 {
+            return Err(DrcPaymentChannelError::MalformedClaimSignature);
+        }
         Ok(())
     }
 
@@ -434,7 +460,7 @@ impl DrcPaymentChannelClaimTx {
         if self.version >= DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION {
             let sequence = self
                 .account_sequence
-                .expect("check cash v2 requires account_sequence");
+                .expect("payment channel claim v2 requires account_sequence");
             return borsh::to_vec(&(
                 DRC_PAYMENT_CHANNEL_CLAIM_TICKET_SIGNING_DOMAIN,
                 chain_id,
@@ -443,10 +469,12 @@ impl DrcPaymentChannelClaimTx {
                 self.version,
                 self.submitter,
                 self.channel_id,
+                self.cumulative_authorized,
+                &self.channel_claim_signature,
                 self.fee,
                 sequence,
             ))
-            .expect("borsh check cash v2");
+            .expect("borsh payment channel claim v2");
         }
         borsh::to_vec(&(
             DRC_PAYMENT_CHANNEL_CLAIM_SIGNING_DOMAIN,
@@ -456,10 +484,12 @@ impl DrcPaymentChannelClaimTx {
             self.version,
             self.submitter,
             self.channel_id,
+            self.cumulative_authorized,
+            &self.channel_claim_signature,
             self.fee,
             self.nonce,
         ))
-        .expect("borsh check cash v1")
+        .expect("borsh payment channel claim v1")
     }
 
     pub fn claim_tx_id(&self) -> Hash {
@@ -542,7 +572,7 @@ impl DrcPaymentChannelCloseTx {
         if self.version >= DRC_PAYMENT_CHANNEL_CLOSE_TICKET_VERSION {
             let sequence = self
                 .account_sequence
-                .expect("check cash v2 requires account_sequence");
+                .expect("payment channel close v2 requires account_sequence");
             return borsh::to_vec(&(
                 DRC_PAYMENT_CHANNEL_CLOSE_TICKET_SIGNING_DOMAIN,
                 chain_id,
@@ -551,10 +581,11 @@ impl DrcPaymentChannelCloseTx {
                 self.version,
                 self.submitter,
                 self.channel_id,
+                self.close_kind,
                 self.fee,
                 sequence,
             ))
-            .expect("borsh check cash v2");
+            .expect("borsh payment channel close v2");
         }
         borsh::to_vec(&(
             DRC_PAYMENT_CHANNEL_CLOSE_SIGNING_DOMAIN,
@@ -564,10 +595,11 @@ impl DrcPaymentChannelCloseTx {
             self.version,
             self.submitter,
             self.channel_id,
+            self.close_kind,
             self.fee,
             self.nonce,
         ))
-        .expect("borsh check cash v1")
+        .expect("borsh payment channel close v1")
     }
 
     pub fn close_tx_id(&self) -> Hash {
@@ -621,7 +653,6 @@ pub struct DrcPaymentChannelLive {
     pub claim_public_key: Vec<u8>,
     pub settle_delay_blue_scores: u64,
     pub cancel_after_blue_score: Option<u64>,
-    pub channel_version: u64,
     pub total_funded: Amount,
     pub cumulative_claimed: Amount,
     pub close_finalizable_after: Option<u64>,

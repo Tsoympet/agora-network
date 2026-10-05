@@ -8,8 +8,9 @@ use ts_rs::TS;
 use crate::{
     AccountTransfer, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
     DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcMultisignAuth,
-    DrcMultisignError, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
-    NativeAssetId, SignedStakeTx,
+    DrcMultisignError, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
+    DrcSignerListTx, DrcTicketCreateTx, Hash, NativeAssetId, SignedStakeTx,
 };
 
 pub const DRC_MULTISIGN_ATTACHMENT_KEY_VERSION: u32 = 1;
@@ -50,6 +51,10 @@ pub enum DrcMultisignOperationKind {
     DrcCheckCreate = 12,
     DrcCheckCash = 13,
     DrcCheckCancel = 14,
+    DrcPaymentChannelCreate = 15,
+    DrcPaymentChannelFund = 16,
+    DrcPaymentChannelClaim = 17,
+    DrcPaymentChannelClose = 18,
 }
 
 impl DrcMultisignOperationKind {
@@ -69,6 +74,10 @@ impl DrcMultisignOperationKind {
             Self::DrcCheckCreate => "drc_check_create",
             Self::DrcCheckCash => "drc_check_cash",
             Self::DrcCheckCancel => "drc_check_cancel",
+            Self::DrcPaymentChannelCreate => "drc_payment_channel_create",
+            Self::DrcPaymentChannelFund => "drc_payment_channel_fund",
+            Self::DrcPaymentChannelClaim => "drc_payment_channel_claim",
+            Self::DrcPaymentChannelClose => "drc_payment_channel_close",
         }
     }
 }
@@ -320,6 +329,50 @@ pub fn attachment_key_for_check_cancel(
 ) -> DrcMultisignAttachmentKey {
     drc_multisign_attachment_key(
         DrcMultisignOperationKind::DrcCheckCancel,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_payment_channel_create(
+    tx: &DrcPaymentChannelCreateTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcPaymentChannelCreate,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_payment_channel_fund(
+    tx: &DrcPaymentChannelFundTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcPaymentChannelFund,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_payment_channel_claim(
+    tx: &DrcPaymentChannelClaimTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcPaymentChannelClaim,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_payment_channel_close(
+    tx: &DrcPaymentChannelCloseTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcPaymentChannelClose,
         &tx.signing_bytes_bound(chain_id, genesis),
     )
 }
