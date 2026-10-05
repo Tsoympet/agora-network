@@ -53,6 +53,9 @@ async fn direct_getblock_returns_full_block() {
         drc_escrow_creates: vec![],
         drc_escrow_finishes: vec![],
         drc_escrow_cancels: vec![],
+        drc_check_creates: vec![],
+        drc_check_cashes: vec![],
+        drc_check_cancels: vec![],
         drc_multisign_attachments: vec![],
     };
     let hash = block.id();

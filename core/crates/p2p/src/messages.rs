@@ -1,14 +1,15 @@
 use agora_types::{
     AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcAccountPolicyTx,
-    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, OvlExecutionTx, SignedStakeTx,
-    Transaction,
+    DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx,
+    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::ibd::short_ids_for_block;
 
 /// Wire envelopes for gossip payloads.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum NetworkMessage {
     Transaction(Transaction),
@@ -52,6 +53,12 @@ pub enum NetworkMessage {
     DrcEscrowFinish(DrcEscrowFinishTx),
     /// Appended in Trident protocol v17; native DRC escrow cancel.
     DrcEscrowCancel(DrcEscrowCancelTx),
+    /// Appended in Trident protocol v18; native DRC check create.
+    DrcCheckCreate(DrcCheckCreateTx),
+    /// Appended in Trident protocol v18; native DRC check cash.
+    DrcCheckCash(DrcCheckCashTx),
+    /// Appended in Trident protocol v18; native DRC check cancel.
+    DrcCheckCancel(DrcCheckCancelTx),
 }
 
 impl NetworkMessage {
@@ -81,6 +88,9 @@ impl NetworkMessage {
             && block.drc_escrow_creates.is_empty()
             && block.drc_escrow_finishes.is_empty()
             && block.drc_escrow_cancels.is_empty()
+            && block.drc_check_creates.is_empty()
+            && block.drc_check_cashes.is_empty()
+            && block.drc_check_cancels.is_empty()
             && block.drc_multisign_attachments.is_empty()
         {
             Self::CompactBlock {

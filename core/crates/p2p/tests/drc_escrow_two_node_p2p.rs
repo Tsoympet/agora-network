@@ -218,7 +218,7 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
         &GENESIS,
         &Hash::hash_borsh(&1u64),
     ));
-    let (handle_a, mut events_a, handle_b, mut events_b) = connect_two_nodes(&fp, &fp).await;
+    let (handle_a, mut events_a, handle_b, _events_b) = connect_two_nodes(&fp, &fp).await;
 
     let owner = KeyPair::from_secret_bytes(&[11; 32]).unwrap();
     let recipient = KeyPair::from_secret_bytes(&[14; 32]).unwrap();

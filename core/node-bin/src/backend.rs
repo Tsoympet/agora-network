@@ -17,30 +17,32 @@ use agora_rpc::{
     UtxoEntry,
 };
 use agora_state_machine::{
-    apply_account_transfer, apply_drc_account_policy, apply_drc_deposit_preauth,
-    apply_drc_escrow_cancel, apply_drc_escrow_create, apply_drc_escrow_finish,
-    apply_drc_payment_at_blue_score, apply_drc_regular_key, apply_drc_signer_list,
-    apply_drc_ticket_create, apply_ovl_execution, apply_signed_stake_tx, build_snapshot,
-    canonical_community_root, governance_treasury_root, list_grants as list_canonical_grants,
-    list_hubs as list_canonical_hubs, list_missions as list_canonical_missions,
-    list_passport_attestations, load_canonical_community_summary, load_canonical_governance_policy,
-    load_drc_account_policy, load_drc_deposit_preauth, load_drc_escrow_receipt,
+    apply_account_transfer, apply_drc_account_policy, apply_drc_check_cancel, apply_drc_check_cash,
+    apply_drc_check_create, apply_drc_deposit_preauth, apply_drc_escrow_cancel,
+    apply_drc_escrow_create, apply_drc_escrow_finish, apply_drc_payment_at_blue_score,
+    apply_drc_regular_key, apply_drc_signer_list, apply_drc_ticket_create, apply_ovl_execution,
+    apply_signed_stake_tx, build_snapshot, canonical_community_root, governance_treasury_root,
+    list_grants as list_canonical_grants, list_hubs as list_canonical_hubs,
+    list_missions as list_canonical_missions, list_passport_attestations,
+    load_canonical_community_summary, load_canonical_governance_policy, load_drc_account_policy,
+    load_drc_check_receipt, load_drc_deposit_preauth, load_drc_escrow_receipt,
     load_drc_payment_by_invoice, load_drc_payment_receipt, load_epoch, load_known_drc_account_keys,
     load_known_drc_account_policy, load_known_drc_account_signer_summary,
     load_known_drc_deposit_authorization, load_protocol_treasuries, load_reward_pool,
-    load_validator, lookup_drc_escrow_point, lookup_drc_ticket_point, lookup_tx_location,
-    meta_keys, outpoint_key, plan_drc_mempool_reservation, validate_mempool_tx_with_auth,
-    AccountJournal, ColumnFamily, DrcMempoolReservation, DrcTicketPointStatus, StakingParams,
-    StateStore, TxAuthContext, WriteBatch,
+    load_validator, lookup_drc_check_point, lookup_drc_escrow_point, lookup_drc_ticket_point,
+    lookup_tx_location, meta_keys, outpoint_key, plan_drc_mempool_reservation,
+    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, DrcMempoolReservation,
+    DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAccountPolicy,
-    DrcAccountPolicyTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
-    DrcEscrowFinishTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
-    DrcTicketCreateTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
-    TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
-    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
-    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx,
+    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentReceipt, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, NativeAssetId, OutPoint,
+    OvlExecutionTx, SignedStakeTx, Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
+    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -573,6 +575,133 @@ pub(crate) fn admit_drc_escrow_cancel(
         .map_err(|error| RpcError::Rejected(error.to_string()))
 }
 
+pub(crate) fn admit_drc_check_create(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: DrcCheckCreateTx,
+    auth: &TxAuthContext,
+    application_blue_score: u64,
+) -> Result<Hash, RpcError> {
+    tx.validate_structure()
+        .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(NativeAssetId::DRC, &tx.owner) {
+        return Err(RpcError::Rejected(
+            "DRC account already has a pending nonce".into(),
+        ));
+    }
+    if tx.fee.as_base_units() < min_relay_fee() {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {} < min relay {}",
+            tx.fee.as_base_units(),
+            min_relay_fee()
+        )));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_drc_check_create(
+        store,
+        &tx,
+        auth,
+        application_blue_score,
+        &mut batch,
+        &mut journal,
+    )
+    .map_err(|error| RpcError::Rejected(format!("DRC check create: {error}")))?;
+    pool.admit_drc_check_create(tx)
+        .map_err(|error| RpcError::Rejected(error.to_string()))
+}
+
+pub(crate) fn admit_drc_check_cash(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: DrcCheckCashTx,
+    auth: &TxAuthContext,
+    application_blue_score: u64,
+) -> Result<Hash, RpcError> {
+    tx.validate_structure()
+        .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(NativeAssetId::DRC, &tx.submitter) {
+        return Err(RpcError::Rejected(
+            "DRC account already has a pending nonce".into(),
+        ));
+    }
+    if pool.pending_check_create(&tx.check_id) {
+        return Err(RpcError::Rejected(
+            "mempool rejects check cash while create is pending".into(),
+        ));
+    }
+    if tx.fee.as_base_units() < min_relay_fee() {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {} < min relay {}",
+            tx.fee.as_base_units(),
+            min_relay_fee()
+        )));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_drc_check_cash(
+        store,
+        &tx,
+        auth,
+        application_blue_score,
+        &mut batch,
+        &mut journal,
+    )
+    .map_err(|error| RpcError::Rejected(format!("DRC check cash: {error}")))?;
+    pool.admit_drc_check_cash(tx)
+        .map_err(|error| RpcError::Rejected(error.to_string()))
+}
+
+pub(crate) fn admit_drc_check_cancel(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: DrcCheckCancelTx,
+    auth: &TxAuthContext,
+    application_blue_score: u64,
+) -> Result<Hash, RpcError> {
+    tx.validate_structure()
+        .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(NativeAssetId::DRC, &tx.submitter) {
+        return Err(RpcError::Rejected(
+            "DRC account already has a pending nonce".into(),
+        ));
+    }
+    if pool.pending_check_create(&tx.check_id) {
+        return Err(RpcError::Rejected(
+            "mempool rejects check cancel while create is pending".into(),
+        ));
+    }
+    if tx.fee.as_base_units() < min_relay_fee() {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {} < min relay {}",
+            tx.fee.as_base_units(),
+            min_relay_fee()
+        )));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_drc_check_cancel(
+        store,
+        &tx,
+        auth,
+        application_blue_score,
+        &mut batch,
+        &mut journal,
+    )
+    .map_err(|error| RpcError::Rejected(format!("DRC check cancel: {error}")))?;
+    pool.admit_drc_check_cancel(tx)
+        .map_err(|error| RpcError::Rejected(error.to_string()))
+}
+
 /// Node RPC surface: tips/blocks from store, signed tx → mempool + gossip.
 pub struct NodeBackend {
     chain: Arc<Mutex<ChainState>>,
@@ -1057,6 +1186,84 @@ impl RpcBackend for NodeBackend {
         }
     }
 
+    fn submit_drc_check_create(&mut self, tx: DrcCheckCreateTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id = admit_drc_check_create(&self.store, &self.mempool, tx.clone(), &auth, blue_score)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcCheckCreate(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn submit_drc_check_cash(&mut self, tx: DrcCheckCashTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id = admit_drc_check_cash(&self.store, &self.mempool, tx.clone(), &auth, blue_score)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcCheckCash(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn submit_drc_check_cancel(&mut self, tx: DrcCheckCancelTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id = admit_drc_check_cancel(&self.store, &self.mempool, tx.clone(), &auth, blue_score)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcCheckCancel(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn get_drc_check(&self, check_id: &Hash) -> Result<Value, RpcError> {
+        let status = lookup_drc_check_point(self.store.as_ref(), check_id)
+            .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+        Ok(json!({
+            "check_id": check_id.to_hex(),
+            "status": status,
+        }))
+    }
+
+    fn get_drc_check_receipt(&self, check_id: &Hash) -> Result<Value, RpcError> {
+        match load_drc_check_receipt(self.store.as_ref(), check_id)
+            .map_err(|error| RpcError::Internal(error.to_string()))?
+        {
+            Some(receipt) => Ok(json!({
+                "check_id": check_id.to_hex(),
+                "status": "known",
+                "outcome": match receipt.outcome {
+                    agora_types::DrcCheckOutcome::Cashed => "cashed",
+                    agora_types::DrcCheckOutcome::Cancelled => "cancelled",
+                },
+                "settlement_blue_score": receipt.settlement_blue_score,
+                "settlement_tx_id": receipt.settlement_tx_id.to_hex(),
+            })),
+            None => Ok(json!({
+                "check_id": check_id.to_hex(),
+                "status": "unknown",
+            })),
+        }
+    }
+
     fn get_drc_account_policy(
         &self,
         account: &Address,
@@ -1181,6 +1388,9 @@ impl RpcBackend for NodeBackend {
             drc_escrow_creates,
             drc_escrow_finishes,
             drc_escrow_cancels,
+            drc_check_creates,
+            drc_check_cashes,
+            drc_check_cancels,
         ) = {
             let pool = self
                 .mempool
@@ -1203,6 +1413,9 @@ impl RpcBackend for NodeBackend {
                 pool.select_drc_escrow_creates(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_escrow_finishes(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_escrow_cancels(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_check_creates(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_check_cashes(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_check_cancels(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         chain
@@ -1222,6 +1435,9 @@ impl RpcBackend for NodeBackend {
                     drc_escrow_creates: &drc_escrow_creates,
                     drc_escrow_finishes: &drc_escrow_finishes,
                     drc_escrow_cancels: &drc_escrow_cancels,
+                    drc_check_creates: &drc_check_creates,
+                    drc_check_cashes: &drc_check_cashes,
+                    drc_check_cancels: &drc_check_cancels,
                     ..BlockTemplateLanes::default()
                 },
             )

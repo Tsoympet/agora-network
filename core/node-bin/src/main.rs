@@ -31,10 +31,11 @@ use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
-    admit_account_transfer, admit_drc_account_policy, admit_drc_deposit_preauth,
-    admit_drc_escrow_cancel, admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_payment,
-    admit_drc_regular_key, admit_drc_signer_list, admit_drc_ticket_create, admit_ovl_execution,
-    admit_stake_tx, admit_transaction, NodeBackend, NodeBackendConfig,
+    admit_account_transfer, admit_drc_account_policy, admit_drc_check_cancel, admit_drc_check_cash,
+    admit_drc_check_create, admit_drc_deposit_preauth, admit_drc_escrow_cancel,
+    admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_payment, admit_drc_regular_key,
+    admit_drc_signer_list, admit_drc_ticket_create, admit_ovl_execution, admit_stake_tx,
+    admit_transaction, NodeBackend, NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::storage_policy::StoragePolicy;
@@ -1166,6 +1167,69 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "DRC escrow-cancel gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcCheckCreate(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_check_create(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, check_create = %id.to_hex(), "DRC check-create gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC check-create gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcCheckCash(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_check_cash(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, check_cash = %id.to_hex(), "DRC check-cash gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC check-cash gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcCheckCancel(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_check_cancel(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, check_cancel = %id.to_hex(), "DRC check-cancel gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC check-cancel gossip rejected");
                             }
                         }
                     }

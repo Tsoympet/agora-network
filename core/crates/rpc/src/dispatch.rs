@@ -1,7 +1,8 @@
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcDepositPreauthTx,
-    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentReceipt, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, OvlExecutionTx, Transaction,
+    AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx,
+    DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
+    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
+    OvlExecutionTx, Transaction,
 };
 use serde_json::{json, Value};
 
@@ -315,6 +316,53 @@ impl<B: RpcBackend> RpcDispatcher<B> {
             RpcMethod::GetDrcEscrowReceipt => {
                 let escrow_id = param_hash(&req.params, "escrow_id")?;
                 self.backend.get_drc_escrow_receipt(&escrow_id)
+            }
+            RpcMethod::SubmitDrcCheckCreate => {
+                let raw = req
+                    .params
+                    .get("check_create")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcCheckCreateTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_check_create(tx)?;
+                Ok(json!({ "check_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcCheckCash => {
+                let raw = req
+                    .params
+                    .get("check_cash")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcCheckCashTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_check_cash(tx)?;
+                Ok(json!({ "cash_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcCheckCancel => {
+                let raw = req
+                    .params
+                    .get("check_cancel")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcCheckCancelTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_check_cancel(tx)?;
+                Ok(json!({ "cancel_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcCheck => {
+                let check_id = param_hash(&req.params, "check_id")?;
+                self.backend.get_drc_check(&check_id)
+            }
+            RpcMethod::GetDrcCheckReceipt => {
+                let check_id = param_hash(&req.params, "check_id")?;
+                self.backend.get_drc_check_receipt(&check_id)
             }
             RpcMethod::GetDrcAccountSignerList => {
                 let account = param_address(&req.params, "account")?;
@@ -963,6 +1011,9 @@ mod tests {
             drc_escrow_creates: vec![],
             drc_escrow_finishes: vec![],
             drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
@@ -1084,6 +1135,9 @@ mod tests {
             drc_escrow_creates: vec![],
             drc_escrow_finishes: vec![],
             drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
@@ -1124,6 +1178,9 @@ mod tests {
             drc_escrow_creates: vec![],
             drc_escrow_finishes: vec![],
             drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
@@ -1729,6 +1786,9 @@ mod tests {
             drc_escrow_creates: vec![],
             drc_escrow_finishes: vec![],
             drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -1785,6 +1845,9 @@ mod tests {
             drc_escrow_creates: vec![],
             drc_escrow_finishes: vec![],
             drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);

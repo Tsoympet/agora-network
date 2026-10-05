@@ -12,11 +12,10 @@ use agora_state_machine::{
     credit_account_into, lookup_drc_escrow_point, GenesisBuilder, StateStore, WriteBatch,
 };
 use agora_types::{
-    materialize_drc_multisign_attachments, Block, BlockHeader, DrcEscrowCancelTx,
+    materialize_drc_multisign_attachments, Block, DrcEscrowCancelTx,
     DrcEscrowCreateTx, DrcEscrowFinishTx, Hash, NativeAssetId, DRC_ESCROW_CANCEL_TX_VERSION,
     DRC_ESCROW_CREATE_TX_VERSION, DRC_ESCROW_FINISH_TX_VERSION,
 };
-use borsh::BorshDeserialize;
 use serde_json::json;
 
 use agora_rpc::RpcBackend;

@@ -2,12 +2,15 @@ use std::collections::{HashMap, HashSet};
 
 use agora_types::{
     resolve_drc_account_sequence, AccountTransfer, Address, Block, DrcAccountPolicyTx,
-    DrcAccountSequence, DrcDepositPreauthAction, DrcDepositPreauthTx, DrcEscrowCancelTx,
-    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
-    DrcTicketCreateTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
+    DrcAccountSequence, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
+    DrcDepositPreauthAction, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
+    DrcEscrowFinishTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
+    NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
     ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
-    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_ESCROW_CANCEL_TICKET_VERSION,
-    DRC_ESCROW_CREATE_TICKET_VERSION, DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
+    DRC_CHECK_CANCEL_TICKET_VERSION, DRC_CHECK_CASH_TICKET_VERSION,
+    DRC_CHECK_CREATE_TICKET_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_ESCROW_CANCEL_TICKET_VERSION, DRC_ESCROW_CREATE_TICKET_VERSION,
+    DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
     DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 
@@ -43,6 +46,11 @@ pub struct Mempool {
     pending_escrow_ids: HashSet<Hash>,
     /// At most one pending finish or cancel per live escrow object id.
     reserved_escrow_settlements: HashMap<Hash, Hash>,
+    drc_check_create_txs: HashMap<Hash, DrcCheckCreateTx>,
+    drc_check_cash_txs: HashMap<Hash, DrcCheckCashTx>,
+    drc_check_cancel_txs: HashMap<Hash, DrcCheckCancelTx>,
+    pending_check_ids: HashSet<Hash>,
+    reserved_check_settlements: HashMap<Hash, Hash>,
     /// One pending consumer per `(owner, ticket_sequence)`.
     reserved_tickets: HashSet<(Address, u64)>,
     /// How each DRC lane operation reserved its sender slot (release on eviction).
@@ -86,6 +94,11 @@ impl Mempool {
             drc_escrow_cancel_txs: HashMap::new(),
             pending_escrow_ids: HashSet::new(),
             reserved_escrow_settlements: HashMap::new(),
+            drc_check_create_txs: HashMap::new(),
+            drc_check_cash_txs: HashMap::new(),
+            drc_check_cancel_txs: HashMap::new(),
+            pending_check_ids: HashSet::new(),
+            reserved_check_settlements: HashMap::new(),
             reserved_tickets: HashSet::new(),
             drc_slot_reservations: HashMap::new(),
             deposit_auth_required_payments: HashSet::new(),
@@ -109,6 +122,9 @@ impl Mempool {
             + self.drc_escrow_create_txs.len()
             + self.drc_escrow_finish_txs.len()
             + self.drc_escrow_cancel_txs.len()
+            + self.drc_check_create_txs.len()
+            + self.drc_check_cash_txs.len()
+            + self.drc_check_cancel_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -129,6 +145,9 @@ impl Mempool {
             || self.drc_escrow_create_txs.contains_key(tx_id)
             || self.drc_escrow_finish_txs.contains_key(tx_id)
             || self.drc_escrow_cancel_txs.contains_key(tx_id)
+            || self.drc_check_create_txs.contains_key(tx_id)
+            || self.drc_check_cash_txs.contains_key(tx_id)
+            || self.drc_check_cancel_txs.contains_key(tx_id)
     }
 
     pub fn ticket_consumer_reserved(&self, owner: &Address, ticket_sequence: u64) -> bool {
@@ -680,6 +699,28 @@ impl Mempool {
         self.reserved_escrow_settlements.remove(escrow_id);
     }
 
+    pub fn pending_check_create(&self, check_id: &Hash) -> bool {
+        self.pending_check_ids.contains(check_id)
+    }
+
+    pub fn check_settlement_reserved(&self, check_id: &Hash) -> bool {
+        self.reserved_check_settlements.contains_key(check_id)
+    }
+
+    fn reserve_check_settlement(&mut self, check_id: Hash, tx_id: Hash) -> Result<(), P2pError> {
+        if self.reserved_check_settlements.contains_key(&check_id) {
+            return Err(P2pError::MempoolRejected(
+                "check already has a pending cash or cancel".into(),
+            ));
+        }
+        self.reserved_check_settlements.insert(check_id, tx_id);
+        Ok(())
+    }
+
+    fn release_check_settlement(&mut self, check_id: &Hash) {
+        self.reserved_check_settlements.remove(check_id);
+    }
+
     pub fn admit_drc_escrow_create(&mut self, tx: DrcEscrowCreateTx) -> Result<Hash, P2pError> {
         tx.validate_structure()
             .map_err(|e| P2pError::MempoolRejected(e.to_string()))?;
@@ -814,6 +855,145 @@ impl Mempool {
 
     pub fn select_drc_escrow_cancels(&self, max: usize) -> Vec<DrcEscrowCancelTx> {
         let mut txs: Vec<_> = self.drc_escrow_cancel_txs.values().cloned().collect();
+        txs.sort_by(|a, b| a.cancel_tx_id().as_bytes().cmp(b.cancel_tx_id().as_bytes()));
+        txs.truncate(max);
+        txs
+    }
+
+    pub fn admit_drc_check_create(&mut self, tx: DrcCheckCreateTx) -> Result<Hash, P2pError> {
+        tx.validate_structure()
+            .map_err(|e| P2pError::MempoolRejected(e.to_string()))?;
+        let id = tx.check_id();
+        if self.drc_check_create_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.owner,
+            tx.version,
+            DRC_CHECK_CREATE_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_drc_slot(id, tx.owner, reservation)?;
+        self.pending_check_ids.insert(id);
+        self.drc_check_create_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    pub fn admit_drc_check_cash(&mut self, tx: DrcCheckCashTx) -> Result<Hash, P2pError> {
+        tx.validate_structure()
+            .map_err(|e| P2pError::MempoolRejected(e.to_string()))?;
+        if self.pending_check_ids.contains(&tx.check_id) {
+            return Err(P2pError::MempoolRejected(
+                "mempool rejects check cash while create is pending (same-block is consensus-only)"
+                    .into(),
+            ));
+        }
+        let id = tx.cash_tx_id();
+        if self.drc_check_cash_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        if self.reserved_check_settlements.contains_key(&tx.check_id) {
+            return Err(P2pError::MempoolRejected(
+                "check already has a pending cash or cancel".into(),
+            ));
+        }
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.submitter,
+            tx.version,
+            DRC_CHECK_CASH_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_check_settlement(tx.check_id, id)?;
+        if let Err(e) = self.reserve_drc_slot(id, tx.submitter, reservation) {
+            self.release_check_settlement(&tx.check_id);
+            return Err(e);
+        }
+        self.drc_check_cash_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    pub fn admit_drc_check_cancel(&mut self, tx: DrcCheckCancelTx) -> Result<Hash, P2pError> {
+        tx.validate_structure()
+            .map_err(|e| P2pError::MempoolRejected(e.to_string()))?;
+        if self.pending_check_ids.contains(&tx.check_id) {
+            return Err(P2pError::MempoolRejected(
+                "mempool rejects check cancel while create is pending (same-block is consensus-only)"
+                    .into(),
+            ));
+        }
+        let id = tx.cancel_tx_id();
+        if self.drc_check_cancel_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        if self.reserved_check_settlements.contains_key(&tx.check_id) {
+            return Err(P2pError::MempoolRejected(
+                "check already has a pending cash or cancel".into(),
+            ));
+        }
+        let reservation = Self::drc_sender_reservation_from_selector(
+            tx.submitter,
+            tx.version,
+            DRC_CHECK_CANCEL_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )?;
+        self.reserve_check_settlement(tx.check_id, id)?;
+        if let Err(e) = self.reserve_drc_slot(id, tx.submitter, reservation) {
+            self.release_check_settlement(&tx.check_id);
+            return Err(e);
+        }
+        self.drc_check_cancel_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    pub fn remove_drc_check_create(&mut self, id: &Hash) -> Option<DrcCheckCreateTx> {
+        let tx = self.drc_check_create_txs.remove(id)?;
+        self.pending_check_ids.remove(id);
+        self.release_drc_slot(id, tx.owner);
+        Some(tx)
+    }
+
+    pub fn remove_drc_check_cash(&mut self, id: &Hash) -> Option<DrcCheckCashTx> {
+        let tx = self.drc_check_cash_txs.remove(id)?;
+        self.release_check_settlement(&tx.check_id);
+        self.release_drc_slot(id, tx.submitter);
+        Some(tx)
+    }
+
+    pub fn remove_drc_check_cancel(&mut self, id: &Hash) -> Option<DrcCheckCancelTx> {
+        let tx = self.drc_check_cancel_txs.remove(id)?;
+        self.release_check_settlement(&tx.check_id);
+        self.release_drc_slot(id, tx.submitter);
+        Some(tx)
+    }
+
+    pub fn select_drc_check_creates(&self, max: usize) -> Vec<DrcCheckCreateTx> {
+        let mut txs: Vec<_> = self.drc_check_create_txs.values().cloned().collect();
+        txs.sort_by(|a, b| a.check_id().as_bytes().cmp(b.check_id().as_bytes()));
+        txs.truncate(max);
+        txs
+    }
+
+    pub fn select_drc_check_cashes(&self, max: usize) -> Vec<DrcCheckCashTx> {
+        let mut txs: Vec<_> = self.drc_check_cash_txs.values().cloned().collect();
+        txs.sort_by(|a, b| a.cash_tx_id().as_bytes().cmp(b.cash_tx_id().as_bytes()));
+        txs.truncate(max);
+        txs
+    }
+
+    pub fn select_drc_check_cancels(&self, max: usize) -> Vec<DrcCheckCancelTx> {
+        let mut txs: Vec<_> = self.drc_check_cancel_txs.values().cloned().collect();
         txs.sort_by(|a, b| a.cancel_tx_id().as_bytes().cmp(b.cancel_tx_id().as_bytes()));
         txs.truncate(max);
         txs
@@ -1520,6 +1700,9 @@ mod tests {
             drc_escrow_creates: vec![],
             drc_escrow_finishes: vec![],
             drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
@@ -1589,6 +1772,9 @@ mod tests {
             drc_escrow_creates: vec![],
             drc_escrow_finishes: vec![],
             drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);

@@ -7,9 +7,9 @@ use agora_governance::{
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
-    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
-    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
-    OutPoint, OvlExecutionTx, Transaction, TxOut,
+    DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx,
+    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx,
+    DrcSignerListTx, DrcTicketCreateTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -190,9 +190,14 @@ pub trait RpcBackend: Send {
     fn submit_drc_escrow_create(&mut self, tx: DrcEscrowCreateTx) -> Result<Hash, RpcError>;
     fn submit_drc_escrow_finish(&mut self, tx: DrcEscrowFinishTx) -> Result<Hash, RpcError>;
     fn submit_drc_escrow_cancel(&mut self, tx: DrcEscrowCancelTx) -> Result<Hash, RpcError>;
+    fn submit_drc_check_create(&mut self, tx: DrcCheckCreateTx) -> Result<Hash, RpcError>;
+    fn submit_drc_check_cash(&mut self, tx: DrcCheckCashTx) -> Result<Hash, RpcError>;
+    fn submit_drc_check_cancel(&mut self, tx: DrcCheckCancelTx) -> Result<Hash, RpcError>;
     fn get_drc_ticket(&self, owner: &Address, ticket_sequence: u64) -> Result<Value, RpcError>;
     fn get_drc_escrow(&self, escrow_id: &Hash) -> Result<Value, RpcError>;
     fn get_drc_escrow_receipt(&self, escrow_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_check(&self, check_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_check_receipt(&self, check_id: &Hash) -> Result<Value, RpcError>;
     /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
     fn get_drc_account_policy(
         &self,
@@ -590,6 +595,24 @@ impl RpcBackend for InMemoryBackend {
         ))
     }
 
+    fn submit_drc_check_create(&mut self, _tx: DrcCheckCreateTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC check creates".into(),
+        ))
+    }
+
+    fn submit_drc_check_cash(&mut self, _tx: DrcCheckCashTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC check cashes".into(),
+        ))
+    }
+
+    fn submit_drc_check_cancel(&mut self, _tx: DrcCheckCancelTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC check cancels".into(),
+        ))
+    }
+
     fn get_drc_ticket(&self, owner: &Address, ticket_sequence: u64) -> Result<Value, RpcError> {
         if *owner == Address::ZERO {
             return Err(RpcError::InvalidParams("zero DRC ticket owner".into()));
@@ -626,6 +649,26 @@ impl RpcBackend for InMemoryBackend {
         }
         Ok(json!({
             "escrow_id": escrow_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_check(&self, check_id: &Hash) -> Result<Value, RpcError> {
+        if *check_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams("zero DRC check id".into()));
+        }
+        Ok(json!({
+            "check_id": check_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_check_receipt(&self, check_id: &Hash) -> Result<Value, RpcError> {
+        if *check_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams("zero DRC check id".into()));
+        }
+        Ok(json!({
+            "check_id": check_id.to_hex(),
             "status": "unknown",
         }))
     }
@@ -761,6 +804,9 @@ impl RpcBackend for InMemoryBackend {
             drc_escrow_creates: vec![],
             drc_escrow_finishes: vec![],
             drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
             drc_multisign_attachments: vec![],
         })
     }
