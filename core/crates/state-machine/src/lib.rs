@@ -11,6 +11,11 @@ mod columns;
 mod community_state;
 mod data_availability;
 mod drc_account_auth;
+mod drc_check;
+#[cfg(test)]
+mod drc_check_test_harness;
+#[cfg(test)]
+mod drc_check_tests;
 mod drc_deposit_preauth;
 mod drc_escrow;
 #[cfg(test)]
@@ -113,6 +118,10 @@ pub use data_availability::{
     apply_data_commitment, data_availability_root, data_commitment_key, data_commitment_nonce_key,
     load_data_commitment, load_data_commitment_nonce, revert_data_commitment_meta_into,
     AcceptedDataCommitment, ACCEPTED_DATA_COMMITMENT_VERSION, DATA_AVAILABILITY_ROOT_DOMAIN,
+};
+pub use drc_check::{
+    apply_drc_check_cancel, apply_drc_check_cash, apply_drc_check_create, drc_check_root,
+    load_drc_check_live, load_drc_check_receipt, lookup_drc_check_point,
 };
 pub use drc_deposit_preauth::{
     apply_drc_deposit_preauth, drc_deposit_preauth_key, drc_deposit_preauth_meta_keys,

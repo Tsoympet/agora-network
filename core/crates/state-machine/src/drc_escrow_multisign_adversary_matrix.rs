@@ -4,9 +4,8 @@
 mod matrix {
     use agora_crypto::KeyPair;
     use agora_types::{
-        materialize_drc_multisign_attachments, validate_drc_multisign_attachment_lane,
-        DrcMultisignAttachmentKey, DrcMultisignBlockAttachment, DrcMultisignEntry,
-        DrcMultisignOperationKind, Hash, DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
+        validate_drc_multisign_attachment_lane, DrcMultisignAttachmentKey,
+        DrcMultisignBlockAttachment, DrcMultisignOperationKind, Hash, DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
         DRC_MULTISIGN_AUTH_VERSION, DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
         DRC_MULTISIGN_MAX_SIGNATURES,
     };
