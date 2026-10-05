@@ -1,6 +1,14 @@
 # Agora Network: Master Execution Roadmap
 
-This document is the definitive command center. It bridges architectural theory and physical implementation of the Agora Network.
+> **Historical roadmap.** This checklist records the pre-Trident delivery
+> sequence and is not the canonical architecture or readiness tracker. Use
+> [`docs/architecture/TRIDENT_L1.md`](docs/architecture/TRIDENT_L1.md) and
+> [`docs/testing/TRIDENT_TEST_PLAN.md`](docs/testing/TRIDENT_TEST_PLAN.md).
+> Phase 4's EVM is an OVL-only lab retained for reuse/migration evidence.
+> DRC's lab and canonical capabilities are contract-free typed payment/state
+> operations; no DRC VM, deploy/call, Hook, or contract API exists.
+
+This document bridges the historical architecture and its implementation record.
 
 ## Phase 1: Foundation (The Ignition) — in progress
 
@@ -46,12 +54,12 @@ This document is the definitive command center. It bridges architectural theory 
 - [x] **Constitution v1 + civic model:** ranks, chambers, proposal lifecycle
 - [x] **Node wiring:** Meta CF `meta/governance` + JSON-RPC + explorer/desktop ballot UI
 
-## Phase 4: Scaling (Day 2 Growth)
+## Phase 4: Historical layered scaling lab
 
 - [x] **4.1 (L2):** Ovolos optimistic rollup (`agora-ovolos-rollup`) — batches, challenge window, fraud proofs, rewind/revert, pluggable `EvmExecutor`
-- [x] **4.2 (L3):** Bridge-in-a-Box SDK (`agora-bridge-sdk`) — District configs + lock/mint & burn/unlock + DRC ledger
+- [x] **4.2 (L3 lab):** Bridge-in-a-Box SDK (`agora-bridge-sdk`) — contract-free typed District payments, lock/mint & burn/unlock, and DRC ledger
 - [x] **4.3 (L4):** Intent-Engine (`agora-intent-engine`) — intents, naive/AMM/composite solvers, cancel, bridge settlement
-- [x] Bind production EVM (`revm`) behind `EvmExecutor` (`RevmExecutor`, feature `revm` default-on)
+- [x] Bind `revm` behind the historical **OVL-only** `EvmExecutor` (`RevmExecutor`, feature `revm` default-on)
 - [x] District light-client merkle proofs + `MessageTransport` / `InMemoryTransport`
 - [x] **4.4 (L2):** `BatchCommitment` DA blob + OVL gas ledger (layered mark, not L1 UTXO)
 - [x] **4.5 (Runtime):** `agora-layers-runtime` + `agora-layers` JSON-RPC operator binary

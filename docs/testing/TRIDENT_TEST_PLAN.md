@@ -6,6 +6,17 @@
 
 Multi-asset transfers; asset isolation; supply caps; fee calculation; OVL/DRC staking; delegation; unbonding; slashing; validator-set rotation; quorum calculation; finality certificates; governance authorization; treasury spending; grant milestone release; passport attestation verification; duplicate/replay rejection.
 
+The execution-boundary suite must prove:
+
+- only `NativeAssetId::OVL` is programmable;
+- OVL execution remains routable and can debit only OVL state;
+- DRC balances cannot fund OVL execution;
+- generic/DRC deploy, call, VM, and execution RPC names are absent;
+- an OVL execution JSON asset selector, DRC transfer call data, and unknown
+  contract-like block lanes fail deserialization; and
+- historical `eth_*` lab state is OVL-only and cannot read or spend DRC lab
+  balances.
+
 ## Consensus
 
 - PoW-only blocks remain unfinalized  
@@ -56,7 +67,9 @@ live balances or change v2 ignition.
 
 ## Integration
 
-Miner proposes; OVL+DRC attest; checkpoint finalizes; wallet sends three assets; OVL gas spend; DRC merchant payment; governance after timelock; grant milestone payment; multi-node convergence.
+Miner proposes; OVL+DRC attest; checkpoint finalizes; wallet sends three assets;
+OVL gas spend; DRC typed merchant/payment-state operations without VM routing;
+governance after timelock; grant milestone payment; multi-node convergence.
 
 ### Automated multi-node crash smoke
 

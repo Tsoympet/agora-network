@@ -18,6 +18,10 @@ BlockDAG Layer 1 with three protocol-native assets (TLT, OVL, DRC).
 - **Clients:** Tauri (Desktop), React Native/Expo (Mobile), Web (Explorer)
 - **Branding:** Obsidian & Gold — Agora Obsidian `#101218`, Burnished Gold `#C59835`, Aegean Cyan `#06BBDF`
 - **Three native L1 assets:** TLT (only mineable, RandomX); OVL (PoS validators + execution, never mined); DRC (PoS validators + payments, never mined). See `docs/assets/NATIVE_ASSETS.md`.
+- **Execution boundary:** OVL is the only smart-contract/VM domain. DRC has no
+  deploy/call/bytecode/Hook API; escrow, Checks, payment channels, trust lines,
+  issued assets and controls, multisign, and Tickets are closed protocol-native
+  state-machine operations.
 - **Finality:** TLT PoW work threshold ∧ ≥⅔ OVL stake ∧ ≥⅔ DRC stake (independent quorums; no price oracle).
 
 ## Technical Stack Rules

@@ -12,25 +12,25 @@ export const agoraTokenSupplies = {
     native: true,
     powAlgorithm: "randomx",
   },
-  /** L3 native PoW — district / bridge money (sha256_leading_zero). */
+  /** L1 native PoS collateral and contract-free payment/state-machine asset. */
   DRC: {
     name: "Drachma",
-    layer: "L3",
+    layer: "L1",
     maxSupplyWhole: 6_000_000_000,
     decimals: 8,
-    role: "XRP-class payments rail / district path payments / bridge liquidity",
+    role: "contract-free payments / typed settlement / community validators",
     native: true,
-    powAlgorithm: "sha256_leading_zero",
+    powAlgorithm: "none",
   },
-  /** L2 native PoW — Ethereum-class EVM gas money (sha256_leading_zero). */
+  /** L1 native PoS collateral and sole programmable-execution gas asset. */
   OVL: {
     name: "Ovolos",
-    layer: "L2",
+    layer: "L1",
     maxSupplyWhole: 21_000_000_000,
     decimals: 8,
-    role: "Ethereum-class L2 gas + EVM execution money",
+    role: "smart-contract execution gas / builders / technical validators",
     native: true,
-    powAlgorithm: "sha256_leading_zero",
+    powAlgorithm: "none",
   },
 } as const;
 

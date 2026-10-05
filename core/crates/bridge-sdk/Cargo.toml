@@ -1,7 +1,7 @@
 [package]
 name = "agora-bridge-sdk"
 publish = false
-description = "Bridge-in-a-Box SDK for Agora District Chains (L3)"
+description = "Historical contract-free DRC payment lab for migration evidence"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

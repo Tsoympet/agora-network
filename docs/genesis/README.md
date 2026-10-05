@@ -4,6 +4,10 @@
 
 Agora Trident freezes **one** genesis document for the hybrid L1 with three native assets.
 
+The artifact assigns programmable execution only to OVL. DRC allocations seed
+contract-free account/payment state and cannot enable a VM, deploy/call,
+bytecode, Hook, or contract API.
+
 | Network | Artifact | Status |
 | --- | --- | --- |
 | Trident testnet | [`trident.testnet.genesis.draft.json`](trident.testnet.genesis.draft.json) | **Draft** (UNFROZEN; Scaffold) |
@@ -16,6 +20,9 @@ Working supply caps (8 decimals): TLT 100M · OVL 21B · DRC 6B whole units. Onl
 ## Historical artifacts (pre-Trident)
 
 These remain for reproducibility of the layered lab stack. They are **not** the Trident monetary root.
+The Ovolos artifact's EVM state is historical OVL-only state. The Drachma
+artifacts describe a historical typed payment/PoW prototype and do not grant
+canonical DRC a contract or VM capability.
 
 | Layer (historical) | Mark | Artifact (testnet) | Artifact (mainnet draft) |
 | --- | --- | --- | --- |

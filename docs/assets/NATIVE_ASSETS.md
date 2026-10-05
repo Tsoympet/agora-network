@@ -32,17 +32,31 @@ The state transition independently enforces for each asset:
 - Treasury, burned, vesting, governance locks
 - Account or UTXO nonces where applicable
 
-No smart contract, RPC administrator, or ordinary transaction may mint TLT, OVL, or DRC outside protocol-defined issuance.
+No smart contract, RPC administrator, or ordinary transaction may mint TLT,
+OVL, or DRC outside protocol-defined issuance.
 
 ## Ledger placement
 
 | Asset | Primary state | Notes |
 | --- | --- | --- |
 | TLT | UTXO set | Only mineable asset; coinbase + base fees |
-| OVL | Account module | Execution gas; validator collateral; **one** balance definition |
-| DRC | Account module | Payments; validator collateral; not a stablecoin by default |
+| OVL | Account module | Sole smart-contract/VM execution and gas domain; validator collateral; **one** balance definition |
+| DRC | Account module | Contract-free payments and typed settlement state; validator collateral; not a stablecoin by default |
 
 Cross-asset input/output mismatch → `Invalid`.
+
+## Programmability boundary
+
+| Asset | User-programmable execution | Protocol-native typed operations |
+| --- | --- | --- |
+| TLT | No | UTXO transfer, coinbase, base-fee settlement |
+| OVL | **Yes, exclusively** (subject to versioned activation) | Account transfer, staking, execution envelopes |
+| DRC | **No** | Payments, escrow, Checks, payment channels, trust lines, issued assets and controls, freeze/clawback, multisign, Tickets |
+
+DRC has no VM, bytecode, deploy/call, Hook, script, callback, or
+contract-facing API. A generic endpoint must reject any request that attempts
+to select DRC for execution. DRC operation envelopes are closed schemas;
+unrecognized executable fields fail deserialization rather than being ignored.
 
 ## Wallet / RPC amounts
 

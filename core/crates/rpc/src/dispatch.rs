@@ -1175,9 +1175,62 @@ mod tests {
     use crate::backend::InMemoryBackend;
     use crate::methods::RpcMethod;
     use agora_types::{
-        Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx, DrcPaymentTx,
-        DrcTicketCreateTx, TxOut,
+        AccountTransfer, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
+        DrcPaymentTx, DrcTicketCreateTx, NativeAssetId, OvlExecutionTx, TxOut,
     };
+
+    #[test]
+    fn rpc_fails_closed_on_drc_execution_shapes_and_keeps_ovl_route() {
+        let mut rpc = RpcDispatcher::new(InMemoryBackend::new());
+
+        let missing = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_submitDrcExecution".into(),
+            params: json!({}),
+        });
+        assert_eq!(missing.error.unwrap().code, -32601);
+
+        let transfer = AccountTransfer::unsigned(
+            NativeAssetId::DRC,
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(1),
+            0,
+        );
+        let mut transfer_json = serde_json::to_value(transfer).unwrap();
+        transfer_json["data"] = json!([0x60, 0x00]);
+        let smuggled = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_submitAccountTransfer".into(),
+            params: json!({ "transfer": transfer_json }),
+        });
+        assert_eq!(smuggled.error.unwrap().code, -32602);
+
+        let execution = OvlExecutionTx::unsigned(
+            Address([3; 20]),
+            Address([4; 20]),
+            Amount::ZERO,
+            21_000,
+            1,
+            0,
+            vec![],
+        );
+        let mut execution_json = serde_json::to_value(&execution).unwrap();
+        execution_json["asset"] = json!("DRC");
+        let selected_drc = rpc.handle(RpcRequest {
+            id: Some(json!(3)),
+            method: "agora_submitOvlExecution".into(),
+            params: json!({ "execution": execution_json }),
+        });
+        assert_eq!(selected_drc.error.unwrap().code, -32602);
+
+        let ovl = rpc.handle(RpcRequest {
+            id: Some(json!(4)),
+            method: "agora_submitOvlExecution".into(),
+            params: json!({ "execution": execution }),
+        });
+        assert_eq!(ovl.error.unwrap().code, -32001);
+    }
 
     #[test]
     fn tips_balance_submit_fund() {

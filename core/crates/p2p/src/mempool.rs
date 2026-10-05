@@ -41,7 +41,7 @@ pub struct Mempool {
     reserved: HashSet<OutPoint>,
     account_txs: HashMap<Hash, AccountTransfer>,
     stake_txs: HashMap<Hash, SignedStakeTx>,
-    execution_txs: HashMap<Hash, OvlExecutionTx>,
+    ovl_execution_txs: HashMap<Hash, OvlExecutionTx>,
     payment_txs: HashMap<Hash, DrcPaymentTx>,
     drc_policy_txs: HashMap<Hash, DrcAccountPolicyTx>,
     drc_deposit_preauth_txs: HashMap<Hash, DrcDepositPreauthTx>,
@@ -112,7 +112,7 @@ impl Mempool {
             reserved: HashSet::new(),
             account_txs: HashMap::new(),
             stake_txs: HashMap::new(),
-            execution_txs: HashMap::new(),
+            ovl_execution_txs: HashMap::new(),
             payment_txs: HashMap::new(),
             drc_policy_txs: HashMap::new(),
             drc_deposit_preauth_txs: HashMap::new(),
@@ -162,7 +162,7 @@ impl Mempool {
         self.txs.len()
             + self.account_txs.len()
             + self.stake_txs.len()
-            + self.execution_txs.len()
+            + self.ovl_execution_txs.len()
             + self.payment_txs.len()
             + self.drc_policy_txs.len()
             + self.drc_deposit_preauth_txs.len()
@@ -188,7 +188,7 @@ impl Mempool {
         self.txs.contains_key(tx_id)
             || self.account_txs.contains_key(tx_id)
             || self.stake_txs.contains_key(tx_id)
-            || self.execution_txs.contains_key(tx_id)
+            || self.ovl_execution_txs.contains_key(tx_id)
             || self.payment_txs.contains_key(tx_id)
             || self.drc_policy_txs.contains_key(tx_id)
             || self.drc_deposit_preauth_txs.contains_key(tx_id)
@@ -421,21 +421,21 @@ impl Mempool {
     }
 
     /// Admit a pre-validated OVL execution envelope.
-    pub fn admit_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, P2pError> {
+    pub fn admit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, P2pError> {
         let id = tx.tx_id();
-        if self.execution_txs.contains_key(&id) {
+        if self.ovl_execution_txs.contains_key(&id) {
             return Ok(id);
         }
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
-        let key = (NativeAssetId::OVL, tx.from);
+        let key = (tx.execution_asset(), tx.from);
         if !self.reserved_accounts.insert(key) {
             return Err(P2pError::MempoolRejected(
                 "account already has a pending nonce".into(),
             ));
         }
-        self.execution_txs.insert(id, tx);
+        self.ovl_execution_txs.insert(id, tx);
         Ok(id)
     }
 
@@ -1160,7 +1160,7 @@ impl Mempool {
     }
 
     pub fn select_ovl_executions(&self, max: usize) -> Vec<OvlExecutionTx> {
-        let mut txs: Vec<_> = self.execution_txs.values().cloned().collect();
+        let mut txs: Vec<_> = self.ovl_execution_txs.values().cloned().collect();
         txs.sort_by(|a, b| {
             b.max_fee_per_gas
                 .cmp(&a.max_fee_per_gas)
@@ -1321,7 +1321,7 @@ impl Mempool {
         for tx in &block.ovl_executions {
             consumed_account_nonces.insert((NativeAssetId::OVL, tx.from));
             let id = tx.tx_id();
-            if self.execution_txs.remove(&id).is_some() {
+            if self.ovl_execution_txs.remove(&id).is_some() {
                 self.reserved_accounts
                     .remove(&(NativeAssetId::OVL, tx.from));
             }
@@ -1460,7 +1460,7 @@ impl Mempool {
                 self.reserved_accounts.remove(&(asset, actor));
             }
         }
-        self.execution_txs
+        self.ovl_execution_txs
             .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::OVL, tx.from)));
         let stale_payments: Vec<Hash> = self
             .payment_txs
@@ -1857,7 +1857,7 @@ mod tests {
         let account_id = pool.admit_account(account.clone()).unwrap();
         assert!(pool.account_reserved(NativeAssetId::OVL, &actor));
         assert!(pool.admit_stake(stake).is_err());
-        assert!(pool.admit_execution(execution).is_err());
+        assert!(pool.admit_ovl_execution(execution).is_err());
 
         let block = Block {
             header: BlockHeader {

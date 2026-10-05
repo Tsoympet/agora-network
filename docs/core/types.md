@@ -25,7 +25,8 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | `Address` | 20-byte account payload (secp256k1-derived); display as Bech32m `agora1…` / `agoratest1…` / `agoradev1…` |
 | `OutPoint` / `TxIn` / `TxOut` | UTXO references and outputs |
 | `Transaction` | Signed transfer (`public_key` + `signature`) |
-| `OvlExecutionTx` | Signed, chain-bound OVL value/execution envelope with gas limits |
+| `AccountTransfer` | Closed OVL/DRC value-transfer envelope; no call data or executable payload |
+| `OvlExecutionTx` | Signed, chain-bound OVL-only value/execution envelope with gas limits and no asset selector |
 | `DrcPaymentTx` / `DrcPaymentOutboxEvent` | Versioned signed DRC settlement and deterministic source/destination-tag routing event |
 | `DrcPaymentReceipt` / `DrcPaymentResult` | Versioned exact full-delivery result; no partial-delivery variant |
 | `DrcAccountPolicyTx` / `DrcAccountPolicy` | Versioned owner-authorized DRC destination-tag and DepositAuth flags |
@@ -35,8 +36,15 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | `DataAvailabilityCommitment` | Versioned Borsh integrity/provenance payload for explicitly non-canonical source data |
 | `DataCommitmentAuthorization` | secp256k1 operator authorization bound to L1 chain, genesis, fingerprint, and replay nonce |
 | `TransactionBody` | Signable subset (no auth material) |
-| `BlockHeader` / `Block` | Multi-parent DAG header + UTXO/account/stake/execution/payment/data lanes |
+| `BlockHeader` / `Block` | Multi-parent DAG header + UTXO/account/stake, OVL-only execution, typed DRC, and data lanes |
 | `TridentHeader` | Offline-only, version-gated commitment for a future Trident block path |
+
+`Block.ovl_executions` is the only programmable-execution lane. Every
+`Block.drc_*` lane is a closed protocol-native operation family: payments,
+policy, multisign/keys/Tickets, escrow, Checks, payment channels, trust lines,
+issued-asset controls, freeze, and clawback. DRC has no VM or contract
+transaction type. Serde rejects unknown execution selectors and unknown block
+lanes so JSON cannot smuggle DRC into an OVL or generic execution path.
 
 See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../assets/NATIVE_ASSETS.md`](../assets/NATIVE_ASSETS.md).
 

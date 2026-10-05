@@ -1,7 +1,8 @@
-//! Drachma (L3 / Bridge-in-a-Box) genesis — native DRC PoW money on the bridge layer.
+//! Historical Drachma L3 lab genesis retained for migration reproduction.
 //!
-//! DRC is **native money on L3**, sealed by layer PoW (`sha256_leading_zero`).
-//! Separate from L1 Talanton genesis and L2 Ovolos genesis. Does not mint L1 UTXOs.
+//! These bytes describe the superseded pre-Trident payment prototype, not a
+//! canonical DRC network or Trident issuance source. The lab has no contract or
+//! VM capability; canonical DRC is native contract-free Trident L1 state.
 
 use std::path::Path;
 

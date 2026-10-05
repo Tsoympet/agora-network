@@ -27,12 +27,18 @@
 | Mark | Locus (target) | Issuance | Role |
 | --- | --- | --- | --- |
 | **TLT** (Talanton) | L1 UTXO | PoW only | Settlement, security, base network fees |
-| **OVL** (Ovolos) | L1 accounts | Genesis + staking reserve (never mined) | Execution gas, builders, technical validators |
-| **DRC** (Drachma) | L1 accounts | Genesis + staking/community reserve (never mined) | Payments, merchants, community validators |
+| **OVL** (Ovolos) | L1 accounts | Genesis + staking reserve (never mined) | Sole smart-contract execution/gas domain, builders, technical validators |
+| **DRC** (Drachma) | L1 accounts | Genesis + staking/community reserve (never mined) | Contract-free payments, typed settlement features, merchants, community validators |
 
 See [`docs/architecture/TRIDENT_L1.md`](docs/architecture/TRIDENT_L1.md) and [`docs/assets/NATIVE_ASSETS.md`](docs/assets/NATIVE_ASSETS.md).
 
 > **Status / maturity:** Trident is in **design freeze + Phase 1 implementation**. Current `main` still runs **TLT-only L1 UTXO** plus an in-process `agora-layers` lab stack for historical OVL/DRC prototypes — **not** a deployed multi-chain network. OVL is **not** Ethereum-equivalent; DRC is **not** XRPL-equivalent. **Mainnet is not frozen** — `AGORA_NETWORK=mainnet` refuses to boot. Do not use “role-complete” as a readiness claim; use the maturity levels in the Trident docs.
+
+DRC has no VM, bytecode, deploy/call, Hook, or contract-facing API. Its escrow,
+Checks, payment channels, trust lines, issued assets and controls, multisign,
+Tickets, and similar capabilities are closed protocol-native state-machine
+operations. Historical EVM lab code is OVL-only and is not a DRC or canonical
+Trident execution route.
 
 ## Features
 

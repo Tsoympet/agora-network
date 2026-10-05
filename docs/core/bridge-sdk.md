@@ -1,6 +1,11 @@
 # Bridge-in-a-Box (`agora-bridge-sdk`)
 
-SDK for custom **District Chains** (gaming / privacy / general).
+**Maturity:** Experimental historical lab; non-canonical under Trident.
+
+Retained SDK for reproducing former **District Chain** payment flows (gaming /
+privacy / general) and porting bounded typed semantics. It is not a deployed
+DRC network, canonical monetary state, or public Trident API. Canonical DRC is
+native Trident L1 contract-free account/payment state.
 
 ## Messages
 
@@ -27,14 +32,24 @@ Deposit into the hub with `credit_hub_lock` before `lock_and_mint`.
 
 ## DRC ledger + genesis
 
-`DrcLedger` holds district/hub balances under the **Drachma L3 genesis** cap. DRC is native L3 PoW money (`sha256_leading_zero` blocks + coinbase) — not an L1 UTXO asset.
+`DrcLedger` holds historical district/hub balances under the former
+**Drachma L3 genesis** cap. In this lab only, DRC was modeled as L3 PoW money
+(`sha256_leading_zero` blocks + coinbase). Trident DRC is never mined and does
+not inherit those balances or issuance rules.
+
+Both the historical and canonical DRC ledgers are closed typed state machines:
+there is no VM, bytecode, deploy/call, Hook, script, or contract-facing API.
+Bridge messages and payment routing metadata are data for fixed protocol
+transitions, not executable input.
 
 | Artifact | Path |
 | --- | --- |
 | Testnet (frozen) | [`docs/genesis/drachma.testnet.genesis.json`](../genesis/drachma.testnet.genesis.json) |
 | Mainnet draft | [`docs/genesis/drachma.mainnet.genesis.draft.json`](../genesis/drachma.mainnet.genesis.draft.json) |
 
-`DrachmaGenesis` / `BridgeBox::from_genesis` load caps, hub id, districts, and premine. `agora-layers` reads `AGORA_DRC_GENESIS_FILE` (default: embedded testnet).
+`DrachmaGenesis` / `BridgeBox::from_genesis` load historical caps, hub id,
+districts, and premine. `agora-layers` reads `AGORA_DRC_GENESIS_FILE` (default:
+embedded testnet) only inside the loopback lab.
 
 ## API
 

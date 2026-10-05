@@ -11,6 +11,9 @@ Agora Network targets **Agora Trident L1**: one hybrid BlockDAG Layer 1 with thr
 - Clients: Tauri (Desktop), React Native/Expo (Mobile), Web (Explorer).
 - Branding: "Obsidian & Gold" aesthetic (Agora Obsidian #101218, Burnished Gold #C59835, Aegean Cyan #06BBDF).
 - TLT: only mineable asset (RandomX). OVL/DRC: never mined; independent PoS validator sets for finality.
+- OVL is the sole smart-contract/VM domain. DRC is contract-free: escrow,
+  Checks, payment channels, trust lines, issued-asset controls, multisign,
+  Tickets, and related features are typed protocol state transitions.
 - Architecture: `docs/architecture/TRIDENT_L1.md`.
 
 ## 2. Technical Stack Rules

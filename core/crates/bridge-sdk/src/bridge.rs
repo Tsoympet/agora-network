@@ -19,7 +19,7 @@ use crate::BridgeError;
 /// Default same-district payment fee in base units (XRP drops–style).
 pub const DEFAULT_PAYMENT_FEE_BASE: u64 = 10;
 
-/// Durable L3 checkpoint (balances, tags, messages, bonds).
+/// Durable checkpoint for the historical contract-free DRC lab.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BridgeCheckpoint {
     pub balances: Vec<(String, Address, u64)>,
@@ -41,7 +41,7 @@ struct DistrictTip {
     tip_height: u64,
 }
 
-/// Bridge-in-a-Box runtime for District Chain asset moves.
+/// Historical Bridge-in-a-Box runtime for typed District Chain asset moves.
 pub struct BridgeBox {
     districts: HashMap<String, DistrictConfig>,
     /// Locked balances on the hub keyed by (district_or_hub, address).
@@ -55,7 +55,7 @@ pub struct BridgeBox {
     pow_blocks: HashMap<(String, u64), Hash>,
     /// Bonded attestors (hybrid PoS finality). Empty ⇒ instant finality.
     attestors: AttestorSet,
-    /// XRPL-class destination tag registry: (district, tag) → owner address.
+    /// Typed destination-tag registry: (district, tag) → owner address.
     tag_owners: HashMap<(String, u32), Address>,
     /// Payments / mints indexed by (district, tag) for exchange deposit routing.
     tag_payments: HashMap<(String, u32), Vec<Hash>>,
@@ -85,7 +85,7 @@ impl BridgeBox {
         Self::default()
     }
 
-    /// Boot bridge from a frozen Drachma L3 genesis (caps, districts, premine, PoW).
+    /// Boot the lab from a frozen historical Drachma L3 genesis.
     pub fn from_genesis(genesis: &DrachmaGenesis) -> Result<Self, BridgeError> {
         genesis.validate()?;
         let ledger = genesis.ignite_ledger()?;
@@ -182,7 +182,7 @@ impl BridgeBox {
         self.attestors.unbond(&mut self.drc, attestor, amount)
     }
 
-    /// Register an XRPL-class destination tag for deposit routing on `district`.
+    /// Register a typed destination tag for deposit routing on `district`.
     ///
     /// Tag `0` is reserved (untagged). Once registered, payments using the tag
     /// must target the registered owner address.
@@ -551,7 +551,7 @@ impl BridgeBox {
         )
     }
 
-    /// Path payment with XRPL-class `deliverMin` floor.
+    /// Typed path payment with a `deliverMin` floor.
     pub fn path_pay_deliver(
         &mut self,
         hub: impl Into<String>,

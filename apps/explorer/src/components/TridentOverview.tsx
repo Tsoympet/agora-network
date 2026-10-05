@@ -28,13 +28,13 @@ const ASSETS: Array<{
   {
     ticker: "OVL",
     name: "Ovolos",
-    role: "Execution · builders",
+    role: "Smart-contract execution · builders",
     mechanism: "PoS · never mined",
   },
   {
     ticker: "DRC",
     name: "Drachma",
-    role: "Payments · community",
+    role: "Contract-free payments · community",
     mechanism: "PoS · never mined",
   },
 ];

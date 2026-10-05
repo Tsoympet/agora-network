@@ -52,12 +52,18 @@ Checkpoint bodies bind this root (no longer provisional zero).
 
 Never from TLT PoW mint.
 
+Programmable execution is OVL-only. DRC payment and settlement families
+(including escrow, Checks, payment channels, trust lines, issued-asset
+controls, multisign, and Tickets) are typed protocol-native lanes and never VM
+transactions or contracts.
+
 ## Still deferred
 
 - Versioned compact short IDs for account + stake lanes (current non-empty lane blocks use full-body gossip)
 - Ceremony-frozen reserve economics (replace working defaults)
 - Deterministic OVL contract VM/storage (signed intrinsic-gas EOA boundary is active)
-- DRC escrow, recurring authorization, multisig, cross-district paths, and tag registry (native tagged/invoiced payments are active)
+- Any additional DRC feature family requires an explicit typed state transition
+  and capability-specific review; there is no full-XRPL-parity or VM roadmap
 - Gov/treasury roots in state root (Phase 5)
 - Validator signing daemon
 
