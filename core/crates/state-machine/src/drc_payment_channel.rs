@@ -3,17 +3,17 @@
 use agora_types::{
     payment_channel_cancel_after_valid_at_create, payment_channel_claim_submitter_allowed,
     payment_channel_close_submitter_allowed, payment_channel_finalize_allowed,
-    payment_channel_fund_submitter_allowed, payment_channel_owner_schedule_deadline,
-    resolve_drc_account_sequence, Address, Amount, DrcPaymentChannelClaimEvent,
-    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseKind, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelFundEvent, DrcPaymentChannelFundTx,
-    DrcPaymentChannelLive, DrcPaymentChannelOutcome, DrcPaymentChannelReceipt,
-    DrcPaymentChannelScheduleEvent, Hash, NativeAssetId, DRC_MAX_LIVE_PAYMENT_CHANNELS_PER_ACCOUNT,
-    DRC_PAYMENT_CHANNEL_CLAIM_EVENT_VERSION, DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION,
-    DRC_PAYMENT_CHANNEL_CLOSE_TICKET_VERSION, DRC_PAYMENT_CHANNEL_CREATE_TICKET_VERSION,
-    DRC_PAYMENT_CHANNEL_FUND_EVENT_VERSION, DRC_PAYMENT_CHANNEL_FUND_TICKET_VERSION,
-    DRC_PAYMENT_CHANNEL_LIVE_STATE_VERSION, DRC_PAYMENT_CHANNEL_RECEIPT_VERSION,
-    DRC_PAYMENT_CHANNEL_SCHEDULE_EVENT_VERSION,
+    payment_channel_fund_submitter_allowed, payment_channel_onchain_claim_allowed,
+    payment_channel_owner_schedule_deadline, resolve_drc_account_sequence, Address, Amount,
+    DrcPaymentChannelClaimEvent, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseKind,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundEvent,
+    DrcPaymentChannelFundTx, DrcPaymentChannelLive, DrcPaymentChannelOutcome,
+    DrcPaymentChannelReceipt, DrcPaymentChannelScheduleEvent, Hash, NativeAssetId,
+    DRC_MAX_LIVE_PAYMENT_CHANNELS_PER_ACCOUNT, DRC_PAYMENT_CHANNEL_CLAIM_EVENT_VERSION,
+    DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION, DRC_PAYMENT_CHANNEL_CLOSE_TICKET_VERSION,
+    DRC_PAYMENT_CHANNEL_CREATE_TICKET_VERSION, DRC_PAYMENT_CHANNEL_FUND_EVENT_VERSION,
+    DRC_PAYMENT_CHANNEL_FUND_TICKET_VERSION, DRC_PAYMENT_CHANNEL_LIVE_STATE_VERSION,
+    DRC_PAYMENT_CHANNEL_RECEIPT_VERSION, DRC_PAYMENT_CHANNEL_SCHEDULE_EVENT_VERSION,
 };
 use borsh::BorshDeserialize;
 
@@ -627,6 +627,12 @@ pub fn apply_drc_payment_channel_claim(
     if !payment_channel_claim_submitter_allowed(tx.submitter, live.destination) {
         return Err(StateError::InvalidTx(
             "payment channel claim submitter must be destination".into(),
+        ));
+    }
+    if !payment_channel_onchain_claim_allowed(application_blue_score, live.cancel_after_blue_score)
+    {
+        return Err(StateError::InvalidTx(
+            "payment channel on-chain claim not allowed at or after cancel after".into(),
         ));
     }
 

@@ -108,6 +108,14 @@ pub fn payment_channel_cancel_after_valid_at_create(
     Ok(())
 }
 
+/// On-chain claims are rejected at/after `cancel_after` (strictly before cutoff only).
+pub fn payment_channel_onchain_claim_allowed(
+    application_blue_score: u64,
+    cancel_after_blue_score: Option<u64>,
+) -> bool {
+    cancel_after_blue_score.is_none_or(|cancel| application_blue_score < cancel)
+}
+
 /// Inclusive finalize boundary: `blue_score >= deadline`.
 pub fn payment_channel_finalize_allowed(
     blue_score: u64,
