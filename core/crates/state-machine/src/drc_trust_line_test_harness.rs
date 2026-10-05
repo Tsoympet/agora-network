@@ -175,4 +175,149 @@ pub mod support {
     pub fn trust_root(store: &StateStore) -> Hash {
         drc_trust_line_root(store).unwrap()
     }
+
+    pub fn apply_block_journal(
+        store: &StateStore,
+        block: Block,
+        blue: u64,
+        ctx: &TxAuthContext,
+    ) -> crate::apply::UtxoJournal {
+        let result =
+            apply_block_batched_with_auth_at_blue_score(store, &block, 50, Some(ctx), blue)
+                .unwrap();
+        store.write_batch(result.batch).unwrap();
+        result.journal
+    }
+
+    pub fn revert_journal(store: &StateStore, journal: &crate::apply::UtxoJournal) {
+        crate::apply::revert_journal(store, journal).unwrap();
+    }
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub mod multisign {
+    use agora_crypto::{sign_drc_multisign_participant_bound, sign_drc_signer_list_bound, KeyPair};
+    use agora_types::{
+        materialize_drc_multisign_attachments, Amount, Block, DrcMultisignAuth, DrcMultisignEntry,
+        DrcSignerListEntry, DrcSignerListTx, DrcTrustLineSetTx, NativeAssetId,
+        DRC_MULTISIGN_AUTH_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
+    };
+
+    use super::support::{coinbase, std_code};
+    use crate::accounts::load_account;
+    use crate::apply::TxAuthContext;
+    use crate::drc_signer_list::apply_drc_signer_list;
+    use crate::store::WriteBatch;
+    use crate::{AccountJournal, StateStore};
+
+    pub fn install_signer_list(
+        store: &StateStore,
+        master: &KeyPair,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) {
+        let nonce = load_account(store, NativeAssetId::DRC, &master.address())
+            .unwrap()
+            .nonce;
+        install_signer_list_at_nonce(store, master, signers, ctx, nonce);
+    }
+
+    pub fn install_signer_list_at_nonce(
+        store: &StateStore,
+        master: &KeyPair,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+        nonce: u64,
+    ) {
+        let total: u16 = signers.iter().map(|(_, w)| w).sum();
+        let mut install = DrcSignerListTx::unsigned_set(
+            master.address(),
+            agora_types::canonical_sorted_entries(
+                &signers
+                    .iter()
+                    .map(|(kp, weight)| DrcSignerListEntry {
+                        signer: kp.address(),
+                        weight: *weight,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            u32::from(total),
+            Amount::ZERO,
+            nonce,
+        );
+        sign_drc_signer_list_bound(&mut install, master, &ctx.chain_id, &ctx.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_signer_list(store, &install, ctx, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+    }
+
+    pub fn multisign_bundle(
+        owner: agora_types::Address,
+        signing_bytes: &[u8],
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> DrcMultisignAuth {
+        let mut entries = Vec::new();
+        for (kp, _) in signers {
+            let (signer, public_key, signature) = sign_drc_multisign_participant_bound(
+                owner,
+                signing_bytes,
+                kp,
+                &ctx.chain_id,
+                &ctx.genesis,
+            )
+            .unwrap();
+            entries.push(DrcMultisignEntry {
+                signer,
+                public_key,
+                signature,
+            });
+        }
+        entries.sort_by_key(|e| e.signer.0);
+        DrcMultisignAuth {
+            version: DRC_MULTISIGN_AUTH_VERSION,
+            signing_for: owner,
+            signatures: entries,
+        }
+    }
+
+    pub fn base_multisign_trust_line_set_block(
+        store: &StateStore,
+        holder: &KeyPair,
+        issuer: &KeyPair,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        install_signer_list(store, holder, signers, ctx);
+        let nonce = load_account(store, NativeAssetId::DRC, &holder.address())
+            .unwrap()
+            .nonce;
+        let mut tx = DrcTrustLineSetTx {
+            version: DRC_TRUST_LINE_SET_TX_VERSION,
+            holder: holder.address(),
+            issuer: issuer.address(),
+            currency: std_code(b"USD"),
+            limit: agora_types::IssuedAmount::from_units(100),
+            fee: Amount::from_base_units(1),
+            nonce,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+        };
+        let signing_bytes = tx.signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+        tx.multisign = Some(multisign_bundle(
+            holder.address(),
+            &signing_bytes,
+            signers,
+            ctx,
+        ));
+        let mut block = coinbase(vec![agora_types::Hash::ZERO], holder);
+        block.drc_trust_line_sets.push(tx);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block.header.tx_root = block.compute_body_root();
+        block
+    }
 }

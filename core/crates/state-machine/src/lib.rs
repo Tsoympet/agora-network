@@ -86,6 +86,14 @@ mod drc_tickets_stage_d_semantic_tests;
 mod drc_tickets_test_harness;
 mod drc_trust_line;
 #[cfg(test)]
+mod drc_trust_line_hardening_tests;
+#[cfg(test)]
+mod drc_trust_line_multisign_adversary_matrix;
+#[cfg(test)]
+mod drc_trust_line_sequence_auth_matrix_tests;
+#[cfg(test)]
+mod drc_trust_line_terminal_tests;
+#[cfg(test)]
 mod drc_trust_line_test_harness;
 #[cfg(test)]
 mod drc_trust_line_tests;
@@ -189,9 +197,10 @@ pub use drc_signer_list::{
 };
 pub use drc_ticket::{apply_drc_ticket_create, load_drc_account_tickets};
 pub use drc_trust_line::{
-    apply_drc_issued_transfer, apply_drc_trust_line_set, drc_trust_line_root,
-    issued_transfer_receipt_key, issuer_liability_key, load_drc_issued_transfer_receipt,
-    load_drc_issuer_liability, load_drc_trust_line_live, lookup_drc_trust_line_point,
+    apply_drc_issued_transfer, apply_drc_trust_line_set, count_live_trust_line_holders_for_issuer,
+    count_live_trust_lines_for_holder, drc_trust_line_root, issued_transfer_receipt_key,
+    issuer_liability_key, load_drc_issued_transfer_receipt, load_drc_issuer_liability,
+    load_drc_trust_line_live, lookup_drc_trust_line_point, sum_holder_balances_for_asset,
     trust_line_key, trust_line_meta_keys, DRC_TRUST_LINE_ROOT_DOMAIN,
 };
 pub use error::StateError;

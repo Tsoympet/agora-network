@@ -4,8 +4,9 @@ use agora_types::{
     resolve_drc_account_sequence, Address, Amount, DrcIssuedTransferReceipt, DrcIssuedTransferTx,
     DrcIssuerLiability, DrcTrustLineLive, DrcTrustLineSetTx, Hash, IssuedAmount, IssuedAssetId,
     NativeAssetId, DRC_ISSUED_TRANSFER_RECEIPT_VERSION, DRC_ISSUER_LIABILITY_STATE_VERSION,
-    DRC_MAX_LIVE_TRUST_LINES_PER_HOLDER, DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION,
-    DRC_TRUST_LINE_LIVE_STATE_VERSION, DRC_TRUST_LINE_SET_TICKET_VERSION,
+    DRC_MAX_LIVE_TRUST_LINES_PER_HOLDER, DRC_MAX_TRUST_LINE_HOLDERS_PER_ISSUER,
+    DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION, DRC_TRUST_LINE_LIVE_STATE_VERSION,
+    DRC_TRUST_LINE_SET_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 
@@ -82,6 +83,14 @@ struct HolderIndex {
     version: u32,
     holder: Address,
     assets: Vec<Hash>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, borsh::BorshSerialize, borsh::BorshDeserialize)]
+struct IssuerHoldersIndex {
+    version: u32,
+    issuer: Address,
+    currency: agora_types::IssuedCurrencyCode,
+    holders: Vec<Address>,
 }
 
 const INDEX_VERSION: u32 = 1;
@@ -175,6 +184,89 @@ fn put_holder_index(
         &borsh::to_vec(&idx).map_err(|e| StateError::Storage(e.to_string()))?,
     );
     Ok(())
+}
+
+fn load_issuer_holders_index(
+    store: &StateStore,
+    issuer: &Address,
+    currency: &agora_types::IssuedCurrencyCode,
+) -> Result<Vec<Address>, StateError> {
+    let Some(bytes) = store.get_cf(
+        ColumnFamily::Meta,
+        &issuer_holders_index_key(issuer, currency),
+    )?
+    else {
+        return Ok(Vec::new());
+    };
+    let idx = IssuerHoldersIndex::try_from_slice(&bytes)
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    if idx.version != INDEX_VERSION || idx.issuer != *issuer || idx.currency.0 != currency.0 {
+        return Err(StateError::Storage(
+            "invalid trust line issuer holders index".into(),
+        ));
+    }
+    Ok(idx.holders)
+}
+
+fn put_issuer_holders_index(
+    batch: &mut WriteBatch,
+    issuer: &Address,
+    currency: &agora_types::IssuedCurrencyCode,
+    holders: &[Address],
+) -> Result<(), StateError> {
+    let key = issuer_holders_index_key(issuer, currency);
+    if holders.is_empty() {
+        batch.delete_cf(ColumnFamily::Meta, &key);
+        return Ok(());
+    }
+    if holders.len() > DRC_MAX_TRUST_LINE_HOLDERS_PER_ISSUER {
+        return Err(StateError::InvalidTx(
+            "trust line issuer holder cap exceeded".into(),
+        ));
+    }
+    let idx = IssuerHoldersIndex {
+        version: INDEX_VERSION,
+        issuer: *issuer,
+        currency: *currency,
+        holders: holders.to_vec(),
+    };
+    batch.put_cf(
+        ColumnFamily::Meta,
+        &key,
+        &borsh::to_vec(&idx).map_err(|e| StateError::Storage(e.to_string()))?,
+    );
+    Ok(())
+}
+
+pub fn count_live_trust_lines_for_holder(
+    store: &StateStore,
+    holder: &Address,
+) -> Result<usize, StateError> {
+    Ok(load_holder_index(store, holder)?.len())
+}
+
+pub fn count_live_trust_line_holders_for_issuer(
+    store: &StateStore,
+    issuer: &Address,
+    currency: &agora_types::IssuedCurrencyCode,
+) -> Result<usize, StateError> {
+    Ok(load_issuer_holders_index(store, issuer, currency)?.len())
+}
+
+pub fn sum_holder_balances_for_asset(
+    store: &StateStore,
+    asset: &IssuedAssetId,
+) -> Result<IssuedAmount, StateError> {
+    let holders = load_issuer_holders_index(store, &asset.issuer, &asset.currency)?;
+    let mut total = IssuedAmount::ZERO;
+    for holder in holders {
+        if let Some(line) = load_drc_trust_line_live(store, &holder, asset)? {
+            total = total
+                .checked_add(line.balance)
+                .ok_or_else(|| StateError::Storage("issued balance sum overflow".into()))?;
+        }
+    }
+    Ok(total)
 }
 
 fn put_live(batch: &mut WriteBatch, live: &DrcTrustLineLive) -> Result<(), StateError> {
@@ -293,6 +385,9 @@ pub fn apply_drc_trust_line_set(
         let mut assets = load_holder_index(store, &tx.holder)?;
         assets.retain(|k| *k != asset.asset_key());
         put_holder_index(batch, &tx.holder, &assets)?;
+        let mut holders = load_issuer_holders_index(store, &tx.issuer, &tx.currency)?;
+        holders.retain(|h| *h != tx.holder);
+        put_issuer_holders_index(batch, &tx.issuer, &tx.currency, &holders)?;
         return Ok(());
     }
 
@@ -311,6 +406,16 @@ pub fn apply_drc_trust_line_set(
         }
         assets.push(asset.asset_key());
         put_holder_index(batch, &tx.holder, &assets)?;
+        let mut holders = load_issuer_holders_index(store, &tx.issuer, &tx.currency)?;
+        if holders.len() >= DRC_MAX_TRUST_LINE_HOLDERS_PER_ISSUER {
+            return Err(StateError::InvalidTx(
+                "trust line issuer holder cap exceeded".into(),
+            ));
+        }
+        if !holders.contains(&tx.holder) {
+            holders.push(tx.holder);
+            put_issuer_holders_index(batch, &tx.issuer, &tx.currency, &holders)?;
+        }
         DrcTrustLineLive {
             version: DRC_TRUST_LINE_LIVE_STATE_VERSION,
             holder: tx.holder,
@@ -446,6 +551,8 @@ pub fn apply_drc_issued_transfer(
         sender: tx.sender,
         recipient: tx.recipient,
         amount: tx.amount,
+        source_tag: tx.source_tag,
+        destination_tag: tx.destination_tag,
         settlement_blue_score: application_blue_score,
     };
     batch.put_cf(
