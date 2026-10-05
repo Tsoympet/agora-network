@@ -18,7 +18,7 @@ use crate::staking::StakingParams;
 
 pub const TRIDENT_GENESIS_SCHEMA: &str = "agora-trident-genesis-v3";
 /// State-transition version committed into the Trident network fingerprint.
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v17";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v18";
 /// Consensus-policy version string for Trident.
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";

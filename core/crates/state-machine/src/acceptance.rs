@@ -59,6 +59,10 @@ pub struct BlockAcceptanceRecord {
     pub drc_payment_channel_claim_statuses: Vec<TransactionAcceptance>,
     /// Aligned to `block.drc_payment_channel_closes`.
     pub drc_payment_channel_close_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.drc_trust_line_sets`.
+    pub drc_trust_line_set_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.drc_issued_transfers`.
+    pub drc_issued_transfer_statuses: Vec<TransactionAcceptance>,
 }
 
 #[derive(Debug, Clone, BorshDeserialize)]
@@ -180,6 +184,32 @@ struct MultiLaneV10AcceptanceRecord {
 }
 
 #[derive(Debug, Clone, BorshDeserialize)]
+struct MultiLaneV14AcceptanceRecord {
+    block_hash: Hash,
+    statuses: Vec<TransactionAcceptance>,
+    account_statuses: Vec<TransactionAcceptance>,
+    stake_statuses: Vec<TransactionAcceptance>,
+    execution_statuses: Vec<TransactionAcceptance>,
+    payment_statuses: Vec<TransactionAcceptance>,
+    data_commitment_statuses: Vec<TransactionAcceptance>,
+    drc_policy_statuses: Vec<TransactionAcceptance>,
+    drc_deposit_preauth_statuses: Vec<TransactionAcceptance>,
+    drc_regular_key_statuses: Vec<TransactionAcceptance>,
+    drc_signer_list_statuses: Vec<TransactionAcceptance>,
+    drc_ticket_create_statuses: Vec<TransactionAcceptance>,
+    drc_escrow_create_statuses: Vec<TransactionAcceptance>,
+    drc_escrow_finish_statuses: Vec<TransactionAcceptance>,
+    drc_escrow_cancel_statuses: Vec<TransactionAcceptance>,
+    drc_check_create_statuses: Vec<TransactionAcceptance>,
+    drc_check_cash_statuses: Vec<TransactionAcceptance>,
+    drc_check_cancel_statuses: Vec<TransactionAcceptance>,
+    drc_payment_channel_create_statuses: Vec<TransactionAcceptance>,
+    drc_payment_channel_fund_statuses: Vec<TransactionAcceptance>,
+    drc_payment_channel_claim_statuses: Vec<TransactionAcceptance>,
+    drc_payment_channel_close_statuses: Vec<TransactionAcceptance>,
+}
+
+#[derive(Debug, Clone, BorshDeserialize)]
 struct MultiLaneV13AcceptanceRecord {
     block_hash: Hash,
     statuses: Vec<TransactionAcceptance>,
@@ -206,6 +236,34 @@ impl BlockAcceptanceRecord {
         if let Ok(rec) = Self::try_from_slice(bytes) {
             return Ok(rec);
         }
+        if let Ok(v14) = MultiLaneV14AcceptanceRecord::try_from_slice(bytes) {
+            return Ok(Self {
+                block_hash: v14.block_hash,
+                statuses: v14.statuses,
+                account_statuses: v14.account_statuses,
+                stake_statuses: v14.stake_statuses,
+                execution_statuses: v14.execution_statuses,
+                payment_statuses: v14.payment_statuses,
+                data_commitment_statuses: v14.data_commitment_statuses,
+                drc_policy_statuses: v14.drc_policy_statuses,
+                drc_deposit_preauth_statuses: v14.drc_deposit_preauth_statuses,
+                drc_regular_key_statuses: v14.drc_regular_key_statuses,
+                drc_signer_list_statuses: v14.drc_signer_list_statuses,
+                drc_ticket_create_statuses: v14.drc_ticket_create_statuses,
+                drc_escrow_create_statuses: v14.drc_escrow_create_statuses,
+                drc_escrow_finish_statuses: v14.drc_escrow_finish_statuses,
+                drc_escrow_cancel_statuses: v14.drc_escrow_cancel_statuses,
+                drc_check_create_statuses: v14.drc_check_create_statuses,
+                drc_check_cash_statuses: v14.drc_check_cash_statuses,
+                drc_check_cancel_statuses: v14.drc_check_cancel_statuses,
+                drc_payment_channel_create_statuses: v14.drc_payment_channel_create_statuses,
+                drc_payment_channel_fund_statuses: v14.drc_payment_channel_fund_statuses,
+                drc_payment_channel_claim_statuses: v14.drc_payment_channel_claim_statuses,
+                drc_payment_channel_close_statuses: v14.drc_payment_channel_close_statuses,
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
+            });
+        }
         if let Ok(v13) = MultiLaneV13AcceptanceRecord::try_from_slice(bytes) {
             return Ok(Self {
                 block_hash: v13.block_hash,
@@ -230,6 +288,8 @@ impl BlockAcceptanceRecord {
                 drc_payment_channel_fund_statuses: Vec::new(),
                 drc_payment_channel_claim_statuses: Vec::new(),
                 drc_payment_channel_close_statuses: Vec::new(),
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
             });
         }
         if let Ok(v10) = MultiLaneV10AcceptanceRecord::try_from_slice(bytes) {
@@ -256,6 +316,8 @@ impl BlockAcceptanceRecord {
                 drc_payment_channel_fund_statuses: Vec::new(),
                 drc_payment_channel_claim_statuses: Vec::new(),
                 drc_payment_channel_close_statuses: Vec::new(),
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
             });
         }
         if let Ok(v9) = MultiLaneV9AcceptanceRecord::try_from_slice(bytes) {
@@ -282,6 +344,8 @@ impl BlockAcceptanceRecord {
                 drc_payment_channel_fund_statuses: Vec::new(),
                 drc_payment_channel_claim_statuses: Vec::new(),
                 drc_payment_channel_close_statuses: Vec::new(),
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
             });
         }
         if let Ok(v8) = MultiLaneV8AcceptanceRecord::try_from_slice(bytes) {
@@ -308,6 +372,8 @@ impl BlockAcceptanceRecord {
                 drc_payment_channel_fund_statuses: Vec::new(),
                 drc_payment_channel_claim_statuses: Vec::new(),
                 drc_payment_channel_close_statuses: Vec::new(),
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
             });
         }
         if let Ok(v7) = MultiLaneV7AcceptanceRecord::try_from_slice(bytes) {
@@ -334,6 +400,8 @@ impl BlockAcceptanceRecord {
                 drc_payment_channel_fund_statuses: Vec::new(),
                 drc_payment_channel_claim_statuses: Vec::new(),
                 drc_payment_channel_close_statuses: Vec::new(),
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
             });
         }
         if let Ok(v6) = MultiLaneV6AcceptanceRecord::try_from_slice(bytes) {
@@ -360,6 +428,8 @@ impl BlockAcceptanceRecord {
                 drc_payment_channel_fund_statuses: Vec::new(),
                 drc_payment_channel_claim_statuses: Vec::new(),
                 drc_payment_channel_close_statuses: Vec::new(),
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
             });
         }
         if let Ok(v5) = MultiLaneV5AcceptanceRecord::try_from_slice(bytes) {
@@ -386,6 +456,8 @@ impl BlockAcceptanceRecord {
                 drc_payment_channel_fund_statuses: Vec::new(),
                 drc_payment_channel_claim_statuses: Vec::new(),
                 drc_payment_channel_close_statuses: Vec::new(),
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
             });
         }
         if let Ok(v4) = MultiLaneV4AcceptanceRecord::try_from_slice(bytes) {
@@ -412,6 +484,8 @@ impl BlockAcceptanceRecord {
                 drc_payment_channel_fund_statuses: Vec::new(),
                 drc_payment_channel_claim_statuses: Vec::new(),
                 drc_payment_channel_close_statuses: Vec::new(),
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
             });
         }
         if let Ok(v3) = MultiLaneV3AcceptanceRecord::try_from_slice(bytes) {
@@ -438,6 +512,8 @@ impl BlockAcceptanceRecord {
                 drc_payment_channel_fund_statuses: Vec::new(),
                 drc_payment_channel_claim_statuses: Vec::new(),
                 drc_payment_channel_close_statuses: Vec::new(),
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
             });
         }
         if let Ok(v2) = MultiLaneV2AcceptanceRecord::try_from_slice(bytes) {
@@ -464,6 +540,8 @@ impl BlockAcceptanceRecord {
                 drc_payment_channel_fund_statuses: Vec::new(),
                 drc_payment_channel_claim_statuses: Vec::new(),
                 drc_payment_channel_close_statuses: Vec::new(),
+                drc_trust_line_set_statuses: Vec::new(),
+                drc_issued_transfer_statuses: Vec::new(),
             });
         }
         let legacy = LegacyBlockAcceptanceRecord::try_from_slice(bytes)
@@ -491,6 +569,8 @@ impl BlockAcceptanceRecord {
             drc_payment_channel_fund_statuses: Vec::new(),
             drc_payment_channel_claim_statuses: Vec::new(),
             drc_payment_channel_close_statuses: Vec::new(),
+            drc_trust_line_set_statuses: Vec::new(),
+            drc_issued_transfer_statuses: Vec::new(),
         })
     }
 
@@ -640,6 +720,8 @@ mod tests {
             drc_payment_channel_fund_statuses: vec![],
             drc_payment_channel_claim_statuses: vec![],
             drc_payment_channel_close_statuses: vec![],
+            drc_trust_line_set_statuses: vec![],
+            drc_issued_transfer_statuses: vec![],
         };
         store_acceptance(&store, &rec.block_hash, &rec).unwrap();
         let loaded = load_acceptance(&store, &rec.block_hash).unwrap().unwrap();

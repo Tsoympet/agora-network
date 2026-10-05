@@ -383,7 +383,9 @@ impl NetworkNode {
             | NetworkMessage::DrcPaymentChannelCreate(_)
             | NetworkMessage::DrcPaymentChannelFund(_)
             | NetworkMessage::DrcPaymentChannelClaim(_)
-            | NetworkMessage::DrcPaymentChannelClose(_) => {
+            | NetworkMessage::DrcPaymentChannelClose(_)
+            | NetworkMessage::DrcTrustLineSet(_)
+            | NetworkMessage::DrcIssuedTransfer(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

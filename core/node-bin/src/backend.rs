@@ -26,14 +26,15 @@ use agora_state_machine::{
     list_missions as list_canonical_missions, list_passport_attestations,
     load_canonical_community_summary, load_canonical_governance_policy, load_drc_account_policy,
     load_drc_check_receipt, load_drc_deposit_preauth, load_drc_escrow_receipt,
-    load_drc_payment_by_invoice, load_drc_payment_channel_claim_event,
-    load_drc_payment_channel_fund_event, load_drc_payment_channel_live,
-    load_drc_payment_channel_receipt, load_drc_payment_channel_schedule_event,
-    load_drc_payment_receipt, load_epoch, load_known_drc_account_keys,
-    load_known_drc_account_policy, load_known_drc_account_signer_summary,
-    load_known_drc_deposit_authorization, load_protocol_treasuries, load_reward_pool,
-    load_validator, lookup_drc_check_point, lookup_drc_escrow_point,
-    lookup_drc_payment_channel_point, lookup_drc_ticket_point, lookup_tx_location, meta_keys,
+    load_drc_issued_transfer_receipt, load_drc_payment_by_invoice,
+    load_drc_payment_channel_claim_event, load_drc_payment_channel_fund_event,
+    load_drc_payment_channel_live, load_drc_payment_channel_receipt,
+    load_drc_payment_channel_schedule_event, load_drc_payment_receipt, load_drc_trust_line_live,
+    load_epoch, load_known_drc_account_keys, load_known_drc_account_policy,
+    load_known_drc_account_signer_summary, load_known_drc_deposit_authorization,
+    load_protocol_treasuries, load_reward_pool, load_validator, lookup_drc_check_point,
+    lookup_drc_escrow_point, lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point,
+    lookup_drc_ticket_point, lookup_drc_trust_line_point, lookup_tx_location, meta_keys,
     outpoint_key, plan_drc_mempool_reservation, validate_mempool_tx_with_auth, AccountJournal,
     ColumnFamily, DrcMempoolReservation, DrcTicketPointStatus, StakingParams, StateStore,
     TxAuthContext, WriteBatch,
@@ -41,13 +42,14 @@ use agora_state_machine::{
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAccountPolicy,
     DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx,
-    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentChannelClaimTx,
-    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx,
-    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
-    NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction, TxOut,
-    ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
-    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
-    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedTransferTx,
+    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
+    DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
+    SignedStakeTx, Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
+    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -60,6 +62,10 @@ pub(crate) fn min_relay_fee() -> u64 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MIN_RELAY_FEE)
+}
+
+fn currency_hex(code: &agora_types::IssuedCurrencyCode) -> String {
+    code.0.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn parse_stake_asset(asset: &str) -> Result<NativeAssetId, RpcError> {
@@ -712,6 +718,11 @@ mod payment_channel_admit;
 pub(crate) use payment_channel_admit::{
     admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
     admit_drc_payment_channel_create, admit_drc_payment_channel_fund,
+};
+#[path = "trust_line_admit.rs"]
+mod trust_line_admit;
+pub(crate) use trust_line_admit::{
+    admit_drc_issued_transfer, admit_drc_trust_line_set, revalidate_trust_line_mempool,
 };
 
 /// Node RPC surface: tips/blocks from store, signed tx → mempool + gossip.
@@ -1479,6 +1490,109 @@ impl RpcBackend for NodeBackend {
         Ok(json!({ "valid": true }))
     }
 
+    fn submit_drc_trust_line_set(&mut self, tx: DrcTrustLineSetTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id =
+            admit_drc_trust_line_set(&self.store, &self.mempool, tx.clone(), &auth, blue_score)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcTrustLineSet(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn submit_drc_issued_transfer(&mut self, tx: DrcIssuedTransferTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id =
+            admit_drc_issued_transfer(&self.store, &self.mempool, tx.clone(), &auth, blue_score)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcIssuedTransfer(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn get_drc_trust_line(
+        &self,
+        holder: &Address,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError> {
+        asset
+            .validate()
+            .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+        let status = lookup_drc_trust_line_point(self.store.as_ref(), holder, asset)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        if status == "live" {
+            let live = load_drc_trust_line_live(self.store.as_ref(), holder, asset)
+                .map_err(|e| RpcError::Internal(e.to_string()))?
+                .expect("live trust line");
+            return Ok(json!({
+                "holder": holder.to_hex(),
+                "issuer": asset.issuer.to_hex(),
+                "currency": currency_hex(&asset.currency),
+                "status": "live",
+                "limit": live.limit.as_units().to_string(),
+                "balance": live.balance.as_units().to_string(),
+                "admission_not_finality": true,
+            }));
+        }
+        Ok(json!({
+            "holder": holder.to_hex(),
+            "issuer": asset.issuer.to_hex(),
+            "currency": currency_hex(&asset.currency),
+            "status": "unknown",
+            "admission_not_finality": true,
+        }))
+    }
+
+    fn get_drc_issuer_liability(
+        &self,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError> {
+        let (status, outstanding) = lookup_drc_issuer_liability_point(self.store.as_ref(), asset)
+            .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+        Ok(json!({
+            "issuer": asset.issuer.to_hex(),
+            "currency": currency_hex(&asset.currency),
+            "status": status,
+            "outstanding": outstanding.as_units().to_string(),
+            "admission_not_finality": true,
+        }))
+    }
+
+    fn get_drc_issued_transfer_receipt(&self, transfer_tx_id: &Hash) -> Result<Value, RpcError> {
+        match load_drc_issued_transfer_receipt(self.store.as_ref(), transfer_tx_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        {
+            Some(receipt) => Ok(json!({
+                "transfer_tx_id": transfer_tx_id.to_hex(),
+                "status": "known",
+                "sender": receipt.sender.to_hex(),
+                "recipient": receipt.recipient.to_hex(),
+                "amount": receipt.amount.as_units().to_string(),
+                "settlement_blue_score": receipt.settlement_blue_score,
+                "source_tag": receipt.source_tag,
+                "destination_tag": receipt.destination_tag,
+            })),
+            None => Ok(json!({
+                "transfer_tx_id": transfer_tx_id.to_hex(),
+                "status": "unknown",
+            })),
+        }
+    }
+
     fn get_drc_account_policy(
         &self,
         account: &Address,
@@ -1610,6 +1724,8 @@ impl RpcBackend for NodeBackend {
             drc_payment_channel_funds,
             drc_payment_channel_claims,
             drc_payment_channel_closes,
+            drc_trust_line_sets,
+            drc_issued_transfers,
         ) = {
             let pool = self
                 .mempool
@@ -1639,6 +1755,8 @@ impl RpcBackend for NodeBackend {
                 pool.select_drc_payment_channel_funds(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_payment_channel_claims(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_payment_channel_closes(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_trust_line_sets(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_issued_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         chain
@@ -1665,6 +1783,8 @@ impl RpcBackend for NodeBackend {
                     drc_payment_channel_funds: &drc_payment_channel_funds,
                     drc_payment_channel_claims: &drc_payment_channel_claims,
                     drc_payment_channel_closes: &drc_payment_channel_closes,
+                    drc_trust_line_sets: &drc_trust_line_sets,
+                    drc_issued_transfers: &drc_issued_transfers,
                     ..BlockTemplateLanes::default()
                 },
             )
@@ -1719,6 +1839,7 @@ impl RpcBackend for NodeBackend {
         };
         if let Ok(mut pool) = self.mempool.lock() {
             pool.evict_for_block_at_blue_score(&block, virtual_blue_score);
+            revalidate_trust_line_mempool(self.store.as_ref(), &mut pool);
         }
         if let Some(net) = &self.net {
             // Prefer compact + announce; peers inflate from mempool or issue GetBlock.
@@ -3099,6 +3220,25 @@ mod drc_payment_channel_reorg_reservation_tests;
 #[cfg(test)]
 #[path = "drc_payment_channel_rpc_integration_tests.rs"]
 mod drc_payment_channel_rpc_integration_tests;
+
+#[cfg(test)]
+#[path = "drc_trust_line_rpc_integration_tests.rs"]
+mod drc_trust_line_rpc_integration_tests;
+#[cfg(test)]
+#[path = "drc_trust_line_public_helpers.rs"]
+mod drc_trust_line_public_helpers;
+#[cfg(test)]
+#[path = "drc_trust_line_public_security_tests.rs"]
+mod drc_trust_line_public_security_tests;
+#[cfg(test)]
+#[path = "drc_trust_line_reorg_reservation_tests.rs"]
+mod drc_trust_line_reorg_reservation_tests;
+#[cfg(test)]
+#[path = "drc_trust_line_template_tests.rs"]
+mod drc_trust_line_template_tests;
+#[cfg(test)]
+#[path = "drc_trust_line_public_invariant_tests.rs"]
+mod drc_trust_line_public_invariant_tests;
 #[cfg(test)]
 #[path = "drc_payment_channel_template_tests.rs"]
 mod drc_payment_channel_template_tests;

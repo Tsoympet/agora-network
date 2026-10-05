@@ -1,13 +1,15 @@
 use agora_types::{
     AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx,
     DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
-    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
-    DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
-    DrcTicketCreateTx, Hash, OvlExecutionTx, Transaction,
+    DrcIssuedTransferTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OvlExecutionTx,
+    Transaction,
 };
 use serde_json::{json, Value};
 
 use crate::backend::RpcBackend;
+use crate::drc_trust_line_params::{parse_holder_issuer_asset, parse_issued_asset_id};
 use crate::error::RpcError;
 use crate::methods::{RpcMethod, RpcRequest, RpcResponse};
 
@@ -449,6 +451,45 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     cumulative_authorized,
                     &channel_claim_signature,
                 )
+            }
+            RpcMethod::SubmitDrcTrustLineSet => {
+                let raw = req
+                    .params
+                    .get("trust_line_set")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcTrustLineSetTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_trust_line_set(tx)?;
+                Ok(json!({ "trust_line_set_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcIssuedTransfer => {
+                let raw = req
+                    .params
+                    .get("issued_transfer")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcIssuedTransferTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_issued_transfer(tx)?;
+                Ok(json!({ "issued_transfer_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcTrustLine => {
+                let (holder, asset) = parse_holder_issuer_asset(&req.params)?;
+                self.backend.get_drc_trust_line(&holder, &asset)
+            }
+            RpcMethod::GetDrcIssuerLiability => {
+                let asset = parse_issued_asset_id(&req.params)?;
+                self.backend.get_drc_issuer_liability(&asset)
+            }
+            RpcMethod::GetDrcIssuedTransferReceipt => {
+                let transfer_tx_id = param_hash(&req.params, "transfer_tx_id")?;
+                self.backend
+                    .get_drc_issued_transfer_receipt(&transfer_tx_id)
             }
             RpcMethod::GetDrcAccountSignerList => {
                 let account = param_address(&req.params, "account")?;
@@ -1113,6 +1154,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
@@ -1241,6 +1284,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
@@ -1288,6 +1333,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
@@ -1900,6 +1947,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -1963,6 +2012,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2025,6 +2076,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2088,6 +2141,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2125,7 +2180,7 @@ mod tests {
 
     #[test]
     fn get_drc_payment_channel_query_malformed_and_unknown() {
-        let mut backend = InMemoryBackend::new();
+        let backend = InMemoryBackend::new();
         let mut rpc = RpcDispatcher::new(backend);
         let bad = rpc.handle(RpcRequest {
             id: Some(json!(103)),

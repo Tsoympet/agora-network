@@ -20,6 +20,7 @@ mod drc_regular_key;
 mod drc_sequence;
 mod drc_signer_list;
 mod drc_ticket;
+mod drc_trust_line;
 mod execution;
 mod finality;
 mod hash;
@@ -42,7 +43,7 @@ pub use block::{
     TRIDENT_BLOCK_BODY_V11_VERSION, TRIDENT_BLOCK_BODY_V12_DOMAIN, TRIDENT_BLOCK_BODY_V12_VERSION,
     TRIDENT_BLOCK_BODY_V13_DOMAIN, TRIDENT_BLOCK_BODY_V13_VERSION, TRIDENT_BLOCK_BODY_V14_DOMAIN,
     TRIDENT_BLOCK_BODY_V14_VERSION, TRIDENT_BLOCK_BODY_V15_DOMAIN, TRIDENT_BLOCK_BODY_V15_VERSION,
-    TRIDENT_BLOCK_BODY_VERSION,
+    TRIDENT_BLOCK_BODY_V16_DOMAIN, TRIDENT_BLOCK_BODY_V16_VERSION, TRIDENT_BLOCK_BODY_VERSION,
 };
 pub use data_availability::{
     DataAvailabilityCommitment, DataCommitmentAuthorization, DataCommitmentError,
@@ -89,14 +90,16 @@ pub use drc_multisign_attachment::{
     attachment_key_for_account_transfer, attachment_key_for_check_cancel,
     attachment_key_for_check_cash, attachment_key_for_check_create,
     attachment_key_for_deposit_preauth, attachment_key_for_escrow_cancel,
-    attachment_key_for_escrow_create, attachment_key_for_escrow_finish, attachment_key_for_payment,
+    attachment_key_for_escrow_create, attachment_key_for_escrow_finish,
+    attachment_key_for_issued_transfer, attachment_key_for_payment,
     attachment_key_for_payment_channel_claim, attachment_key_for_payment_channel_close,
     attachment_key_for_payment_channel_create, attachment_key_for_payment_channel_fund,
     attachment_key_for_policy, attachment_key_for_regular_key, attachment_key_for_signer_list,
-    attachment_key_for_stake, attachment_key_for_ticket_create, drc_multisign_attachment_key,
-    drc_multisign_signing_commitment, DrcMultisignAttachmentError, DrcMultisignAttachmentKey,
-    DrcMultisignBlockAttachment, DrcMultisignOperationKind, DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
-    DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION, DRC_MULTISIGN_SIGNING_COMMITMENT_DOMAIN,
+    attachment_key_for_stake, attachment_key_for_ticket_create, attachment_key_for_trust_line_set,
+    drc_multisign_attachment_key, drc_multisign_signing_commitment, DrcMultisignAttachmentError,
+    DrcMultisignAttachmentKey, DrcMultisignBlockAttachment, DrcMultisignOperationKind,
+    DRC_MULTISIGN_ATTACHMENT_KEY_VERSION, DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
+    DRC_MULTISIGN_SIGNING_COMMITMENT_DOMAIN,
 };
 pub use drc_multisign_lane::{
     drc_multisign_attachment_capacity, materialize_drc_multisign_attachments,
@@ -155,6 +158,19 @@ pub use drc_signer_list::{
 pub use drc_ticket::{
     DrcAccountTickets, DrcTicketCreateError, DrcTicketCreateTx, DRC_TICKET_CREATE_SIGNING_DOMAIN,
     DRC_TICKET_CREATE_TX_TYPE, DRC_TICKET_CREATE_TX_VERSION, DRC_TICKET_STATE_VERSION,
+};
+pub use drc_trust_line::{
+    drc_issued_transfer_mutation_meta_keys, drc_trust_line_issuer_liability_meta_key,
+    drc_trust_line_live_meta_key, drc_trust_line_set_mutation_meta_keys,
+    DrcIssuedTransferReceipt, DrcIssuedTransferTx, DrcIssuerLiability, DrcTrustLineError,
+    DrcTrustLineLive, DrcTrustLineSetTx, IssuedAmount, IssuedAssetId, IssuedCurrencyCode,
+    IssuedCurrencyError, DRC_ISSUED_TRANSFER_RECEIPT_VERSION, DRC_ISSUED_TRANSFER_SIGNING_DOMAIN,
+    DRC_ISSUED_TRANSFER_TICKET_SIGNING_DOMAIN, DRC_ISSUER_LIABILITY_STATE_VERSION,
+    DRC_MAX_LIVE_TRUST_LINES_PER_HOLDER, DRC_MAX_TRUST_LINE_HOLDERS_PER_ISSUER,
+    DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION, DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION,
+    DRC_TRUST_LINE_LIVE_STATE_VERSION, DRC_TRUST_LINE_SET_SIGNING_DOMAIN,
+    DRC_TRUST_LINE_SET_TICKET_SIGNING_DOMAIN, DRC_TRUST_LINE_SET_TICKET_VERSION,
+    DRC_TRUST_LINE_SET_TX_VERSION,
 };
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
@@ -272,6 +288,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         assert_eq!(block.id(), header.hash());
@@ -400,6 +418,15 @@ mod ts_export {
         SignedStakeTx::export_all().expect("export SignedStakeTx");
         PassportCategory::export_all().expect("export PassportCategory");
         PassportAttestation::export_all().expect("export PassportAttestation");
+        IssuedCurrencyCode::export_all().expect("export IssuedCurrencyCode");
+        IssuedAmount::export_all().expect("export IssuedAmount");
+        IssuedAssetId::export_all().expect("export IssuedAssetId");
+        DrcTrustLineSetTx::export_all().expect("export DrcTrustLineSetTx");
+        DrcTrustLineLive::export_all().expect("export DrcTrustLineLive");
+        DrcIssuedTransferTx::export_all().expect("export DrcIssuedTransferTx");
+        DrcIssuedTransferReceipt::export_all().expect("export DrcIssuedTransferReceipt");
+        DrcIssuerLiability::export_all().expect("export DrcIssuerLiability");
+        DrcMultisignOperationKind::export_all().expect("export DrcMultisignOperationKind");
         normalize_generated_bindings();
 
         let payment_binding = fs::read_to_string(

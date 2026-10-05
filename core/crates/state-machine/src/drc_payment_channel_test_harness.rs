@@ -599,6 +599,7 @@ pub mod multisign {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn reject_preserving_invariants(
         store: &StateStore,
         owner: &KeyPair,
@@ -793,6 +794,7 @@ pub mod multisign {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn base_multisign_claim_block(
         store: &StateStore,
         owner: &KeyPair,

@@ -67,6 +67,10 @@ pub enum NetworkMessage {
     DrcPaymentChannelClaim(agora_types::DrcPaymentChannelClaimTx),
     /// Appended in Trident protocol v19; native DRC payment channel close.
     DrcPaymentChannelClose(agora_types::DrcPaymentChannelCloseTx),
+    /// Appended in Trident protocol v20; issuer-scoped trust line set.
+    DrcTrustLineSet(agora_types::DrcTrustLineSetTx),
+    /// Appended in Trident protocol v20; exact issued-value transfer.
+    DrcIssuedTransfer(agora_types::DrcIssuedTransferTx),
 }
 
 impl NetworkMessage {
@@ -103,6 +107,8 @@ impl NetworkMessage {
             && block.drc_payment_channel_funds.is_empty()
             && block.drc_payment_channel_claims.is_empty()
             && block.drc_payment_channel_closes.is_empty()
+            && block.drc_trust_line_sets.is_empty()
+            && block.drc_issued_transfers.is_empty()
             && block.drc_multisign_attachments.is_empty()
         {
             Self::CompactBlock {
@@ -283,6 +289,42 @@ mod tests {
             DrcTicketCreateTx::unsigned(Address([6; 20]), Amount::from_base_units(1), 0);
         let message = NetworkMessage::DrcTicketCreate(ticket_create.clone());
         assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+    }
+
+    #[test]
+    fn trust_line_lane_block_uses_full_body_gossip() {
+        use agora_types::{
+            Address, Amount, DrcTrustLineSetTx, Hash, IssuedAmount, IssuedCurrencyCode,
+            DRC_TRUST_LINE_SET_TX_VERSION,
+        };
+
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.drc_trust_line_sets.push(DrcTrustLineSetTx {
+            version: DRC_TRUST_LINE_SET_TX_VERSION,
+            holder: Address([1; 20]),
+            issuer: Address([2; 20]),
+            currency: IssuedCurrencyCode([0u8; 20]),
+            limit: IssuedAmount::from_units(1),
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![],
+            signature: vec![],
+            multisign: None,
+        });
+        block.header.tx_root = block.compute_body_root();
+        let message = NetworkMessage::compact_from_block(&block);
+        assert_eq!(message, NetworkMessage::Block(block));
     }
 
     #[test]

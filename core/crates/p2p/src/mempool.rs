@@ -4,10 +4,10 @@ use agora_types::{
     resolve_drc_account_sequence, AccountTransfer, Address, Block, DrcAccountPolicyTx,
     DrcAccountSequence, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
     DrcDepositPreauthAction, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
-    DrcEscrowFinishTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcEscrowFinishTx, DrcIssuedTransferTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, DrcTicketCreateTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
-    SignedStakeTx, Transaction, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint,
+    OvlExecutionTx, SignedStakeTx, Transaction, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
     DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_CHECK_CANCEL_TICKET_VERSION,
     DRC_CHECK_CASH_TICKET_VERSION, DRC_CHECK_CREATE_TICKET_VERSION,
     DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_ESCROW_CANCEL_TICKET_VERSION,
@@ -19,6 +19,8 @@ use crate::P2pError;
 
 #[path = "payment_channel_lane.rs"]
 mod payment_channel_lane;
+#[path = "trust_line_lane.rs"]
+mod trust_line_lane;
 
 /// Default cap on how many transfer txs a mining template pulls from the pool.
 pub const DEFAULT_TEMPLATE_TX_LIMIT: usize = 128;
@@ -61,6 +63,16 @@ pub struct Mempool {
     drc_payment_channel_close_txs: HashMap<Hash, DrcPaymentChannelCloseTx>,
     pending_payment_channel_ids: HashSet<Hash>,
     reserved_payment_channel_mutations: HashMap<Hash, Hash>,
+    drc_trust_line_set_txs: HashMap<Hash, DrcTrustLineSetTx>,
+    drc_issued_transfer_txs: HashMap<Hash, DrcIssuedTransferTx>,
+    reserved_trust_line_set_slots: HashMap<(Address, Hash), Hash>,
+    pending_trust_line_set_slots: HashSet<(Address, Hash)>,
+    pending_trust_line_delete_slots: HashSet<(Address, Hash)>,
+    pending_trust_line_create_slots: HashSet<(Address, Hash)>,
+    reserved_issuer_liability_assets: HashMap<Hash, Hash>,
+    pending_trust_line_balance_delta: HashMap<(Address, Hash), i128>,
+    /// One pending mempool consumer per canonical Meta mutation key byte sequence.
+    reserved_trust_line_meta_keys: HashMap<Vec<u8>, Hash>,
     /// One pending consumer per `(owner, ticket_sequence)`.
     reserved_tickets: HashSet<(Address, u64)>,
     /// How each DRC lane operation reserved its sender slot (release on eviction).
@@ -115,6 +127,15 @@ impl Mempool {
             drc_payment_channel_close_txs: HashMap::new(),
             pending_payment_channel_ids: HashSet::new(),
             reserved_payment_channel_mutations: HashMap::new(),
+            drc_trust_line_set_txs: HashMap::new(),
+            drc_issued_transfer_txs: HashMap::new(),
+            reserved_trust_line_set_slots: HashMap::new(),
+            pending_trust_line_set_slots: HashSet::new(),
+            pending_trust_line_delete_slots: HashSet::new(),
+            pending_trust_line_create_slots: HashSet::new(),
+            reserved_issuer_liability_assets: HashMap::new(),
+            pending_trust_line_balance_delta: HashMap::new(),
+            reserved_trust_line_meta_keys: HashMap::new(),
             reserved_tickets: HashSet::new(),
             drc_slot_reservations: HashMap::new(),
             deposit_auth_required_payments: HashSet::new(),
@@ -142,6 +163,7 @@ impl Mempool {
             + self.drc_check_cash_txs.len()
             + self.drc_check_cancel_txs.len()
             + self.payment_channel_maps_len()
+            + self.trust_line_maps_len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -166,6 +188,7 @@ impl Mempool {
             || self.drc_check_cash_txs.contains_key(tx_id)
             || self.drc_check_cancel_txs.contains_key(tx_id)
             || self.payment_channel_maps_contains(tx_id)
+            || self.trust_line_maps_contains(tx_id)
     }
 
     pub fn ticket_consumer_reserved(&self, owner: &Address, ticket_sequence: u64) -> bool {
@@ -1355,6 +1378,13 @@ impl Mempool {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.submitter));
         }
         self.evict_payment_channel_lanes_from_block(block);
+        for tx in &block.drc_trust_line_sets {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.holder));
+        }
+        for tx in &block.drc_issued_transfers {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.sender));
+        }
+        self.evict_trust_line_lanes_from_block(block);
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
             let id = tx.policy_tx_id();
@@ -1753,6 +1783,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
@@ -1829,6 +1861,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
@@ -2645,6 +2679,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);

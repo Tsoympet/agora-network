@@ -93,7 +93,7 @@ mod reorg_journal_transitions {
 #[cfg(feature = "rocksdb")]
 #[cfg(test)]
 mod rocksdb_reopen_parity {
-    use agora_types::{DrcPaymentChannelCloseKind, Hash, NativeAssetId};
+    use agora_types::{DrcPaymentChannelCloseKind, Hash};
 
     use crate::drc_payment_channel::{
         load_drc_payment_channel_live, load_drc_payment_channel_receipt,
