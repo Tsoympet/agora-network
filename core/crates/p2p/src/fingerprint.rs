@@ -16,10 +16,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Trident fingerprint domain + versions (distinct mesh from v2).
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
-/// v19 adds native DRC payment channel create/fund/claim/close gossip + body lanes.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 19;
+/// v20 adds issuer-scoped trust lines and exact issued-value transfer gossip + body lanes.
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 20;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v9";
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v17";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v18";
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
 
 /// Canonical network fingerprint hash (pre-Trident / genesis v2).
@@ -83,7 +83,7 @@ mod tests {
         assert_ne!(v2, t1);
         assert_eq!(
             t1.to_hex(),
-            "9d475749b38499a751f84d5a5317e6854f7bdabc89d6f710c8c09e4a86bc4931"
+            "3fcfefb479dc6588877dc734b5d51e1328255c427c7e40afd57b1c613456ccc6"
         );
         let t2 = trident_network_fingerprint("agora-trident-testnet-2", &genesis, &policy);
         assert_ne!(t1, t2);
@@ -99,8 +99,8 @@ mod tests {
             TRIDENT_CONSENSUS_POLICY_VERSION,
         ));
         assert_ne!(t1, prior);
-        assert_eq!(TRIDENT_PROTOCOL_VERSION, 19);
+        assert_eq!(TRIDENT_PROTOCOL_VERSION, 20);
         assert_eq!(TRIDENT_TX_SIGNING_VERSION, "agora-trident-tx-v9");
-        assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v17");
+        assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v18");
     }
 }

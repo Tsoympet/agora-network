@@ -198,6 +198,8 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_payment_channel_funds: &'a [agora_types::DrcPaymentChannelFundTx],
     pub drc_payment_channel_claims: &'a [agora_types::DrcPaymentChannelClaimTx],
     pub drc_payment_channel_closes: &'a [agora_types::DrcPaymentChannelCloseTx],
+    pub drc_trust_line_sets: &'a [agora_types::DrcTrustLineSetTx],
+    pub drc_issued_transfers: &'a [agora_types::DrcIssuedTransferTx],
 }
 
 impl ChainState {
@@ -572,6 +574,8 @@ impl ChainState {
             drc_payment_channel_funds: lanes.drc_payment_channel_funds.to_vec(),
             drc_payment_channel_claims: lanes.drc_payment_channel_claims.to_vec(),
             drc_payment_channel_closes: lanes.drc_payment_channel_closes.to_vec(),
+            drc_trust_line_sets: lanes.drc_trust_line_sets.to_vec(),
+            drc_issued_transfers: lanes.drc_issued_transfers.to_vec(),
             drc_multisign_attachments: Vec::new(),
         };
         if let Some(ctx) = self.auth.as_ref() {
@@ -1933,6 +1937,7 @@ impl ChainState {
                 drc_escrow_meta_before: journal.drc_escrow_meta_before,
                 drc_check_meta_before: journal.drc_check_meta_before,
                 drc_payment_channel_meta_before: journal.drc_payment_channel_meta_before,
+                drc_trust_line_meta_before: journal.drc_trust_line_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

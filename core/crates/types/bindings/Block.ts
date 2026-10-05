@@ -10,6 +10,7 @@ import type { DrcDepositPreauthTx } from "./DrcDepositPreauthTx";
 import type { DrcEscrowCancelTx } from "./DrcEscrowCancelTx";
 import type { DrcEscrowCreateTx } from "./DrcEscrowCreateTx";
 import type { DrcEscrowFinishTx } from "./DrcEscrowFinishTx";
+import type { DrcIssuedTransferTx } from "./DrcIssuedTransferTx";
 import type { DrcMultisignBlockAttachment } from "./DrcMultisignBlockAttachment";
 import type { DrcPaymentChannelClaimTx } from "./DrcPaymentChannelClaimTx";
 import type { DrcPaymentChannelCloseTx } from "./DrcPaymentChannelCloseTx";
@@ -19,6 +20,7 @@ import type { DrcPaymentTx } from "./DrcPaymentTx";
 import type { DrcRegularKeyTx } from "./DrcRegularKeyTx";
 import type { DrcSignerListTx } from "./DrcSignerListTx";
 import type { DrcTicketCreateTx } from "./DrcTicketCreateTx";
+import type { DrcTrustLineSetTx } from "./DrcTrustLineSetTx";
 import type { OvlExecutionTx } from "./OvlExecutionTx";
 import type { SignedStakeTx } from "./SignedStakeTx";
 import type { Transaction } from "./Transaction";
@@ -111,6 +113,14 @@ drc_payment_channel_claims: Array<DrcPaymentChannelClaimTx>,
  * Authorized native DRC payment channel closes.
  */
 drc_payment_channel_closes: Array<DrcPaymentChannelCloseTx>,
+/**
+ * Holder-authorized issuer-scoped trust line set/delete operations.
+ */
+drc_trust_line_sets: Array<DrcTrustLineSetTx>,
+/**
+ * Exact issued-value transfers (issue/redeem/holder transfer).
+ */
+drc_issued_transfers: Array<DrcIssuedTransferTx>,
 /**
  * Detached, body-root-committed DRC multisign authorization (consensus lane).
  */
