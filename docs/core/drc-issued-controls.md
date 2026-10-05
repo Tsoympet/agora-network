@@ -54,6 +54,25 @@ Same-block order: **policy → line control → issued transfer / clawback**. Pe
 - Block body **v17** when issued-control lanes non-empty.
 - P2P fingerprint **v21**; state transition **v19** (`agora-trident-state-v19`) adds `drc-issued-controls-v1` root.
 
+## Public integration (Experimental)
+
+### RPC submit
+
+- `agora_submitDrcIssuedAssetPolicySet`
+- `agora_submitDrcTrustLineIssuerControl`
+- `agora_submitDrcIssuedClawback`
+
+### RPC query
+
+- `agora_getDrcIssuedAssetPolicy` — live policy flags for `(issuer, currency)`
+- `agora_getDrcIssuedAssetPolicyReceipt` — point receipt by `policy_set_tx_id`
+- `agora_getDrcTrustLineIssuerControlReceipt` — point receipt by `control_tx_id`
+- `agora_getDrcIssuedClawbackReceipt` — point receipt by `clawback_tx_id`
+
+Admission is fail-closed: issuer DRC nonce, asset-policy slot, trust-line meta (including RequireAuth migration keys), issuer-control slot, and issuer-liability slot must be free. Pending policy blocks issuer control and issued transfer admission on the same asset; pending issuer control blocks clawback on that line.
+
+Gossip: `DrcIssuedAssetPolicySet`, `DrcTrustLineIssuerControl`, `DrcIssuedClawback` (same validation as local admit). v17 bodies with these lanes or multisign attachments use full-block relay (not compact).
+
 ## Deferred
 
 Rippling, transfer rates, paths, partial payments, DEX/AMM, LP tokens, credentials, NFTs, XRPL API parity.
