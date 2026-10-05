@@ -2840,5 +2840,8 @@ mod tests {
 }
 
 #[cfg(test)]
+#[path = "drc_check_template_tests.rs"]
+mod drc_check_template_tests;
+#[cfg(test)]
 #[path = "drc_escrow_template_tests.rs"]
 mod drc_escrow_template_tests;
