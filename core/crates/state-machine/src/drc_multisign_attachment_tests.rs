@@ -7,7 +7,7 @@ mod tests {
         materialize_drc_multisign_attachments, merge_drc_multisign_attachments,
         validate_drc_multisign_attachment_lane, Amount, Block, BlockHeader, DrcMultisignAuth,
         DrcMultisignEntry, DrcMultisignOperationKind, DrcPaymentTx, DrcSignerListEntry,
-        DrcSignerListTx, Hash, NativeAssetId, Transaction, DRC_MULTISIGN_AUTH_VERSION,
+        DrcSignerListTx, Hash, NativeAssetId, Transaction, TxOut, DRC_MULTISIGN_AUTH_VERSION,
     };
     use borsh::BorshDeserialize;
 
@@ -141,7 +141,7 @@ mod tests {
             &ctx,
         ));
 
-        use agora_types::{Amount as Amt, TxOut};
+        use agora_types::Amount as Amt;
 
         let mut block = Block::utxo(
             BlockHeader {
