@@ -18,7 +18,7 @@ owner: Address, action: DrcDepositPreauthAction,
  */
 authorized_source: Address,
 /**
- * Explicit DRC fee credited to the DRC validator reward pool on acceptance.
+ * Explicit DRC fee destroyed only when the operation is accepted.
  */
 fee: Amount,
 /**

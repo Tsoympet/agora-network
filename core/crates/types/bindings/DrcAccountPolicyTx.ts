@@ -10,7 +10,7 @@ import type { DrcMultisignAuth } from "./DrcMultisignAuth";
  */
 export type DrcAccountPolicyTx = { version: number, account: Address, action: DrcAccountPolicyAction,
 /**
- * Explicit DRC fee credited to the DRC validator reward pool on acceptance.
+ * Explicit DRC fee destroyed only when the operation is accepted.
  */
 fee: Amount,
 /**

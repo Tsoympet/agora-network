@@ -29,4 +29,7 @@ writing live state.
 
 **v1 (wired):** slash proceeds credit `stake/reward_pool/DRC` and distribute pro-rata on epoch advance (commission + self/delegator split).
 
-**Reserve drip / fee share:** same path as OVL (working non-zero `reserve_remaining`, Accepted DRC account fees → reward pool). Never from TLT PoW mint. DRC is not a stablecoin by virtue of staking.
+**Reserve drip:** working non-zero `reserve_remaining` credits the DRC reward
+pool. Accepted DRC transaction fees do not enter that pool: protocol v22
+destroys them and commits lifetime burned/net supply. Neither source comes from
+TLT PoW mint. DRC is not a stablecoin by virtue of staking.

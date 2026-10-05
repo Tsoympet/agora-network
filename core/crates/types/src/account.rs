@@ -28,7 +28,7 @@ pub struct AccountTransfer {
     pub from: Address,
     pub to: Address,
     pub amount: Amount,
-    /// Explicit same-asset fee (credited to staking reward pool when Accepted).
+    /// Explicit same-asset fee; accepted DRC fees burn and accepted OVL fees fund its reward pool.
     pub fee: Amount,
     /// Sender account nonce (must match current on-chain nonce).
     pub nonce: u64,

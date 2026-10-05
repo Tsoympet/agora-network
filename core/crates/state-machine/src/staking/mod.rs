@@ -257,7 +257,10 @@ pub fn stake_meta_keys_touched(tx: &SignedStakeTx) -> Vec<Vec<u8>> {
     keys
 }
 
-/// Meta key for the OVL/DRC staking reward pool (fee-share / slash sink).
+/// Meta key for the OVL/DRC staking reward pool.
+///
+/// Both pools receive reserve drips and slash proceeds; only OVL receives
+/// accepted transaction fees after Trident protocol v22.
 pub fn reward_pool_meta_key(asset: NativeAssetId) -> Vec<u8> {
     reward_pool_key(asset)
 }
@@ -380,19 +383,25 @@ pub fn drip_staking_reserve(
     Ok(drip)
 }
 
-/// Fee-share sink for future OVL execution / DRC payment modules.
+/// Credit an accepted OVL transaction fee to the OVL reward pool.
 ///
-/// Call only for Accepted fee attribution in the same asset — never divert TLT miner fees.
+/// DRC transaction fees burn under protocol v22, while TLT fees remain in the
+/// UTXO/coinbase lane, so both assets fail closed here.
 pub fn credit_fee_share_to_reward_pool(
     store: &StateStore,
     batch: &mut WriteBatch,
     asset: NativeAssetId,
     amount: u64,
 ) -> Result<u64, StateError> {
+    if asset != NativeAssetId::OVL {
+        return Err(StateError::InvalidTx(
+            "fee-share reward pool only accepts OVL; accepted DRC fees burn".into(),
+        ));
+    }
     credit_reward_pool_into(store, batch, asset, amount)
 }
 
-/// Slash / fee proceeds held for epoch distribution (never TLT).
+/// Reserve drips, slash proceeds, and OVL fees held for epoch distribution.
 pub fn load_reward_pool(store: &StateStore, asset: NativeAssetId) -> Result<u64, StateError> {
     let Some(bytes) = store.get_cf(ColumnFamily::Meta, &reward_pool_key(asset))? else {
         return Ok(0);
@@ -1506,5 +1515,17 @@ mod tests {
         credit_fee_share_to_reward_pool(&store, &mut batch, NativeAssetId::OVL, 10).unwrap();
         store.write_batch(batch).unwrap();
         assert_eq!(load_reward_pool(&store, NativeAssetId::OVL).unwrap(), 260);
+
+        let mut rejected = WriteBatch::new();
+        assert!(matches!(
+            credit_fee_share_to_reward_pool(
+                &store,
+                &mut rejected,
+                NativeAssetId::DRC,
+                10
+            ),
+            Err(StateError::InvalidTx(message)) if message.contains("DRC fees burn")
+        ));
+        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 0);
     }
 }

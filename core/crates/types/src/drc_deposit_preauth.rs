@@ -54,7 +54,7 @@ pub struct DrcDepositPreauthTx {
     pub action: DrcDepositPreauthAction,
     /// Source account allowed to deposit to `owner` while DepositAuth is enabled.
     pub authorized_source: Address,
-    /// Explicit DRC fee credited to the DRC validator reward pool on acceptance.
+    /// Explicit DRC fee destroyed only when the operation is accepted.
     pub fee: Amount,
     /// Shared DRC nonce used by transfers, stake ops, policies, preauths, and payments.
     pub nonce: u64,

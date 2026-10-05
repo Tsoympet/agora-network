@@ -82,9 +82,10 @@ any conflicting local operation.
 
 Mining templates pull the supported UTXO and appended consensus lanes and
 commit them with `compute_body_root`. Coinbase value remains emission plus TLT
-transfer fees only; OVL/DRC account fees go to their reward pools during
-acceptance. On block admit, `evict_for_block` drops included operations and
-releases reservations.
+transfer fees only. Accepted OVL account/execution fees credit the OVL reward
+pool; accepted DRC typed-operation fees increment committed lifetime burned
+supply. On block admit, `evict_for_block` drops included operations and releases
+reservations.
 
 Authenticated DA authorizations deliberately have no standalone mempool or
 `NetworkMessage` variant. Existing enum discriminants remain unchanged; full
