@@ -407,9 +407,7 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
     use agora_types::{Amount, NativeAssetId};
     use std::sync::{Arc, Mutex};
 
-    use super::drc_payment_channel_public_helpers::{
-        backend_config, boot_chain, burned_supply_balance,
-    };
+    use super::drc_payment_channel_public_helpers::{backend_config, boot_chain};
     use agora_p2p::Mempool;
 
     let dir = tempfile::tempdir().unwrap();
@@ -448,10 +446,8 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
 
     let owner_addr = owner.address();
     let dest_addr = destination.address();
-    let burned0 = burned_supply_balance(store.as_ref());
     let quad0 = channel_conservation_quad(store.as_ref(), &owner_addr, &dest_addr, &Hash::ZERO);
     let total0: u64 = quad0.0 + quad0.1 + quad0.2 + quad0.3;
-    let mut burned_baseline = burned0;
     let initial_spendable =
         spendable_plus_locked(store.as_ref(), &owner_addr, &dest_addr, &Hash::ZERO);
 
@@ -460,7 +456,6 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
     backend.submit_drc_payment_channel_create(create).unwrap();
     mine_template(&mut backend);
     let quad1 = channel_conservation_quad(store.as_ref(), &owner_addr, &dest_addr, &channel_id);
-    burned_baseline = quad1.3;
     assert_eq!(quad1.0 + quad1.1 + quad1.2 + quad1.3, total0);
     assert_eq!(
         spendable_plus_locked(store.as_ref(), &owner_addr, &dest_addr, &channel_id),
@@ -505,7 +500,6 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
     assert_eq!(dest_after_claim, quad0.1 + 40 - 1);
     assert_eq!(locked_after_claim, 150 + 60 - 40);
     let quad3 = channel_conservation_quad(store.as_ref(), &owner_addr, &dest_addr, &channel_id);
-    burned_baseline = quad3.3;
     assert_eq!(quad3.0 + quad3.1 + quad3.2 + quad3.3, total0);
     assert_eq!(
         spendable_plus_locked(store.as_ref(), &owner_addr, &dest_addr, &channel_id),

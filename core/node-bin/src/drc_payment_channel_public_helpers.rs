@@ -419,10 +419,6 @@ pub fn reorg_away_claim_on_fund_tip(
     branch_tip
 }
 
-pub fn reward_pool_balance(store: &StateStore) -> u64 {
-    agora_state_machine::load_reward_pool(store, NativeAssetId::DRC).unwrap_or(0)
-}
-
 pub fn burned_supply_balance(store: &StateStore) -> u64 {
     agora_state_machine::load_burned_supply(store, NativeAssetId::DRC).unwrap()
 }
