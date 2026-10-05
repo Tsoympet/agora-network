@@ -379,7 +379,11 @@ impl NetworkNode {
             | NetworkMessage::DrcEscrowCancel(_)
             | NetworkMessage::DrcCheckCreate(_)
             | NetworkMessage::DrcCheckCash(_)
-            | NetworkMessage::DrcCheckCancel(_) => {
+            | NetworkMessage::DrcCheckCancel(_)
+            | NetworkMessage::DrcPaymentChannelCreate(_)
+            | NetworkMessage::DrcPaymentChannelFund(_)
+            | NetworkMessage::DrcPaymentChannelClaim(_)
+            | NetworkMessage::DrcPaymentChannelClose(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

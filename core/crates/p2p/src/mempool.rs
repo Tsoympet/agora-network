@@ -4,17 +4,21 @@ use agora_types::{
     resolve_drc_account_sequence, AccountTransfer, Address, Block, DrcAccountPolicyTx,
     DrcAccountSequence, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
     DrcDepositPreauthAction, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
-    DrcEscrowFinishTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
-    NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
-    ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
-    DRC_CHECK_CANCEL_TICKET_VERSION, DRC_CHECK_CASH_TICKET_VERSION,
-    DRC_CHECK_CREATE_TICKET_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
-    DRC_ESCROW_CANCEL_TICKET_VERSION, DRC_ESCROW_CREATE_TICKET_VERSION,
-    DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
+    DrcEscrowFinishTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
+    DrcSignerListTx, DrcTicketCreateTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
+    SignedStakeTx, Transaction, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_CHECK_CANCEL_TICKET_VERSION,
+    DRC_CHECK_CASH_TICKET_VERSION, DRC_CHECK_CREATE_TICKET_VERSION,
+    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_ESCROW_CANCEL_TICKET_VERSION,
+    DRC_ESCROW_CREATE_TICKET_VERSION, DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
     DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 
 use crate::P2pError;
+
+#[path = "payment_channel_lane.rs"]
+mod payment_channel_lane;
 
 /// Default cap on how many transfer txs a mining template pulls from the pool.
 pub const DEFAULT_TEMPLATE_TX_LIMIT: usize = 128;
@@ -51,6 +55,12 @@ pub struct Mempool {
     drc_check_cancel_txs: HashMap<Hash, DrcCheckCancelTx>,
     pending_check_ids: HashSet<Hash>,
     reserved_check_settlements: HashMap<Hash, Hash>,
+    drc_payment_channel_create_txs: HashMap<Hash, DrcPaymentChannelCreateTx>,
+    drc_payment_channel_fund_txs: HashMap<Hash, DrcPaymentChannelFundTx>,
+    drc_payment_channel_claim_txs: HashMap<Hash, DrcPaymentChannelClaimTx>,
+    drc_payment_channel_close_txs: HashMap<Hash, DrcPaymentChannelCloseTx>,
+    pending_payment_channel_ids: HashSet<Hash>,
+    reserved_payment_channel_mutations: HashMap<Hash, Hash>,
     /// One pending consumer per `(owner, ticket_sequence)`.
     reserved_tickets: HashSet<(Address, u64)>,
     /// How each DRC lane operation reserved its sender slot (release on eviction).
@@ -99,6 +109,12 @@ impl Mempool {
             drc_check_cancel_txs: HashMap::new(),
             pending_check_ids: HashSet::new(),
             reserved_check_settlements: HashMap::new(),
+            drc_payment_channel_create_txs: HashMap::new(),
+            drc_payment_channel_fund_txs: HashMap::new(),
+            drc_payment_channel_claim_txs: HashMap::new(),
+            drc_payment_channel_close_txs: HashMap::new(),
+            pending_payment_channel_ids: HashSet::new(),
+            reserved_payment_channel_mutations: HashMap::new(),
             reserved_tickets: HashSet::new(),
             drc_slot_reservations: HashMap::new(),
             deposit_auth_required_payments: HashSet::new(),
@@ -125,6 +141,7 @@ impl Mempool {
             + self.drc_check_create_txs.len()
             + self.drc_check_cash_txs.len()
             + self.drc_check_cancel_txs.len()
+            + self.payment_channel_maps_len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -148,6 +165,7 @@ impl Mempool {
             || self.drc_check_create_txs.contains_key(tx_id)
             || self.drc_check_cash_txs.contains_key(tx_id)
             || self.drc_check_cancel_txs.contains_key(tx_id)
+            || self.payment_channel_maps_contains(tx_id)
     }
 
     pub fn ticket_consumer_reserved(&self, owner: &Address, ticket_sequence: u64) -> bool {
@@ -1324,6 +1342,19 @@ impl Mempool {
             let id = tx.cancel_tx_id();
             let _ = self.remove_drc_check_cancel(&id);
         }
+        for tx in &block.drc_payment_channel_creates {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
+        }
+        for tx in &block.drc_payment_channel_funds {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.submitter));
+        }
+        for tx in &block.drc_payment_channel_claims {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.submitter));
+        }
+        for tx in &block.drc_payment_channel_closes {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.submitter));
+        }
+        self.evict_payment_channel_lanes_from_block(block);
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
             let id = tx.policy_tx_id();
@@ -2619,5 +2650,46 @@ mod tests {
         pool.evict_for_block(&block);
         assert!(!pool.pending_check_create(&id));
         assert!(pool.drc_check_create_txs.is_empty());
+    }
+
+    #[test]
+    fn pending_payment_channel_create_blocks_fund_in_mempool() {
+        let owner = Address([40; 20]);
+        let destination = Address([41; 20]);
+        let create = DrcPaymentChannelCreateTx {
+            version: agora_types::DRC_PAYMENT_CHANNEL_CREATE_TX_VERSION,
+            owner,
+            destination,
+            amount: Amount::from_base_units(10),
+            fee: Amount::from_base_units(1),
+            claim_public_key: vec![1; 33],
+            settle_delay_blue_scores: 5,
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            cancel_after_blue_score: None,
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let channel_id = create.channel_id();
+        let fund = DrcPaymentChannelFundTx {
+            version: agora_types::DRC_PAYMENT_CHANNEL_FUND_TX_VERSION,
+            submitter: owner,
+            channel_id,
+            amount: Amount::from_base_units(2),
+            fee: Amount::from_base_units(1),
+            nonce: 1,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(16);
+        pool.admit_drc_payment_channel_create(create).unwrap();
+        assert!(pool.pending_payment_channel_create(&channel_id));
+        assert!(pool.admit_drc_payment_channel_fund(fund).is_err());
     }
 }
