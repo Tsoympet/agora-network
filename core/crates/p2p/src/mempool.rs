@@ -1309,6 +1309,21 @@ impl Mempool {
             let id = tx.cancel_tx_id();
             let _ = self.remove_drc_escrow_cancel(&id);
         }
+        for tx in &block.drc_check_creates {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
+            let id = tx.check_id();
+            let _ = self.remove_drc_check_create(&id);
+        }
+        for tx in &block.drc_check_cashes {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.submitter));
+            let id = tx.cash_tx_id();
+            let _ = self.remove_drc_check_cash(&id);
+        }
+        for tx in &block.drc_check_cancels {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.submitter));
+            let id = tx.cancel_tx_id();
+            let _ = self.remove_drc_check_cancel(&id);
+        }
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
             let id = tx.policy_tx_id();
@@ -2320,5 +2335,277 @@ mod tests {
         assert!(pool.pending_escrow_create(&id));
         pool.remove_drc_escrow_create(&id).unwrap();
         assert!(!pool.ticket_consumer_reserved(&owner, 7));
+    }
+
+    #[test]
+    fn pending_check_create_blocks_cash_and_cancel_in_mempool() {
+        let owner = Address([20; 20]);
+        let destination = Address([21; 20]);
+        let create = DrcCheckCreateTx {
+            version: agora_types::DRC_CHECK_CREATE_TX_VERSION,
+            owner,
+            destination,
+            amount: Amount::from_base_units(5),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            expires_after_blue_score: Some(100),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let check_id = create.check_id();
+        let cash = DrcCheckCashTx {
+            version: agora_types::DRC_CHECK_CASH_TX_VERSION,
+            submitter: destination,
+            check_id,
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let cancel = DrcCheckCancelTx {
+            version: agora_types::DRC_CHECK_CANCEL_TX_VERSION,
+            submitter: owner,
+            check_id,
+            fee: Amount::from_base_units(1),
+            nonce: 1,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(16);
+        pool.admit_drc_check_create(create).unwrap();
+        assert!(pool.pending_check_create(&check_id));
+        assert!(pool.admit_drc_check_cash(cash).is_err());
+        assert!(pool.admit_drc_check_cancel(cancel).is_err());
+    }
+
+    #[test]
+    fn check_cash_reserves_destination_submitter_not_owner() {
+        let owner = Address([22; 20]);
+        let destination = Address([23; 20]);
+        let create = DrcCheckCreateTx {
+            version: agora_types::DRC_CHECK_CREATE_TX_VERSION,
+            owner,
+            destination,
+            amount: Amount::from_base_units(5),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            expires_after_blue_score: Some(50),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let check_id = create.check_id();
+        let cash = DrcCheckCashTx {
+            version: agora_types::DRC_CHECK_CASH_TX_VERSION,
+            submitter: destination,
+            check_id,
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(8);
+        let create_id = create.check_id();
+        pool.admit_drc_check_create(create).unwrap();
+        pool.remove_drc_check_create(&create_id);
+        let cash_id = pool.admit_drc_check_cash(cash).unwrap();
+        assert!(pool.account_reserved(NativeAssetId::DRC, &destination));
+        assert!(!pool.account_reserved(NativeAssetId::DRC, &owner));
+        assert!(pool.check_settlement_reserved(&check_id));
+        pool.remove_drc_check_cash(&cash_id).unwrap();
+        assert!(!pool.account_reserved(NativeAssetId::DRC, &destination));
+        assert!(!pool.check_settlement_reserved(&check_id));
+    }
+
+    #[test]
+    fn pending_check_cash_blocks_cancel_on_same_check_id() {
+        let destination = Address([24; 20]);
+        let check_id = Hash([25; 32]);
+        let cash = DrcCheckCashTx {
+            version: agora_types::DRC_CHECK_CASH_TX_VERSION,
+            submitter: destination,
+            check_id,
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let cancel = DrcCheckCancelTx {
+            version: agora_types::DRC_CHECK_CANCEL_TX_VERSION,
+            submitter: destination,
+            check_id,
+            fee: Amount::from_base_units(1),
+            nonce: 1,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(8);
+        pool.admit_drc_check_cash(cash).unwrap();
+        assert!(pool.check_settlement_reserved(&check_id));
+        assert!(pool.admit_drc_check_cancel(cancel).is_err());
+    }
+
+    #[test]
+    fn check_create_ticket_sequence_reserved_in_mempool() {
+        let owner = Address([26; 20]);
+        let create = DrcCheckCreateTx {
+            version: agora_types::DRC_CHECK_CREATE_TICKET_VERSION,
+            owner,
+            destination: Address([27; 20]),
+            amount: Amount::from_base_units(3),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            expires_after_blue_score: Some(40),
+            nonce: 0,
+            account_sequence: Some(agora_types::DrcAccountSequenceSelector::ticket(7)),
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(8);
+        let id = create.check_id();
+        pool.admit_drc_check_create(create).unwrap();
+        assert!(pool.ticket_consumer_reserved(&owner, 7));
+        assert!(pool.pending_check_create(&id));
+        pool.remove_drc_check_create(&id).unwrap();
+        assert!(!pool.ticket_consumer_reserved(&owner, 7));
+    }
+
+    #[test]
+    fn deposit_auth_blocks_payment_but_not_check_cash_mempool_admission() {
+        use agora_types::DrcPaymentTx;
+
+        let owner = Address([30; 20]);
+        let destination = Address([31; 20]);
+        let payment = DrcPaymentTx::unsigned_v4(
+            owner,
+            destination,
+            Amount::from_base_units(2),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+            Some(100),
+        );
+        let check_id = Hash([32; 32]);
+        let cash = DrcCheckCashTx {
+            version: agora_types::DRC_CHECK_CASH_TX_VERSION,
+            submitter: destination,
+            check_id,
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(8);
+        assert!(pool
+            .admit_payment_with_deposit_auth_at_blue_score(payment, 50, true, false,)
+            .is_err());
+        assert!(pool.admit_drc_check_cash(cash).is_ok());
+    }
+
+    #[test]
+    fn duplicate_check_cash_tx_id_is_idempotent_in_mempool() {
+        let destination = Address([33; 20]);
+        let check_id = Hash([34; 32]);
+        let cash = DrcCheckCashTx {
+            version: agora_types::DRC_CHECK_CASH_TX_VERSION,
+            submitter: destination,
+            check_id,
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(8);
+        let first = pool.admit_drc_check_cash(cash.clone()).unwrap();
+        let second = pool.admit_drc_check_cash(cash).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(pool.drc_check_cash_txs.len(), 1);
+    }
+
+    #[test]
+    fn check_block_inclusion_releases_mempool_reservations() {
+        use agora_types::Block;
+
+        let owner = Address([28; 20]);
+        let destination = Address([29; 20]);
+        let create = DrcCheckCreateTx {
+            version: agora_types::DRC_CHECK_CREATE_TX_VERSION,
+            owner,
+            destination,
+            amount: Amount::from_base_units(2),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            expires_after_blue_score: None,
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![1; 33],
+            signature: vec![1; 64],
+            multisign: None,
+        };
+        let mut pool = Mempool::new(8);
+        let id = create.check_id();
+        pool.admit_drc_check_create(create.clone()).unwrap();
+        assert!(pool.pending_check_create(&id));
+        let block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
+            data_commitments: vec![],
+            drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
+            drc_check_creates: vec![create],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
+            drc_multisign_attachments: vec![],
+        };
+        pool.evict_for_block(&block);
+        assert!(!pool.pending_check_create(&id));
+        assert!(pool.drc_check_create_txs.is_empty());
     }
 }
