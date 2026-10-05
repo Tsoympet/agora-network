@@ -29,7 +29,10 @@ import type { SignedStakeTx } from "./SignedStakeTx";
 import type { Transaction } from "./Transaction";
 
 /**
- * Full Trident body: TLT UTXO plus native account, stake, execution, payment, and data lanes.
+ * Full Trident body with an OVL-only execution lane.
+ *
+ * Every `drc_*` field is a closed, protocol-native state-machine lane. DRC
+ * has no bytecode, VM, deploy, contract-call, or generic execution lane.
  */
 export type Block = { header: BlockHeader,
 /**

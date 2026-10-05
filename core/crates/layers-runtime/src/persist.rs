@@ -27,6 +27,7 @@ pub struct LayersCheckpoint {
     pub sequencer_bonds: Vec<(Address, u64)>,
     pub revm_snapshots: Vec<(String, Vec<AccountSnapDto>)>,
     pub bridge: BridgeCheckpoint,
+    /// Historical OVL EVM mempool bytes; never DRC transactions.
     pub l2_mempool: Vec<Vec<u8>>,
 }
 

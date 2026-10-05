@@ -225,7 +225,7 @@ pub(crate) fn admit_ovl_execution(
     let mut journal = AccountJournal::default();
     apply_ovl_execution(store, &tx, auth, &mut batch, &mut journal)
         .map_err(|e| RpcError::Rejected(format!("OVL execution: {e}")))?;
-    pool.admit_execution(tx)
+    pool.admit_ovl_execution(tx)
         .map_err(|e| RpcError::Rejected(e.to_string()))
 }
 

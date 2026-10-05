@@ -17,7 +17,11 @@ pub const ACCOUNT_TRANSFER_VERSION: u32 = 2;
 pub const ACCOUNT_TRANSFER_DRC_TICKET_VERSION: u32 = 3;
 
 /// Signed account-to-account transfer for OVL or DRC.
+///
+/// This is a closed value-transfer envelope. It carries no bytecode, call
+/// data, script, or contract selector; unknown JSON fields fail closed.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
 pub struct AccountTransfer {
     pub version: u32,
     pub asset: NativeAssetId,
@@ -216,5 +220,21 @@ mod tests {
         assert_eq!(tx.transfer_id(), tx.transfer_id());
         assert!(!tx.asset.is_mineable());
         assert_eq!(tx.fee.as_base_units(), 0);
+    }
+
+    #[test]
+    fn drc_transfer_json_rejects_execution_payloads() {
+        let tx = AccountTransfer::unsigned(
+            NativeAssetId::DRC,
+            Address([1u8; 20]),
+            Address([2u8; 20]),
+            Amount::from_base_units(9),
+            0,
+        );
+        let mut value = serde_json::to_value(tx).unwrap();
+        value["data"] = serde_json::json!([0x60, 0x00]);
+
+        let error = serde_json::from_value::<AccountTransfer>(value).unwrap_err();
+        assert!(error.to_string().contains("unknown field `data`"));
     }
 }

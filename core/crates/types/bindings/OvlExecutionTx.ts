@@ -4,6 +4,9 @@ import type { Amount } from "./Amount";
 
 /**
  * Signed account-based OVL value transfer or execution request.
+ *
+ * The domain is fixed to OVL by the type and signing domain. There is no
+ * serialized asset selector, and JSON callers may not add one.
  */
 export type OvlExecutionTx = { version: number, from: Address,
 /**

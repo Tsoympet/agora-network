@@ -186,6 +186,9 @@ async fn dispatch(
     params: Value,
     state: &Arc<Mutex<LayersRuntime>>,
 ) -> Result<Value, String> {
+    if method.starts_with("eth_") {
+        reject_eth_asset_selectors(&params)?;
+    }
     let mut rt = state.lock().await;
     match method {
         "agora_layers_getInfo" => Ok(serde_json::to_value(rt.info()).map_err(|e| e.to_string())?),
@@ -523,16 +526,16 @@ async fn dispatch(
                 .map_err(|e| e.to_string())?;
             Ok(json!({"message_id": id.to_hex()}))
         }
-        // Historical EVM-compatibility lab surface; not canonical Trident OVL state.
-        "eth_chainId" => Ok(json!(format!("0x{:x}", rt.eth_chain_id()))),
-        "eth_blockNumber" => Ok(json!(format!("0x{:x}", rt.eth_block_number()))),
+        // Historical OVL-only EVM lab surface; DRC is never routed here.
+        "eth_chainId" => Ok(json!(format!("0x{:x}", rt.ovl_eth_chain_id()))),
+        "eth_blockNumber" => Ok(json!(format!("0x{:x}", rt.ovl_eth_block_number()))),
         "eth_getBalance" => {
             let addr = params
                 .as_array()
                 .and_then(|a| a.first())
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "eth_getBalance(address, block) required".to_string())?;
-            let bal = rt.eth_get_balance(parse_addr(addr)?);
+            let bal = rt.ovl_eth_get_balance(parse_addr(addr)?);
             Ok(json!(format!("0x{:x}", bal)))
         }
         "eth_getTransactionCount" => {
@@ -541,7 +544,7 @@ async fn dispatch(
                 .and_then(|a| a.first())
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "eth_getTransactionCount(address, block) required".to_string())?;
-            let n = rt.eth_get_transaction_count(parse_addr(addr)?);
+            let n = rt.ovl_eth_get_transaction_count(parse_addr(addr)?);
             Ok(json!(format!("0x{:x}", n)))
         }
         "eth_getCode" => {
@@ -550,7 +553,7 @@ async fn dispatch(
                 .and_then(|a| a.first())
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "eth_getCode(address, block) required".to_string())?;
-            let code = rt.eth_get_code(parse_addr(addr)?);
+            let code = rt.ovl_eth_get_code(parse_addr(addr)?);
             Ok(json!(format!("0x{}", hex::encode(code))))
         }
         "eth_getStorageAt" => {
@@ -572,7 +575,7 @@ async fn dispatch(
             }
             let mut slot = [0u8; 32];
             slot[32 - slot_bytes.len()..].copy_from_slice(&slot_bytes);
-            let value = rt.eth_get_storage_at(parse_addr(addr)?, slot);
+            let value = rt.ovl_eth_get_storage_at(parse_addr(addr)?, slot);
             Ok(json!(format!("0x{}", hex::encode(value))))
         }
         "eth_call" => {
@@ -595,7 +598,7 @@ async fn dispatch(
             let data_bytes =
                 hex::decode(data.trim_start_matches("0x")).map_err(|e| e.to_string())?;
             let out = rt
-                .eth_call(parse_addr(to)?, &data_bytes, value)
+                .ovl_eth_call(parse_addr(to)?, &data_bytes, value)
                 .map_err(|e| e.to_string())?;
             Ok(json!(format!("0x{}", hex::encode(out))))
         }
@@ -607,12 +610,12 @@ async fn dispatch(
                 .ok_or_else(|| "eth_sendRawTransaction(raw) required".to_string())?;
             let raw = hex::decode(raw_hex.trim_start_matches("0x")).map_err(|e| e.to_string())?;
             let id = rt
-                .eth_send_raw_transaction(EvmTx(raw))
+                .ovl_eth_send_raw_transaction(EvmTx(raw))
                 .map_err(|e| e.to_string())?;
             Ok(json!(format!("0x{}", id.to_hex())))
         }
         "agora_layers_drainL2Mempool" => {
-            let txs = rt.drain_l2_mempool();
+            let txs = rt.drain_ovl_evm_mempool();
             Ok(json!({
                 "transactions": txs.iter().map(|t| format!("0x{}", hex::encode(&t.0))).collect::<Vec<_>>(),
                 "count": txs.len(),
@@ -630,6 +633,29 @@ fn parse_hex_u128(s: &str) -> Result<u128, String> {
     u128::from_str_radix(s, 16).map_err(|e| e.to_string())
 }
 
+fn reject_eth_asset_selectors(value: &Value) -> Result<(), String> {
+    match value {
+        Value::Object(fields) => {
+            if fields.contains_key("asset") {
+                return Err(
+                    "historical eth_* execution is fixed to OVL; asset selectors are forbidden"
+                        .into(),
+                );
+            }
+            for nested in fields.values() {
+                reject_eth_asset_selectors(nested)?;
+            }
+        }
+        Value::Array(values) => {
+            for nested in values {
+                reject_eth_asset_selectors(nested)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn is_loopback_bind(bind: &str) -> bool {
     let host = bind.rsplit_once(':').map(|(host, _)| host).unwrap_or(bind);
     let host = host.trim_start_matches('[').trim_end_matches(']');
@@ -641,7 +667,9 @@ fn health_payload() -> Value {
         "ok": true,
         "service": "agora-layers",
         "canonical_l1": false,
-        "maturity": "Experimental"
+        "maturity": "Experimental",
+        "programmable_execution_asset": "OVL",
+        "drc_programmable_execution": false
     })
 }
 
@@ -845,6 +873,8 @@ mod tests {
         let health = health_payload();
         assert_eq!(health["canonical_l1"], false);
         assert_eq!(health["maturity"], "Experimental");
+        assert_eq!(health["programmable_execution_asset"], "OVL");
+        assert_eq!(health["drc_programmable_execution"], false);
         assert!(is_mutating_method("agora_layers_mintOvl"));
         assert!(is_mutating_method("agora_layers_creditDrc"));
         assert!(!is_mutating_method("agora_layers_getInfo"));
@@ -854,5 +884,20 @@ mod tests {
     #[should_panic(expected = "must not be publicly bound")]
     fn public_layers_rpc_bind_is_rejected() {
         enforce_layers_bind_policy("0.0.0.0:8555");
+    }
+
+    #[test]
+    fn historical_eth_methods_reject_every_asset_selector() {
+        let error = reject_eth_asset_selectors(&json!([{
+            "to": Address::ZERO.to_hex(),
+            "nested": { "asset": "DRC" }
+        }]))
+        .unwrap_err();
+        assert!(error.contains("fixed to OVL"));
+
+        assert!(reject_eth_asset_selectors(&json!([{
+            "to": Address::ZERO.to_hex()
+        }, "latest"]))
+        .is_ok());
     }
 }

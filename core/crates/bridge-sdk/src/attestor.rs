@@ -1,6 +1,9 @@
-//! Hybrid L3 consensus: bonded attestors (PoS-style) + PoW coinbase for miners.
+//! Historical L3 lab consensus: bonded attestors plus PoW coinbase.
 //!
-//! - **PoW** still mints DRC via `admit_mined_block` (unchanged).
+//! Non-canonical migration evidence only; Trident DRC uses its independent L1
+//! PoS finality set and has no programmable execution capability.
+//!
+//! - Inside this lab, **PoW** mints historical DRC via `admit_mined_block`.
 //! - **Bonded attestors** finalize payments / bridge messages by quorum once the
 //!   active set is non-empty. Empty set ⇒ messages finalize immediately.
 

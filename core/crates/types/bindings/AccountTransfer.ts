@@ -7,6 +7,9 @@ import type { NativeAssetId } from "./NativeAssetId";
 
 /**
  * Signed account-to-account transfer for OVL or DRC.
+ *
+ * This is a closed value-transfer envelope. It carries no bytecode, call
+ * data, script, or contract selector; unknown JSON fields fail closed.
  */
 export type AccountTransfer = { version: number, asset: NativeAssetId, from: Address, to: Address, amount: Amount,
 /**

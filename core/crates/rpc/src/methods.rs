@@ -329,3 +329,26 @@ impl RpcResponse {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::RpcMethod;
+
+    #[test]
+    fn programmable_execution_rpc_is_ovl_only() {
+        assert_eq!(
+            RpcMethod::parse("agora_submitOvlExecution"),
+            Some(RpcMethod::SubmitOvlExecution)
+        );
+
+        for forbidden in [
+            "agora_submitExecution",
+            "agora_submitDrcExecution",
+            "agora_deployDrcContract",
+            "agora_callDrcContract",
+            "agora_submitDrcVmTransaction",
+        ] {
+            assert_eq!(RpcMethod::parse(forbidden), None, "{forbidden}");
+        }
+    }
+}

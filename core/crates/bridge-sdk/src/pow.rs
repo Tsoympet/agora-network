@@ -1,4 +1,7 @@
-//! Native DRC proof-of-work for L3 hub / district blocks.
+//! Historical DRC lab proof-of-work for pre-Trident hub / district blocks.
+//!
+//! This module is migration evidence only. Trident DRC is never mined and
+//! remains a contract-free native L1 payment asset.
 //!
 //! DRC is the native money of the Drachma bridge layer. Blocks are sealed with
 //! SHA-256 leading-zero PoW (portable; L1 remains RandomX for TLT).

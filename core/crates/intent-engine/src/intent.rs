@@ -10,14 +10,14 @@ pub struct Intent {
     pub give_asset_district: String,
     pub give_amount: Amount,
     pub want_asset_district: String,
-    /// XRPL-class deliverMin: minimum amount that must arrive on the want side.
+    /// Typed `deliverMin`: minimum amount that must arrive on the want side.
     pub min_receive: Amount,
     pub deadline_ms: u64,
     /// Optional solver hint (model / strategy id) — non-consensus metadata.
     pub solver_hint: String,
     /// Credit recipient on the want district (defaults to `user` when zero).
     pub recipient: Address,
-    /// XRPL-class destination tag for deposit routing on the want district.
+    /// Typed destination tag for deposit routing on the want district.
     pub destination_tag: u32,
 }
 

@@ -73,6 +73,15 @@ impl NativeAssetId {
     pub const fn is_mineable(self) -> bool {
         matches!(self, Self::TLT)
     }
+
+    /// Whether this asset owns Trident's programmable execution domain.
+    ///
+    /// This is an architecture capability boundary, not an activation signal:
+    /// OVL contract execution may still be version-gated, while DRC must remain
+    /// limited to closed, protocol-native state-machine operations.
+    pub const fn is_programmable_execution_asset(self) -> bool {
+        matches!(self, Self::OVL)
+    }
 }
 
 impl std::fmt::Display for NativeAssetId {
@@ -168,6 +177,9 @@ mod tests {
         assert!(NativeAssetId::TLT.is_mineable());
         assert!(!NativeAssetId::OVL.is_mineable());
         assert!(!NativeAssetId::DRC.is_mineable());
+        assert!(!NativeAssetId::TLT.is_programmable_execution_asset());
+        assert!(NativeAssetId::OVL.is_programmable_execution_asset());
+        assert!(!NativeAssetId::DRC.is_programmable_execution_asset());
         // Borsh discriminant must match the stable wire byte.
         assert_eq!(borsh::to_vec(&NativeAssetId::TLT).unwrap(), vec![0x00]);
         assert_eq!(borsh::to_vec(&NativeAssetId::OVL).unwrap(), vec![0x01]);

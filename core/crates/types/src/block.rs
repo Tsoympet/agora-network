@@ -66,8 +66,12 @@ impl BlockHeader {
     }
 }
 
-/// Full Trident body: TLT UTXO plus native account, stake, execution, payment, and data lanes.
+/// Full Trident body with an OVL-only execution lane.
+///
+/// Every `drc_*` field is a closed, protocol-native state-machine lane. DRC
+/// has no bytecode, VM, deploy, contract-call, or generic execution lane.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
 pub struct Block {
     pub header: BlockHeader,
     /// TLT UTXO lane (coinbase + transfers).
@@ -1315,5 +1319,27 @@ mod tests {
         let mut bytes = borsh::to_vec(&legacy).unwrap();
         bytes.push(1);
         assert!(Block::try_from_slice(&bytes).is_err());
+    }
+
+    #[test]
+    fn json_rejects_unknown_drc_execution_lanes() {
+        let block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        let mut value = serde_json::to_value(block).unwrap();
+        value["drc_contract_calls"] = serde_json::json!([]);
+
+        let error = serde_json::from_value::<Block>(value).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("unknown field `drc_contract_calls`"));
     }
 }
