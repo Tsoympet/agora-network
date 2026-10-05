@@ -191,12 +191,8 @@ impl Block {
         self.header.hash()
     }
 
-    fn has_appended_body_lanes(&self) -> bool {
-        !self.account_transfers.is_empty()
-            || !self.stake_ops.is_empty()
-            || !self.ovl_executions.is_empty()
-            || !self.drc_payments.is_empty()
-            || !self.data_commitments.is_empty()
+    fn has_post_v4_body_lanes(&self) -> bool {
+        !self.data_commitments.is_empty()
             || !self.drc_account_policies.is_empty()
             || !self.drc_deposit_preauths.is_empty()
             || !self.drc_regular_keys.is_empty()
@@ -594,16 +590,17 @@ impl BorshSerialize for Block {
     fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
         BorshSerialize::serialize(&self.header, writer)?;
         BorshSerialize::serialize(&self.transactions, writer)?;
-
-        // Empty appended lanes must not change frozen v2 UTXO-only bytes.
-        if !self.has_appended_body_lanes() {
-            return Ok(());
-        }
-
         BorshSerialize::serialize(&self.account_transfers, writer)?;
         BorshSerialize::serialize(&self.stake_ops, writer)?;
         BorshSerialize::serialize(&self.ovl_executions, writer)?;
         BorshSerialize::serialize(&self.drc_payments, writer)?;
+
+        // Frozen v2 bytes include the original account, stake, OVL, and DRC
+        // lanes; later empty lanes must not extend that canonical encoding.
+        if !self.has_post_v4_body_lanes() {
+            return Ok(());
+        }
+
         BorshSerialize::serialize(&self.data_commitments, writer)?;
         BorshSerialize::serialize(&self.drc_account_policies, writer)?;
         BorshSerialize::serialize(&self.drc_deposit_preauths, writer)?;
