@@ -22,6 +22,19 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_getDrcAccountPolicy` | Read canonical recipient policy and shared DRC nonce (`known` / `unknown`) |
 | `agora_submitDrcDepositPreauth` | Validate, reserve, and gossip an owner-signed address grant/revoke |
 | `agora_getDrcDepositPreauth` | Read one canonical recipient/source DepositAuth status without enumeration |
+| `agora_submitDrcCheckCancel` | Validate and gossip a signed DRC check cancel |
+| `agora_getDrcCheck` | Point lookup: `{ check_id, status }` where `status` is `live`, `receipt`, or `unknown` |
+| `agora_getDrcCheckReceipt` | Closed check receipt by `check_id` (`known` / `unknown`) |
+| `agora_submitDrcPaymentChannelCreate` | Validate, virtual-apply, mempool-admit, and gossip a signed DRC payment channel create (**Experimental**; accepted ≠ finality) |
+| `agora_submitDrcPaymentChannelFund` | Owner-only fund of a live channel |
+| `agora_submitDrcPaymentChannelClaim` | Destination-submitted on-chain claim with off-ledger cumulative signature |
+| `agora_submitDrcPaymentChannelClose` | Owner schedule/finalize or destination immediate close |
+| `agora_getDrcPaymentChannel` | Point lookup: `{ channel_id, status }` — `live`, `receipt`, or `unknown` (zero id → `-32602`) |
+| `agora_getDrcPaymentChannelReceipt` | Closed channel receipt (`known` / `unknown`) |
+| `agora_getDrcPaymentChannelFundEvent` | Immutable fund event by `fund_tx_id` (`known` / `unknown`; no scan) |
+| `agora_getDrcPaymentChannelClaimEvent` | Immutable claim event by `claim_tx_id` |
+| `agora_getDrcPaymentChannelScheduleEvent` | Schedule event by close `close_tx_id` |
+| `agora_verifyDrcPaymentChannelClaim` | Pure verification of supplied cumulative claim signature against a **live** channel (no private keys; no mutation) |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
@@ -217,6 +230,16 @@ optionally wrapped as `{ "preauth": ... }`, and returns
 Pending grants/revokes do not alter the canonical read query. `"known"` and
 accepted/settled results describe the canonical virtual view, not checkpoint
 finality.
+
+### DRC payment channels (Experimental)
+
+Submit methods accept optional lane wrappers (`payment_channel_create`, `payment_channel_fund`, `payment_channel_claim`, `payment_channel_close`) or bare transaction objects. Successful submit returns mempool acceptance (`channel_id`, `fund_tx_id`, `claim_tx_id`, or `close_tx_id` hex). **Accepted** means admitted to the local mempool and gossip — not PoW + dual-PoS finality.
+
+`agora_getDrcPaymentChannel` returns `{ channel_id, status }` with `live` (open channel), `receipt` (closed receipt present), or `unknown`. Malformed `channel_id` → `-32602`.
+
+`agora_verifyDrcPaymentChannelClaim` requires `channel_id`, `cumulative_authorized` (amount string/base units), and `channel_claim_signature` (hex). Verifies the off-ledger secp256k1 claim against the live channel `claim_public_key` and Agora domains. Unknown channel, bad signature, or bounds → `-32602`. Never accepts private keys.
+
+Event getters (`agora_getDrcPaymentChannelFundEvent`, `ClaimEvent`, `ScheduleEvent`) are exact tx-id point lookups returning `known` or `unknown` without enumeration.
 
 `agora_getBlockTemplate` returns `{ "block": Block, "randomx_epoch": u64 }` (native serde hashes as byte arrays). The block has a coinbase paying `AGORA_MINER_ADDRESS` for **emission + Σ transfer fees** at the estimated next blue score, followed by up to 128 mempool transfers (fee-desc, then `tx_id`); `header.tx_root` commits to that body. `randomx_epoch` is the blue-score–anchored RandomX key epoch miners must use. `agora_submitBlock` rejects `tx_root` mismatches and evicts included/conflicting mempool txs. Mempool admission requires `fee ≥ AGORA_MIN_RELAY_FEE`; fees are paid to the miner via the coinbase (not burned).
 
