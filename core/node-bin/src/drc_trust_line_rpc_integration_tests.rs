@@ -136,3 +136,84 @@ fn rpc_trust_line_create_issue_restart_query() {
     });
     assert_eq!(line2.result.as_ref().unwrap()["balance"], json!("100"));
 }
+
+#[test]
+fn rpc_malformed_currency_returns_32602() {
+    use agora_types::Address;
+
+    let store = Arc::new(agora_state_machine::StateStore::open_in_memory());
+    let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+    let miner = KeyPair::from_secret_bytes(&[0x99; 32]).unwrap();
+    let backend = crate::backend::NodeBackend::new(
+        Arc::new(Mutex::new(boot_chain(store.clone(), genesis))),
+        store,
+        Arc::new(Mutex::new(agora_p2p::Mempool::new(8))),
+        backend_config(genesis, miner.address()),
+    );
+    let mut dispatcher = RpcDispatcher::new(backend);
+    let bad = dispatcher.handle(RpcRequest {
+        id: Some(json!(1)),
+        method: "agora_getDrcTrustLine".into(),
+        params: json!({
+            "holder": Address::ZERO.to_hex(),
+            "issuer": Address::ZERO.to_hex(),
+            "currency": "usd",
+        }),
+    });
+    assert!(bad.error.is_some());
+    assert_eq!(bad.error.as_ref().unwrap().code, -32602);
+}
+
+#[test]
+fn rpc_positional_currency_array_submit_and_query() {
+    let store = Arc::new(agora_state_machine::StateStore::open_in_memory());
+    let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+    let holder = KeyPair::from_secret_bytes(&[0x40; 32]).unwrap();
+    let issuer = KeyPair::from_secret_bytes(&[0x41; 32]).unwrap();
+    let miner = KeyPair::from_secret_bytes(&[0x99; 32]).unwrap();
+    let mut funding = WriteBatch::new();
+    for kp in [&holder, &issuer] {
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &kp.address(),
+            Amount::from_base_units(100_000),
+        )
+        .unwrap();
+    }
+    store.write_batch(funding).unwrap();
+    let mut backend = crate::backend::NodeBackend::new(
+        Arc::new(Mutex::new(boot_chain(store.clone(), genesis))),
+        store,
+        Arc::new(Mutex::new(agora_p2p::Mempool::new(32))),
+        backend_config(genesis, miner.address()),
+    );
+    let mut set = agora_types::DrcTrustLineSetTx {
+        version: DRC_TRUST_LINE_SET_TX_VERSION,
+        holder: holder.address(),
+        issuer: issuer.address(),
+        currency: IssuedCurrencyCode(*b"ABC\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"),
+        limit: IssuedAmount::from_units(500),
+        fee: Amount::from_base_units(1),
+        nonce: 0,
+        account_sequence: None,
+        public_key: Vec::new(),
+        signature: Vec::new(),
+        multisign: None,
+    };
+    sign_drc_trust_line_set_bound(&mut set, &holder, CHAIN, &genesis).unwrap();
+    backend.submit_drc_trust_line_set(set).unwrap();
+    mine_template(&mut backend);
+    let mut dispatcher = RpcDispatcher::new(backend);
+    let line = dispatcher.handle(RpcRequest {
+        id: Some(json!(1)),
+        method: "agora_getDrcTrustLine".into(),
+        params: json!([
+            holder.address().to_hex(),
+            issuer.address().to_hex(),
+            "ABC",
+        ]),
+    });
+    assert_eq!(line.result.as_ref().unwrap()["status"], json!("live"));
+}

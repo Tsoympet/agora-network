@@ -50,7 +50,18 @@ Contract-free issuer liabilities in the DRC payment domain. Not native DRC, not 
 
 **Currency input:** exactly 40 hex digits (20 bytes) or uppercase 3-character standard code only. No lowercase standard codes, locale aliases, or string normalization.
 
-**Mempool reservations (public):** one pending `TrustLineSet` per `(holder, asset)`; pending create/delete blocks dependent transfers; pending issue/redeem serializes issuer liability mutation; pending balance deltas enforce recipient limits and sender balances; release on block inclusion, eviction, and reorg.
+**Mempool reservations (public):** one pending `TrustLineSet` per `(holder, asset)`; pending create/delete blocks dependent transfers; pending issue/redeem serializes issuer liability mutation; pending balance deltas enforce recipient limits and sender balances; canonical meta-key reservations (`trust/drc/line/…`, `trust/drc/liability/…`) are inspectable in tests; release on block inclusion, eviction, and reorg. After canonical state changes, pending issued transfers are revalidated and dropped when overlay fails.
+
+**Reorg:** explicit resubmit of evicted mempool txs; duplicate resubmit rejected; chain tip reorg restores line, liability, receipt, and native fee state.
+
+**`agora_getDrcTrustLine` schema:** `status` (`live`|`unknown`), `limit`, `balance` (issued units as decimal strings), `holder`, `issuer`, `currency` — balance is not a separate RPC method.
+
+## Versions (v20 mesh)
+
+- P2P fingerprint `TRIDENT_PROTOCOL_VERSION` **20**; fail-closed when peer fingerprint mismatches.
+- Block body **v16** when trust-line lanes are non-empty.
+- State transition documents: `agora-trident-state-v18` includes issued-liability root.
+- TS bindings: regenerate via `cargo test -p agora-types export_shared_types -- --nocapture`; expect zero diff under `core/crates/types/bindings`.
 
 ## Deferred
 

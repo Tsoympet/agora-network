@@ -292,6 +292,42 @@ mod tests {
     }
 
     #[test]
+    fn trust_line_lane_block_uses_full_body_gossip() {
+        use agora_types::{
+            Address, Amount, DrcTrustLineSetTx, Hash, IssuedAmount, IssuedCurrencyCode,
+            DRC_TRUST_LINE_SET_TX_VERSION,
+        };
+
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.drc_trust_line_sets.push(DrcTrustLineSetTx {
+            version: DRC_TRUST_LINE_SET_TX_VERSION,
+            holder: Address([1; 20]),
+            issuer: Address([2; 20]),
+            currency: IssuedCurrencyCode([0u8; 20]),
+            limit: IssuedAmount::from_units(1),
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![],
+            signature: vec![],
+            multisign: None,
+        });
+        block.header.tx_root = block.compute_body_root();
+        let message = NetworkMessage::compact_from_block(&block);
+        assert_eq!(message, NetworkMessage::Block(block));
+    }
+
+    #[test]
     fn drc_ticket_create_gossip_roundtrip_and_full_block_lane() {
         let owner = Address([0x33; 20]);
         let create = DrcTicketCreateTx::unsigned(owner, Amount::from_base_units(2), 3);

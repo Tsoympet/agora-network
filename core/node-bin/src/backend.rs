@@ -721,7 +721,9 @@ pub(crate) use payment_channel_admit::{
 };
 #[path = "trust_line_admit.rs"]
 mod trust_line_admit;
-pub(crate) use trust_line_admit::{admit_drc_issued_transfer, admit_drc_trust_line_set};
+pub(crate) use trust_line_admit::{
+    admit_drc_issued_transfer, admit_drc_trust_line_set, revalidate_trust_line_mempool,
+};
 
 /// Node RPC surface: tips/blocks from store, signed tx → mempool + gossip.
 pub struct NodeBackend {
@@ -1837,6 +1839,7 @@ impl RpcBackend for NodeBackend {
         };
         if let Ok(mut pool) = self.mempool.lock() {
             pool.evict_for_block_at_blue_score(&block, virtual_blue_score);
+            revalidate_trust_line_mempool(self.store.as_ref(), &mut pool);
         }
         if let Some(net) = &self.net {
             // Prefer compact + announce; peers inflate from mempool or issue GetBlock.
@@ -3218,8 +3221,24 @@ mod drc_payment_channel_reorg_reservation_tests;
 #[path = "drc_payment_channel_rpc_integration_tests.rs"]
 mod drc_payment_channel_rpc_integration_tests;
 
+#[cfg(test)]
 #[path = "drc_trust_line_rpc_integration_tests.rs"]
 mod drc_trust_line_rpc_integration_tests;
+#[cfg(test)]
+#[path = "drc_trust_line_public_helpers.rs"]
+mod drc_trust_line_public_helpers;
+#[cfg(test)]
+#[path = "drc_trust_line_public_security_tests.rs"]
+mod drc_trust_line_public_security_tests;
+#[cfg(test)]
+#[path = "drc_trust_line_reorg_reservation_tests.rs"]
+mod drc_trust_line_reorg_reservation_tests;
+#[cfg(test)]
+#[path = "drc_trust_line_template_tests.rs"]
+mod drc_trust_line_template_tests;
+#[cfg(test)]
+#[path = "drc_trust_line_public_invariant_tests.rs"]
+mod drc_trust_line_public_invariant_tests;
 #[cfg(test)]
 #[path = "drc_payment_channel_template_tests.rs"]
 mod drc_payment_channel_template_tests;
