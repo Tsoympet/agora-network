@@ -29,7 +29,7 @@ Contract-free issuer liabilities in the DRC payment domain. Not native DRC, not 
 
 - Live line: `DrcTrustLineLive` in Meta (`trust/drc/line/…`).
 - Issuer outstanding: `DrcIssuerLiability` (`trust/drc/liability/…`).
-- Transfer receipt: `DrcIssuedTransferReceipt` (`trust/drc/xfer/…`).
+- Transfer receipt: `DrcIssuedTransferReceipt` v2 (`trust/drc/xfer/…`; includes source/destination tags).
 - State root: `drc-check-paychan-v2` commits check, payment-channel, and `drc-issued-liability-v1` trust-line root.
 
 ## Block / mesh versions

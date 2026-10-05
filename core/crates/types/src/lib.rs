@@ -416,6 +416,15 @@ mod ts_export {
         SignedStakeTx::export_all().expect("export SignedStakeTx");
         PassportCategory::export_all().expect("export PassportCategory");
         PassportAttestation::export_all().expect("export PassportAttestation");
+        IssuedCurrencyCode::export_all().expect("export IssuedCurrencyCode");
+        IssuedAmount::export_all().expect("export IssuedAmount");
+        IssuedAssetId::export_all().expect("export IssuedAssetId");
+        DrcTrustLineSetTx::export_all().expect("export DrcTrustLineSetTx");
+        DrcTrustLineLive::export_all().expect("export DrcTrustLineLive");
+        DrcIssuedTransferTx::export_all().expect("export DrcIssuedTransferTx");
+        DrcIssuedTransferReceipt::export_all().expect("export DrcIssuedTransferReceipt");
+        DrcIssuerLiability::export_all().expect("export DrcIssuerLiability");
+        DrcMultisignOperationKind::export_all().expect("export DrcMultisignOperationKind");
         normalize_generated_bindings();
 
         let payment_binding = fs::read_to_string(

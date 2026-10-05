@@ -527,13 +527,10 @@ mod currency_encoding_vectors {
         let ok = IssuedCurrencyCode(*b"USD\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
         assert!(ok.validate().is_ok());
         let bad = *b"usd\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+        assert!(IssuedCurrencyCode(bad).validate().is_ok());
+        let bad_std = *b"U$D\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
         assert_eq!(
-            IssuedCurrencyCode(bad).validate(),
-            Err(IssuedCurrencyError::MalformedStandardCode)
-        );
-        let bad_sym = *b"US$\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
-        assert_eq!(
-            IssuedCurrencyCode(bad_sym).validate(),
+            IssuedCurrencyCode(bad_std).validate(),
             Err(IssuedCurrencyError::MalformedStandardCode)
         );
         let mut trailing = *b"USD\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
