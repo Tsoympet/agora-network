@@ -123,9 +123,7 @@ pub fn compose_trident_state_root(
     let community = canonical_community_root(store)?;
     let data_availability = data_availability_root(store)?;
 
-    Ok(Hash::hash_borsh(&(
-        STATE_ROOT_DOMAIN,
-        TRIDENT_STATE_TRANSITION_VERSION,
+    let components = [
         utxo,
         ovl_accounts,
         drc_accounts,
@@ -145,6 +143,11 @@ pub fn compose_trident_state_root(
         gov_treasury,
         community,
         data_availability,
+    ];
+    Ok(Hash::hash_borsh(&(
+        STATE_ROOT_DOMAIN,
+        TRIDENT_STATE_TRANSITION_VERSION,
+        components,
     )))
 }
 

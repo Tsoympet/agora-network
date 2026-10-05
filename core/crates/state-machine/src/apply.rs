@@ -1122,7 +1122,7 @@ fn apply_accepted_account_fee(
     match asset {
         NativeAssetId::DRC => burn_drc_fee_into(store, batch, fee),
         NativeAssetId::OVL => {
-            credit_fee_share_to_reward_pool(store, batch, NativeAssetId::OVL, fee)
+            credit_fee_share_to_reward_pool(store, batch, NativeAssetId::OVL, fee).map(|_| ())
         }
         NativeAssetId::TLT => unreachable!("TLT returned before mutation"),
     }
@@ -1165,7 +1165,7 @@ fn apply_trident_lanes(
     application_blue_score: Option<u64>,
     mode: ApplyMode,
     batch: &mut WriteBatch,
-    journal: &mut UtxoJournal,
+    mut journal: &mut UtxoJournal,
 ) -> Result<TridentLaneAcceptances, StateError> {
     if block.drc_ticket_creates.is_empty()
         && block.drc_escrow_creates.is_empty()
