@@ -565,55 +565,55 @@ mod tests {
         let vectors = [
             (
                 DrcLedgerObjectKey::AccountPolicy { account: owner },
-                "32d1de7e77054089230f3b9f94e92f0a87dc4fd1f448c6b4c929d82ffd2d2550",
+                "81e441ff64f5eea9e394a54404555375a774501f198001e6c1ca58bf23f09fc5",
             ),
             (
                 DrcLedgerObjectKey::DepositPreauthorization {
                     owner,
                     authorized_source: Address([2; 20]),
                 },
-                "f67dc24ad877e92ad8e083f3d3a8af3b694b85bf79c69d663a9770d765979b10",
+                "164721a8924b15e03c6eb2a28e7468da34277832e6d9151fb803c2a4c7014526",
             ),
             (
                 DrcLedgerObjectKey::RegularKey { owner },
-                "4818e092e2155dea65e91a43fc0e4ac603922be1ea007ed3129208cb1c989ef6",
+                "238a6035e453e36d3d778b327221835960ef677348be3ab0f626c763938e7f15",
             ),
             (
                 DrcLedgerObjectKey::SignerList { owner },
-                "de1ad993508e15c88cf9561f5bd047790438305742ccc0910490fde736ed9b8f",
+                "4818e092e2155dea65e91a43fc0e4ac603922be1ea007ed3129208cb1c989ef6",
             ),
             (
                 DrcLedgerObjectKey::TicketSet { owner },
-                "d9d4ff60e24e3ca15430a8f31430ca7daa4aa045610c53aca7a12871d060fb8e",
+                "de1ad993508e15c88cf9561f5bd047790438305742ccc0910490fde736ed9b8f",
             ),
             (
                 DrcLedgerObjectKey::Escrow {
                     escrow_id: Hash([6; 32]),
                 },
-                "b9cd844658d7837f341f105d7b7e83a1d3640654f0c38bc5f000b6b59bf2e1ef",
+                "347aa99270e32792771df4d8f335d5243abf6a1a601166816986c1ea35f1a5f8",
             ),
             (
                 DrcLedgerObjectKey::Check {
                     check_id: Hash([7; 32]),
                 },
-                "6f96bdd108e2a70c66ae6a87cf27f30310fcf043b9ab7c5af5b681094f1523cf",
+                "90160e190543e32e2f431130c3e0705dbdd693e97c26344f1242466e0b3cc8d7",
             ),
             (
                 DrcLedgerObjectKey::PaymentChannel {
                     channel_id: Hash([8; 32]),
                 },
-                "5822f988fd0928063c7d7b502b5b16bb5c122ee4324e933d472344d8076ca135",
+                "90648b8aa3c79f6a329970d27b62ff02094518acb4d34d10b9b3176eb58a81a6",
             ),
             (
                 DrcLedgerObjectKey::TrustLine {
                     holder: owner,
                     asset,
                 },
-                "e9e9cbad113589a7c8f094e8f2cb54bbcfc7c05bfa1d50796eeb99bb5adf5a63",
+                "5e3402a428b2014b15787589947f45190dce1442051fbb7d95e1f66c9ed41abf",
             ),
             (
                 DrcLedgerObjectKey::IssuedAssetPolicy { asset },
-                "e1baf11ab8ac7bbc55d0e6ae438315a34472cbe250b09bc29f01f33d2af87b58",
+                "ce53f130a7d9249100e900fd42a36aae388e43a23c3cbf43e2d8cae29a5e3e87",
             ),
         ];
 
