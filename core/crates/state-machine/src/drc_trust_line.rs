@@ -5,8 +5,7 @@ use agora_types::{
     DrcIssuerLiability, DrcTrustLineLive, DrcTrustLineSetTx, Hash, IssuedAmount, IssuedAssetId,
     NativeAssetId, DRC_ISSUED_TRANSFER_RECEIPT_VERSION, DRC_ISSUER_LIABILITY_STATE_VERSION,
     DRC_MAX_LIVE_TRUST_LINES_PER_HOLDER, DRC_MAX_TRUST_LINE_HOLDERS_PER_ISSUER,
-    DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION, DRC_TRUST_LINE_LIVE_STATE_VERSION,
-    DRC_TRUST_LINE_SET_TICKET_VERSION,
+    DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION, DRC_TRUST_LINE_SET_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 
@@ -269,7 +268,59 @@ pub fn sum_holder_balances_for_asset(
     Ok(total)
 }
 
-fn put_live(batch: &mut WriteBatch, live: &DrcTrustLineLive) -> Result<(), StateError> {
+/// Whether any indexed holder line for `asset` has line-level freeze flags set (on-disk or v1 defaults).
+pub fn asset_has_active_line_freeze(
+    store: &StateStore,
+    asset: &IssuedAssetId,
+    policy: &agora_types::DrcIssuedAssetPolicyLive,
+) -> Result<bool, StateError> {
+    for holder in load_issuer_holders_index(store, &asset.issuer, &asset.currency)? {
+        let Some(line) = load_drc_trust_line_live(store, &holder, asset)? else {
+            continue;
+        };
+        let line = crate::drc_issued_controls::normalize_trust_line_live(line, policy);
+        if line.line_frozen || line.line_deep_frozen {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// On `require_auth` enable: persist every indexed line as v2 with `authorized = false` (no silent v1 bypass).
+/// Meta keys touched when persisting v2 unauthorized lines on `require_auth` enable (mempool reservation).
+pub fn require_auth_migration_meta_keys(
+    store: &StateStore,
+    asset: &IssuedAssetId,
+) -> Result<Vec<Vec<u8>>, StateError> {
+    let mut keys = Vec::new();
+    for holder in load_issuer_holders_index(store, &asset.issuer, &asset.currency)? {
+        keys.push(trust_line_key(&holder, asset));
+    }
+    Ok(keys)
+}
+
+type TrustLineMetaSnapshot = (Vec<u8>, Option<Vec<u8>>);
+
+pub fn upgrade_trust_lines_for_require_auth(
+    store: &StateStore,
+    asset: &IssuedAssetId,
+    batch: &mut WriteBatch,
+) -> Result<Vec<TrustLineMetaSnapshot>, StateError> {
+    let mut meta_before = Vec::new();
+    for holder in load_issuer_holders_index(store, &asset.issuer, &asset.currency)? {
+        let Some(mut line) = load_drc_trust_line_live(store, &holder, asset)? else {
+            continue;
+        };
+        let key = trust_line_key(&holder, asset);
+        meta_before.push((key.clone(), store.get_cf(ColumnFamily::Meta, &key)?));
+        line.version = agora_types::DRC_TRUST_LINE_LIVE_STATE_V2;
+        line.authorized = false;
+        put_live(batch, &line)?;
+    }
+    Ok(meta_before)
+}
+
+pub(crate) fn put_live(batch: &mut WriteBatch, live: &DrcTrustLineLive) -> Result<(), StateError> {
     live.validate()
         .map_err(|e| StateError::InvalidTx(e.to_string()))?;
     batch.put_cf(
@@ -280,7 +331,7 @@ fn put_live(batch: &mut WriteBatch, live: &DrcTrustLineLive) -> Result<(), State
     Ok(())
 }
 
-fn put_liability(
+pub(crate) fn put_liability(
     batch: &mut WriteBatch,
     asset: &IssuedAssetId,
     outstanding: IssuedAmount,
@@ -302,7 +353,7 @@ fn put_liability(
     Ok(())
 }
 
-fn debit_drc_fee(
+pub(crate) fn debit_drc_fee(
     store: &StateStore,
     batch: &mut WriteBatch,
     journal: &mut AccountJournal,
@@ -416,12 +467,16 @@ pub fn apply_drc_trust_line_set(
             holders.push(tx.holder);
             put_issuer_holders_index(batch, &tx.issuer, &tx.currency, &holders)?;
         }
+        let policy = crate::drc_issued_controls::load_drc_issued_asset_policy(store, &asset)?;
         DrcTrustLineLive {
-            version: DRC_TRUST_LINE_LIVE_STATE_VERSION,
+            version: agora_types::DRC_TRUST_LINE_LIVE_STATE_V2,
             holder: tx.holder,
             asset,
             limit: tx.limit,
             balance: IssuedAmount::ZERO,
+            authorized: !policy.require_auth,
+            line_frozen: false,
+            line_deep_frozen: false,
         }
     };
     put_live(batch, &live)?;
@@ -479,7 +534,59 @@ pub fn apply_drc_issued_transfer(
 
     debit_drc_fee(store, batch, journal, &tx.sender, tx.fee, sequence_ctx)?;
 
+    let policy = crate::drc_issued_controls::load_drc_issued_asset_policy(store, &asset)?;
     let issuer = asset.issuer;
+    let movement_kind = if tx.sender == issuer && tx.recipient != issuer {
+        crate::drc_issued_controls::IssuedMovementKind::Issue
+    } else if tx.recipient == issuer && tx.sender != issuer {
+        crate::drc_issued_controls::IssuedMovementKind::Redeem
+    } else if tx.sender != issuer && tx.recipient != issuer {
+        crate::drc_issued_controls::IssuedMovementKind::HolderTransfer
+    } else {
+        return Err(StateError::InvalidTx(
+            "invalid issuer transfer endpoints".into(),
+        ));
+    };
+    match movement_kind {
+        crate::drc_issued_controls::IssuedMovementKind::Issue => {
+            let Some(line) = load_drc_trust_line_live(store, &tx.recipient, &asset)? else {
+                return Err(StateError::InvalidTx("recipient missing trust line".into()));
+            };
+            let line = crate::drc_issued_controls::normalize_trust_line_live(line, &policy);
+            crate::drc_issued_controls::issued_movement_allowed(&policy, &line, movement_kind)?;
+        }
+        crate::drc_issued_controls::IssuedMovementKind::Redeem => {
+            let Some(line) = load_drc_trust_line_live(store, &tx.sender, &asset)? else {
+                return Err(StateError::InvalidTx("sender missing trust line".into()));
+            };
+            let line = crate::drc_issued_controls::normalize_trust_line_live(line, &policy);
+            crate::drc_issued_controls::issued_movement_allowed(&policy, &line, movement_kind)?;
+        }
+        crate::drc_issued_controls::IssuedMovementKind::HolderTransfer => {
+            let Some(sender_line) = load_drc_trust_line_live(store, &tx.sender, &asset)? else {
+                return Err(StateError::InvalidTx("sender missing trust line".into()));
+            };
+            let Some(recipient_line) = load_drc_trust_line_live(store, &tx.recipient, &asset)?
+            else {
+                return Err(StateError::InvalidTx("recipient missing trust line".into()));
+            };
+            let sender_line =
+                crate::drc_issued_controls::normalize_trust_line_live(sender_line, &policy);
+            let recipient_line =
+                crate::drc_issued_controls::normalize_trust_line_live(recipient_line, &policy);
+            crate::drc_issued_controls::issued_movement_allowed(
+                &policy,
+                &sender_line,
+                movement_kind,
+            )?;
+            crate::drc_issued_controls::issued_movement_allowed(
+                &policy,
+                &recipient_line,
+                movement_kind,
+            )?;
+        }
+    }
+
     let mut liability = load_drc_issuer_liability(store, &asset)?;
 
     if tx.sender == issuer && tx.recipient != issuer {

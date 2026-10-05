@@ -11,6 +11,7 @@ mod data_availability;
 mod drc_check;
 mod drc_deposit_preauth;
 mod drc_escrow;
+mod drc_issued_controls;
 mod drc_multisign;
 mod drc_multisign_attachment;
 mod drc_multisign_lane;
@@ -43,7 +44,8 @@ pub use block::{
     TRIDENT_BLOCK_BODY_V11_VERSION, TRIDENT_BLOCK_BODY_V12_DOMAIN, TRIDENT_BLOCK_BODY_V12_VERSION,
     TRIDENT_BLOCK_BODY_V13_DOMAIN, TRIDENT_BLOCK_BODY_V13_VERSION, TRIDENT_BLOCK_BODY_V14_DOMAIN,
     TRIDENT_BLOCK_BODY_V14_VERSION, TRIDENT_BLOCK_BODY_V15_DOMAIN, TRIDENT_BLOCK_BODY_V15_VERSION,
-    TRIDENT_BLOCK_BODY_V16_DOMAIN, TRIDENT_BLOCK_BODY_V16_VERSION, TRIDENT_BLOCK_BODY_VERSION,
+    TRIDENT_BLOCK_BODY_V16_DOMAIN, TRIDENT_BLOCK_BODY_V16_VERSION, TRIDENT_BLOCK_BODY_V17_DOMAIN,
+    TRIDENT_BLOCK_BODY_V17_VERSION, TRIDENT_BLOCK_BODY_VERSION,
 };
 pub use data_availability::{
     DataAvailabilityCommitment, DataCommitmentAuthorization, DataCommitmentError,
@@ -80,6 +82,23 @@ pub use drc_escrow::{
     DRC_ESCROW_LIVE_STATE_VERSION, DRC_ESCROW_MAX_BLUE_SCORE_BOUND, DRC_ESCROW_RECEIPT_VERSION,
     DRC_MAX_LIVE_ESCROWS_PER_ACCOUNT,
 };
+pub use drc_issued_controls::{
+    drc_issued_asset_policy_meta_key, drc_issued_asset_policy_set_mutation_meta_keys,
+    drc_issued_clawback_mutation_meta_keys, drc_trust_line_issuer_control_mutation_meta_keys,
+    DrcIssuedAssetPolicyAction, DrcIssuedAssetPolicyLive, DrcIssuedAssetPolicyReceipt,
+    DrcIssuedAssetPolicySetTx, DrcIssuedClawbackReceipt, DrcIssuedClawbackTx,
+    DrcIssuedControlsError, DrcTrustLineIssuerControlAction, DrcTrustLineIssuerControlReceipt,
+    DrcTrustLineIssuerControlTx, DRC_ISSUED_ASSET_POLICY_LIVE_VERSION,
+    DRC_ISSUED_ASSET_POLICY_META_PREFIX, DRC_ISSUED_ASSET_POLICY_RECEIPT_VERSION,
+    DRC_ISSUED_ASSET_POLICY_SET_SIGNING_DOMAIN, DRC_ISSUED_ASSET_POLICY_SET_TICKET_SIGNING_DOMAIN,
+    DRC_ISSUED_ASSET_POLICY_SET_TICKET_VERSION, DRC_ISSUED_ASSET_POLICY_SET_TX_VERSION,
+    DRC_ISSUED_CLAWBACK_RECEIPT_VERSION, DRC_ISSUED_CLAWBACK_SIGNING_DOMAIN,
+    DRC_ISSUED_CLAWBACK_TICKET_SIGNING_DOMAIN, DRC_ISSUED_CLAWBACK_TICKET_VERSION,
+    DRC_ISSUED_CLAWBACK_TX_VERSION, DRC_TRUST_LINE_ISSUER_CONTROL_RECEIPT_VERSION,
+    DRC_TRUST_LINE_ISSUER_CONTROL_SIGNING_DOMAIN,
+    DRC_TRUST_LINE_ISSUER_CONTROL_TICKET_SIGNING_DOMAIN,
+    DRC_TRUST_LINE_ISSUER_CONTROL_TICKET_VERSION, DRC_TRUST_LINE_ISSUER_CONTROL_TX_VERSION,
+};
 pub use drc_multisign::{
     read_multisign_trailer, validate_exclusive_authorization, write_multisign_trailer,
     DrcMultisignAuth, DrcMultisignEntry, DrcMultisignError, DRC_MULTISIGN_AUTH_VERSION,
@@ -91,11 +110,13 @@ pub use drc_multisign_attachment::{
     attachment_key_for_check_cash, attachment_key_for_check_create,
     attachment_key_for_deposit_preauth, attachment_key_for_escrow_cancel,
     attachment_key_for_escrow_create, attachment_key_for_escrow_finish,
+    attachment_key_for_issued_asset_policy_set, attachment_key_for_issued_clawback,
     attachment_key_for_issued_transfer, attachment_key_for_payment,
     attachment_key_for_payment_channel_claim, attachment_key_for_payment_channel_close,
     attachment_key_for_payment_channel_create, attachment_key_for_payment_channel_fund,
     attachment_key_for_policy, attachment_key_for_regular_key, attachment_key_for_signer_list,
-    attachment_key_for_stake, attachment_key_for_ticket_create, attachment_key_for_trust_line_set,
+    attachment_key_for_stake, attachment_key_for_ticket_create,
+    attachment_key_for_trust_line_issuer_control, attachment_key_for_trust_line_set,
     drc_multisign_attachment_key, drc_multisign_signing_commitment, DrcMultisignAttachmentError,
     DrcMultisignAttachmentKey, DrcMultisignBlockAttachment, DrcMultisignOperationKind,
     DRC_MULTISIGN_ATTACHMENT_KEY_VERSION, DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
@@ -161,16 +182,16 @@ pub use drc_ticket::{
 };
 pub use drc_trust_line::{
     drc_issued_transfer_mutation_meta_keys, drc_trust_line_issuer_liability_meta_key,
-    drc_trust_line_live_meta_key, drc_trust_line_set_mutation_meta_keys,
-    DrcIssuedTransferReceipt, DrcIssuedTransferTx, DrcIssuerLiability, DrcTrustLineError,
-    DrcTrustLineLive, DrcTrustLineSetTx, IssuedAmount, IssuedAssetId, IssuedCurrencyCode,
-    IssuedCurrencyError, DRC_ISSUED_TRANSFER_RECEIPT_VERSION, DRC_ISSUED_TRANSFER_SIGNING_DOMAIN,
+    drc_trust_line_live_meta_key, drc_trust_line_set_mutation_meta_keys, DrcIssuedTransferReceipt,
+    DrcIssuedTransferTx, DrcIssuerLiability, DrcTrustLineError, DrcTrustLineLive,
+    DrcTrustLineSetTx, IssuedAmount, IssuedAssetId, IssuedCurrencyCode, IssuedCurrencyError,
+    DRC_ISSUED_TRANSFER_RECEIPT_VERSION, DRC_ISSUED_TRANSFER_SIGNING_DOMAIN,
     DRC_ISSUED_TRANSFER_TICKET_SIGNING_DOMAIN, DRC_ISSUER_LIABILITY_STATE_VERSION,
     DRC_MAX_LIVE_TRUST_LINES_PER_HOLDER, DRC_MAX_TRUST_LINE_HOLDERS_PER_ISSUER,
     DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION, DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION,
-    DRC_TRUST_LINE_LIVE_STATE_VERSION, DRC_TRUST_LINE_SET_SIGNING_DOMAIN,
-    DRC_TRUST_LINE_SET_TICKET_SIGNING_DOMAIN, DRC_TRUST_LINE_SET_TICKET_VERSION,
-    DRC_TRUST_LINE_SET_TX_VERSION,
+    DRC_TRUST_LINE_LIVE_STATE_V2, DRC_TRUST_LINE_LIVE_STATE_VERSION,
+    DRC_TRUST_LINE_SET_SIGNING_DOMAIN, DRC_TRUST_LINE_SET_TICKET_SIGNING_DOMAIN,
+    DRC_TRUST_LINE_SET_TICKET_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
 };
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
@@ -290,6 +311,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         assert_eq!(block.id(), header.hash());

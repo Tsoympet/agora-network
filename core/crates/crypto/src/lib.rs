@@ -11,6 +11,7 @@ mod data_availability;
 mod drc_check;
 mod drc_deposit_preauth;
 mod drc_escrow;
+mod drc_issued_controls;
 mod drc_multisign;
 mod drc_operation;
 mod drc_payment_channel;
@@ -45,6 +46,11 @@ pub use drc_deposit_preauth::{sign_drc_deposit_preauth_bound, verify_drc_deposit
 pub use drc_escrow::{
     sign_drc_escrow_cancel_bound, sign_drc_escrow_create_bound, sign_drc_escrow_finish_bound,
     verify_drc_escrow_cancel_bound, verify_drc_escrow_create_bound, verify_drc_escrow_finish_bound,
+};
+pub use drc_issued_controls::{
+    sign_drc_issued_asset_policy_set_bound, sign_drc_issued_clawback_bound,
+    sign_drc_trust_line_issuer_control_bound, verify_drc_issued_asset_policy_set_bound,
+    verify_drc_issued_clawback_bound, verify_drc_trust_line_issuer_control_bound,
 };
 pub use drc_multisign::{
     sign_drc_multisign_participant_bound, validate_drc_operation_authorization_fields,

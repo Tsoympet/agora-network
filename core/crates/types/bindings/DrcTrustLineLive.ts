@@ -3,4 +3,8 @@ import type { Address } from "./Address";
 import type { IssuedAmount } from "./IssuedAmount";
 import type { IssuedAssetId } from "./IssuedAssetId";
 
-export type DrcTrustLineLive = { version: number, holder: Address, asset: IssuedAssetId, limit: IssuedAmount, balance: IssuedAmount, };
+export type DrcTrustLineLive = { version: number, holder: Address, asset: IssuedAssetId, limit: IssuedAmount, balance: IssuedAmount, 
+/**
+ * Under `require_auth` policy, false until issuer authorizes (v1 lines default at load).
+ */
+authorized: boolean, line_frozen: boolean, line_deep_frozen: boolean, };

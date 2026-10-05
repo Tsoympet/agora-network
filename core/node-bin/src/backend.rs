@@ -26,11 +26,13 @@ use agora_state_machine::{
     list_missions as list_canonical_missions, list_passport_attestations,
     load_canonical_community_summary, load_canonical_governance_policy, load_drc_account_policy,
     load_drc_check_receipt, load_drc_deposit_preauth, load_drc_escrow_receipt,
+    load_drc_issued_asset_policy_receipt, load_drc_issued_clawback_receipt,
     load_drc_issued_transfer_receipt, load_drc_payment_by_invoice,
     load_drc_payment_channel_claim_event, load_drc_payment_channel_fund_event,
     load_drc_payment_channel_live, load_drc_payment_channel_receipt,
-    load_drc_payment_channel_schedule_event, load_drc_payment_receipt, load_drc_trust_line_live,
-    load_epoch, load_known_drc_account_keys, load_known_drc_account_policy,
+    load_drc_payment_channel_schedule_event, load_drc_payment_receipt,
+    load_drc_trust_line_issuer_control_receipt, load_drc_trust_line_live, load_epoch,
+    load_known_drc_account_keys, load_known_drc_account_policy,
     load_known_drc_account_signer_summary, load_known_drc_deposit_authorization,
     load_protocol_treasuries, load_reward_pool, load_validator, lookup_drc_check_point,
     lookup_drc_escrow_point, lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point,
@@ -42,14 +44,14 @@ use agora_state_machine::{
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAccountPolicy,
     DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx,
-    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedTransferTx,
-    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
-    DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
-    DrcTicketCreateTx, DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
-    SignedStakeTx, Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
-    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
-    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
-    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx,
+    DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
+    DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
+    TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
+    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
+    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -64,7 +66,7 @@ pub(crate) fn min_relay_fee() -> u64 {
         .unwrap_or(DEFAULT_MIN_RELAY_FEE)
 }
 
-fn currency_hex(code: &agora_types::IssuedCurrencyCode) -> String {
+pub(crate) fn currency_hex(code: &agora_types::IssuedCurrencyCode) -> String {
     code.0.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -723,6 +725,13 @@ pub(crate) use payment_channel_admit::{
 mod trust_line_admit;
 pub(crate) use trust_line_admit::{
     admit_drc_issued_transfer, admit_drc_trust_line_set, revalidate_trust_line_mempool,
+};
+#[path = "issued_controls_admit.rs"]
+mod issued_controls_admit;
+pub(crate) use issued_controls_admit::{
+    admit_drc_issued_asset_policy_set, admit_drc_issued_clawback,
+    admit_drc_trust_line_issuer_control, get_drc_issued_asset_policy_json,
+    revalidate_issued_controls_mempool,
 };
 
 /// Node RPC surface: tips/blocks from store, signed tx → mempool + gossip.
@@ -1593,6 +1602,139 @@ impl RpcBackend for NodeBackend {
         }
     }
 
+    fn submit_drc_issued_asset_policy_set(
+        &mut self,
+        tx: DrcIssuedAssetPolicySetTx,
+    ) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id = admit_drc_issued_asset_policy_set(
+            &self.store,
+            &self.mempool,
+            tx.clone(),
+            &auth,
+            blue_score,
+        )?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcIssuedAssetPolicySet(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn submit_drc_trust_line_issuer_control(
+        &mut self,
+        tx: DrcTrustLineIssuerControlTx,
+    ) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id = admit_drc_trust_line_issuer_control(
+            &self.store,
+            &self.mempool,
+            tx.clone(),
+            &auth,
+            blue_score,
+        )?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcTrustLineIssuerControl(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn submit_drc_issued_clawback(&mut self, tx: DrcIssuedClawbackTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id =
+            admit_drc_issued_clawback(&self.store, &self.mempool, tx.clone(), &auth, blue_score)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcIssuedClawback(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn get_drc_issued_asset_policy(
+        &self,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError> {
+        get_drc_issued_asset_policy_json(self.store.as_ref(), asset)
+    }
+
+    fn get_drc_issued_asset_policy_receipt(
+        &self,
+        policy_set_tx_id: &Hash,
+    ) -> Result<Value, RpcError> {
+        match load_drc_issued_asset_policy_receipt(self.store.as_ref(), policy_set_tx_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        {
+            Some(receipt) => Ok(json!({
+                "policy_set_tx_id": policy_set_tx_id.to_hex(),
+                "status": "known",
+                "action": format!("{:?}", receipt.action),
+                "settlement_blue_score": receipt.settlement_blue_score,
+            })),
+            None => Ok(json!({
+                "policy_set_tx_id": policy_set_tx_id.to_hex(),
+                "status": "unknown",
+            })),
+        }
+    }
+
+    fn get_drc_trust_line_issuer_control_receipt(
+        &self,
+        control_tx_id: &Hash,
+    ) -> Result<Value, RpcError> {
+        match load_drc_trust_line_issuer_control_receipt(self.store.as_ref(), control_tx_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        {
+            Some(receipt) => Ok(json!({
+                "control_tx_id": control_tx_id.to_hex(),
+                "status": "known",
+                "holder": receipt.holder.to_hex(),
+                "action": format!("{:?}", receipt.action),
+                "settlement_blue_score": receipt.settlement_blue_score,
+            })),
+            None => Ok(json!({
+                "control_tx_id": control_tx_id.to_hex(),
+                "status": "unknown",
+            })),
+        }
+    }
+
+    fn get_drc_issued_clawback_receipt(&self, clawback_tx_id: &Hash) -> Result<Value, RpcError> {
+        match load_drc_issued_clawback_receipt(self.store.as_ref(), clawback_tx_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        {
+            Some(receipt) => Ok(json!({
+                "clawback_tx_id": clawback_tx_id.to_hex(),
+                "status": "known",
+                "holder": receipt.holder.to_hex(),
+                "amount": receipt.amount.as_units().to_string(),
+                "settlement_blue_score": receipt.settlement_blue_score,
+            })),
+            None => Ok(json!({
+                "clawback_tx_id": clawback_tx_id.to_hex(),
+                "status": "unknown",
+            })),
+        }
+    }
+
     fn get_drc_account_policy(
         &self,
         account: &Address,
@@ -1726,6 +1868,9 @@ impl RpcBackend for NodeBackend {
             drc_payment_channel_closes,
             drc_trust_line_sets,
             drc_issued_transfers,
+            drc_issued_asset_policy_sets,
+            drc_trust_line_issuer_controls,
+            drc_issued_clawbacks,
         ) = {
             let pool = self
                 .mempool
@@ -1757,6 +1902,9 @@ impl RpcBackend for NodeBackend {
                 pool.select_drc_payment_channel_closes(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_trust_line_sets(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_issued_transfers(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_issued_asset_policy_sets(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_trust_line_issuer_controls(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_issued_clawbacks(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         chain
@@ -1785,6 +1933,9 @@ impl RpcBackend for NodeBackend {
                     drc_payment_channel_closes: &drc_payment_channel_closes,
                     drc_trust_line_sets: &drc_trust_line_sets,
                     drc_issued_transfers: &drc_issued_transfers,
+                    drc_issued_asset_policy_sets: &drc_issued_asset_policy_sets,
+                    drc_trust_line_issuer_controls: &drc_trust_line_issuer_controls,
+                    drc_issued_clawbacks: &drc_issued_clawbacks,
                     ..BlockTemplateLanes::default()
                 },
             )
@@ -1839,7 +1990,9 @@ impl RpcBackend for NodeBackend {
         };
         if let Ok(mut pool) = self.mempool.lock() {
             pool.evict_for_block_at_blue_score(&block, virtual_blue_score);
+            let auth = self.tx_auth();
             revalidate_trust_line_mempool(self.store.as_ref(), &mut pool);
+            revalidate_issued_controls_mempool(self.store.as_ref(), &mut pool, &auth);
         }
         if let Some(net) = &self.net {
             // Prefer compact + announce; peers inflate from mempool or issue GetBlock.
@@ -3222,11 +3375,32 @@ mod drc_payment_channel_reorg_reservation_tests;
 mod drc_payment_channel_rpc_integration_tests;
 
 #[cfg(test)]
-#[path = "drc_trust_line_rpc_integration_tests.rs"]
-mod drc_trust_line_rpc_integration_tests;
+#[path = "drc_issued_controls_public_helpers.rs"]
+mod drc_issued_controls_public_helpers;
+#[cfg(test)]
+#[path = "drc_issued_controls_public_invariant_tests.rs"]
+mod drc_issued_controls_public_invariant_tests;
+#[cfg(test)]
+#[path = "drc_issued_controls_public_security_tests.rs"]
+mod drc_issued_controls_public_security_tests;
+#[cfg(test)]
+#[path = "drc_issued_controls_reorg_reservation_tests.rs"]
+mod drc_issued_controls_reorg_reservation_tests;
+#[cfg(test)]
+#[path = "drc_issued_controls_rpc_integration_tests.rs"]
+mod drc_issued_controls_rpc_integration_tests;
+#[cfg(test)]
+#[path = "drc_issued_controls_template_tests.rs"]
+mod drc_issued_controls_template_tests;
+#[cfg(test)]
+#[path = "drc_payment_channel_template_tests.rs"]
+mod drc_payment_channel_template_tests;
 #[cfg(test)]
 #[path = "drc_trust_line_public_helpers.rs"]
 mod drc_trust_line_public_helpers;
+#[cfg(test)]
+#[path = "drc_trust_line_public_invariant_tests.rs"]
+mod drc_trust_line_public_invariant_tests;
 #[cfg(test)]
 #[path = "drc_trust_line_public_security_tests.rs"]
 mod drc_trust_line_public_security_tests;
@@ -3234,11 +3408,8 @@ mod drc_trust_line_public_security_tests;
 #[path = "drc_trust_line_reorg_reservation_tests.rs"]
 mod drc_trust_line_reorg_reservation_tests;
 #[cfg(test)]
+#[path = "drc_trust_line_rpc_integration_tests.rs"]
+mod drc_trust_line_rpc_integration_tests;
+#[cfg(test)]
 #[path = "drc_trust_line_template_tests.rs"]
 mod drc_trust_line_template_tests;
-#[cfg(test)]
-#[path = "drc_trust_line_public_invariant_tests.rs"]
-mod drc_trust_line_public_invariant_tests;
-#[cfg(test)]
-#[path = "drc_payment_channel_template_tests.rs"]
-mod drc_payment_channel_template_tests;

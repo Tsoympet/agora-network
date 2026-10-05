@@ -3,9 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use agora_consensus::{LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
-use agora_crypto::{
-    sign_drc_issued_transfer_bound, sign_drc_trust_line_set_bound, KeyPair,
-};
+use agora_crypto::{sign_drc_issued_transfer_bound, sign_drc_trust_line_set_bound, KeyPair};
 use agora_p2p::Mempool;
 use agora_state_machine::{
     credit_account_into, load_drc_issuer_liability, load_drc_trust_line_live, GenesisBuilder,
@@ -17,24 +15,14 @@ use agora_types::{
     DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
 };
 
-use super::{NodeBackend, NodeBackendConfig};
+use super::NodeBackend;
+use crate::admit::BlockTemplateLanes;
 use agora_rpc::RpcBackend;
-use crate::admit::{BlockTemplateLanes, ChainState};
-use crate::storage_policy::StoragePolicy;
 
 pub use super::drc_payment_channel_public_helpers::{
-    account_reserved, backend_config, boot_chain, mine_template as mine_template_inner,
-    submit_lanes_at_parents, ticket_consumer_reserved, virtual_tip, CHAIN,
+    account_reserved, backend_config, boot_chain, submit_lanes_at_parents,
+    ticket_consumer_reserved, virtual_tip, CHAIN,
 };
-
-fn coinbase_commitment_nonce(parents: &[Hash], timestamp_ms: u64, extranonce: u32) -> u64 {
-    let mut sorted = parents.to_vec();
-    sorted.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
-    let tag = Hash::hash_borsh(&(b"agora-cb-parents-v2", sorted));
-    let parent_tag = u32::from_le_bytes(tag.as_bytes()[..4].try_into().unwrap());
-    let low = parent_tag ^ (timestamp_ms as u32);
-    ((extranonce as u64) << 32) | u64::from(low)
-}
 
 pub fn std_code(tag: &[u8; 3]) -> IssuedCurrencyCode {
     let mut c = [0u8; 20];
@@ -93,6 +81,7 @@ pub struct TrustLineFixture {
     pub issuer: KeyPair,
     pub holder_b: KeyPair,
     pub cur_usd: IssuedCurrencyCode,
+    #[allow(dead_code)]
     pub cur_eur: IssuedCurrencyCode,
 }
 
@@ -215,7 +204,11 @@ pub fn mempool_len(backend: &NodeBackend) -> usize {
     backend.test_mempool().lock().unwrap().len()
 }
 
-pub fn trust_line_mutation_reserved(backend: &NodeBackend, holder: &Address, ast: &IssuedAssetId) -> bool {
+pub fn trust_line_mutation_reserved(
+    backend: &NodeBackend,
+    holder: &Address,
+    ast: &IssuedAssetId,
+) -> bool {
     backend
         .test_mempool()
         .lock()
@@ -223,7 +216,11 @@ pub fn trust_line_mutation_reserved(backend: &NodeBackend, holder: &Address, ast
         .trust_line_mutation_reserved(holder, &ast.asset_key())
 }
 
-pub fn trust_line_meta_reserved(backend: &NodeBackend, holder: &Address, ast: &IssuedAssetId) -> bool {
+pub fn trust_line_meta_reserved(
+    backend: &NodeBackend,
+    holder: &Address,
+    ast: &IssuedAssetId,
+) -> bool {
     let key = drc_trust_line_live_meta_key(holder, ast);
     backend
         .test_mempool()
@@ -249,14 +246,7 @@ pub fn setup_live_line(
     limit: u64,
     holder_nonce: u64,
 ) {
-    let set = signed_trust_line_set(
-        holder,
-        issuer,
-        currency,
-        limit,
-        genesis,
-        holder_nonce,
-    );
+    let set = signed_trust_line_set(holder, issuer, currency, limit, genesis, holder_nonce);
     backend.submit_drc_trust_line_set(set).unwrap();
     mine_template(backend);
 }

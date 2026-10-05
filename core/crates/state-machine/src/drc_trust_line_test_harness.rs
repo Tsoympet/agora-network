@@ -238,7 +238,7 @@ pub mod support {
 
 #[cfg(test)]
 pub mod invariants {
-    use super::support::{asset, auth, issuer_outstanding, line_balance, trust_root, TIP};
+    use super::support::{asset, issuer_outstanding, line_balance, trust_root, TIP};
     use crate::accounts::load_account;
     use crate::drc_ticket::load_drc_account_tickets;
     use crate::drc_trust_line::{
@@ -372,7 +372,6 @@ pub mod policy {
     use agora_crypto::sign_drc_account_policy_bound;
     use agora_types::{Amount, DrcAccountPolicyTx, DrcDepositPreauthTx};
 
-    use super::support::auth;
     use crate::apply::TxAuthContext;
     use crate::drc_deposit_preauth::apply_drc_deposit_preauth;
     use crate::drc_policy::apply_drc_account_policy;

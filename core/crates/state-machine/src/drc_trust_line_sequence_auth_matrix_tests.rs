@@ -2,10 +2,7 @@
 
 #[cfg(test)]
 mod shared {
-    pub use crate::drc_trust_line_test_harness::support::{
-        apply_block, auth, coinbase, fund, key, mint_ticket, setup_live_line,
-        signed_issued_transfer, signed_trust_line_set, std_code,
-    };
+    pub use crate::drc_trust_line_test_harness::support::apply_block;
 }
 
 #[cfg(test)]

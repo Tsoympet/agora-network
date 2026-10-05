@@ -150,12 +150,11 @@ mod tests {
     #[test]
     fn matrix_reject_self_trust_line() {
         let store = StateStore::open_in_memory();
-        let ctx = auth();
         let acct = key(13);
         fund(&store, &acct, 50);
         let cur = std_code(b"M06");
         let before = invariants::snapshot(&store, &acct, cur, &[&acct], &[]);
-        let mut tx = agora_types::DrcTrustLineSetTx {
+        let tx = agora_types::DrcTrustLineSetTx {
             version: agora_types::DRC_TRUST_LINE_SET_TX_VERSION,
             holder: acct.address(),
             issuer: acct.address(),

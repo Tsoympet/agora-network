@@ -98,7 +98,12 @@ pub fn compose_trident_state_root(
     let drc_checks = drc_check_root(store)?;
     let drc_payment_channels = drc_payment_channel_root(store)?;
     let drc_trust_lines = drc_trust_line_root(store)?;
-    let drc_issued_liability = Hash::hash_borsh(&(b"drc-issued-liability-v1", drc_trust_lines));
+    let drc_issued_controls = crate::drc_issued_controls::drc_issued_controls_root(store)?;
+    let drc_issued_liability = Hash::hash_borsh(&(
+        b"drc-issued-liability-v1",
+        drc_trust_lines,
+        drc_issued_controls,
+    ));
     let drc_check_paychan = Hash::hash_borsh(&(
         b"drc-check-paychan-v2",
         drc_checks,

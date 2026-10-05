@@ -105,7 +105,10 @@ fn rpc_trust_line_create_issue_restart_query() {
         }),
     });
     assert_eq!(liability.result.as_ref().unwrap()["status"], json!("live"));
-    assert_eq!(liability.result.as_ref().unwrap()["outstanding"], json!("100"));
+    assert_eq!(
+        liability.result.as_ref().unwrap()["outstanding"],
+        json!("100")
+    );
 
     let receipt = dispatcher.handle(RpcRequest {
         id: Some(json!(3)),
@@ -209,11 +212,7 @@ fn rpc_positional_currency_array_submit_and_query() {
     let line = dispatcher.handle(RpcRequest {
         id: Some(json!(1)),
         method: "agora_getDrcTrustLine".into(),
-        params: json!([
-            holder.address().to_hex(),
-            issuer.address().to_hex(),
-            "ABC",
-        ]),
+        params: json!([holder.address().to_hex(), issuer.address().to_hex(), "ABC",]),
     });
     assert_eq!(line.result.as_ref().unwrap()["status"], json!("live"));
 }

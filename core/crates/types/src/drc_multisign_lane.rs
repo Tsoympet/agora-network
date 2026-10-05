@@ -7,12 +7,14 @@ use crate::{
     attachment_key_for_check_cash, attachment_key_for_check_create,
     attachment_key_for_deposit_preauth, attachment_key_for_escrow_cancel,
     attachment_key_for_escrow_create, attachment_key_for_escrow_finish,
+    attachment_key_for_issued_asset_policy_set, attachment_key_for_issued_clawback,
     attachment_key_for_issued_transfer, attachment_key_for_payment,
     attachment_key_for_payment_channel_claim, attachment_key_for_payment_channel_close,
     attachment_key_for_payment_channel_create, attachment_key_for_payment_channel_fund,
     attachment_key_for_policy, attachment_key_for_regular_key, attachment_key_for_signer_list,
-    attachment_key_for_stake, attachment_key_for_ticket_create, attachment_key_for_trust_line_set,
-    Address, Block, DrcMultisignAttachmentError, DrcMultisignAttachmentKey, DrcMultisignAuth,
+    attachment_key_for_stake, attachment_key_for_ticket_create,
+    attachment_key_for_trust_line_issuer_control, attachment_key_for_trust_line_set, Address,
+    Block, DrcMultisignAttachmentError, DrcMultisignAttachmentKey, DrcMultisignAuth,
     DrcMultisignBlockAttachment, Hash, NativeAssetId, DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
 };
 
@@ -61,6 +63,9 @@ pub fn drc_multisign_attachment_capacity(block: &Block) -> usize {
         + block.drc_payment_channel_closes.len()
         + block.drc_trust_line_sets.len()
         + block.drc_issued_transfers.len()
+        + block.drc_issued_asset_policy_sets.len()
+        + block.drc_trust_line_issuer_controls.len()
+        + block.drc_issued_clawbacks.len()
 }
 
 fn ensure_sorted(keys: &[DrcMultisignAttachmentKey]) -> Result<(), DrcMultisignAttachmentError> {
@@ -406,6 +411,48 @@ pub fn materialize_drc_multisign_attachments(
         }
     }
 
+    for tx in &mut block.drc_issued_asset_policy_sets {
+        if let Some(auth) = tx.multisign.take() {
+            if single_sig_present(&tx.public_key, &tx.signature) {
+                return Err(DrcMultisignAttachmentError::MixedAuthorization);
+            }
+            tx.public_key.clear();
+            tx.signature.clear();
+            let key = attachment_key_for_issued_asset_policy_set(tx, chain_id, genesis);
+            push_materialized(&mut attachments, key, tx.issuer, auth)?;
+        } else if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
+    for tx in &mut block.drc_trust_line_issuer_controls {
+        if let Some(auth) = tx.multisign.take() {
+            if single_sig_present(&tx.public_key, &tx.signature) {
+                return Err(DrcMultisignAttachmentError::MixedAuthorization);
+            }
+            tx.public_key.clear();
+            tx.signature.clear();
+            let key = attachment_key_for_trust_line_issuer_control(tx, chain_id, genesis);
+            push_materialized(&mut attachments, key, tx.issuer, auth)?;
+        } else if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
+    for tx in &mut block.drc_issued_clawbacks {
+        if let Some(auth) = tx.multisign.take() {
+            if single_sig_present(&tx.public_key, &tx.signature) {
+                return Err(DrcMultisignAttachmentError::MixedAuthorization);
+            }
+            tx.public_key.clear();
+            tx.signature.clear();
+            let key = attachment_key_for_issued_clawback(tx, chain_id, genesis);
+            push_materialized(&mut attachments, key, tx.issuer, auth)?;
+        } else if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
     attachments.sort_by_key(|a| a.key);
     ensure_sorted(&attachments.iter().map(|a| a.key).collect::<Vec<_>>())?;
     block.drc_multisign_attachments = attachments;
@@ -615,6 +662,37 @@ fn collect_expected_keys(
         }
     }
 
+    for tx in &block.drc_issued_asset_policy_sets {
+        reject_inline_multisign(&tx.multisign)?;
+        if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            expected.push(attachment_key_for_issued_asset_policy_set(
+                tx, chain_id, genesis,
+            ));
+        } else if !single_sig_present(&tx.public_key, &tx.signature) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
+    for tx in &block.drc_trust_line_issuer_controls {
+        reject_inline_multisign(&tx.multisign)?;
+        if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            expected.push(attachment_key_for_trust_line_issuer_control(
+                tx, chain_id, genesis,
+            ));
+        } else if !single_sig_present(&tx.public_key, &tx.signature) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
+    for tx in &block.drc_issued_clawbacks {
+        reject_inline_multisign(&tx.multisign)?;
+        if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            expected.push(attachment_key_for_issued_clawback(tx, chain_id, genesis));
+        } else if !single_sig_present(&tx.public_key, &tx.signature) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
     expected.sort();
     Ok(expected)
 }
@@ -770,6 +848,21 @@ fn owner_for_key(
     for tx in &block.drc_issued_transfers {
         if attachment_key_for_issued_transfer(tx, chain_id, genesis) == key {
             return Ok(tx.sender);
+        }
+    }
+    for tx in &block.drc_issued_asset_policy_sets {
+        if attachment_key_for_issued_asset_policy_set(tx, chain_id, genesis) == key {
+            return Ok(tx.issuer);
+        }
+    }
+    for tx in &block.drc_trust_line_issuer_controls {
+        if attachment_key_for_trust_line_issuer_control(tx, chain_id, genesis) == key {
+            return Ok(tx.issuer);
+        }
+    }
+    for tx in &block.drc_issued_clawbacks {
+        if attachment_key_for_issued_clawback(tx, chain_id, genesis) == key {
+            return Ok(tx.issuer);
         }
     }
     Err(DrcMultisignAttachmentError::OrphanAttachment)
@@ -1027,6 +1120,42 @@ pub fn merge_drc_multisign_attachments(
             continue;
         }
         let key = attachment_key_for_issued_transfer(tx, chain_id, genesis);
+        tx.multisign = Some(
+            map.get(&key)
+                .cloned()
+                .ok_or(DrcMultisignAttachmentError::MissingAttachment)?,
+        );
+    }
+
+    for tx in &mut block.drc_issued_asset_policy_sets {
+        if !needs_attachment(&tx.public_key, &tx.signature, &None) {
+            continue;
+        }
+        let key = attachment_key_for_issued_asset_policy_set(tx, chain_id, genesis);
+        tx.multisign = Some(
+            map.get(&key)
+                .cloned()
+                .ok_or(DrcMultisignAttachmentError::MissingAttachment)?,
+        );
+    }
+
+    for tx in &mut block.drc_trust_line_issuer_controls {
+        if !needs_attachment(&tx.public_key, &tx.signature, &None) {
+            continue;
+        }
+        let key = attachment_key_for_trust_line_issuer_control(tx, chain_id, genesis);
+        tx.multisign = Some(
+            map.get(&key)
+                .cloned()
+                .ok_or(DrcMultisignAttachmentError::MissingAttachment)?,
+        );
+    }
+
+    for tx in &mut block.drc_issued_clawbacks {
+        if !needs_attachment(&tx.public_key, &tx.signature, &None) {
+            continue;
+        }
+        let key = attachment_key_for_issued_clawback(tx, chain_id, genesis);
         tx.multisign = Some(
             map.get(&key)
                 .cloned()

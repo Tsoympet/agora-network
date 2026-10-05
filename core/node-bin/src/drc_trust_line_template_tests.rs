@@ -1,9 +1,7 @@
 //! Block template ordering and fail-closed lanes for trust lines.
 
 use agora_rpc::RpcBackend;
-use agora_types::{
-    DrcMultisignAuth, DrcMultisignEntry, Hash, DRC_MULTISIGN_AUTH_VERSION,
-};
+use agora_types::{DrcMultisignAuth, DrcMultisignEntry, Hash, DRC_MULTISIGN_AUTH_VERSION};
 
 use super::drc_trust_line_public_helpers::{
     assert_template_has_no_invalid_trust_line_lanes, funded_trust_line_fixture, mine_template,
@@ -13,14 +11,7 @@ use super::drc_trust_line_public_helpers::{
 #[test]
 fn template_selects_trust_line_set_before_issued_transfer() {
     let mut fx = funded_trust_line_fixture();
-    let set = signed_trust_line_set(
-        &fx.holder,
-        &fx.issuer,
-        fx.cur_usd,
-        100,
-        fx.genesis,
-        0,
-    );
+    let set = signed_trust_line_set(&fx.holder, &fx.issuer, fx.cur_usd, 100, fx.genesis, 0);
     fx.backend.submit_drc_trust_line_set(set).unwrap();
     fx.backend
         .submit_drc_issued_transfer(signed_issued_transfer(
@@ -57,14 +48,7 @@ fn template_selects_trust_line_set_before_issued_transfer() {
 #[test]
 fn template_never_includes_invalid_multisign_attachment_set() {
     let mut fx = funded_trust_line_fixture();
-    let mut set = signed_trust_line_set(
-        &fx.holder,
-        &fx.issuer,
-        fx.cur_usd,
-        50,
-        fx.genesis,
-        0,
-    );
+    let mut set = signed_trust_line_set(&fx.holder, &fx.issuer, fx.cur_usd, 50, fx.genesis, 0);
     set.multisign = Some(DrcMultisignAuth {
         version: DRC_MULTISIGN_AUTH_VERSION,
         signing_for: fx.holder.address(),
