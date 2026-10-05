@@ -514,3 +514,120 @@ pub fn verify_drc_check_cancel_operation(
         None,
     )
 }
+
+pub fn verify_drc_payment_channel_create_operation(
+    store: &StateStore,
+    tx: &agora_types::DrcPaymentChannelCreateTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    agora_crypto::parse_compressed_public_key(&tx.claim_public_key)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_payment_channel_create_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.owner,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )
+}
+
+pub fn verify_drc_payment_channel_fund_operation(
+    store: &StateStore,
+    tx: &agora_types::DrcPaymentChannelFundTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_payment_channel_fund_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.submitter,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )
+}
+
+pub fn verify_drc_payment_channel_claim_operation(
+    store: &StateStore,
+    tx: &agora_types::DrcPaymentChannelClaimTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_payment_channel_claim_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.submitter,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )?;
+    let live = crate::drc_payment_channel::load_drc_payment_channel_live(store, &tx.channel_id)?
+        .ok_or_else(|| StateError::InvalidTx("unknown payment channel for claim".into()))?;
+    agora_crypto::verify_payment_channel_offledger_claim(
+        &live.claim_public_key,
+        &tx.channel_claim_signature,
+        &auth.chain_id,
+        &auth.genesis,
+        &tx.channel_id,
+        tx.cumulative_authorized,
+    )
+    .map_err(|error| StateError::InvalidTx(error.to_string()))
+}
+
+pub fn verify_drc_payment_channel_close_operation(
+    store: &StateStore,
+    tx: &agora_types::DrcPaymentChannelCloseTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_payment_channel_close_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.submitter,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )
+}

@@ -59,6 +59,14 @@ pub enum NetworkMessage {
     DrcCheckCash(DrcCheckCashTx),
     /// Appended in Trident protocol v18; native DRC check cancel.
     DrcCheckCancel(DrcCheckCancelTx),
+    /// Appended in Trident protocol v19; native DRC payment channel create.
+    DrcPaymentChannelCreate(agora_types::DrcPaymentChannelCreateTx),
+    /// Appended in Trident protocol v19; native DRC payment channel fund.
+    DrcPaymentChannelFund(agora_types::DrcPaymentChannelFundTx),
+    /// Appended in Trident protocol v19; native DRC payment channel claim.
+    DrcPaymentChannelClaim(agora_types::DrcPaymentChannelClaimTx),
+    /// Appended in Trident protocol v19; native DRC payment channel close.
+    DrcPaymentChannelClose(agora_types::DrcPaymentChannelCloseTx),
 }
 
 impl NetworkMessage {
@@ -91,6 +99,10 @@ impl NetworkMessage {
             && block.drc_check_creates.is_empty()
             && block.drc_check_cashes.is_empty()
             && block.drc_check_cancels.is_empty()
+            && block.drc_payment_channel_creates.is_empty()
+            && block.drc_payment_channel_funds.is_empty()
+            && block.drc_payment_channel_claims.is_empty()
+            && block.drc_payment_channel_closes.is_empty()
             && block.drc_multisign_attachments.is_empty()
         {
             Self::CompactBlock {

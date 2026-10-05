@@ -13,8 +13,6 @@ mod data_availability;
 mod drc_account_auth;
 mod drc_check;
 #[cfg(test)]
-mod drc_check_auth_cutoff_tranche_tests;
-#[cfg(test)]
 mod drc_check_multisign_adversary_matrix;
 #[cfg(test)]
 mod drc_check_terminal_tests;
@@ -47,6 +45,21 @@ mod drc_mempool;
 mod drc_multisig_tests;
 #[cfg(test)]
 mod drc_multisign_attachment_tests;
+mod drc_payment_channel;
+#[cfg(test)]
+mod drc_payment_channel_auth_cutoff_tranche_tests;
+#[cfg(test)]
+mod drc_payment_channel_hardening_tests;
+#[cfg(test)]
+mod drc_payment_channel_multisign_adversary_matrix;
+#[cfg(test)]
+mod drc_payment_channel_sequence_auth_matrix_tests;
+#[cfg(test)]
+mod drc_payment_channel_terminal_tests;
+#[cfg(test)]
+mod drc_payment_channel_test_harness;
+#[cfg(test)]
+mod drc_payment_channel_tests;
 mod drc_policy;
 mod drc_regular_key;
 #[cfg(test)]
@@ -141,6 +154,16 @@ pub use drc_escrow::{
 pub use drc_mempool::{
     drc_ticket_sequence_for_create_nonce, lookup_drc_ticket_point, plan_drc_mempool_reservation,
     DrcMempoolReservation, DrcTicketPointStatus,
+};
+pub use drc_payment_channel::{
+    apply_drc_payment_channel_claim, apply_drc_payment_channel_close,
+    apply_drc_payment_channel_create, apply_drc_payment_channel_fund, drc_payment_channel_root,
+    load_drc_payment_channel_claim_event, load_drc_payment_channel_fund_event,
+    load_drc_payment_channel_live, load_drc_payment_channel_receipt,
+    load_drc_payment_channel_schedule_event, lookup_drc_payment_channel_point,
+    payment_channel_meta_keys_for_claim, payment_channel_meta_keys_for_create,
+    payment_channel_meta_keys_for_fund, payment_channel_meta_keys_for_mutating,
+    payment_channel_meta_keys_for_schedule_close,
 };
 pub use drc_policy::{
     apply_drc_account_policy, drc_account_policy_key, drc_account_policy_meta_keys,

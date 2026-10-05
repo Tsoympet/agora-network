@@ -57,6 +57,10 @@ async fn announce_triggers_getblock_and_full_serve() {
         drc_check_creates: vec![],
         drc_check_cashes: vec![],
         drc_check_cancels: vec![],
+        drc_payment_channel_creates: vec![],
+        drc_payment_channel_funds: vec![],
+        drc_payment_channel_claims: vec![],
+        drc_payment_channel_closes: vec![],
         drc_multisign_attachments: vec![],
     };
     let hash = block.id();

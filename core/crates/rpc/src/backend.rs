@@ -8,8 +8,10 @@ use agora_governance::{
 use agora_types::{
     AccountTransfer, Address, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
     DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx,
-    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, DrcTicketCreateTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
+    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, OutPoint, OvlExecutionTx,
+    Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -198,6 +200,34 @@ pub trait RpcBackend: Send {
     fn get_drc_escrow_receipt(&self, escrow_id: &Hash) -> Result<Value, RpcError>;
     fn get_drc_check(&self, check_id: &Hash) -> Result<Value, RpcError>;
     fn get_drc_check_receipt(&self, check_id: &Hash) -> Result<Value, RpcError>;
+    fn submit_drc_payment_channel_create(
+        &mut self,
+        tx: DrcPaymentChannelCreateTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_payment_channel_fund(
+        &mut self,
+        tx: DrcPaymentChannelFundTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_payment_channel_claim(
+        &mut self,
+        tx: DrcPaymentChannelClaimTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_payment_channel_close(
+        &mut self,
+        tx: DrcPaymentChannelCloseTx,
+    ) -> Result<Hash, RpcError>;
+    fn get_drc_payment_channel(&self, channel_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_payment_channel_receipt(&self, channel_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_payment_channel_fund_event(&self, fund_tx_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_payment_channel_claim_event(&self, claim_tx_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_payment_channel_schedule_event(&self, close_tx_id: &Hash)
+        -> Result<Value, RpcError>;
+    fn verify_drc_payment_channel_claim(
+        &self,
+        channel_id: &Hash,
+        cumulative_authorized: Amount,
+        channel_claim_signature: &[u8],
+    ) -> Result<Value, RpcError>;
     /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
     fn get_drc_account_policy(
         &self,
@@ -673,6 +703,121 @@ impl RpcBackend for InMemoryBackend {
         }))
     }
 
+    fn submit_drc_payment_channel_create(
+        &mut self,
+        _tx: DrcPaymentChannelCreateTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC payment channel creates".into(),
+        ))
+    }
+
+    fn submit_drc_payment_channel_fund(
+        &mut self,
+        _tx: DrcPaymentChannelFundTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC payment channel funds".into(),
+        ))
+    }
+
+    fn submit_drc_payment_channel_claim(
+        &mut self,
+        _tx: DrcPaymentChannelClaimTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC payment channel claims".into(),
+        ))
+    }
+
+    fn submit_drc_payment_channel_close(
+        &mut self,
+        _tx: DrcPaymentChannelCloseTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC payment channel closes".into(),
+        ))
+    }
+
+    fn get_drc_payment_channel(&self, channel_id: &Hash) -> Result<Value, RpcError> {
+        if *channel_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel id".into(),
+            ));
+        }
+        Ok(json!({
+            "channel_id": channel_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_payment_channel_receipt(&self, channel_id: &Hash) -> Result<Value, RpcError> {
+        if *channel_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel id".into(),
+            ));
+        }
+        Ok(json!({
+            "channel_id": channel_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_payment_channel_fund_event(&self, fund_tx_id: &Hash) -> Result<Value, RpcError> {
+        if *fund_tx_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel fund tx id".into(),
+            ));
+        }
+        Ok(json!({
+            "fund_tx_id": fund_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_payment_channel_claim_event(&self, claim_tx_id: &Hash) -> Result<Value, RpcError> {
+        if *claim_tx_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel claim tx id".into(),
+            ));
+        }
+        Ok(json!({
+            "claim_tx_id": claim_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_payment_channel_schedule_event(
+        &self,
+        close_tx_id: &Hash,
+    ) -> Result<Value, RpcError> {
+        if *close_tx_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel close tx id".into(),
+            ));
+        }
+        Ok(json!({
+            "close_tx_id": close_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn verify_drc_payment_channel_claim(
+        &self,
+        channel_id: &Hash,
+        _cumulative_authorized: Amount,
+        _channel_claim_signature: &[u8],
+    ) -> Result<Value, RpcError> {
+        if *channel_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel id".into(),
+            ));
+        }
+        Err(RpcError::Rejected(
+            "in-memory backend cannot verify payment channel claims".into(),
+        ))
+    }
+
     fn get_drc_account_policy(
         &self,
         account: &Address,
@@ -807,6 +952,10 @@ impl RpcBackend for InMemoryBackend {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         })
     }

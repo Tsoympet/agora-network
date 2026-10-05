@@ -78,6 +78,7 @@ mod tests {
             drc_ticket_meta_before: Vec::new(),
             drc_escrow_meta_before: Vec::new(),
             drc_check_meta_before: Vec::new(),
+            drc_payment_channel_meta_before: Vec::new(),
         };
         store_utxo_journal(&store, &hash, &journal).unwrap();
         let loaded = load_utxo_journal(&store, &hash).unwrap().unwrap();

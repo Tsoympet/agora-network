@@ -14,6 +14,7 @@ mod drc_escrow;
 mod drc_multisign;
 mod drc_multisign_attachment;
 mod drc_multisign_lane;
+mod drc_payment_channel;
 mod drc_policy;
 mod drc_regular_key;
 mod drc_sequence;
@@ -40,7 +41,8 @@ pub use block::{
     Block, BlockHeader, TRIDENT_BLOCK_BODY_DOMAIN, TRIDENT_BLOCK_BODY_V11_DOMAIN,
     TRIDENT_BLOCK_BODY_V11_VERSION, TRIDENT_BLOCK_BODY_V12_DOMAIN, TRIDENT_BLOCK_BODY_V12_VERSION,
     TRIDENT_BLOCK_BODY_V13_DOMAIN, TRIDENT_BLOCK_BODY_V13_VERSION, TRIDENT_BLOCK_BODY_V14_DOMAIN,
-    TRIDENT_BLOCK_BODY_V14_VERSION, TRIDENT_BLOCK_BODY_VERSION,
+    TRIDENT_BLOCK_BODY_V14_VERSION, TRIDENT_BLOCK_BODY_V15_DOMAIN, TRIDENT_BLOCK_BODY_V15_VERSION,
+    TRIDENT_BLOCK_BODY_VERSION,
 };
 pub use data_availability::{
     DataAvailabilityCommitment, DataCommitmentAuthorization, DataCommitmentError,
@@ -88,6 +90,8 @@ pub use drc_multisign_attachment::{
     attachment_key_for_check_cash, attachment_key_for_check_create,
     attachment_key_for_deposit_preauth, attachment_key_for_escrow_cancel,
     attachment_key_for_escrow_create, attachment_key_for_escrow_finish, attachment_key_for_payment,
+    attachment_key_for_payment_channel_claim, attachment_key_for_payment_channel_close,
+    attachment_key_for_payment_channel_create, attachment_key_for_payment_channel_fund,
     attachment_key_for_policy, attachment_key_for_regular_key, attachment_key_for_signer_list,
     attachment_key_for_stake, attachment_key_for_ticket_create, drc_multisign_attachment_key,
     drc_multisign_signing_commitment, DrcMultisignAttachmentError, DrcMultisignAttachmentKey,
@@ -97,6 +101,29 @@ pub use drc_multisign_attachment::{
 pub use drc_multisign_lane::{
     drc_multisign_attachment_capacity, materialize_drc_multisign_attachments,
     merge_drc_multisign_attachments, validate_drc_multisign_attachment_lane,
+};
+pub use drc_payment_channel::{
+    payment_channel_cancel_after_valid_at_create, payment_channel_claim_submitter_allowed,
+    payment_channel_close_submitter_allowed, payment_channel_finalize_allowed,
+    payment_channel_fund_submitter_allowed, payment_channel_offledger_claim_signing_bytes,
+    payment_channel_onchain_claim_allowed, payment_channel_owner_schedule_deadline,
+    validate_payment_channel_blue_score_bound, DrcPaymentChannelClaimEvent,
+    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseKind, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelError, DrcPaymentChannelFundEvent,
+    DrcPaymentChannelFundTx, DrcPaymentChannelLive, DrcPaymentChannelOutcome,
+    DrcPaymentChannelReceipt, DrcPaymentChannelScheduleEvent,
+    DRC_MAX_LIVE_PAYMENT_CHANNELS_PER_ACCOUNT, DRC_PAYMENT_CHANNEL_CLAIM_EVENT_VERSION,
+    DRC_PAYMENT_CHANNEL_CLAIM_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_CLAIM_TICKET_SIGNING_DOMAIN,
+    DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION, DRC_PAYMENT_CHANNEL_CLAIM_TX_VERSION,
+    DRC_PAYMENT_CHANNEL_CLOSE_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_CLOSE_TICKET_SIGNING_DOMAIN,
+    DRC_PAYMENT_CHANNEL_CLOSE_TICKET_VERSION, DRC_PAYMENT_CHANNEL_CLOSE_TX_VERSION,
+    DRC_PAYMENT_CHANNEL_CREATE_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_CREATE_TICKET_SIGNING_DOMAIN,
+    DRC_PAYMENT_CHANNEL_CREATE_TICKET_VERSION, DRC_PAYMENT_CHANNEL_CREATE_TX_VERSION,
+    DRC_PAYMENT_CHANNEL_FUND_EVENT_VERSION, DRC_PAYMENT_CHANNEL_FUND_SIGNING_DOMAIN,
+    DRC_PAYMENT_CHANNEL_FUND_TICKET_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_FUND_TICKET_VERSION,
+    DRC_PAYMENT_CHANNEL_FUND_TX_VERSION, DRC_PAYMENT_CHANNEL_LIVE_STATE_VERSION,
+    DRC_PAYMENT_CHANNEL_MAX_BLUE_SCORE_BOUND, DRC_PAYMENT_CHANNEL_OFFLEDGER_CLAIM_DOMAIN,
+    DRC_PAYMENT_CHANNEL_RECEIPT_VERSION, DRC_PAYMENT_CHANNEL_SCHEDULE_EVENT_VERSION,
 };
 pub use drc_policy::{
     DrcAccountPolicy, DrcAccountPolicyAction, DrcAccountPolicyError, DrcAccountPolicyTx,
@@ -241,6 +268,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         assert_eq!(block.id(), header.hash());
@@ -345,6 +376,18 @@ mod ts_export {
         DrcCheckLive::export_all().expect("export DrcCheckLive");
         DrcCheckReceipt::export_all().expect("export DrcCheckReceipt");
         DrcCheckOutcome::export_all().expect("export DrcCheckOutcome");
+        DrcPaymentChannelCreateTx::export_all().expect("export DrcPaymentChannelCreateTx");
+        DrcPaymentChannelFundTx::export_all().expect("export DrcPaymentChannelFundTx");
+        DrcPaymentChannelClaimTx::export_all().expect("export DrcPaymentChannelClaimTx");
+        DrcPaymentChannelCloseTx::export_all().expect("export DrcPaymentChannelCloseTx");
+        DrcPaymentChannelCloseKind::export_all().expect("export DrcPaymentChannelCloseKind");
+        DrcPaymentChannelLive::export_all().expect("export DrcPaymentChannelLive");
+        DrcPaymentChannelReceipt::export_all().expect("export DrcPaymentChannelReceipt");
+        DrcPaymentChannelOutcome::export_all().expect("export DrcPaymentChannelOutcome");
+        DrcPaymentChannelFundEvent::export_all().expect("export DrcPaymentChannelFundEvent");
+        DrcPaymentChannelClaimEvent::export_all().expect("export DrcPaymentChannelClaimEvent");
+        DrcPaymentChannelScheduleEvent::export_all()
+            .expect("export DrcPaymentChannelScheduleEvent");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");

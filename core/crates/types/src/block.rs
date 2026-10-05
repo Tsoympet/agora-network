@@ -5,10 +5,15 @@ use ts_rs::TS;
 use crate::{
     AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcCheckCancelTx,
     DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
-    DrcEscrowFinishTx, DrcMultisignBlockAttachment, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
-    DrcTicketCreateTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
+    DrcEscrowFinishTx, DrcMultisignBlockAttachment, DrcPaymentChannelClaimTx,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, OvlExecutionTx, SignedStakeTx,
+    Transaction,
 };
 
+/// Explicit version/domain for bodies carrying native DRC payment channel operations.
+pub const TRIDENT_BLOCK_BODY_V15_VERSION: u16 = 15;
+pub const TRIDENT_BLOCK_BODY_V15_DOMAIN: &[u8] = b"agora-block-body-v15";
 /// Explicit version/domain for bodies carrying native DRC check operations.
 pub const TRIDENT_BLOCK_BODY_V14_VERSION: u16 = 14;
 pub const TRIDENT_BLOCK_BODY_V14_DOMAIN: &[u8] = b"agora-block-body-v14";
@@ -110,6 +115,18 @@ pub struct Block {
     /// Authorized native DRC check cancels.
     #[serde(default)]
     pub drc_check_cancels: Vec<DrcCheckCancelTx>,
+    /// Owner-authorized native DRC payment channel creates.
+    #[serde(default)]
+    pub drc_payment_channel_creates: Vec<DrcPaymentChannelCreateTx>,
+    /// Owner-authorized native DRC payment channel funds.
+    #[serde(default)]
+    pub drc_payment_channel_funds: Vec<DrcPaymentChannelFundTx>,
+    /// Destination-authorized native DRC payment channel claims.
+    #[serde(default)]
+    pub drc_payment_channel_claims: Vec<DrcPaymentChannelClaimTx>,
+    /// Authorized native DRC payment channel closes.
+    #[serde(default)]
+    pub drc_payment_channel_closes: Vec<DrcPaymentChannelCloseTx>,
     /// Detached, body-root-committed DRC multisign authorization (consensus lane).
     #[serde(default)]
     pub drc_multisign_attachments: Vec<DrcMultisignBlockAttachment>,
@@ -137,6 +154,10 @@ impl Block {
             drc_check_creates: Vec::new(),
             drc_check_cashes: Vec::new(),
             drc_check_cancels: Vec::new(),
+            drc_payment_channel_creates: Vec::new(),
+            drc_payment_channel_funds: Vec::new(),
+            drc_payment_channel_claims: Vec::new(),
+            drc_payment_channel_closes: Vec::new(),
             drc_multisign_attachments: Vec::new(),
         }
     }
@@ -177,7 +198,7 @@ impl Block {
     /// data commitments use v5; DRC account policies use v6; address-based DRC
     /// deposit preauthorizations use v7; payment-v4 expiry uses v8; regular keys use v9;
     /// signer lists use v10; detached multisign attachments use v11; ticket creates use v12;
-    /// native DRC escrow uses v13; native DRC checks use v14.
+    /// native DRC escrow uses v13; native DRC checks use v14; native DRC payment channels use v15.
     pub fn compute_body_root(&self) -> Hash {
         let mut inner = self.compute_body_root_with_multisign_attachments();
         if !self.drc_ticket_creates.is_empty() {
@@ -247,6 +268,41 @@ impl Block {
                 create_ids,
                 cash_ids,
                 cancel_ids,
+            ));
+        }
+        if !self.drc_payment_channel_creates.is_empty()
+            || !self.drc_payment_channel_funds.is_empty()
+            || !self.drc_payment_channel_claims.is_empty()
+            || !self.drc_payment_channel_closes.is_empty()
+        {
+            let create_ids: Vec<Hash> = self
+                .drc_payment_channel_creates
+                .iter()
+                .map(DrcPaymentChannelCreateTx::channel_id)
+                .collect();
+            let fund_ids: Vec<Hash> = self
+                .drc_payment_channel_funds
+                .iter()
+                .map(DrcPaymentChannelFundTx::fund_tx_id)
+                .collect();
+            let claim_ids: Vec<Hash> = self
+                .drc_payment_channel_claims
+                .iter()
+                .map(DrcPaymentChannelClaimTx::claim_tx_id)
+                .collect();
+            let close_ids: Vec<Hash> = self
+                .drc_payment_channel_closes
+                .iter()
+                .map(DrcPaymentChannelCloseTx::close_tx_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V15_DOMAIN,
+                TRIDENT_BLOCK_BODY_V15_VERSION,
+                inner,
+                create_ids,
+                fund_ids,
+                claim_ids,
+                close_ids,
             ));
         }
         inner
@@ -454,6 +510,10 @@ impl BorshDeserialize for Block {
             drc_check_creates: deserialize_trailing_vec(reader)?,
             drc_check_cashes: deserialize_trailing_vec(reader)?,
             drc_check_cancels: deserialize_trailing_vec(reader)?,
+            drc_payment_channel_creates: deserialize_trailing_vec(reader)?,
+            drc_payment_channel_funds: deserialize_trailing_vec(reader)?,
+            drc_payment_channel_claims: deserialize_trailing_vec(reader)?,
+            drc_payment_channel_closes: deserialize_trailing_vec(reader)?,
             drc_multisign_attachments: deserialize_trailing_vec(reader)?,
         })
     }

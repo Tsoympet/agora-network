@@ -1,8 +1,9 @@
 use agora_types::{
     AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx,
     DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
-    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
-    OvlExecutionTx, Transaction,
+    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
+    DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, Hash, OvlExecutionTx, Transaction,
 };
 use serde_json::{json, Value};
 
@@ -363,6 +364,91 @@ impl<B: RpcBackend> RpcDispatcher<B> {
             RpcMethod::GetDrcCheckReceipt => {
                 let check_id = param_hash(&req.params, "check_id")?;
                 self.backend.get_drc_check_receipt(&check_id)
+            }
+            RpcMethod::SubmitDrcPaymentChannelCreate => {
+                let raw = req
+                    .params
+                    .get("payment_channel_create")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcPaymentChannelCreateTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_payment_channel_create(tx)?;
+                Ok(json!({ "channel_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcPaymentChannelFund => {
+                let raw = req
+                    .params
+                    .get("payment_channel_fund")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcPaymentChannelFundTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_payment_channel_fund(tx)?;
+                Ok(json!({ "fund_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcPaymentChannelClaim => {
+                let raw = req
+                    .params
+                    .get("payment_channel_claim")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcPaymentChannelClaimTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_payment_channel_claim(tx)?;
+                Ok(json!({ "claim_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcPaymentChannelClose => {
+                let raw = req
+                    .params
+                    .get("payment_channel_close")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcPaymentChannelCloseTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_payment_channel_close(tx)?;
+                Ok(json!({ "close_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcPaymentChannel => {
+                let channel_id = param_hash(&req.params, "channel_id")?;
+                self.backend.get_drc_payment_channel(&channel_id)
+            }
+            RpcMethod::GetDrcPaymentChannelReceipt => {
+                let channel_id = param_hash(&req.params, "channel_id")?;
+                self.backend.get_drc_payment_channel_receipt(&channel_id)
+            }
+            RpcMethod::GetDrcPaymentChannelFundEvent => {
+                let fund_tx_id = param_hash(&req.params, "fund_tx_id")?;
+                self.backend.get_drc_payment_channel_fund_event(&fund_tx_id)
+            }
+            RpcMethod::GetDrcPaymentChannelClaimEvent => {
+                let claim_tx_id = param_hash(&req.params, "claim_tx_id")?;
+                self.backend
+                    .get_drc_payment_channel_claim_event(&claim_tx_id)
+            }
+            RpcMethod::GetDrcPaymentChannelScheduleEvent => {
+                let close_tx_id = param_hash(&req.params, "close_tx_id")?;
+                self.backend
+                    .get_drc_payment_channel_schedule_event(&close_tx_id)
+            }
+            RpcMethod::VerifyDrcPaymentChannelClaim => {
+                let channel_id = param_hash(&req.params, "channel_id")?;
+                let cumulative_authorized = param_amount(&req.params, "cumulative_authorized")?;
+                let channel_claim_signature =
+                    param_hex_bytes(&req.params, "channel_claim_signature")?;
+                self.backend.verify_drc_payment_channel_claim(
+                    &channel_id,
+                    cumulative_authorized,
+                    &channel_claim_signature,
+                )
             }
             RpcMethod::GetDrcAccountSignerList => {
                 let account = param_address(&req.params, "account")?;
@@ -783,6 +869,15 @@ fn parse_hash_value(v: &Value, key: &str) -> Result<Hash, RpcError> {
     Hash::from_hex(s).ok_or_else(|| RpcError::InvalidParams(format!("invalid hash `{s}`")))
 }
 
+fn param_hex_bytes(params: &Value, key: &str) -> Result<Vec<u8>, RpcError> {
+    let v = single_or_named(params, key)?;
+    let s = v
+        .as_str()
+        .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be hex string")))?;
+    hex::decode(s.trim_start_matches("0x"))
+        .map_err(|_| RpcError::InvalidParams(format!("invalid hex `{key}`")))
+}
+
 fn param_address(params: &Value, key: &str) -> Result<Address, RpcError> {
     let v = single_or_named(params, key)?;
     parse_address_value(&v, key)
@@ -1014,6 +1109,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
@@ -1138,6 +1237,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
@@ -1181,6 +1284,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
@@ -1789,6 +1896,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -1848,6 +1959,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -1906,6 +2021,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -1965,6 +2084,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -1998,5 +2121,23 @@ mod tests {
             params: json!({"check_id": "xy", "submitter": agora_types::Address([3;20]).to_bech32()}),
         });
         assert_eq!(bad_cash.error.as_ref().unwrap().code, -32602);
+    }
+
+    #[test]
+    fn get_drc_payment_channel_query_malformed_and_unknown() {
+        let mut backend = InMemoryBackend::new();
+        let mut rpc = RpcDispatcher::new(backend);
+        let bad = rpc.handle(RpcRequest {
+            id: Some(json!(103)),
+            method: "agora_getDrcPaymentChannel".into(),
+            params: json!({"channel_id": "not-hex"}),
+        });
+        assert_eq!(bad.error.as_ref().unwrap().code, -32602);
+        let zero = rpc.handle(RpcRequest {
+            id: Some(json!(104)),
+            method: "agora_getDrcPaymentChannel".into(),
+            params: json!({"channel_id": Hash::ZERO.to_hex()}),
+        });
+        assert_eq!(zero.error.as_ref().unwrap().code, -32602);
     }
 }
