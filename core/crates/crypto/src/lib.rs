@@ -13,6 +13,7 @@ mod drc_deposit_preauth;
 mod drc_escrow;
 mod drc_multisign;
 mod drc_operation;
+mod drc_payment_channel;
 mod drc_policy;
 mod drc_regular_key;
 mod drc_signer_list;
@@ -49,6 +50,13 @@ pub use drc_multisign::{
     verify_drc_multisign_against_list,
 };
 pub use drc_operation::verify_bound_secp256k1;
+pub use drc_payment_channel::{
+    sign_drc_payment_channel_claim_bound, sign_drc_payment_channel_close_bound,
+    sign_drc_payment_channel_create_bound, sign_drc_payment_channel_fund_bound,
+    sign_payment_channel_offledger_claim, verify_drc_payment_channel_claim_bound,
+    verify_drc_payment_channel_close_bound, verify_drc_payment_channel_create_bound,
+    verify_drc_payment_channel_fund_bound, verify_payment_channel_offledger_claim,
+};
 pub use drc_policy::{sign_drc_account_policy_bound, verify_drc_account_policy_bound};
 pub use drc_regular_key::{sign_drc_regular_key_bound, verify_drc_regular_key_bound};
 pub use drc_signer_list::{
