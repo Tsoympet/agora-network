@@ -426,22 +426,18 @@ mod tests {
                 .unwrap()
                 .global_freeze
         );
-        assert!(
-            load_drc_issued_asset_policy_receipt(&store, &policy_id)
-                .unwrap()
-                .is_some()
-        );
+        assert!(load_drc_issued_asset_policy_receipt(&store, &policy_id)
+            .unwrap()
+            .is_some());
         revert_journal(&store, &journal);
         assert!(
             !load_drc_issued_asset_policy(&store, &ast)
                 .unwrap()
                 .global_freeze
         );
-        assert!(
-            load_drc_issued_asset_policy_receipt(&store, &policy_id)
-                .unwrap()
-                .is_none()
-        );
+        assert!(load_drc_issued_asset_policy_receipt(&store, &policy_id)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -505,22 +501,18 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        assert!(
-            load_drc_issued_clawback_receipt(&store, &clawback_id)
-                .unwrap()
-                .is_some()
-        );
+        assert!(load_drc_issued_clawback_receipt(&store, &clawback_id)
+            .unwrap()
+            .is_some());
         revert_journal(&store, &journal);
         assert!(
             load_drc_trust_line_issuer_control_receipt(&store, &control_id)
                 .unwrap()
                 .is_none()
         );
-        assert!(
-            load_drc_issued_clawback_receipt(&store, &clawback_id)
-                .unwrap()
-                .is_none()
-        );
+        assert!(load_drc_issued_clawback_receipt(&store, &clawback_id)
+            .unwrap()
+            .is_none());
     }
 
     #[cfg(feature = "rocksdb")]
