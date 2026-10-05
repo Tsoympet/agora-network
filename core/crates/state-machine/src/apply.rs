@@ -1,5 +1,6 @@
 //! Apply / revert consensus-ordered blocks against multi-lane Trident state.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use agora_crypto::{address_from_pubkey, signer_address, verify_transaction_bound, PublicKeyBytes};
@@ -1063,11 +1064,12 @@ fn apply_block_batched_mode(
         drc_policy_statuses,
         drc_deposit_preauth_statuses,
     };
-    crate::drc_ledger_object::index_accepted_drc_operations_into(
+    crate::drc_ledger_object::index_accepted_drc_operations_with_auth_into(
         store,
         block,
         &acceptance,
         application_blue_score,
+        auth,
         &mut batch,
         &mut journal,
     )?;
@@ -1238,6 +1240,29 @@ fn apply_trident_lanes(
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
 ) -> Result<TridentLaneAcceptances, StateError> {
+    // Validate the detached lane even when no typed operation is present. This
+    // prevents orphan or cross-kind authorization bytes from becoming inert,
+    // consensus-accepted block data.
+    let working_block = if let Some(ctx) = auth {
+        agora_types::validate_drc_multisign_attachment_lane(block, &ctx.chain_id, &ctx.genesis)
+            .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+        if block.drc_multisign_attachments.is_empty() {
+            Cow::Borrowed(block)
+        } else {
+            agora_types::merge_drc_multisign_attachments(block.clone(), &ctx.chain_id, &ctx.genesis)
+                .map(Cow::Owned)
+                .map_err(|e| StateError::InvalidTx(e.to_string()))?
+        }
+    } else {
+        if !block.drc_multisign_attachments.is_empty() {
+            return Err(StateError::InvalidTx(
+                "DRC multisign attachment lane requires network-bound auth".into(),
+            ));
+        }
+        Cow::Borrowed(block)
+    };
+    let block = working_block.as_ref();
+
     if block.drc_ticket_creates.is_empty()
         && block.drc_escrow_creates.is_empty()
         && block.drc_escrow_finishes.is_empty()
@@ -1334,25 +1359,6 @@ fn apply_trident_lanes(
             agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK
         )));
     }
-
-    let working_block = if let Some(ctx) = auth {
-        agora_types::validate_drc_multisign_attachment_lane(block, &ctx.chain_id, &ctx.genesis)
-            .map_err(|e| StateError::InvalidTx(e.to_string()))?;
-        if block.drc_multisign_attachments.is_empty() {
-            block.clone()
-        } else {
-            agora_types::merge_drc_multisign_attachments(block.clone(), &ctx.chain_id, &ctx.genesis)
-                .map_err(|e| StateError::InvalidTx(e.to_string()))?
-        }
-    } else {
-        if !block.drc_multisign_attachments.is_empty() {
-            return Err(StateError::InvalidTx(
-                "DRC multisign attachment lane requires network-bound auth".into(),
-            ));
-        }
-        block.clone()
-    };
-    let block = &working_block;
 
     // Sequential visibility without committing the consensus batch early.
     let lane = store.cow_overlay();

@@ -3463,6 +3463,9 @@ mod drc_check_template_tests;
 #[path = "drc_escrow_template_tests.rs"]
 mod drc_escrow_template_tests;
 #[cfg(test)]
+#[path = "drc_ledger_object_rpc_integration_tests.rs"]
+mod drc_ledger_object_rpc_integration_tests;
+#[cfg(test)]
 #[path = "drc_payment_channel_public_helpers.rs"]
 mod drc_payment_channel_public_helpers;
 #[cfg(test)]

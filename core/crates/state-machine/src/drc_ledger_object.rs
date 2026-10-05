@@ -5,6 +5,7 @@
 //! a sparse `(owner, kind, object_id)` index. It never changes historical block or
 //! transaction encoding.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use agora_types::{
@@ -29,7 +30,7 @@ use crate::drc_ticket::drc_ticket_meta_key;
 use crate::drc_trust_line::trust_line_key;
 use crate::store::WriteBatch;
 use crate::supply::{load_schema_version, put_schema_version_into};
-use crate::{StateError, StateStore, UtxoJournal};
+use crate::{StateError, StateStore, TxAuthContext, UtxoJournal};
 
 pub const DRC_LEDGER_INDEX_SCHEMA_VERSION: u32 = 1;
 pub const DRC_LEDGER_INDEX_DATADIR_SCHEMA: u32 = 21;
@@ -44,6 +45,7 @@ const OPERATION_BY_ID_PREFIX: &[u8] = b"ledger/drc/operation/by-id/";
 const OPERATION_BY_TX_PREFIX: &[u8] = b"ledger/drc/operation/by-tx/";
 const INDEX_MARKER_KEY: &[u8] = b"ledger/drc/index/version";
 const INDEX_MARKER_BYTES: &[u8] = &[1, 0, 0, 0, 21, 0, 0, 0];
+const OWNER_CURSOR_DOMAIN: &[u8] = b"agora-trident-drc-owner-cursor-v1";
 
 const POLICY_PREFIX: &[u8] = b"policy/drc/account/";
 const DEPOSIT_PREAUTH_PREFIX: &[u8] = b"policy/drc/deposit-preauth/";
@@ -75,6 +77,46 @@ struct OwnerCursor {
     filter: Option<DrcLedgerObjectKind>,
     last_kind: DrcLedgerObjectKind,
     last_object_id: Hash,
+    integrity: Hash,
+}
+
+impl OwnerCursor {
+    fn new(
+        owner: Address,
+        filter: Option<DrcLedgerObjectKind>,
+        last_kind: DrcLedgerObjectKind,
+        last_object_id: Hash,
+    ) -> Self {
+        let version = DRC_LEDGER_INDEX_SCHEMA_VERSION;
+        let integrity = Hash::hash_borsh(&(
+            OWNER_CURSOR_DOMAIN,
+            version,
+            owner,
+            filter,
+            last_kind,
+            last_object_id,
+        ));
+        Self {
+            version,
+            owner,
+            filter,
+            last_kind,
+            last_object_id,
+            integrity,
+        }
+    }
+
+    fn has_valid_integrity(&self) -> bool {
+        self.integrity
+            == Hash::hash_borsh(&(
+                OWNER_CURSOR_DOMAIN,
+                self.version,
+                self.owner,
+                self.filter,
+                self.last_kind,
+                self.last_object_id,
+            ))
+    }
 }
 
 fn storage(error: impl ToString) -> StateError {
@@ -328,6 +370,9 @@ fn decode_owner_row(key: &[u8]) -> Result<(Address, DrcLedgerObjectKind, Hash), 
 }
 
 fn encode_cursor(cursor: &OwnerCursor) -> Result<String, StateError> {
+    if !cursor.has_valid_integrity() {
+        return Err(storage("refusing to encode malformed DRC owner cursor"));
+    }
     borsh::to_vec(cursor).map(hex::encode).map_err(storage)
 }
 
@@ -339,7 +384,8 @@ fn decode_cursor(
     let bytes = hex::decode(value).map_err(|_| StateError::InvalidTx("malformed cursor".into()))?;
     let cursor = OwnerCursor::try_from_slice(&bytes)
         .map_err(|_| StateError::InvalidTx("malformed cursor".into()))?;
-    if cursor.version != DRC_LEDGER_INDEX_SCHEMA_VERSION
+    if !cursor.has_valid_integrity()
+        || cursor.version != DRC_LEDGER_INDEX_SCHEMA_VERSION
         || cursor.owner != owner
         || cursor.filter != filter
         || filter.is_some_and(|kind| cursor.last_kind != kind)
@@ -399,13 +445,12 @@ pub fn list_drc_account_objects(
         let last = objects
             .last()
             .ok_or_else(|| storage("DRC pagination produced an empty continuation"))?;
-        Some(encode_cursor(&OwnerCursor {
-            version: DRC_LEDGER_INDEX_SCHEMA_VERSION,
+        Some(encode_cursor(&OwnerCursor::new(
             owner,
-            filter: kind,
-            last_kind: last.kind,
-            last_object_id: last.object_id,
-        })?)
+            kind,
+            last.kind,
+            last.object_id,
+        ))?)
     } else {
         None
     };
@@ -776,6 +821,33 @@ fn collect_accepted_operations(
     Ok(operations)
 }
 
+fn operation_receipt_block<'a>(
+    block: &'a Block,
+    auth: Option<&TxAuthContext>,
+) -> Result<Cow<'a, Block>, StateError> {
+    match auth {
+        Some(ctx) => {
+            agora_types::validate_drc_multisign_attachment_lane(block, &ctx.chain_id, &ctx.genesis)
+                .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+            if block.drc_multisign_attachments.is_empty() {
+                Ok(Cow::Borrowed(block))
+            } else {
+                agora_types::merge_drc_multisign_attachments(
+                    block.clone(),
+                    &ctx.chain_id,
+                    &ctx.genesis,
+                )
+                .map(Cow::Owned)
+                .map_err(|error| StateError::InvalidTx(error.to_string()))
+            }
+        }
+        None if block.drc_multisign_attachments.is_empty() => Ok(Cow::Borrowed(block)),
+        None => Err(StateError::InvalidTx(
+            "DRC accepted-operation indexing requires network-bound attachment auth".into(),
+        )),
+    }
+}
+
 fn direct_operation_object_keys(operation: &DrcOperation) -> Vec<DrcLedgerObjectKey> {
     match operation {
         DrcOperation::AccountTransfer(_) | DrcOperation::Stake(_) | DrcOperation::Payment(_) => {
@@ -989,8 +1061,29 @@ pub fn index_accepted_drc_operations_into(
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
 ) -> Result<(), StateError> {
+    index_accepted_drc_operations_with_auth_into(
+        store,
+        block,
+        acceptance,
+        application_blue_score,
+        None,
+        batch,
+        journal,
+    )
+}
+
+pub fn index_accepted_drc_operations_with_auth_into(
+    store: &StateStore,
+    block: &Block,
+    acceptance: &BlockAcceptanceRecord,
+    application_blue_score: Option<u64>,
+    auth: Option<&TxAuthContext>,
+    batch: &mut WriteBatch,
+    journal: &mut UtxoJournal,
+) -> Result<(), StateError> {
     let schema = load_schema_version(store)?;
-    let operations = collect_accepted_operations(block, acceptance)?;
+    let receipt_block = operation_receipt_block(block, auth)?;
+    let operations = collect_accepted_operations(receipt_block.as_ref(), acceptance)?;
     if schema < DRC_LEDGER_INDEX_DATADIR_SCHEMA {
         // Schema-20 recovery must be able to finish an interrupted virtual
         // reorg before the canonical view can be migrated atomically. Older
@@ -1203,6 +1296,14 @@ pub fn migrate_drc_ledger_object_index_schema(
     store: &StateStore,
     applied_blocks: &[(Hash, u64)],
 ) -> Result<(), StateError> {
+    migrate_drc_ledger_object_index_schema_with_auth(store, applied_blocks, None)
+}
+
+pub fn migrate_drc_ledger_object_index_schema_with_auth(
+    store: &StateStore,
+    applied_blocks: &[(Hash, u64)],
+    auth: Option<&TxAuthContext>,
+) -> Result<(), StateError> {
     let schema = load_schema_version(store)?;
     if schema == DRC_LEDGER_INDEX_DATADIR_SCHEMA {
         return verify_drc_ledger_object_index(store);
@@ -1284,7 +1385,8 @@ pub fn migrate_drc_ledger_object_index_schema(
     let mut transaction_ids = BTreeSet::new();
     let mut block_objects = BTreeMap::new();
     for (block_id, blue_score, block, acceptance, journal) in &records {
-        let operations = collect_accepted_operations(block, acceptance)?;
+        let receipt_block = operation_receipt_block(block, auth)?;
+        let operations = collect_accepted_operations(receipt_block.as_ref(), acceptance)?;
         let object_keys = affected_object_keys(store, &operations, journal)?;
         block_objects.insert(*block_id, object_keys.clone());
         for operation in operations {
@@ -1317,7 +1419,8 @@ pub fn migrate_drc_ledger_object_index_schema(
     verify_drc_ledger_object_index(&overlay)?;
 
     for (block_id, _, block, acceptance, mut journal) in records.into_iter().rev() {
-        let operations = collect_accepted_operations(&block, &acceptance)?;
+        let receipt_block = operation_receipt_block(&block, auth)?;
+        let operations = collect_accepted_operations(receipt_block.as_ref(), &acceptance)?;
         let object_keys = block_objects
             .remove(&block_id)
             .ok_or_else(|| storage("migration lost block object set"))?;
@@ -1429,8 +1532,10 @@ pub fn reindex_drc_ledger_objects(store: &StateStore) -> Result<(), StateError> 
             marker,
         );
     }
-    store.write_batch(batch)?;
-    verify_drc_ledger_object_index(store)
+    let overlay = store.cow_overlay();
+    overlay.write_batch(batch.clone())?;
+    verify_drc_ledger_object_index(&overlay)?;
+    store.write_batch(batch)
 }
 
 pub(crate) fn common_index_prefix() -> &'static [u8] {
@@ -1445,6 +1550,14 @@ mod tests {
         apply_block_capture, auth, coinbase, fund, key, signed_create,
     };
     use crate::supply::{put_burned_supply_into, put_schema_version_into};
+    use agora_types::{
+        Amount, DrcAccountSignerList, DrcAccountTickets, DrcCheckLive, DrcEscrowLive,
+        DrcIssuedAssetPolicyLive, DrcLedgerObject, DrcPaymentChannelLive, DrcSignerListEntry,
+        DrcTrustLineLive, IssuedAmount, IssuedAssetId, IssuedCurrencyCode,
+        DRC_CHECK_LIVE_STATE_VERSION, DRC_ESCROW_LIVE_STATE_VERSION,
+        DRC_PAYMENT_CHANNEL_LIVE_STATE_VERSION, DRC_SIGNER_LIST_STATE_VERSION,
+        DRC_TICKET_STATE_VERSION,
+    };
 
     fn ready_store() -> StateStore {
         let store = StateStore::open_in_memory();
@@ -1473,16 +1586,39 @@ mod tests {
         let store = ready_store();
         let owner = Address([1; 20]);
         assert!(list_drc_account_objects(&store, owner, None, 0, None).is_err());
+        assert!(list_drc_account_objects(&store, owner, None, 101, None).is_err());
         assert!(list_drc_account_objects(&store, owner, None, 1, Some("xyz")).is_err());
-        let cursor = encode_cursor(&OwnerCursor {
-            version: DRC_LEDGER_INDEX_SCHEMA_VERSION,
-            owner: Address([2; 20]),
-            filter: None,
-            last_kind: DrcLedgerObjectKind::TicketSet,
-            last_object_id: Hash([3; 32]),
-        })
+        let cursor = encode_cursor(&OwnerCursor::new(
+            Address([2; 20]),
+            None,
+            DrcLedgerObjectKind::TicketSet,
+            Hash([3; 32]),
+        ))
         .unwrap();
         assert!(list_drc_account_objects(&store, owner, None, 1, Some(&cursor)).is_err());
+
+        let cursor = encode_cursor(&OwnerCursor::new(
+            owner,
+            None,
+            DrcLedgerObjectKind::TicketSet,
+            Hash([3; 32]),
+        ))
+        .unwrap();
+        assert!(list_drc_account_objects(
+            &store,
+            owner,
+            Some(DrcLedgerObjectKind::TicketSet),
+            1,
+            Some(&cursor),
+        )
+        .is_err());
+
+        let mut tampered = hex::decode(cursor).unwrap();
+        *tampered.last_mut().unwrap() ^= 1;
+        assert!(
+            list_drc_account_objects(&store, owner, None, 1, Some(&hex::encode(tampered)),)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1507,6 +1643,140 @@ mod tests {
                 &borsh::to_vec(&record).unwrap(),
             )
             .unwrap();
+    }
+
+    fn put_source_object(store: &StateStore, object: &DrcLedgerObject) {
+        let bytes = match object {
+            DrcLedgerObject::AccountPolicy { policy, .. } => borsh::to_vec(policy),
+            DrcLedgerObject::DepositPreauthorization(value) => borsh::to_vec(value),
+            DrcLedgerObject::RegularKey(value) => borsh::to_vec(value),
+            DrcLedgerObject::SignerList(value) => borsh::to_vec(value),
+            DrcLedgerObject::TicketSet(value) => borsh::to_vec(value),
+            DrcLedgerObject::Escrow(value) => borsh::to_vec(value),
+            DrcLedgerObject::Check(value) => borsh::to_vec(value),
+            DrcLedgerObject::PaymentChannel(value) => borsh::to_vec(value),
+            DrcLedgerObject::TrustLine(value) => borsh::to_vec(value),
+            DrcLedgerObject::IssuedAssetPolicy(value) => borsh::to_vec(value),
+        }
+        .unwrap();
+        store
+            .put_cf(ColumnFamily::Meta, &source_key(&object.key()), &bytes)
+            .unwrap();
+    }
+
+    fn all_sample_objects() -> Vec<DrcLedgerObject> {
+        let owner = Address([0x11; 20]);
+        let peer = Address([0x22; 20]);
+        let issuer = Address([0x33; 20]);
+        let mut currency = [0u8; 20];
+        currency[..3].copy_from_slice(b"USD");
+        let asset = IssuedAssetId {
+            issuer,
+            currency: IssuedCurrencyCode(currency),
+        };
+        vec![
+            DrcLedgerObject::AccountPolicy {
+                account: owner,
+                policy: DrcAccountPolicy::default(),
+            },
+            DrcLedgerObject::DepositPreauthorization(DrcDepositPreauth::new(owner, peer)),
+            DrcLedgerObject::RegularKey(DrcAccountRegularKey::new(owner, peer)),
+            DrcLedgerObject::SignerList(DrcAccountSignerList {
+                version: DRC_SIGNER_LIST_STATE_VERSION,
+                owner,
+                quorum: 1,
+                entries: vec![DrcSignerListEntry {
+                    signer: peer,
+                    weight: 1,
+                }],
+            }),
+            DrcLedgerObject::TicketSet(DrcAccountTickets {
+                version: DRC_TICKET_STATE_VERSION,
+                owner,
+                sequences: vec![7, 8],
+            }),
+            DrcLedgerObject::Escrow(DrcEscrowLive {
+                version: DRC_ESCROW_LIVE_STATE_VERSION,
+                escrow_id: Hash([0x61; 32]),
+                owner,
+                recipient: peer,
+                amount: Amount::from_base_units(10),
+                destination_tag: None,
+                source_tag: None,
+                invoice_id: Hash::ZERO,
+                finish_after_blue_score: None,
+                cancel_after_blue_score: Some(100),
+                create_blue_score: 1,
+            }),
+            DrcLedgerObject::Check(DrcCheckLive {
+                version: DRC_CHECK_LIVE_STATE_VERSION,
+                check_id: Hash([0x62; 32]),
+                owner,
+                destination: peer,
+                amount: Amount::from_base_units(11),
+                destination_tag: None,
+                source_tag: None,
+                invoice_id: Hash::ZERO,
+                expires_after_blue_score: Some(100),
+                create_blue_score: 1,
+            }),
+            DrcLedgerObject::PaymentChannel(DrcPaymentChannelLive {
+                version: DRC_PAYMENT_CHANNEL_LIVE_STATE_VERSION,
+                channel_id: Hash([0x63; 32]),
+                owner,
+                destination: peer,
+                destination_tag: None,
+                source_tag: None,
+                invoice_id: Hash::ZERO,
+                claim_public_key: vec![2; 33],
+                settle_delay_blue_scores: 2,
+                cancel_after_blue_score: Some(100),
+                total_funded: Amount::from_base_units(20),
+                cumulative_claimed: Amount::from_base_units(3),
+                close_finalizable_after: None,
+                create_blue_score: 1,
+            }),
+            DrcLedgerObject::TrustLine(DrcTrustLineLive::v1_defaults(
+                owner,
+                asset,
+                IssuedAmount::from_units(100),
+                IssuedAmount::from_units(4),
+                false,
+            )),
+            DrcLedgerObject::IssuedAssetPolicy(DrcIssuedAssetPolicyLive::default_for_asset(asset)),
+        ]
+    }
+
+    #[test]
+    fn all_supported_live_families_have_typed_ids_point_lookup_and_owner_rows() {
+        let store = ready_store();
+        let objects = all_sample_objects();
+        for object in &objects {
+            put_source_object(&store, object);
+        }
+        reindex_drc_ledger_objects(&store).unwrap();
+
+        let mut kinds = BTreeSet::new();
+        let mut ids = BTreeSet::new();
+        for object in objects {
+            let expected = DrcLedgerObjectDescriptor::new(object);
+            let loaded = load_drc_ledger_object(&store, &expected.object_id)
+                .unwrap()
+                .expect("sample object is indexed");
+            assert_eq!(loaded, expected);
+            assert!(kinds.insert(loaded.kind));
+            assert!(ids.insert(loaded.object_id));
+            let owner_page =
+                list_drc_account_objects(&store, loaded.owner, Some(loaded.kind), 100, None)
+                    .unwrap();
+            assert!(owner_page
+                .objects
+                .iter()
+                .any(|candidate| candidate.object_id == loaded.object_id));
+        }
+        assert_eq!(kinds, DrcLedgerObjectKind::ALL.into_iter().collect());
+        assert_eq!(ids.len(), DrcLedgerObjectKind::ALL.len());
+        verify_drc_ledger_object_index(&store).unwrap();
     }
 
     #[test]
@@ -1562,13 +1832,12 @@ mod tests {
         .objects
         .is_empty());
 
-        let foreign_cursor = encode_cursor(&OwnerCursor {
-            version: DRC_LEDGER_INDEX_SCHEMA_VERSION,
-            owner: other,
-            filter: None,
-            last_kind: DrcLedgerObjectKind::DepositPreauthorization,
-            last_object_id: Hash([9; 32]),
-        })
+        let foreign_cursor = encode_cursor(&OwnerCursor::new(
+            other,
+            None,
+            DrcLedgerObjectKind::DepositPreauthorization,
+            Hash([9; 32]),
+        ))
         .unwrap();
         assert!(list_drc_account_objects(&store, owner, None, 1, Some(&foreign_cursor)).is_err());
     }
@@ -1616,6 +1885,55 @@ mod tests {
             .unwrap();
         assert!(load_drc_ledger_object(&store, &descriptor.object_id).is_err());
         assert!(verify_drc_ledger_object_index(&store).is_err());
+    }
+
+    #[test]
+    fn missing_receipt_fails_closed_and_reindex_does_not_partially_commit() {
+        let store = ready_store();
+        let owner = key(12);
+        let recipient = key(13);
+        let ctx = auth();
+        fund(&store, &owner, 1_000);
+        let create = signed_create(
+            &owner,
+            recipient.address(),
+            10,
+            Some(1),
+            None,
+            0,
+            &ctx,
+            None,
+        );
+        let operation = DrcOperation::EscrowCreate(create.clone());
+        let object_id = DrcLedgerObjectKey::Escrow {
+            escrow_id: create.escrow_id(),
+        }
+        .object_id();
+        let mut block = coinbase(vec![Hash::ZERO], &owner);
+        block.drc_escrow_creates.push(create);
+        apply_block_capture(&store, block, 1, &ctx);
+
+        let descriptor = load_drc_ledger_object(&store, &object_id).unwrap().unwrap();
+        let owner_key =
+            object_by_owner_key(&descriptor.owner, descriptor.kind, &descriptor.object_id);
+        store
+            .delete_cf(
+                ColumnFamily::Meta,
+                &operation_by_id_key(&operation.operation_id()),
+            )
+            .unwrap();
+        store.delete_cf(ColumnFamily::Meta, &owner_key).unwrap();
+
+        assert!(load_drc_transaction(&store, &operation.historical_transaction_id()).is_err());
+        assert!(verify_drc_ledger_object_index(&store).is_err());
+        assert!(reindex_drc_ledger_objects(&store).is_err());
+        assert!(
+            store
+                .get_cf(ColumnFamily::Meta, &owner_key)
+                .unwrap()
+                .is_none(),
+            "failed reindex must not commit a partial object repair"
+        );
     }
 
     #[test]
@@ -1758,18 +2076,6 @@ mod tests {
         let mut block = coinbase(vec![Hash::ZERO], &owner);
         block.drc_escrow_creates.push(create);
         block.header.tx_root = block.compute_body_root();
-        let (block_id, mut journal, acceptance) =
-            apply_block_capture(&store, block.clone(), 1, &ctx);
-        store
-            .put_cf(
-                ColumnFamily::Hot,
-                block_id.as_bytes(),
-                &borsh::to_vec(&block).unwrap(),
-            )
-            .unwrap();
-        journal.drc_ledger_index_meta_before.clear();
-        crate::store_utxo_journal(&store, &block_id, &journal).unwrap();
-        crate::store_acceptance(&store, &block_id, &acceptance).unwrap();
 
         let mut downgrade = WriteBatch::new();
         for (key, _) in store
@@ -1784,6 +2090,22 @@ mod tests {
             &(DRC_LEDGER_INDEX_DATADIR_SCHEMA - 1).to_le_bytes(),
         );
         store.write_batch(downgrade).unwrap();
+
+        let (block_id, journal, acceptance) = apply_block_capture(&store, block.clone(), 1, &ctx);
+        assert!(journal.drc_ledger_index_meta_before.is_empty());
+        assert!(store
+            .scan_prefix(ColumnFamily::Meta, common_index_prefix())
+            .unwrap()
+            .is_empty());
+        store
+            .put_cf(
+                ColumnFamily::Hot,
+                block_id.as_bytes(),
+                &borsh::to_vec(&block).unwrap(),
+            )
+            .unwrap();
+        crate::store_utxo_journal(&store, &block_id, &journal).unwrap();
+        crate::store_acceptance(&store, &block_id, &acceptance).unwrap();
 
         migrate_drc_ledger_object_index_schema(&store, &[(Hash::ZERO, 0), (block_id, 1)]).unwrap();
         assert!(load_drc_operation(&store, &operation.operation_id())

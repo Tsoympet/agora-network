@@ -206,8 +206,9 @@ pub use drc_issued_controls::{
 };
 pub use drc_ledger_object::{
     drc_ledger_object_index_root, index_accepted_drc_operations_into,
-    initialize_drc_ledger_index_into, list_drc_account_objects, load_drc_ledger_object,
-    load_drc_operation, load_drc_transaction, migrate_drc_ledger_object_index_schema,
+    index_accepted_drc_operations_with_auth_into, initialize_drc_ledger_index_into,
+    list_drc_account_objects, load_drc_ledger_object, load_drc_operation, load_drc_transaction,
+    migrate_drc_ledger_object_index_schema, migrate_drc_ledger_object_index_schema_with_auth,
     reindex_drc_ledger_objects, verify_drc_ledger_index_ready, verify_drc_ledger_object_index,
     DRC_LEDGER_INDEX_DATADIR_SCHEMA, DRC_LEDGER_INDEX_SCHEMA_VERSION,
     DRC_LEDGER_OBJECT_INDEX_ROOT_DOMAIN, DRC_LEDGER_OBJECT_PAGE_MAX,

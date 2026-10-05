@@ -553,6 +553,82 @@ mod tests {
     }
 
     #[test]
+    fn object_id_vectors_cover_every_closed_kind() {
+        let owner = Address([1; 20]);
+        let issuer = Address([3; 20]);
+        let mut currency = [0u8; 20];
+        currency[..3].copy_from_slice(b"USD");
+        let asset = IssuedAssetId {
+            issuer,
+            currency: crate::IssuedCurrencyCode(currency),
+        };
+        let vectors = [
+            (
+                DrcLedgerObjectKey::AccountPolicy { account: owner },
+                "32d1de7e77054089230f3b9f94e92f0a87dc4fd1f448c6b4c929d82ffd2d2550",
+            ),
+            (
+                DrcLedgerObjectKey::DepositPreauthorization {
+                    owner,
+                    authorized_source: Address([2; 20]),
+                },
+                "f67dc24ad877e92ad8e083f3d3a8af3b694b85bf79c69d663a9770d765979b10",
+            ),
+            (
+                DrcLedgerObjectKey::RegularKey { owner },
+                "4818e092e2155dea65e91a43fc0e4ac603922be1ea007ed3129208cb1c989ef6",
+            ),
+            (
+                DrcLedgerObjectKey::SignerList { owner },
+                "de1ad993508e15c88cf9561f5bd047790438305742ccc0910490fde736ed9b8f",
+            ),
+            (
+                DrcLedgerObjectKey::TicketSet { owner },
+                "d9d4ff60e24e3ca15430a8f31430ca7daa4aa045610c53aca7a12871d060fb8e",
+            ),
+            (
+                DrcLedgerObjectKey::Escrow {
+                    escrow_id: Hash([6; 32]),
+                },
+                "b9cd844658d7837f341f105d7b7e83a1d3640654f0c38bc5f000b6b59bf2e1ef",
+            ),
+            (
+                DrcLedgerObjectKey::Check {
+                    check_id: Hash([7; 32]),
+                },
+                "6f96bdd108e2a70c66ae6a87cf27f30310fcf043b9ab7c5af5b681094f1523cf",
+            ),
+            (
+                DrcLedgerObjectKey::PaymentChannel {
+                    channel_id: Hash([8; 32]),
+                },
+                "5822f988fd0928063c7d7b502b5b16bb5c122ee4324e933d472344d8076ca135",
+            ),
+            (
+                DrcLedgerObjectKey::TrustLine {
+                    holder: owner,
+                    asset,
+                },
+                "e9e9cbad113589a7c8f094e8f2cb54bbcfc7c05bfa1d50796eeb99bb5adf5a63",
+            ),
+            (
+                DrcLedgerObjectKey::IssuedAssetPolicy { asset },
+                "e1baf11ab8ac7bbc55d0e6ae438315a34472cbe250b09bc29f01f33d2af87b58",
+            ),
+        ];
+
+        let mut kinds = std::collections::BTreeSet::new();
+        let mut ids = std::collections::BTreeSet::new();
+        for (key, expected) in vectors {
+            assert_eq!(key.object_id(), Hash::from_hex(expected).unwrap());
+            assert!(kinds.insert(key.kind()));
+            assert!(ids.insert(key.object_id()));
+        }
+        assert_eq!(kinds, DrcLedgerObjectKind::ALL.into_iter().collect());
+        assert_eq!(ids.len(), DrcLedgerObjectKind::ALL.len());
+    }
+
+    #[test]
     fn object_kind_parser_is_closed() {
         assert_eq!(
             DrcLedgerObjectKind::parse("payment_channel"),

@@ -287,6 +287,64 @@ mod tests {
     }
 
     #[test]
+    fn block_apply_rejects_orphan_attachment_when_all_typed_lanes_are_empty() {
+        let store = StateStore::open_in_memory();
+        let ctx = auth();
+        let master = key(11);
+        fund(&store, &master, 100);
+        let mut payment = DrcPaymentTx::unsigned(
+            master.address(),
+            key(12).address(),
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            0,
+            Hash::ZERO,
+            1,
+        );
+        payment.public_key.clear();
+        payment.signature.clear();
+        payment.multisign = Some(multisign_bundle(
+            master.address(),
+            &payment.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
+            &[(&key(13), 1)],
+            &ctx,
+        ));
+
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![Transaction::unsigned(
+                1,
+                vec![],
+                vec![TxOut {
+                    value: Amount::from_base_units(50),
+                    address: master.address(),
+                }],
+                1,
+            )],
+        );
+        block.drc_payments.push(payment);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block.drc_payments.clear();
+        block.header.tx_root = block.compute_body_root();
+
+        let error = match apply_block_batched_with_auth(&store, &block, 50, Some(&ctx)) {
+            Err(error) => error,
+            Ok(_) => panic!("orphan attachment must fail before state application"),
+        };
+        assert!(
+            error.to_string().contains("orphan") || error.to_string().contains("attachment"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn legacy_v10_body_root_unchanged_without_attachments() {
         let block = Block::utxo(
             BlockHeader {

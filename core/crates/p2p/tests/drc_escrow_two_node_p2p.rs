@@ -274,6 +274,8 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
             signature: sig,
         }],
     });
+    let submitted_operation = DrcOperation::EscrowCreate(create.clone());
+    let submitted_transaction_id = submitted_operation.historical_transaction_id();
 
     let mut block = Block::utxo(
         BlockHeader {
@@ -340,14 +342,23 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
         list_drc_account_objects(&store_a, owner.address(), None, 100, None).unwrap(),
         list_drc_account_objects(&store_b, owner.address(), None, 100, None).unwrap()
     );
-    let operation = DrcOperation::EscrowCreate(block.drc_escrow_creates[0].clone());
     assert_eq!(
-        load_drc_operation(&store_a, &operation.operation_id()).unwrap(),
-        load_drc_operation(&store_b, &operation.operation_id()).unwrap()
+        load_drc_operation(&store_a, &submitted_operation.operation_id()).unwrap(),
+        load_drc_operation(&store_b, &submitted_operation.operation_id()).unwrap()
     );
-    assert_eq!(
-        load_drc_transaction(&store_a, &operation.historical_transaction_id()).unwrap(),
-        load_drc_transaction(&store_b, &operation.historical_transaction_id()).unwrap()
+    let receipt_a = load_drc_transaction(&store_a, &submitted_transaction_id)
+        .unwrap()
+        .expect("submitted multisign transaction is indexed");
+    let receipt_b = load_drc_transaction(&store_b, &submitted_transaction_id)
+        .unwrap()
+        .expect("relayed multisign transaction is indexed");
+    assert_eq!(receipt_a, receipt_b);
+    assert_eq!(receipt_a.operation, submitted_operation);
+    assert_eq!(receipt_a.canonical_block_id, hash);
+    assert_ne!(
+        submitted_transaction_id,
+        block.drc_escrow_creates[0].escrow_id(),
+        "detached block bytes must remain distinct from the reconstructed transaction"
     );
 
     let mut tampered = received;
