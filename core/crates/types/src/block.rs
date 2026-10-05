@@ -67,7 +67,7 @@ impl BlockHeader {
 }
 
 /// Full Trident body: TLT UTXO plus native account, stake, execution, payment, and data lanes.
-#[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, Serialize, Deserialize, TS)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
 pub struct Block {
     pub header: BlockHeader,
     /// TLT UTXO lane (coinbase + transfers).
@@ -189,6 +189,31 @@ impl Block {
 
     pub fn id(&self) -> Hash {
         self.header.hash()
+    }
+
+    fn has_post_v4_body_lanes(&self) -> bool {
+        !self.data_commitments.is_empty()
+            || !self.drc_account_policies.is_empty()
+            || !self.drc_deposit_preauths.is_empty()
+            || !self.drc_regular_keys.is_empty()
+            || !self.drc_signer_lists.is_empty()
+            || !self.drc_ticket_creates.is_empty()
+            || !self.drc_escrow_creates.is_empty()
+            || !self.drc_escrow_finishes.is_empty()
+            || !self.drc_escrow_cancels.is_empty()
+            || !self.drc_check_creates.is_empty()
+            || !self.drc_check_cashes.is_empty()
+            || !self.drc_check_cancels.is_empty()
+            || !self.drc_payment_channel_creates.is_empty()
+            || !self.drc_payment_channel_funds.is_empty()
+            || !self.drc_payment_channel_claims.is_empty()
+            || !self.drc_payment_channel_closes.is_empty()
+            || !self.drc_trust_line_sets.is_empty()
+            || !self.drc_issued_transfers.is_empty()
+            || !self.drc_issued_asset_policy_sets.is_empty()
+            || !self.drc_trust_line_issuer_controls.is_empty()
+            || !self.drc_issued_clawbacks.is_empty()
+            || !self.drc_multisign_attachments.is_empty()
     }
 
     /// Compute a simple pairwise tx merkle root (duplicate last leaf when odd).
@@ -561,6 +586,46 @@ impl Block {
     }
 }
 
+impl BorshSerialize for Block {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        BorshSerialize::serialize(&self.header, writer)?;
+        BorshSerialize::serialize(&self.transactions, writer)?;
+        BorshSerialize::serialize(&self.account_transfers, writer)?;
+        BorshSerialize::serialize(&self.stake_ops, writer)?;
+        BorshSerialize::serialize(&self.ovl_executions, writer)?;
+        BorshSerialize::serialize(&self.drc_payments, writer)?;
+
+        // Frozen v2 bytes include the original account, stake, OVL, and DRC
+        // lanes; later empty lanes must not extend that canonical encoding.
+        if !self.has_post_v4_body_lanes() {
+            return Ok(());
+        }
+
+        BorshSerialize::serialize(&self.data_commitments, writer)?;
+        BorshSerialize::serialize(&self.drc_account_policies, writer)?;
+        BorshSerialize::serialize(&self.drc_deposit_preauths, writer)?;
+        BorshSerialize::serialize(&self.drc_regular_keys, writer)?;
+        BorshSerialize::serialize(&self.drc_signer_lists, writer)?;
+        BorshSerialize::serialize(&self.drc_ticket_creates, writer)?;
+        BorshSerialize::serialize(&self.drc_escrow_creates, writer)?;
+        BorshSerialize::serialize(&self.drc_escrow_finishes, writer)?;
+        BorshSerialize::serialize(&self.drc_escrow_cancels, writer)?;
+        BorshSerialize::serialize(&self.drc_check_creates, writer)?;
+        BorshSerialize::serialize(&self.drc_check_cashes, writer)?;
+        BorshSerialize::serialize(&self.drc_check_cancels, writer)?;
+        BorshSerialize::serialize(&self.drc_payment_channel_creates, writer)?;
+        BorshSerialize::serialize(&self.drc_payment_channel_funds, writer)?;
+        BorshSerialize::serialize(&self.drc_payment_channel_claims, writer)?;
+        BorshSerialize::serialize(&self.drc_payment_channel_closes, writer)?;
+        BorshSerialize::serialize(&self.drc_trust_line_sets, writer)?;
+        BorshSerialize::serialize(&self.drc_issued_transfers, writer)?;
+        BorshSerialize::serialize(&self.drc_issued_asset_policy_sets, writer)?;
+        BorshSerialize::serialize(&self.drc_trust_line_issuer_controls, writer)?;
+        BorshSerialize::serialize(&self.drc_issued_clawbacks, writer)?;
+        BorshSerialize::serialize(&self.drc_multisign_attachments, writer)
+    }
+}
+
 impl BorshDeserialize for Block {
     fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
         Ok(Self {
@@ -894,6 +959,31 @@ mod tests {
         stake_ops: Vec<SignedStakeTx>,
         ovl_executions: Vec<OvlExecutionTx>,
         drc_payments: Vec<DrcPaymentTx>,
+    }
+
+    #[test]
+    fn empty_post_v4_lanes_preserve_v4_block_bytes() {
+        let header = BlockHeader {
+            version: 1,
+            parents: vec![Hash([7; 32])],
+            timestamp_ms: 8,
+            bits: 9,
+            nonce: 10,
+            tx_root: Hash([11; 32]),
+        };
+        let block = Block::utxo(header.clone(), Vec::new());
+        let legacy = LegacyV4Block {
+            header,
+            transactions: Vec::new(),
+            account_transfers: Vec::new(),
+            stake_ops: Vec::new(),
+            ovl_executions: Vec::new(),
+            drc_payments: Vec::new(),
+        };
+
+        let bytes = borsh::to_vec(&block).unwrap();
+        assert_eq!(bytes, borsh::to_vec(&legacy).unwrap());
+        assert_eq!(Block::try_from_slice(&bytes).unwrap(), block);
     }
 
     #[derive(BorshSerialize)]

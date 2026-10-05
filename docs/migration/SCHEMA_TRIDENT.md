@@ -18,7 +18,13 @@
 | `10` | Authenticated DA commitment/source-sequence index, operator replay cursor, acceptance, and revert snapshots |
 | `11` | Root-committed exact-delivery DRC receipt index and reorg snapshots |
 | `12` | Owner-authorized DRC recipient policy and payment-v3 destination-tag presence |
-| `13` (current) | Address-based DRC DepositAuth policy/preauthorization state, acceptance, and reorg snapshots |
+| `13` | Address-based DRC DepositAuth policy/preauthorization state, acceptance, and reorg snapshots |
+| `14` | Signed DRC payment-v4 GHOSTDAG blue-score expiry metadata |
+| `15` | DRC regular-key state and authorization journals |
+| `16` | DRC weighted signer-list state and authorization journals |
+| `17` | Detached DRC multisign-attachment block lane |
+| `18` | DRC master-key-disable policy with no-lockout enforcement |
+| `19` (current) | Additive DRC ticket, escrow, check, payment-channel, trust-line, issued-control, receipt, and revert-journal key families |
 
 Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
@@ -37,6 +43,10 @@ Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 - DRC payments: `payment/drc/seen|invoice|outbox|receipt/…`
 - DRC policy/preauthorization:
   `policy/drc/account/…`, `policy/drc/deposit-preauth/<owner><source>`
+- DRC authorization: regular keys, signer lists, tickets, and detached
+  multisign-attachment commitments
+- DRC settlement objects: escrow, checks, payment channels, issuer-scoped trust
+  lines/liabilities, issued-asset controls, and point-query receipts
 - Governance: `governance/consensus/policy`, `governance/treasury/<id>`
 - Community: `community/v1/summary|hub|passport|grant|mission|issuer_nonce|active_issuer`
 - Data commitments: `da/v1/commitment/<source><sequence_be>`,
@@ -44,7 +54,8 @@ Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
 Atomic `WriteBatch` commit rules from PRs #76–#81 remain mandatory.
 
-Schema 13 does not reinterpret frozen payment-v1/v2/v3, outbox-v1/v2,
-receipt-v1, policy-v1, or historical block bytes. An older Experimental
-datadir needs replay/reindex (or a fresh Trident datadir) before DepositAuth is
-activated.
+Schema 19 does not reinterpret frozen historical block or transaction bytes.
+The later DRC objects are additive, but their body, signing, state-transition,
+and P2P versions still gate consensus compatibility. An older Experimental
+datadir needs replay/reindex (or a fresh Trident datadir) before public
+activation; no in-place migration CLI is claimed here.

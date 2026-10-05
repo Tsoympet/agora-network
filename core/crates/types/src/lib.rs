@@ -351,9 +351,18 @@ mod ts_export {
         "DrcEscrowLive.ts",
         "DrcEscrowReceipt.ts",
         "DrcEscrowOutcome.ts",
+        "DrcIssuedAssetPolicyAction.ts",
+        "DrcIssuedAssetPolicyLive.ts",
+        "DrcIssuedAssetPolicyReceipt.ts",
+        "DrcIssuedAssetPolicySetTx.ts",
+        "DrcIssuedClawbackReceipt.ts",
+        "DrcIssuedClawbackTx.ts",
         "DrcPaymentReceipt.ts",
         "DrcPaymentResult.ts",
         "DrcPaymentTx.ts",
+        "DrcTrustLineIssuerControlAction.ts",
+        "DrcTrustLineIssuerControlReceipt.ts",
+        "DrcTrustLineIssuerControlTx.ts",
         "OvlExecutionTx.ts",
         "SignedStakeTx.ts",
         "Transaction.ts",
@@ -450,6 +459,17 @@ mod ts_export {
         DrcIssuedTransferTx::export_all().expect("export DrcIssuedTransferTx");
         DrcIssuedTransferReceipt::export_all().expect("export DrcIssuedTransferReceipt");
         DrcIssuerLiability::export_all().expect("export DrcIssuerLiability");
+        DrcIssuedAssetPolicyAction::export_all().expect("export DrcIssuedAssetPolicyAction");
+        DrcIssuedAssetPolicySetTx::export_all().expect("export DrcIssuedAssetPolicySetTx");
+        DrcIssuedAssetPolicyLive::export_all().expect("export DrcIssuedAssetPolicyLive");
+        DrcIssuedAssetPolicyReceipt::export_all().expect("export DrcIssuedAssetPolicyReceipt");
+        DrcTrustLineIssuerControlAction::export_all()
+            .expect("export DrcTrustLineIssuerControlAction");
+        DrcTrustLineIssuerControlTx::export_all().expect("export DrcTrustLineIssuerControlTx");
+        DrcTrustLineIssuerControlReceipt::export_all()
+            .expect("export DrcTrustLineIssuerControlReceipt");
+        DrcIssuedClawbackTx::export_all().expect("export DrcIssuedClawbackTx");
+        DrcIssuedClawbackReceipt::export_all().expect("export DrcIssuedClawbackReceipt");
         DrcMultisignOperationKind::export_all().expect("export DrcMultisignOperationKind");
         normalize_generated_bindings();
 

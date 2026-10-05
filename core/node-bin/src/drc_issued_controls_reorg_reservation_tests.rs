@@ -43,6 +43,7 @@ fn nodebackend_reorg_reverts_policy_resubmit_once() {
         fx.genesis,
         0,
     );
+    let policy_id = policy.policy_set_tx_id();
     let ast = asset(&fx.issuer, fx.cur_usd);
     let pool0 = reward_pool_balance(fx.store.as_ref());
     let fund_tip = virtual_tip(&fx.backend);
@@ -60,6 +61,11 @@ fn nodebackend_reorg_reverts_policy_resubmit_once() {
         agora_state_machine::load_drc_issued_asset_policy(fx.store.as_ref(), &ast)
             .unwrap()
             .global_freeze
+    );
+    assert!(
+        load_drc_issued_asset_policy_receipt(fx.store.as_ref(), &policy_id)
+            .unwrap()
+            .is_some()
     );
     let mut revert_tip = submit_lanes_at_parents(
         &mut fx.backend,
@@ -87,6 +93,11 @@ fn nodebackend_reorg_reverts_policy_resubmit_once() {
         !agora_state_machine::load_drc_issued_asset_policy(fx.store.as_ref(), &ast)
             .unwrap()
             .global_freeze
+    );
+    assert!(
+        load_drc_issued_asset_policy_receipt(fx.store.as_ref(), &policy_id)
+            .unwrap()
+            .is_none()
     );
     assert_eq!(reward_pool_balance(fx.store.as_ref()), pool0);
     assert_liability_equals_sum_balances(fx.store.as_ref(), &fx.issuer.address(), &fx.cur_usd);

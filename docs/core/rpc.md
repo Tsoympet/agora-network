@@ -22,7 +22,12 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_getDrcAccountPolicy` | Read canonical recipient policy and shared DRC nonce (`known` / `unknown`) |
 | `agora_submitDrcDepositPreauth` | Validate, reserve, and gossip an owner-signed address grant/revoke |
 | `agora_getDrcDepositPreauth` | Read one canonical recipient/source DepositAuth status without enumeration |
-| `agora_submitDrcCheckCancel` | Validate and gossip a signed DRC check cancel |
+| `agora_submitDrcRegularKey` / `agora_getDrcAccountKeys` | Rotate or query the account’s regular-key authorization state |
+| `agora_submitDrcSignerList` / `agora_getDrcAccountSignerList` | Set or query weighted multisign authorization |
+| `agora_submitDrcTicketCreate` / `agora_getDrcTicket` | Create account-sequence tickets or query one exact ticket |
+| `agora_submitDrcEscrowCreate` / `agora_submitDrcEscrowFinish` / `agora_submitDrcEscrowCancel` | Admit native DRC escrow lifecycle operations |
+| `agora_getDrcEscrow` / `agora_getDrcEscrowReceipt` | Query one live/closed escrow or its receipt |
+| `agora_submitDrcCheckCreate` / `agora_submitDrcCheckCash` / `agora_submitDrcCheckCancel` | Admit native DRC check lifecycle operations |
 | `agora_getDrcCheck` | Point lookup: `{ check_id, status }` where `status` is `live`, `receipt`, or `unknown` |
 | `agora_getDrcCheckReceipt` | Closed check receipt by `check_id` (`known` / `unknown`) |
 | `agora_submitDrcPaymentChannelCreate` | Validate, virtual-apply, mempool-admit, and gossip a signed DRC payment channel create (**Experimental**; accepted ≠ finality) |
@@ -35,6 +40,11 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_getDrcPaymentChannelClaimEvent` | Immutable claim event by `claim_tx_id` |
 | `agora_getDrcPaymentChannelScheduleEvent` | Schedule event by close `close_tx_id` |
 | `agora_verifyDrcPaymentChannelClaim` | Pure verification of supplied cumulative claim signature against a **live** channel (no private keys; no mutation) |
+| `agora_submitDrcTrustLineSet` / `agora_submitDrcIssuedTransfer` | Admit contract-free trust-line or exact issued-value operations |
+| `agora_getDrcTrustLine` / `agora_getDrcIssuerLiability` / `agora_getDrcIssuedTransferReceipt` | Exact trust-line, liability, and transfer-receipt queries |
+| `agora_submitDrcIssuedAssetPolicySet` / `agora_submitDrcTrustLineIssuerControl` / `agora_submitDrcIssuedClawback` | Admit issued-asset authorization, freeze, or exact clawback controls |
+| `agora_getDrcIssuedAssetPolicy` | Query the live policy flags for one `(issuer, currency)` asset |
+| `agora_getDrcIssuedAssetPolicyReceipt` / `agora_getDrcTrustLineIssuerControlReceipt` / `agora_getDrcIssuedClawbackReceipt` | Exact issued-control receipt queries |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |

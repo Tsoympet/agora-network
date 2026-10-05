@@ -103,4 +103,36 @@ mod tests {
         assert_eq!(TRIDENT_TX_SIGNING_VERSION, "agora-trident-tx-v9");
         assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v19");
     }
+
+    #[test]
+    fn trident_genesis_and_p2p_fingerprint_versions_match() {
+        use agora_state_machine::TridentGenesisArtifact;
+
+        const DRAFT: &str =
+            include_str!("../../../../docs/genesis/trident.testnet.genesis.draft.json");
+        let artifact = TridentGenesisArtifact::from_json(DRAFT).unwrap();
+        let p2p_fingerprint = trident_network_fingerprint(
+            &artifact.chain_id,
+            &artifact.consensus_identity_hash(),
+            &artifact.consensus_policy_hash(),
+        );
+
+        assert_eq!(
+            TRIDENT_PROTOCOL_VERSION,
+            agora_state_machine::TRIDENT_PROTOCOL_VERSION
+        );
+        assert_eq!(
+            TRIDENT_TX_SIGNING_VERSION,
+            agora_state_machine::TRIDENT_TX_SIGNING_VERSION
+        );
+        assert_eq!(
+            TRIDENT_STATE_TRANSITION_VERSION,
+            agora_state_machine::TRIDENT_STATE_TRANSITION_VERSION
+        );
+        assert_eq!(
+            TRIDENT_CONSENSUS_POLICY_VERSION,
+            agora_state_machine::TRIDENT_CONSENSUS_POLICY_VERSION
+        );
+        assert_eq!(p2p_fingerprint, artifact.compute_network_fingerprint());
+    }
 }

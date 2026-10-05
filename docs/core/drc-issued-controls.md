@@ -48,6 +48,8 @@ Same-block order: **policy → line control → issued transfer / clawback**. Pe
 - Asset policy live: `trust/drc/asset-policy/…` (`DrcIssuedAssetPolicyLive`).
 - Trust line live **v2**: adds `authorized`, `line_frozen`, `line_deep_frozen`.
 - Receipts: policy set, issuer control, clawback (point queries only; no enumeration).
+- Reorg journals snapshot both live-state and receipt keys, so orphaned control
+  receipts disappear with their policy/line/liability effects.
 
 ## Mesh / roots
 

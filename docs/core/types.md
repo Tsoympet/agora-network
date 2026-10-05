@@ -30,6 +30,8 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | `DrcPaymentReceipt` / `DrcPaymentResult` | Versioned exact full-delivery result; no partial-delivery variant |
 | `DrcAccountPolicyTx` / `DrcAccountPolicy` | Versioned owner-authorized DRC destination-tag and DepositAuth flags |
 | `DrcDepositPreauthTx` / `DrcDepositPreauth` | Address-only recipient grant/revoke operation and canonical record |
+| `DrcTrustLineSetTx` / `DrcIssuedTransferTx` | Contract-free issuer-scoped trust-line and exact issued-value operations |
+| `DrcIssuedAssetPolicySetTx` / `DrcTrustLineIssuerControlTx` / `DrcIssuedClawbackTx` | Issued-asset authorization, freeze, and exact clawback controls; never native-asset controls |
 | `DataAvailabilityCommitment` | Versioned Borsh integrity/provenance payload for explicitly non-canonical source data |
 | `DataCommitmentAuthorization` | secp256k1 operator authorization bound to L1 chain, genesis, fingerprint, and replay nonce |
 | `TransactionBody` | Signable subset (no auth material) |
@@ -42,10 +44,9 @@ See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../as
 - `Transaction::tx_id()` = SHA-256(borsh(tx))
 - `Block::id()` = SHA-256(borsh(header))
 - `Block::compute_tx_root` = pairwise merkle over tx ids
-- `Block::compute_body_root` = legacy root when appended lanes are empty; DRC
-  policy entries activate `agora-block-body-v6` over the unchanged v5 root;
-  deposit-preauthorization entries activate `agora-block-body-v7` over the
-  unchanged v6 root and ordered operation IDs
+- `Block::compute_body_root` = compatibility-preserving nested roots for the
+  append-only lanes; issued-control entries activate the current v17 body root
+  over v16 trust-line/issued-transfer lanes and all prior lane roots
 
 `DataCommitmentSource` uses explicit stable Borsh discriminants; future variants
 must be appended. `Block` deserialization accepts older bodies that end before
@@ -54,5 +55,6 @@ later appended lanes, but partial lengths/elements remain invalid.
 ## Change process
 
 1. Edit definitions in `core/crates/types`.
-2. Run `cargo test -p agora-types` (regenerates bindings).
+2. Run `cargo test -p agora-types export_shared_types` (regenerates the
+   explicitly exported shared bindings).
 3. Update any `apps/` imports of generated bindings.

@@ -249,9 +249,11 @@ preauthorization, and payment statuses. Account, policy, preauthorization, and
 payment metadata are journaled for reorg restoration and included in the
 Trident state root.
 `agora_submitDrcPayment` admits signed payments into mempool/gossip/template
-flow. Trident protocol v10, transaction-signing v5, state-transition
-`agora-trident-state-v11`, state-root v8, and body-root v8 isolate payment-v4
-expiry from older peers. This raises the Experimental datadir schema to v14; an
+flow. Payment-v4 expiry entered at Trident protocol v10,
+transaction-signing v5, state-transition `agora-trident-state-v11`,
+state-root v8, and body-root v8. The current aggregate protocol/state
+fingerprint is v21 / `agora-trident-state-v19`; those later lanes do not
+reinterpret payment-v4. This raised the Experimental datadir schema to v14; an
 older Experimental datadir must be replayed/reindexed (or recreated). Frozen
 payment-v1/v2/v3, policy-v1, outbox-v1/v2/v3, receipt-v1/v2, body-v1–v7, and
 historical acceptance/journal bytes remain readable and unchanged.
@@ -319,8 +321,8 @@ Policy and preauthorization reads and exact-delivery receipts describe the
 canonical state-machine virtual view. Acceptance/settlement does not assert PoW
 plus OVL/DRC checkpoint finality; finality remains independently queryable.
 
-Escrow, recurring authorization, cross-district paths, and
-merchant tag registries remain separate future transitions. Destination tags
+Escrow is a separate typed transition. Recurring authorization, cross-district
+paths, and merchant tag registries remain future transitions. Destination tags
 are recipient-local routing metadata (as on XRPL), not globally owned names.
 Source tags are sender-local routing metadata and are not globally registered.
 This bounded feature does not add partial payments, paths, checks, escrow,
@@ -414,8 +416,8 @@ for a known account without enumerating signer identities. Malformed inputs retu
 
 Pinned baseline: rippled 2.5.0 `asfDisableMaster` / `lsfDisableMaster` intent — the
 owner master secp256k1 key stops authorizing DRC account operations while alternate
-recovery remains. **Not XRPL wire/API parity** (no `lsf`, Tickets, credentials, or
-`tec`-class semantics).
+recovery remains. **Not XRPL wire/API parity** (no `lsf`, credential, or
+`tec`-class semantics; Agora's bounded Tickets use separate versioned envelopes).
 
 Supported Agora subset:
 
@@ -459,8 +461,7 @@ isolate the regular-key slice. Frozen payment/policy/preauth encodings remain re
 `agora_getDrcAccountKeys` returns `regular_key` and `account_nonce` for a known
 DRC account, or `unknown` when absent. Malformed inputs return `-32602`.
 
-## Next bounded slice
+## Remaining deferred capabilities
 
-Master-key disable with signer-list-only recovery, credential-based `DepositPreauth`,
-recurring pull payments, and cross-asset routing remain out of scope for the
-native DRC payment lane.
+Credential-based `DepositPreauth`, recurring pull payments, and cross-asset
+routing remain out of scope for the native DRC payment lane.

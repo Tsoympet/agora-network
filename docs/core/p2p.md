@@ -30,7 +30,7 @@ Topics and the getblock protocol are scoped by `NetworkConfig::network` (from `A
 | --- | --- | --- |
 | blocks | `agora/testnet/blocks/1` | `Block` / `BlockAnnounce` / `CompactBlock` / `GetBlock`; DA is carried only inside full blocks |
 | attestations | `agora/testnet/attestations/1` | `CheckpointAttestation` (Trident dual-PoS) |
-| txs | `agora/testnet/txs/1` | UTXO, account, stake, OVL execution, and DRC payment envelopes |
+| txs | `agora/testnet/txs/1` | UTXO, account, stake, OVL execution, and versioned DRC settlement/control envelopes |
 | getblock RR | `/agora/testnet/getblock/1` | CBOR `GetBlockRequest` / `GetBlockResponse` |
 
 `dev` (default) uses `agora/dev/…`. Peers on different networks never share a gossip mesh even on the same underlay.
@@ -40,7 +40,7 @@ Topics and the getblock protocol are scoped by `NetworkConfig::network` (from `A
 After a block is admitted locally, `agora-node` gossips:
 
 1. `CompactBlock { header, short_ids }` for UTXO-only bodies, or a full `Block`
-   when any account/stake/execution/payment/DA lane is non-empty
+   when any appended consensus lane is non-empty
 2. `BlockAnnounce { hash }` — hash-only tip signal
 
 Receivers try `reconstruct_compact_block` against the local mempool. On miss (or hash-only announce without a body), they request the body from the announcing peer over the network-scoped **`/agora/<network>/getblock/1`** protocol (libp2p request-response, CBOR). `PendingFetches` dedupes in-flight hashes. If request-response fails, the node falls back to gossip `GetBlock` / `Block`.
@@ -72,20 +72,28 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 
 ## Mempool
 
-The mempool reserves UTXO outpoints and one shared account nonce per `(asset, address)`. Account transfers, stake ops, OVL execution, DRC payments, and DRC account-policy operations cannot race the same native-account nonce. Account-lane replacement is disabled; a peer block consuming the nonce evicts any conflicting local operation.
+The mempool reserves UTXO outpoints and one shared account nonce per
+`(asset, address)`. Account transfers, stake ops, OVL execution, and every
+versioned DRC operation cannot race the same native-account nonce.
+Account-lane replacement is disabled; a peer block consuming the nonce evicts
+any conflicting local operation.
 
 `agora-node` runs `validate_mempool_tx` (live `cf_utxo` + mempool reserved set) under the same lock before admit on both RPC `agora_submitTransaction` and gossip `Transaction` messages. Missing, foreign, overspending, or already-reserved inputs are rejected at the edge. The implicit fee must be ≥ `AGORA_MIN_RELAY_FEE` (default 1); admission stores the fee for template ordering.
 
-Mining templates pull UTXO transfers plus account/stake lanes and commit all lanes with `compute_body_root`. Coinbase value remains emission plus TLT transfer fees only; OVL/DRC account fees go to their reward pools during acceptance. On block admit, `evict_for_block` drops included operations and releases reservations.
+Mining templates pull the supported UTXO and appended consensus lanes and
+commit them with `compute_body_root`. Coinbase value remains emission plus TLT
+transfer fees only; OVL/DRC account fees go to their reward pools during
+acceptance. On block admit, `evict_for_block` drops included operations and
+releases reservations.
 
 Authenticated DA authorizations deliberately have no standalone mempool or
 `NetworkMessage` variant. Existing enum discriminants remain unchanged; full
 block propagation carries accepted candidates under the current Trident
-protocol v10 / state-transition v11 fingerprint. DRC account-policy and
-deposit-preauthorization gossip use appended enum variants without changing
-prior discriminants. The current node leaves DA activation disabled until a
-reviewed TLT base-fee/sponsorship policy exists, so there is no free public
-gossip path.
+protocol v21 / state-transition v19 fingerprint. DRC account-policy,
+deposit-preauthorization, contract-free settlement, trust-line, and
+issued-control gossip use appended enum variants without changing prior
+discriminants. The current node leaves DA activation disabled until a reviewed
+TLT base-fee/sponsorship policy exists, so there is no free public gossip path.
 
 ## Runtime
 

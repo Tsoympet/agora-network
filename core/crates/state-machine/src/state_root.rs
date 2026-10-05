@@ -2,7 +2,8 @@
 //!
 //! Composition (domain-separated), matching Phase 0 audit §5.5:
 //! UTXO ∥ OVL accounts ∥ DRC accounts ∥ OVL stake snap ∥ DRC stake snap ∥
-//! DRC policy ∥ DRC deposit preauthorization ∥ DRC payment state ∥
+//! DRC authorization/settlement state (including issuer-scoped trust lines and
+//! controls) ∥ DRC policy ∥ DRC deposit preauthorization ∥ DRC payment state ∥
 //! tip acceptance ∥ finalized tip ∥ governance/treasuries ∥ canonical community
 //! registry ∥ authenticated data-commitment state.
 
