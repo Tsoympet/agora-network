@@ -8,7 +8,8 @@ use agora_crypto::{
 };
 use agora_p2p::Mempool;
 use agora_state_machine::{
-    credit_account_into, lookup_drc_check_point, GenesisBuilder, StateStore, WriteBatch,
+    credit_account_into, lookup_drc_check_point, put_issued_supply_into, GenesisBuilder,
+    StateStore, WriteBatch,
 };
 use agora_types::{
     materialize_drc_multisign_attachments, Block, DrcCheckCancelTx, DrcCheckCashTx,
@@ -45,6 +46,7 @@ fn funded_backend() -> (NodeBackend, Hash, KeyPair, KeyPair) {
         Amount::from_base_units(5_000),
     )
     .unwrap();
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 55_000);
     store.write_batch(funding).unwrap();
     let chain = Arc::new(Mutex::new(
         ChainState::bootstrap_with(
@@ -242,6 +244,7 @@ fn template_materializes_multisign_attachments_and_borsh_roundtrip() {
         Amount::from_base_units(20_000),
     )
     .unwrap();
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 20_000);
     store.write_batch(funding).unwrap();
     let auth = TxAuthContext {
         chain_id: "agora-dev".into(),
@@ -311,6 +314,7 @@ fn mined_check_survives_backend_reopen_and_rpc_queries() {
         Amount::from_base_units(5_000),
     )
     .unwrap();
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 25_000);
     store.write_batch(funding).unwrap();
     let mut backend = NodeBackend::new(
         Arc::new(Mutex::new(boot_chain(store.clone(), genesis))),

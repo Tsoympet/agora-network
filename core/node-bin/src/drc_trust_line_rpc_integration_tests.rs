@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use agora_crypto::{sign_drc_issued_transfer_bound, sign_drc_trust_line_set_bound, KeyPair};
 use agora_rpc::{RpcBackend, RpcDispatcher, RpcRequest};
-use agora_state_machine::{credit_account_into, GenesisBuilder, WriteBatch};
+use agora_state_machine::{
+    credit_account_into, put_issued_supply_into, GenesisBuilder, WriteBatch,
+};
 use agora_types::{
     Amount, Hash, IssuedAmount, IssuedCurrencyCode, NativeAssetId,
     DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
@@ -35,6 +37,7 @@ fn rpc_trust_line_create_issue_restart_query() {
         )
         .unwrap();
     }
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 1_500_000);
     store.write_batch(funding).unwrap();
 
     let mut backend = crate::backend::NodeBackend::new(
@@ -185,6 +188,7 @@ fn rpc_positional_currency_array_submit_and_query() {
         )
         .unwrap();
     }
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 200_000);
     store.write_batch(funding).unwrap();
     let mut backend = crate::backend::NodeBackend::new(
         Arc::new(Mutex::new(boot_chain(store.clone(), genesis))),
