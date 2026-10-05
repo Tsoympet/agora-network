@@ -87,13 +87,13 @@ authorization is `ExactDuplicate`; a different authorization or consumed
 operator nonce is `ConflictLost`. Invalid authentication fails the block.
 
 Accepted records and operator replay cursors live under `da/v1/…` Meta keys.
-They contribute to `agora-trident-state-root-v6`. Their prior values are stored
+They contribute to `agora-trident-state-root-v7`. Their prior values are stored
 in `UtxoJournal` and apply/revert with acceptance in the same `WriteBatch`, so
 reorg and crash recovery use the existing `pending_virtual` protocol.
 
-The Trident protocol fingerprint is v8 and the state-transition version is
-`agora-trident-state-v9`; this later bump activates DRC account policy and
-payment-v3 tag presence without changing the DA lane described here. Frozen
+The Trident protocol fingerprint is v9 and the state-transition version is
+`agora-trident-state-v10`; this later bump activates address-based DRC
+DepositAuth without changing the DA lane described here. Frozen
 pre-Trident/v2 constants remain unchanged.
 No standalone `NetworkMessage` variant was added: authenticated commitments
 travel only inside full blocks, preserving every existing wire-enum

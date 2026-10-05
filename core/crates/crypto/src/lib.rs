@@ -8,6 +8,7 @@ mod address;
 mod attestation;
 mod bip44;
 mod data_availability;
+mod drc_deposit_preauth;
 mod drc_policy;
 mod error;
 mod execution;
@@ -27,6 +28,7 @@ pub use bip44::{
     derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,
 };
 pub use data_availability::{sign_data_commitment_bound, verify_data_commitment_bound};
+pub use drc_deposit_preauth::{sign_drc_deposit_preauth_bound, verify_drc_deposit_preauth_bound};
 pub use drc_policy::{sign_drc_account_policy_bound, verify_drc_account_policy_bound};
 pub use error::CryptoError;
 pub use execution::{sign_ovl_execution_bound, verify_ovl_execution_bound};

@@ -3,11 +3,13 @@
 use agora_crypto::verify_drc_account_policy_bound;
 use agora_types::{
     Address, DrcAccountPolicy, DrcAccountPolicyTx, Hash, NativeAssetId,
-    DRC_ACCOUNT_POLICY_STATE_VERSION,
+    DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION, DRC_ACCOUNT_POLICY_STATE_VERSION,
 };
 use borsh::BorshDeserialize;
 
-use crate::accounts::{account_key, load_account, put_account_into, AccountJournal, AccountState};
+use crate::accounts::{
+    account_exists, account_key, load_account, put_account_into, AccountJournal, AccountState,
+};
 use crate::apply::TxAuthContext;
 use crate::columns::ColumnFamily;
 use crate::store::WriteBatch;
@@ -37,12 +39,9 @@ pub fn load_drc_account_policy(
     };
     let policy = DrcAccountPolicy::try_from_slice(&bytes)
         .map_err(|error| StateError::Storage(error.to_string()))?;
-    if policy.version != DRC_ACCOUNT_POLICY_STATE_VERSION {
-        return Err(StateError::Storage(format!(
-            "unsupported DRC account-policy state version {}",
-            policy.version
-        )));
-    }
+    policy
+        .validate()
+        .map_err(|error| StateError::Storage(error.to_string()))?;
     Ok(policy)
 }
 
@@ -77,12 +76,9 @@ pub fn drc_account_policy_root(store: &StateStore) -> Result<Hash, StateError> {
         account.copy_from_slice(&key[DRC_ACCOUNT_POLICY_PREFIX.len()..]);
         let policy = DrcAccountPolicy::try_from_slice(&bytes)
             .map_err(|error| StateError::Storage(error.to_string()))?;
-        if policy.version != DRC_ACCOUNT_POLICY_STATE_VERSION {
-            return Err(StateError::Storage(format!(
-                "unsupported DRC account-policy state version {}",
-                policy.version
-            )));
-        }
+        policy
+            .validate()
+            .map_err(|error| StateError::Storage(error.to_string()))?;
         entries.push((Address(account), policy));
     }
     entries.sort_by_key(|(account, _)| account.0);
@@ -102,6 +98,13 @@ pub fn apply_drc_account_policy(
     verify_drc_account_policy_bound(tx, &auth.chain_id, &auth.genesis)
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
 
+    if tx.action.deposit_auth_requirement().is_some()
+        && !account_exists(store, NativeAssetId::DRC, &tx.account)?
+    {
+        return Err(StateError::InvalidTx(
+            "unknown DRC DepositAuth policy owner".into(),
+        ));
+    }
     let mut account = load_account(store, NativeAssetId::DRC, &tx.account)?;
     if account.nonce != tx.nonce {
         return Err(StateError::InvalidTx(format!(
@@ -118,10 +121,24 @@ pub fn apply_drc_account_policy(
         .nonce
         .checked_add(1)
         .ok_or_else(|| StateError::InvalidTx("DRC account-policy nonce overflow".into()))?;
-    let policy = DrcAccountPolicy {
-        version: DRC_ACCOUNT_POLICY_STATE_VERSION,
-        require_destination_tag: tx.action.require_destination_tag(),
-    };
+    let mut policy = load_drc_account_policy(store, &tx.account)?;
+    if let Some(require_destination_tag) = tx.action.destination_tag_requirement() {
+        policy.require_destination_tag = require_destination_tag;
+    }
+    if let Some(deposit_auth_required) = tx.action.deposit_auth_requirement() {
+        policy.deposit_auth_required = deposit_auth_required;
+        policy.version = if deposit_auth_required {
+            DRC_ACCOUNT_POLICY_STATE_VERSION
+        } else {
+            // Once DepositAuth is clear, v1 can represent the complete policy
+            // again. Downgrading avoids two roots for the same effective flags
+            // while preserving the frozen v1 bytes.
+            DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION
+        };
+    }
+    policy
+        .validate()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
     let policy_bytes =
         borsh::to_vec(&policy).map_err(|error| StateError::Storage(error.to_string()))?;
 
@@ -131,15 +148,15 @@ pub fn apply_drc_account_policy(
     account.balance -= tx.fee.as_base_units();
     account.nonce = next_nonce;
     put_account_into(batch, NativeAssetId::DRC, &tx.account, &account)?;
-    if policy.require_destination_tag {
+    if policy.require_destination_tag || policy.deposit_auth_required {
         batch.put_cf(
             ColumnFamily::Meta,
             &drc_account_policy_key(&tx.account),
             &policy_bytes,
         );
     } else {
-        // Absence is the canonical false representation, avoiding two roots for
-        // semantically identical default-off state.
+        // Absence is the canonical all-false representation, avoiding multiple
+        // roots for semantically identical default-off state.
         batch.delete_cf(ColumnFamily::Meta, &drc_account_policy_key(&tx.account));
     }
     Ok(policy)
@@ -256,6 +273,65 @@ mod tests {
         assert!(journal.before.is_empty());
     }
 
+    #[test]
+    fn deposit_auth_default_off_set_clear_and_canonicalizes_back_to_v1() {
+        let store = StateStore::open_in_memory();
+        let owner = owner();
+        fund(&store, &owner);
+        let default = load_drc_account_policy(&store, &owner.address()).unwrap();
+        assert!(!default.deposit_auth_required);
+        assert_eq!(
+            default.version,
+            agora_types::DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION
+        );
+
+        let mut enable = DrcAccountPolicyTx::set_deposit_auth_required(
+            owner.address(),
+            Amount::from_base_units(1),
+            0,
+        );
+        sign_drc_account_policy_bound(&mut enable, &owner, &auth().chain_id, &auth().genesis)
+            .unwrap();
+        let enabled = apply(&store, &enable).unwrap();
+        assert!(enabled.deposit_auth_required);
+        assert_eq!(enabled.version, DRC_ACCOUNT_POLICY_STATE_VERSION);
+
+        let mut disable = DrcAccountPolicyTx::clear_deposit_auth_required(
+            owner.address(),
+            Amount::from_base_units(1),
+            1,
+        );
+        sign_drc_account_policy_bound(&mut disable, &owner, &auth().chain_id, &auth().genesis)
+            .unwrap();
+        let disabled = apply(&store, &disable).unwrap();
+        assert!(!disabled.deposit_auth_required);
+        assert_eq!(
+            disabled.version,
+            agora_types::DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION
+        );
+        assert_eq!(
+            load_drc_account_policy(&store, &owner.address()).unwrap(),
+            DrcAccountPolicy::default()
+        );
+    }
+
+    #[test]
+    fn deposit_auth_cannot_create_an_unknown_owner_account() {
+        let store = StateStore::open_in_memory();
+        let owner = owner();
+        let mut enable =
+            DrcAccountPolicyTx::set_deposit_auth_required(owner.address(), Amount::ZERO, 0);
+        sign_drc_account_policy_bound(&mut enable, &owner, &auth().chain_id, &auth().genesis)
+            .unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        assert!(
+            apply_drc_account_policy(&store, &enable, &auth(), &mut batch, &mut journal).is_err()
+        );
+        assert!(batch.is_empty());
+        assert!(journal.before.is_empty());
+    }
+
     #[cfg(feature = "rocksdb")]
     #[test]
     fn policy_persists_across_rocksdb_reopen() {
@@ -280,13 +356,16 @@ mod tests {
             sign_drc_account_policy_bound(&mut tx, &owner, &auth().chain_id, &auth().genesis)
                 .unwrap();
             apply(&store, &tx).unwrap();
+            let mut enable =
+                DrcAccountPolicyTx::set_deposit_auth_required(owner.address(), Amount::ZERO, 1);
+            sign_drc_account_policy_bound(&mut enable, &owner, &auth().chain_id, &auth().genesis)
+                .unwrap();
+            apply(&store, &enable).unwrap();
         }
         let reopened = StateStore::open(&directory).unwrap();
-        assert!(
-            load_drc_account_policy(&reopened, &owner.address())
-                .unwrap()
-                .require_destination_tag
-        );
+        let policy = load_drc_account_policy(&reopened, &owner.address()).unwrap();
+        assert!(policy.require_destination_tag);
+        assert!(policy.deposit_auth_required);
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

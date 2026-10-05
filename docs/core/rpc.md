@@ -18,8 +18,10 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_submitDrcPayment` | Validate and gossip a versioned signed DRC payment with source/destination-tag and invoice routing |
 | `agora_getDrcPayment` | Read a canonical settled DRC exact-delivery receipt by payment ID (`settled` / `unknown`) |
 | `agora_getDrcPaymentByInvoice` | Resolve an exact recipient/invoice tuple to its canonical settled DRC receipt |
-| `agora_submitDrcAccountPolicy` | Validate, reserve, and gossip a signed DRC `require_destination_tag` set/clear operation |
+| `agora_submitDrcAccountPolicy` | Validate, reserve, and gossip a signed DRC destination-tag/DepositAuth policy operation |
 | `agora_getDrcAccountPolicy` | Read canonical recipient policy and shared DRC nonce (`known` / `unknown`) |
+| `agora_submitDrcDepositPreauth` | Validate, reserve, and gossip an owner-signed address grant/revoke |
+| `agora_getDrcDepositPreauth` | Read one canonical recipient/source DepositAuth status without enumeration |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
@@ -102,7 +104,7 @@ When unset, JSON-RPC stays open (safe with the default loopback bind). When set:
 | Always public | Token required |
 | --- | --- |
 | `GET /health` | `agora_submitTransaction` / `agora_submitBlock` |
-| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` / DRC payment and policy reads | `agora_getBlockTemplate` / `agora_fundAddress` |
+| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` / DRC payment, policy, and preauthorization reads | `agora_getBlockTemplate` / `agora_fundAddress` |
 | `agora_getMempool` / `agora_getNodeInfo` / `agora_estimateFee` | `agora_getBalance` / `agora_getUtxos` |
 | `agora_getConstitution` / `agora_getGovernance` | `agora_submitProposal` / `agora_castGovVote` / … |
 | `agora_listProposals` / `agora_getProposal` / `agora_listOffices` | `agora_depositProposal` / tally / execute / forum post |
@@ -165,7 +167,11 @@ returns:
 {
   "account": "agora1...",
   "status": "known",
-  "policy": { "version": 1, "require_destination_tag": true },
+  "policy": {
+    "version": 2,
+    "require_destination_tag": true,
+    "deposit_auth_required": true
+  },
   "account_nonce": 4
 }
 ```
@@ -181,6 +187,36 @@ never accepted. The owner signature binds chain, genesis, version, account,
 set/clear action, shared nonce, and DRC fee. Pending submissions do not alter
 the read query until state-machine acceptance. Neither a known policy nor an
 accepted operation asserts PoW plus OVL/DRC checkpoint finality.
+
+`agora_getDrcDepositPreauth` accepts either
+`{ "owner": "<account>", "authorized_source": "<account>" }` or the positional
+array `["<account>", "<account>"]`. If both canonical DRC accounts exist, the
+response is:
+
+```json
+{
+  "owner": "agora1...",
+  "authorized_source": "agora1...",
+  "status": "known",
+  "preauthorized": true,
+  "deposit_auth_required": true,
+  "deposit_authorized": true
+}
+```
+
+`preauthorized` reports the exact active record. `deposit_authorized` reports
+the effective payment check: self, policy disabled, or exact record. If either
+account is absent, `status` is `"unknown"` and all three booleans are null.
+Malformed accounts, missing fields, and wrong positional arity return
+`-32602`. The method is an exact point lookup: it cannot scan or enumerate
+recipient grants and returns no signatures or keys.
+
+`agora_submitDrcDepositPreauth` accepts a signed `DrcDepositPreauthTx`,
+optionally wrapped as `{ "preauth": ... }`, and returns
+`{ "preauth_tx_id": "<hex>" }`. It never accepts private-key material.
+Pending grants/revokes do not alter the canonical read query. `"known"` and
+accepted/settled results describe the canonical virtual view, not checkpoint
+finality.
 
 `agora_getBlockTemplate` returns `{ "block": Block, "randomx_epoch": u64 }` (native serde hashes as byte arrays). The block has a coinbase paying `AGORA_MINER_ADDRESS` for **emission + Σ transfer fees** at the estimated next blue score, followed by up to 128 mempool transfers (fee-desc, then `tx_id`); `header.tx_root` commits to that body. `randomx_epoch` is the blue-score–anchored RandomX key epoch miners must use. `agora_submitBlock` rejects `tx_root` mismatches and evicts included/conflicting mempool txs. Mempool admission requires `fee ≥ AGORA_MIN_RELAY_FEE`; fees are paid to the miner via the coinbase (not burned).
 

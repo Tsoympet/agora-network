@@ -16,7 +16,9 @@
 | `8` | Canonical governance authorization policy and three asset-isolated protocol treasuries |
 | `9` | Canonical Hub, Passport, Grant, and Mission registry summary/records |
 | `10` | Authenticated DA commitment/source-sequence index, operator replay cursor, acceptance, and revert snapshots |
-| `11` (current) | Root-committed exact-delivery DRC receipt index and reorg snapshots |
+| `11` | Root-committed exact-delivery DRC receipt index and reorg snapshots |
+| `12` | Owner-authorized DRC recipient policy and payment-v3 destination-tag presence |
+| `13` (current) | Address-based DRC DepositAuth policy/preauthorization state, acceptance, and reorg snapshots |
 
 Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
@@ -33,6 +35,8 @@ Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 - Staking: `stake/val|del|unbond|epoch|snap/…`
 - Finality: `finality/cert/<block_hash>`, `finality/tip_blue_score`
 - DRC payments: `payment/drc/seen|invoice|outbox|receipt/…`
+- DRC policy/preauthorization:
+  `policy/drc/account/…`, `policy/drc/deposit-preauth/<owner><source>`
 - Governance: `governance/consensus/policy`, `governance/treasury/<id>`
 - Community: `community/v1/summary|hub|passport|grant|mission|issuer_nonce|active_issuer`
 - Data commitments: `da/v1/commitment/<source><sequence_be>`,
@@ -40,6 +44,7 @@ Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
 Atomic `WriteBatch` commit rules from PRs #76–#81 remain mandatory.
 
-Schema 11 does not reinterpret frozen payment-v1 or outbox-v1 bytes. An
-Experimental schema-10 datadir needs replay/reindex (or a fresh Trident
-datadir) before historical payments can be queried through the receipt index.
+Schema 13 does not reinterpret frozen payment-v1/v2/v3, outbox-v1/v2,
+receipt-v1, policy-v1, or historical block bytes. An older Experimental
+datadir needs replay/reindex (or a fresh Trident datadir) before DepositAuth is
+activated.

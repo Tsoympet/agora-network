@@ -8,6 +8,7 @@ mod amount;
 mod asset;
 mod block;
 mod data_availability;
+mod drc_deposit_preauth;
 mod drc_policy;
 mod execution;
 mod finality;
@@ -30,10 +31,17 @@ pub use data_availability::{
     DA_COMMITMENT_AUTHORIZATION_ID_DOMAIN, DA_COMMITMENT_AUTHORIZATION_VERSION,
     DA_COMMITMENT_PAYLOAD_DOMAIN, DA_COMMITMENT_VERSION, MAX_DA_CHAIN_ID_BYTES,
 };
+pub use drc_deposit_preauth::{
+    DrcDepositPreauth, DrcDepositPreauthAction, DrcDepositPreauthError, DrcDepositPreauthTx,
+    DRC_DEPOSIT_PREAUTH_SIGNING_DOMAIN, DRC_DEPOSIT_PREAUTH_STATE_VERSION,
+    DRC_DEPOSIT_PREAUTH_TX_TYPE, DRC_DEPOSIT_PREAUTH_TX_VERSION,
+};
 pub use drc_policy::{
     DrcAccountPolicy, DrcAccountPolicyAction, DrcAccountPolicyError, DrcAccountPolicyTx,
+    DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION, DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION,
     DRC_ACCOUNT_POLICY_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_STATE_VERSION,
-    DRC_ACCOUNT_POLICY_TX_VERSION,
+    DRC_ACCOUNT_POLICY_TX_TYPE, DRC_ACCOUNT_POLICY_TX_VERSION,
+    DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_V2_SIGNING_DOMAIN,
 };
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
@@ -132,6 +140,7 @@ mod tests {
             drc_payments: vec![],
             data_commitments: vec![],
             drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -152,6 +161,9 @@ mod ts_export {
         "CheckpointAttestation.ts",
         "DataAvailabilityCommitment.ts",
         "DataCommitmentAuthorization.ts",
+        "DrcDepositPreauth.ts",
+        "DrcDepositPreauthAction.ts",
+        "DrcDepositPreauthTx.ts",
         "DrcAccountPolicy.ts",
         "DrcAccountPolicyAction.ts",
         "DrcAccountPolicyTx.ts",
@@ -200,6 +212,9 @@ mod ts_export {
         DataCommitmentSource::export_all().expect("export DataCommitmentSource");
         DataAvailabilityCommitment::export_all().expect("export DataAvailabilityCommitment");
         DataCommitmentAuthorization::export_all().expect("export DataCommitmentAuthorization");
+        DrcDepositPreauthAction::export_all().expect("export DrcDepositPreauthAction");
+        DrcDepositPreauthTx::export_all().expect("export DrcDepositPreauthTx");
+        DrcDepositPreauth::export_all().expect("export DrcDepositPreauth");
         DrcAccountPolicyAction::export_all().expect("export DrcAccountPolicyAction");
         DrcAccountPolicyTx::export_all().expect("export DrcAccountPolicyTx");
         DrcAccountPolicy::export_all().expect("export DrcAccountPolicy");
@@ -243,5 +258,16 @@ mod ts_export {
         .expect("read DRC account-policy binding");
         assert!(policy_binding.contains("action: DrcAccountPolicyAction"));
         assert!(!policy_binding.contains("private"));
+        let policy_state_binding = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings/DrcAccountPolicy.ts"),
+        )
+        .expect("read DRC account-policy state binding");
+        assert!(policy_state_binding.contains("deposit_auth_required: boolean"));
+        let preauth_binding = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings/DrcDepositPreauthTx.ts"),
+        )
+        .expect("read DRC deposit-preauthorization binding");
+        assert!(preauth_binding.contains("authorized_source: Address"));
+        assert!(!preauth_binding.contains("private"));
     }
 }

@@ -118,4 +118,22 @@ mod tests {
                 .is_err()
         );
     }
+
+    #[test]
+    fn deposit_auth_v2_signature_is_domain_separated_and_action_bound() {
+        let owner = keypair(1);
+        let genesis = Hash([3; 32]);
+        let mut tx = DrcAccountPolicyTx::set_deposit_auth_required(
+            owner.address(),
+            Amount::from_base_units(2),
+            5,
+        );
+        sign_drc_account_policy_bound(&mut tx, &owner, "agora-dev", &genesis).unwrap();
+        verify_drc_account_policy_bound(&tx, "agora-dev", &genesis).unwrap();
+
+        tx.action = DrcAccountPolicyAction::ClearDepositAuthRequired;
+        assert!(verify_drc_account_policy_bound(&tx, "agora-dev", &genesis).is_err());
+        tx.action = DrcAccountPolicyAction::SetRequireDestinationTag;
+        assert!(verify_drc_account_policy_bound(&tx, "agora-dev", &genesis).is_err());
+    }
 }

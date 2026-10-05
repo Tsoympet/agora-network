@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use agora_types::{
-    AccountTransfer, Address, Block, DrcAccountPolicyTx, DrcPaymentTx, Hash, NativeAssetId,
-    OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
+    AccountTransfer, Address, Block, DrcAccountPolicyTx, DrcDepositPreauthAction,
+    DrcDepositPreauthTx, DrcPaymentTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
+    SignedStakeTx, Transaction,
 };
 
 use crate::P2pError;
@@ -26,7 +27,12 @@ pub struct Mempool {
     execution_txs: HashMap<Hash, OvlExecutionTx>,
     payment_txs: HashMap<Hash, DrcPaymentTx>,
     drc_policy_txs: HashMap<Hash, DrcAccountPolicyTx>,
-    /// Account and stake lanes share the same per-asset account nonce.
+    drc_deposit_preauth_txs: HashMap<Hash, DrcDepositPreauthTx>,
+    /// Payments admitted while canonical or pending DepositAuth is enabled.
+    deposit_auth_required_payments: HashSet<Hash>,
+    /// Payments whose source has a canonical dormant/active preauthorization.
+    deposit_preauthorized_payments: HashSet<Hash>,
+    /// Every OVL/DRC account lane shares the same per-asset account nonce.
     reserved_accounts: HashSet<(NativeAssetId, Address)>,
     max_size: usize,
 }
@@ -42,6 +48,9 @@ impl Mempool {
             execution_txs: HashMap::new(),
             payment_txs: HashMap::new(),
             drc_policy_txs: HashMap::new(),
+            drc_deposit_preauth_txs: HashMap::new(),
+            deposit_auth_required_payments: HashSet::new(),
+            deposit_preauthorized_payments: HashSet::new(),
             reserved_accounts: HashSet::new(),
             max_size,
         }
@@ -54,6 +63,7 @@ impl Mempool {
             + self.execution_txs.len()
             + self.payment_txs.len()
             + self.drc_policy_txs.len()
+            + self.drc_deposit_preauth_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -67,6 +77,7 @@ impl Mempool {
             || self.execution_txs.contains_key(tx_id)
             || self.payment_txs.contains_key(tx_id)
             || self.drc_policy_txs.contains_key(tx_id)
+            || self.drc_deposit_preauth_txs.contains_key(tx_id)
     }
 
     /// Outpoints already claimed by mempool transactions.
@@ -196,18 +207,46 @@ impl Mempool {
 
     /// Admit a pre-validated native DRC payment.
     pub fn admit_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, P2pError> {
+        self.admit_payment_with_deposit_auth(tx, false, false)
+    }
+
+    /// Admit a payment with its canonical recipient DepositAuth context.
+    ///
+    /// Pending grants and disables do not authorize relay before settlement.
+    /// Pending enables and revokes do take effect because those lanes precede
+    /// payments in every locally built block.
+    pub fn admit_payment_with_deposit_auth(
+        &mut self,
+        tx: DrcPaymentTx,
+        canonical_deposit_auth_required: bool,
+        canonical_preauthorized: bool,
+    ) -> Result<Hash, P2pError> {
         let id = tx.payment_id();
         if self.payment_txs.contains_key(&id) {
             return Ok(id);
         }
         if tx.authenticated_destination_tag().is_none()
-            && self
-                .drc_policy_txs
-                .values()
-                .any(|policy| policy.account == tx.to && policy.action.require_destination_tag())
+            && self.drc_policy_txs.values().any(|policy| {
+                policy.account == tx.to && policy.action.destination_tag_requirement() == Some(true)
+            })
         {
             return Err(P2pError::MempoolRejected(
                 "pending recipient policy requires a DRC destination tag".into(),
+            ));
+        }
+        let pending_enable = self.drc_policy_txs.values().any(|policy| {
+            policy.account == tx.to && policy.action.deposit_auth_requirement() == Some(true)
+        });
+        let pending_revoke = self.drc_deposit_preauth_txs.values().any(|preauth| {
+            preauth.owner == tx.to
+                && preauth.authorized_source == tx.from
+                && preauth.action == DrcDepositPreauthAction::Unauthorize
+        });
+        let deposit_auth_required = canonical_deposit_auth_required || pending_enable;
+        if tx.from != tx.to && deposit_auth_required && (!canonical_preauthorized || pending_revoke)
+        {
+            return Err(P2pError::MempoolRejected(
+                "recipient DepositAuth does not authorize this DRC source".into(),
             ));
         }
         if self.len() >= self.max_size {
@@ -218,6 +257,12 @@ impl Mempool {
             return Err(P2pError::MempoolRejected(
                 "account already has a pending nonce".into(),
             ));
+        }
+        if deposit_auth_required {
+            self.deposit_auth_required_payments.insert(id);
+        }
+        if canonical_preauthorized {
+            self.deposit_preauthorized_payments.insert(id);
         }
         self.payment_txs.insert(id, tx);
         Ok(id)
@@ -242,9 +287,10 @@ impl Mempool {
             ));
         }
         let account = tx.account;
-        let requires_destination_tag = tx.action.require_destination_tag();
+        let requires_destination_tag = tx.action.destination_tag_requirement() == Some(true);
+        let enables_deposit_auth = tx.action.deposit_auth_requirement() == Some(true);
         self.drc_policy_txs.insert(id, tx);
-        if requires_destination_tag {
+        if requires_destination_tag || enables_deposit_auth {
             // A valid owner policy has deterministic precedence over the later
             // payment lane. Drop candidates that would make local templates
             // invalid, and reject equivalent candidates while the policy waits.
@@ -252,18 +298,77 @@ impl Mempool {
                 .payment_txs
                 .iter()
                 .filter_map(|(payment_id, payment)| {
-                    (payment.to == account && payment.authenticated_destination_tag().is_none())
-                        .then_some(*payment_id)
+                    let missing_tag = requires_destination_tag
+                        && payment.to == account
+                        && payment.authenticated_destination_tag().is_none();
+                    let unauthorized_deposit = enables_deposit_auth
+                        && payment.to == account
+                        && payment.from != payment.to
+                        && !self.deposit_preauthorized_payments.contains(payment_id);
+                    (missing_tag || unauthorized_deposit).then_some(*payment_id)
                 })
                 .collect();
             for payment_id in incompatible {
-                if let Some(payment) = self.payment_txs.remove(&payment_id) {
-                    self.reserved_accounts
-                        .remove(&(NativeAssetId::DRC, payment.from));
-                }
+                self.remove_payment(&payment_id);
+            }
+            if enables_deposit_auth {
+                let guarded: Vec<Hash> = self
+                    .payment_txs
+                    .iter()
+                    .filter_map(|(payment_id, payment)| {
+                        (payment.to == account).then_some(*payment_id)
+                    })
+                    .collect();
+                self.deposit_auth_required_payments.extend(guarded);
             }
         }
         Ok(id)
+    }
+
+    /// Admit a pre-validated owner-authorized DRC deposit preauthorization.
+    pub fn admit_drc_deposit_preauth(&mut self, tx: DrcDepositPreauthTx) -> Result<Hash, P2pError> {
+        let id = tx.preauth_tx_id();
+        if self.drc_deposit_preauth_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let key = (NativeAssetId::DRC, tx.owner);
+        if !self.reserved_accounts.insert(key) {
+            return Err(P2pError::MempoolRejected(
+                "account already has a pending nonce".into(),
+            ));
+        }
+        let owner = tx.owner;
+        let source = tx.authorized_source;
+        let revokes = tx.action == DrcDepositPreauthAction::Unauthorize;
+        self.drc_deposit_preauth_txs.insert(id, tx);
+        if revokes {
+            let incompatible: Vec<Hash> = self
+                .payment_txs
+                .iter()
+                .filter_map(|(payment_id, payment)| {
+                    (payment.to == owner
+                        && payment.from == source
+                        && self.deposit_auth_required_payments.contains(payment_id))
+                    .then_some(*payment_id)
+                })
+                .collect();
+            for payment_id in incompatible {
+                self.remove_payment(&payment_id);
+            }
+        }
+        Ok(id)
+    }
+
+    fn remove_payment(&mut self, payment_id: &Hash) -> Option<DrcPaymentTx> {
+        let payment = self.payment_txs.remove(payment_id)?;
+        self.reserved_accounts
+            .remove(&(NativeAssetId::DRC, payment.from));
+        self.deposit_auth_required_payments.remove(payment_id);
+        self.deposit_preauthorized_payments.remove(payment_id);
+        Some(payment)
     }
 
     /// Drop the lowest-fee resident if its fee is strictly below `fee`.
@@ -405,8 +510,25 @@ impl Mempool {
         txs
     }
 
+    pub fn select_drc_deposit_preauths(&self, max: usize) -> Vec<DrcDepositPreauthTx> {
+        let mut txs: Vec<_> = self.drc_deposit_preauth_txs.values().cloned().collect();
+        txs.sort_by(|a, b| {
+            b.fee
+                .as_base_units()
+                .cmp(&a.fee.as_base_units())
+                .then_with(|| {
+                    a.preauth_tx_id()
+                        .as_bytes()
+                        .cmp(b.preauth_tx_id().as_bytes())
+                })
+        });
+        txs.truncate(max);
+        txs
+    }
+
     /// Drop included txs and any remaining pool txs that spend the same outpoints.
     pub fn evict_for_block(&mut self, block: &Block) {
+        self.reconcile_payments_for_block_policies(block);
         let mut spent = HashSet::new();
         let mut included = HashSet::new();
         let mut consumed_account_nonces = HashSet::new();
@@ -441,10 +563,7 @@ impl Mempool {
         for tx in &block.drc_payments {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.from));
             let id = tx.payment_id();
-            if self.payment_txs.remove(&id).is_some() {
-                self.reserved_accounts
-                    .remove(&(NativeAssetId::DRC, tx.from));
-            }
+            self.remove_payment(&id);
         }
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
@@ -452,6 +571,14 @@ impl Mempool {
             if self.drc_policy_txs.remove(&id).is_some() {
                 self.reserved_accounts
                     .remove(&(NativeAssetId::DRC, tx.account));
+            }
+        }
+        for tx in &block.drc_deposit_preauths {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
+            let id = tx.preauth_tx_id();
+            if self.drc_deposit_preauth_txs.remove(&id).is_some() {
+                self.reserved_accounts
+                    .remove(&(NativeAssetId::DRC, tx.owner));
             }
         }
         // A peer block can consume a nonce with a different operation than the
@@ -462,10 +589,22 @@ impl Mempool {
             .retain(|_, tx| !consumed_account_nonces.contains(&(tx.asset, tx.actor)));
         self.execution_txs
             .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::OVL, tx.from)));
-        self.payment_txs
-            .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.from)));
+        let stale_payments: Vec<Hash> = self
+            .payment_txs
+            .iter()
+            .filter_map(|(id, tx)| {
+                consumed_account_nonces
+                    .contains(&(NativeAssetId::DRC, tx.from))
+                    .then_some(*id)
+            })
+            .collect();
+        for id in stale_payments {
+            self.remove_payment(&id);
+        }
         self.drc_policy_txs
             .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.account)));
+        self.drc_deposit_preauth_txs
+            .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.owner)));
         for key in consumed_account_nonces {
             self.reserved_accounts.remove(&key);
         }
@@ -483,6 +622,53 @@ impl Mempool {
             .collect();
         for id in drop {
             let _ = self.remove(&id);
+        }
+    }
+
+    fn reconcile_payments_for_block_policies(&mut self, block: &Block) {
+        let payment_ids: Vec<Hash> = self.payment_txs.keys().copied().collect();
+        for payment_id in payment_ids {
+            let Some(payment) = self.payment_txs.get(&payment_id) else {
+                continue;
+            };
+            let mut require_destination_tag = None;
+            let mut deposit_auth_required =
+                self.deposit_auth_required_payments.contains(&payment_id);
+            let mut preauthorized = self.deposit_preauthorized_payments.contains(&payment_id);
+            for policy in &block.drc_account_policies {
+                if policy.account != payment.to {
+                    continue;
+                }
+                if let Some(required) = policy.action.destination_tag_requirement() {
+                    require_destination_tag = Some(required);
+                }
+                if let Some(required) = policy.action.deposit_auth_requirement() {
+                    deposit_auth_required = required;
+                }
+            }
+            for preauth in &block.drc_deposit_preauths {
+                if preauth.owner == payment.to && preauth.authorized_source == payment.from {
+                    preauthorized = preauth.action == DrcDepositPreauthAction::Authorize;
+                }
+            }
+            let invalid_tag = require_destination_tag == Some(true)
+                && payment.authenticated_destination_tag().is_none();
+            let invalid_deposit =
+                payment.from != payment.to && deposit_auth_required && !preauthorized;
+            if invalid_tag || invalid_deposit {
+                self.remove_payment(&payment_id);
+                continue;
+            }
+            if deposit_auth_required {
+                self.deposit_auth_required_payments.insert(payment_id);
+            } else {
+                self.deposit_auth_required_payments.remove(&payment_id);
+            }
+            if preauthorized {
+                self.deposit_preauthorized_payments.insert(payment_id);
+            } else {
+                self.deposit_preauthorized_payments.remove(&payment_id);
+            }
         }
     }
 }
@@ -654,6 +840,7 @@ mod tests {
             drc_payments: vec![],
             data_commitments: vec![],
             drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -715,6 +902,7 @@ mod tests {
             drc_payments: vec![],
             data_commitments: vec![],
             drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));
@@ -847,5 +1035,103 @@ mod tests {
         );
         pool.admit_payment(tagged_zero.clone()).unwrap();
         assert_eq!(pool.select_drc_payments(1), vec![tagged_zero]);
+    }
+
+    #[test]
+    fn deposit_preauth_shares_nonce_and_pending_grant_does_not_authorize_early() {
+        let owner = Address([8; 20]);
+        let source = Address([7; 20]);
+        let grant = DrcDepositPreauthTx::authorize(owner, source, Amount::from_base_units(2), 0);
+        let policy =
+            DrcAccountPolicyTx::set_deposit_auth_required(owner, Amount::from_base_units(1), 0);
+        let payment = DrcPaymentTx::unsigned_v3(
+            source,
+            owner,
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+
+        let mut pool = Mempool::new(8);
+        let id = pool.admit_drc_deposit_preauth(grant.clone()).unwrap();
+        assert_eq!(id, grant.preauth_tx_id());
+        assert_eq!(pool.select_drc_deposit_preauths(1), vec![grant]);
+        assert!(pool.admit_drc_policy(policy).is_err());
+        assert!(
+            pool.admit_payment_with_deposit_auth(payment, true, false)
+                .is_err(),
+            "a pending grant does not authorize relay before canonical settlement"
+        );
+    }
+
+    #[test]
+    fn pending_deposit_auth_enable_keeps_only_canonically_preauthorized_payments() {
+        let owner = Address([8; 20]);
+        let authorized_source = Address([6; 20]);
+        let unauthorized_source = Address([7; 20]);
+        let authorized = DrcPaymentTx::unsigned_v3(
+            authorized_source,
+            owner,
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        let unauthorized = DrcPaymentTx::unsigned_v3(
+            unauthorized_source,
+            owner,
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        let policy =
+            DrcAccountPolicyTx::set_deposit_auth_required(owner, Amount::from_base_units(1), 0);
+
+        let mut pool = Mempool::new(8);
+        pool.admit_payment_with_deposit_auth(authorized.clone(), false, true)
+            .unwrap();
+        pool.admit_payment_with_deposit_auth(unauthorized.clone(), false, false)
+            .unwrap();
+        pool.admit_drc_policy(policy).unwrap();
+
+        assert!(pool.contains(&authorized.payment_id()));
+        assert!(!pool.contains(&unauthorized.payment_id()));
+        assert!(pool
+            .admit_payment_with_deposit_auth(unauthorized, false, false)
+            .is_err());
+    }
+
+    #[test]
+    fn pending_revoke_evicts_and_blocks_guarded_payment() {
+        let owner = Address([8; 20]);
+        let source = Address([7; 20]);
+        let payment = DrcPaymentTx::unsigned_v3(
+            source,
+            owner,
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        let revoke = DrcDepositPreauthTx::unauthorize(owner, source, Amount::from_base_units(1), 0);
+
+        let mut pool = Mempool::new(8);
+        pool.admit_payment_with_deposit_auth(payment.clone(), true, true)
+            .unwrap();
+        pool.admit_drc_deposit_preauth(revoke).unwrap();
+        assert!(!pool.contains(&payment.payment_id()));
+        assert!(pool
+            .admit_payment_with_deposit_auth(payment, true, true)
+            .is_err());
     }
 }

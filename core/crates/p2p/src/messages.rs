@@ -1,6 +1,6 @@
 use agora_types::{
-    AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcAccountPolicyTx, DrcPaymentTx,
-    Hash, OvlExecutionTx, SignedStakeTx, Transaction,
+    AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcAccountPolicyTx,
+    DrcDepositPreauthTx, DrcPaymentTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -36,6 +36,8 @@ pub enum NetworkMessage {
     DrcPayment(DrcPaymentTx),
     /// Appended in Trident protocol v8; owner-authorized DRC recipient policy.
     DrcAccountPolicy(DrcAccountPolicyTx),
+    /// Appended in Trident protocol v9; address-based DRC deposit preauthorization.
+    DrcDepositPreauth(DrcDepositPreauthTx),
 }
 
 impl NetworkMessage {
@@ -58,6 +60,7 @@ impl NetworkMessage {
             && block.drc_payments.is_empty()
             && block.data_commitments.is_empty()
             && block.drc_account_policies.is_empty()
+            && block.drc_deposit_preauths.is_empty()
         {
             Self::CompactBlock {
                 header: block.header.clone(),
@@ -221,6 +224,16 @@ mod tests {
         );
         let message = NetworkMessage::DrcAccountPolicy(policy);
         assert_eq!(message.encode()[0], 10);
+        assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+
+        let preauth = DrcDepositPreauthTx::authorize(
+            Address([4; 20]),
+            Address([5; 20]),
+            Amount::from_base_units(1),
+            0,
+        );
+        let message = NetworkMessage::DrcDepositPreauth(preauth);
+        assert_eq!(message.encode()[0], 11);
         assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
     }
 }

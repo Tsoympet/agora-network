@@ -3,4 +3,4 @@
 /**
  * The only DRC account-policy actions activated in this bounded slice.
  */
-export type DrcAccountPolicyAction = "set_require_destination_tag" | "clear_require_destination_tag";
+export type DrcAccountPolicyAction = "set_require_destination_tag" | "clear_require_destination_tag" | "set_deposit_auth_required" | "clear_deposit_auth_required";

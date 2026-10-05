@@ -81,8 +81,9 @@ Mining templates pull UTXO transfers plus account/stake lanes and commit all lan
 Authenticated DA authorizations deliberately have no standalone mempool or
 `NetworkMessage` variant. Existing enum discriminants remain unchanged; full
 block propagation carries accepted candidates under the current Trident
-protocol v8 / state-transition v9 fingerprint. DRC account-policy gossip uses
-an appended enum variant without changing prior discriminants. The current node leaves DA activation disabled until a
+protocol v9 / state-transition v10 fingerprint. DRC account-policy and
+deposit-preauthorization gossip use appended enum variants without changing
+prior discriminants. The current node leaves DA activation disabled until a
 reviewed TLT base-fee/sponsorship policy exists, so there is no free public
 gossip path.
 

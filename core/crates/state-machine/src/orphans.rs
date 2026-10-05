@@ -71,6 +71,7 @@ mod tests {
             drc_payments: vec![],
             data_commitments: vec![],
             drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
         };
         let id = block.id();
         store_orphan(&store, &block).unwrap();

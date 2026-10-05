@@ -7,7 +7,8 @@ use agora_governance::{
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
-    DrcPaymentReceipt, DrcPaymentTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
+    DrcDepositPreauthTx, DrcPaymentReceipt, DrcPaymentTx, Hash, OutPoint, OvlExecutionTx,
+    Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -97,6 +98,14 @@ pub struct FeeEstimate {
     pub suggested_fee: u64,
 }
 
+/// Effective canonical DepositAuth status for one recipient/source pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrcDepositPreauthStatus {
+    pub preauthorized: bool,
+    pub deposit_auth_required: bool,
+    pub deposit_authorized: bool,
+}
+
 impl TxLookup {
     pub fn unknown(tx_id: Hash) -> Self {
         Self {
@@ -173,11 +182,18 @@ pub trait RpcBackend: Send {
     fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError>;
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError>;
     fn submit_drc_account_policy(&mut self, tx: DrcAccountPolicyTx) -> Result<Hash, RpcError>;
+    fn submit_drc_deposit_preauth(&mut self, tx: DrcDepositPreauthTx) -> Result<Hash, RpcError>;
     /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
     fn get_drc_account_policy(
         &self,
         account: &Address,
     ) -> Result<Option<(DrcAccountPolicy, u64)>, RpcError>;
+    /// Canonical point query only; no address or authorization enumeration.
+    fn get_drc_deposit_preauth(
+        &self,
+        owner: &Address,
+        authorized_source: &Address,
+    ) -> Result<Option<DrcDepositPreauthStatus>, RpcError>;
     /// Root-committed canonical settlement only; pending is intentionally out of scope.
     fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError>;
     /// Exact recipient/invoice lookup; never scans or reports pending payments.
@@ -270,6 +286,8 @@ pub struct InMemoryBackend {
     drc_payment_invoice_index: HashMap<(Address, Hash), Hash>,
     /// Canonical DRC policy and shared account nonce for RPC tests.
     drc_account_policies: HashMap<Address, (DrcAccountPolicy, u64)>,
+    /// Exact owner/source DepositAuth statuses for RPC tests.
+    drc_deposit_preauths: HashMap<(Address, Address), DrcDepositPreauthStatus>,
     template_bits: u32,
     fund_nonce: u64,
     civic: Mutex<CivicSnapshot>,
@@ -287,6 +305,7 @@ impl Default for InMemoryBackend {
             drc_payment_receipts: HashMap::new(),
             drc_payment_invoice_index: HashMap::new(),
             drc_account_policies: HashMap::new(),
+            drc_deposit_preauths: HashMap::new(),
             template_bits: 0,
             fund_nonce: 0,
             civic: Mutex::new(CivicSnapshot::genesis(10_000)),
@@ -341,6 +360,16 @@ impl InMemoryBackend {
         nonce: u64,
     ) {
         self.drc_account_policies.insert(account, (policy, nonce));
+    }
+
+    pub fn insert_drc_deposit_preauth(
+        &mut self,
+        owner: Address,
+        authorized_source: Address,
+        status: DrcDepositPreauthStatus,
+    ) {
+        self.drc_deposit_preauths
+            .insert((owner, authorized_source), status);
     }
 
     pub fn insert_block(&mut self, block: Block) {
@@ -493,11 +522,28 @@ impl RpcBackend for InMemoryBackend {
         ))
     }
 
+    fn submit_drc_deposit_preauth(&mut self, _tx: DrcDepositPreauthTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC deposit preauthorizations".into(),
+        ))
+    }
+
     fn get_drc_account_policy(
         &self,
         account: &Address,
     ) -> Result<Option<(DrcAccountPolicy, u64)>, RpcError> {
         Ok(self.drc_account_policies.get(account).copied())
+    }
+
+    fn get_drc_deposit_preauth(
+        &self,
+        owner: &Address,
+        authorized_source: &Address,
+    ) -> Result<Option<DrcDepositPreauthStatus>, RpcError> {
+        Ok(self
+            .drc_deposit_preauths
+            .get(&(*owner, *authorized_source))
+            .copied())
     }
 
     fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError> {
@@ -592,6 +638,7 @@ impl RpcBackend for InMemoryBackend {
             drc_payments: vec![],
             data_commitments: vec![],
             drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
         })
     }
 
