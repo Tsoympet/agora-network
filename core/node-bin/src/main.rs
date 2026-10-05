@@ -33,7 +33,9 @@ use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
     admit_account_transfer, admit_drc_account_policy, admit_drc_check_cancel, admit_drc_check_cash,
     admit_drc_check_create, admit_drc_deposit_preauth, admit_drc_escrow_cancel,
-    admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_payment, admit_drc_regular_key,
+    admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_payment,
+    admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
+    admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
     admit_drc_signer_list, admit_drc_ticket_create, admit_ovl_execution, admit_stake_tx,
     admit_transaction, NodeBackend, NodeBackendConfig,
 };
@@ -1230,6 +1232,90 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "DRC check-cancel gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcPaymentChannelCreate(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_payment_channel_create(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, channel_create = %id.to_hex(), "DRC payment-channel-create gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC payment-channel-create gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcPaymentChannelFund(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_payment_channel_fund(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, channel_fund = %id.to_hex(), "DRC payment-channel-fund gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC payment-channel-fund gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcPaymentChannelClaim(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_payment_channel_claim(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, channel_claim = %id.to_hex(), "DRC payment-channel-claim gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC payment-channel-claim gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcPaymentChannelClose(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_payment_channel_close(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, channel_close = %id.to_hex(), "DRC payment-channel-close gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC payment-channel-close gossip rejected");
                             }
                         }
                     }

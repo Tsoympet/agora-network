@@ -194,6 +194,10 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_check_creates: &'a [agora_types::DrcCheckCreateTx],
     pub drc_check_cashes: &'a [agora_types::DrcCheckCashTx],
     pub drc_check_cancels: &'a [agora_types::DrcCheckCancelTx],
+    pub drc_payment_channel_creates: &'a [agora_types::DrcPaymentChannelCreateTx],
+    pub drc_payment_channel_funds: &'a [agora_types::DrcPaymentChannelFundTx],
+    pub drc_payment_channel_claims: &'a [agora_types::DrcPaymentChannelClaimTx],
+    pub drc_payment_channel_closes: &'a [agora_types::DrcPaymentChannelCloseTx],
 }
 
 impl ChainState {
@@ -564,6 +568,10 @@ impl ChainState {
             drc_check_creates: lanes.drc_check_creates.to_vec(),
             drc_check_cashes: lanes.drc_check_cashes.to_vec(),
             drc_check_cancels: lanes.drc_check_cancels.to_vec(),
+            drc_payment_channel_creates: lanes.drc_payment_channel_creates.to_vec(),
+            drc_payment_channel_funds: lanes.drc_payment_channel_funds.to_vec(),
+            drc_payment_channel_claims: lanes.drc_payment_channel_claims.to_vec(),
+            drc_payment_channel_closes: lanes.drc_payment_channel_closes.to_vec(),
             drc_multisign_attachments: Vec::new(),
         };
         if let Some(ctx) = self.auth.as_ref() {
@@ -1924,6 +1932,7 @@ impl ChainState {
                 drc_ticket_meta_before: journal.drc_ticket_meta_before,
                 drc_escrow_meta_before: journal.drc_escrow_meta_before,
                 drc_check_meta_before: journal.drc_check_meta_before,
+                drc_payment_channel_meta_before: journal.drc_payment_channel_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store
