@@ -7,10 +7,11 @@ use ts_rs::TS;
 
 use crate::{
     AccountTransfer, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
-    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcMultisignAuth,
-    DrcMultisignError, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, DrcTicketCreateTx, Hash, NativeAssetId, SignedStakeTx,
+    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
+    DrcIssuedTransferTx, DrcMultisignAuth, DrcMultisignError, DrcPaymentChannelClaimTx,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, NativeAssetId,
+    SignedStakeTx,
 };
 
 pub const DRC_MULTISIGN_ATTACHMENT_KEY_VERSION: u32 = 1;
@@ -55,6 +56,8 @@ pub enum DrcMultisignOperationKind {
     DrcPaymentChannelFund = 16,
     DrcPaymentChannelClaim = 17,
     DrcPaymentChannelClose = 18,
+    DrcTrustLineSet = 19,
+    DrcIssuedTransfer = 20,
 }
 
 impl DrcMultisignOperationKind {
@@ -78,6 +81,8 @@ impl DrcMultisignOperationKind {
             Self::DrcPaymentChannelFund => "drc_payment_channel_fund",
             Self::DrcPaymentChannelClaim => "drc_payment_channel_claim",
             Self::DrcPaymentChannelClose => "drc_payment_channel_close",
+            Self::DrcTrustLineSet => "drc_trust_line_set",
+            Self::DrcIssuedTransfer => "drc_issued_transfer",
         }
     }
 }
@@ -376,6 +381,29 @@ pub fn attachment_key_for_payment_channel_close(
         &tx.signing_bytes_bound(chain_id, genesis),
     )
 }
+
+pub fn attachment_key_for_trust_line_set(
+    tx: &DrcTrustLineSetTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcTrustLineSet,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_issued_transfer(
+    tx: &DrcIssuedTransferTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcIssuedTransfer,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Error)]
 pub enum DrcMultisignAttachmentError {
     #[error("unsupported DRC multisign attachment key version {0}")]

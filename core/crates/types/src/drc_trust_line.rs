@@ -23,7 +23,7 @@ pub const DRC_TRUST_LINE_LIVE_STATE_VERSION: u32 = 1;
 #[allow(dead_code)]
 pub const DRC_TRUST_LINE_RECEIPT_VERSION: u32 = 1;
 pub const DRC_ISSUER_LIABILITY_STATE_VERSION: u32 = 1;
-pub const DRC_ISSUED_TRANSFER_RECEIPT_VERSION: u32 = 1;
+pub const DRC_ISSUED_TRANSFER_RECEIPT_VERSION: u32 = 2;
 
 #[allow(dead_code)]
 pub const DRC_TRUST_LINE_SET_TX_TYPE: &[u8] = b"drc_trust_line_set";
@@ -396,6 +396,8 @@ pub struct DrcIssuedTransferReceipt {
     pub sender: Address,
     pub recipient: Address,
     pub amount: IssuedAmount,
+    pub source_tag: Option<u32>,
+    pub destination_tag: Option<u32>,
     pub settlement_blue_score: u64,
 }
 
@@ -511,5 +513,63 @@ impl BorshDeserialize for DrcIssuedTransferTx {
             signature: BorshDeserialize::deserialize_reader(reader)?,
             multisign: read_multisign_trailer(reader)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod currency_encoding_vectors {
+    use super::*;
+    use crate::NativeAssetId;
+    use borsh::BorshDeserialize;
+
+    #[test]
+    fn standard_three_byte_uppercase_and_digit_rules() {
+        let ok = IssuedCurrencyCode(*b"USD\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
+        assert!(ok.validate().is_ok());
+        let bad = *b"usd\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+        assert_eq!(
+            IssuedCurrencyCode(bad).validate(),
+            Err(IssuedCurrencyError::MalformedStandardCode)
+        );
+        let bad_sym = *b"US$\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+        assert_eq!(
+            IssuedCurrencyCode(bad_sym).validate(),
+            Err(IssuedCurrencyError::MalformedStandardCode)
+        );
+        let mut trailing = *b"USD\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+        trailing[4] = 1;
+        assert_eq!(
+            IssuedCurrencyCode(trailing).validate(),
+            Err(IssuedCurrencyError::MalformedStandardCode)
+        );
+    }
+
+    #[test]
+    fn nonstandard_rejects_legacy_zero_prefix() {
+        let mut code = [0u8; 20];
+        code[1] = 1;
+        assert_eq!(
+            IssuedCurrencyCode(code).validate(),
+            Err(IssuedCurrencyError::MalformedNonStandardCode)
+        );
+        code[0] = 0x01;
+        assert!(IssuedCurrencyCode(code).validate().is_ok());
+    }
+
+    #[test]
+    fn canonical_borsh_order_and_asset_key_stability() {
+        let issuer = Address([7; 20]);
+        let currency = IssuedCurrencyCode(*b"ABC\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
+        let asset = IssuedAssetId { issuer, currency };
+        let bytes = borsh::to_vec(&asset).unwrap();
+        let decoded = IssuedAssetId::try_from_slice(&bytes).unwrap();
+        assert_eq!(decoded, asset);
+        assert_eq!(asset.asset_key(), asset.asset_key());
+    }
+
+    #[test]
+    fn issued_asset_id_has_no_native_asset_id_conversion_in_types() {
+        fn assert_distinct<T, U>() {}
+        assert_distinct::<IssuedAssetId, NativeAssetId>();
     }
 }

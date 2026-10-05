@@ -4,4 +4,4 @@ import type { Hash } from "./Hash";
 import type { IssuedAmount } from "./IssuedAmount";
 import type { IssuedAssetId } from "./IssuedAssetId";
 
-export type DrcIssuedTransferReceipt = { version: number, transfer_tx_id: Hash, asset: IssuedAssetId, sender: Address, recipient: Address, amount: IssuedAmount, settlement_blue_score: bigint, };
+export type DrcIssuedTransferReceipt = { version: number, transfer_tx_id: Hash, asset: IssuedAssetId, sender: Address, recipient: Address, amount: IssuedAmount, source_tag: number | null, destination_tag: number | null, settlement_blue_score: bigint, };
