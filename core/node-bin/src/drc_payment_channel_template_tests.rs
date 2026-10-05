@@ -454,14 +454,7 @@ fn verify_rpc_checks_offledger_claim_against_live_channel() {
 #[test]
 fn destination_immediate_close_path_closes_channel() {
     let (mut backend, genesis, owner, destination, claim_key) = funded_backend();
-    let create = signed_create(
-        &owner,
-        &claim_key,
-        destination.address(),
-        genesis,
-        0,
-        40,
-    );
+    let create = signed_create(&owner, &claim_key, destination.address(), genesis, 0, 40);
     let channel_id = create.channel_id();
     backend.submit_drc_payment_channel_create(create).unwrap();
     mine_template(&mut backend);
