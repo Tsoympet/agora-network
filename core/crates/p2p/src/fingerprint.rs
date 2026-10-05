@@ -20,7 +20,7 @@ pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
 pub const TRIDENT_PROTOCOL_VERSION: u32 = 21;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v9";
 pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v19";
-pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v1";
+pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v2";
 
 /// Canonical network fingerprint hash (pre-Trident / genesis v2).
 pub fn network_fingerprint(chain_id: &str, genesis: &Hash, consensus_policy_hash: &Hash) -> Hash {
@@ -83,7 +83,7 @@ mod tests {
         assert_ne!(v2, t1);
         assert_eq!(
             t1.to_hex(),
-            "c2d9c81289ba56540c8fea096f2e107c83130a41bbf382cfecabb6cd535c331e"
+            "512e222d9063ded919ef41012aa992629c6ceae595ad0a09ce5f4d60d8b49006"
         );
         let t2 = trident_network_fingerprint("agora-trident-testnet-2", &genesis, &policy);
         assert_ne!(t1, t2);
