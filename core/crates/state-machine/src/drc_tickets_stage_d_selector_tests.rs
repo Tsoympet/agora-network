@@ -2,22 +2,21 @@
 
 #[cfg(test)]
 mod selector_replay_version {
-    use agora_crypto::{sign_drc_payment_bound, sign_drc_ticket_create_bound, KeyPair};
+    use agora_crypto::{sign_drc_payment_bound, sign_drc_ticket_create_bound};
     use agora_types::{
-        Amount, DrcAccountSequenceSelector, DrcPaymentTx, DrcTicketCreateTx, Hash, NativeAssetId,
+        Amount, DrcAccountSequenceSelector, DrcPaymentTx, DrcTicketCreateTx, Hash,
         DRC_PAYMENT_LEGACY_VERSION, DRC_PAYMENT_TICKET_VERSION,
     };
 
     use crate::apply::{
         apply_block_batched_virtual_at_blue_score, apply_block_batched_with_auth_at_blue_score,
-        TxAuthContext,
     };
     use crate::drc_mempool::{
         lookup_drc_ticket_point, plan_drc_mempool_reservation, DrcTicketPointStatus,
     };
     use crate::drc_tickets_test_harness::support::{
-        assert_ticket_snapshot_unchanged, auth, coinbase, fund, key, mint_ticket,
-        reject_block_preserving_ticket_state, snapshot_ticket_state,
+        auth, coinbase, fund, key, mint_ticket, reject_block_preserving_ticket_state,
+        snapshot_ticket_state,
     };
     use crate::store::WriteBatch;
     use crate::{apply_drc_ticket_create, AccountJournal, StateStore};

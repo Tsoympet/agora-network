@@ -12,10 +12,10 @@ mod multisign_matrix {
     };
 
     use crate::accounts::load_account;
-    use crate::apply::{apply_block_batched_with_auth_at_blue_score, TxAuthContext};
+    use crate::apply::TxAuthContext;
     use crate::drc_signer_list::apply_drc_signer_list;
     use crate::drc_tickets_test_harness::support::{
-        assert_ticket_snapshot_unchanged, auth, coinbase, fund, key, mint_ticket,
+        auth, coinbase, fund, key, mint_ticket,
         reject_invalid_multisign_or_apply_preserving_ticket_state, snapshot_ticket_state,
     };
     use crate::store::WriteBatch;

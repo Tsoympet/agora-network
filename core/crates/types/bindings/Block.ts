@@ -4,6 +4,9 @@ import type { BlockHeader } from "./BlockHeader";
 import type { DataCommitmentAuthorization } from "./DataCommitmentAuthorization";
 import type { DrcAccountPolicyTx } from "./DrcAccountPolicyTx";
 import type { DrcDepositPreauthTx } from "./DrcDepositPreauthTx";
+import type { DrcEscrowCancelTx } from "./DrcEscrowCancelTx";
+import type { DrcEscrowCreateTx } from "./DrcEscrowCreateTx";
+import type { DrcEscrowFinishTx } from "./DrcEscrowFinishTx";
 import type { DrcMultisignBlockAttachment } from "./DrcMultisignBlockAttachment";
 import type { DrcPaymentTx } from "./DrcPaymentTx";
 import type { DrcRegularKeyTx } from "./DrcRegularKeyTx";
@@ -61,6 +64,18 @@ drc_signer_lists: Array<DrcSignerListTx>,
  * Owner-authorized DRC ticket creation (one ticket per operation).
  */
 drc_ticket_creates: Array<DrcTicketCreateTx>,
+/**
+ * Owner-authorized native DRC escrow creates.
+ */
+drc_escrow_creates: Array<DrcEscrowCreateTx>,
+/**
+ * Submitter-authorized native DRC escrow finishes.
+ */
+drc_escrow_finishes: Array<DrcEscrowFinishTx>,
+/**
+ * Owner-authorized native DRC escrow cancels.
+ */
+drc_escrow_cancels: Array<DrcEscrowCancelTx>,
 /**
  * Detached, body-root-committed DRC multisign authorization (consensus lane).
  */

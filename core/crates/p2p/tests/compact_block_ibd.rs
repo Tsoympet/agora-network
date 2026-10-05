@@ -51,6 +51,9 @@ async fn announce_triggers_getblock_and_full_serve() {
         drc_regular_keys: vec![],
         drc_signer_lists: vec![],
         drc_ticket_creates: vec![],
+        drc_escrow_creates: vec![],
+        drc_escrow_finishes: vec![],
+        drc_escrow_cancels: vec![],
         drc_multisign_attachments: vec![],
     };
     let hash = block.id();

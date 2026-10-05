@@ -1,7 +1,7 @@
 use agora_types::{
     AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcDepositPreauthTx,
-    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
-    OvlExecutionTx, Transaction,
+    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentReceipt, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, OvlExecutionTx, Transaction,
 };
 use serde_json::{json, Value};
 
@@ -268,6 +268,53 @@ impl<B: RpcBackend> RpcDispatcher<B> {
             RpcMethod::GetDrcTicket => {
                 let (owner, ticket_sequence) = drc_ticket_params(&req.params)?;
                 self.backend.get_drc_ticket(&owner, ticket_sequence)
+            }
+            RpcMethod::SubmitDrcEscrowCreate => {
+                let raw = req
+                    .params
+                    .get("escrow_create")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcEscrowCreateTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_escrow_create(tx)?;
+                Ok(json!({ "escrow_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcEscrowFinish => {
+                let raw = req
+                    .params
+                    .get("escrow_finish")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcEscrowFinishTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_escrow_finish(tx)?;
+                Ok(json!({ "finish_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcEscrowCancel => {
+                let raw = req
+                    .params
+                    .get("escrow_cancel")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcEscrowCancelTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_escrow_cancel(tx)?;
+                Ok(json!({ "cancel_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcEscrow => {
+                let escrow_id = param_hash(&req.params, "escrow_id")?;
+                self.backend.get_drc_escrow(&escrow_id)
+            }
+            RpcMethod::GetDrcEscrowReceipt => {
+                let escrow_id = param_hash(&req.params, "escrow_id")?;
+                self.backend.get_drc_escrow_receipt(&escrow_id)
             }
             RpcMethod::GetDrcAccountSignerList => {
                 let account = param_address(&req.params, "account")?;
@@ -913,6 +960,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
@@ -1031,6 +1081,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
@@ -1068,6 +1121,9 @@ mod tests {
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
             drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
@@ -1645,5 +1701,116 @@ mod tests {
             params: json!([]),
         });
         assert!(offices.result.unwrap()["offices"].as_array().unwrap().len() >= 27);
+    }
+
+    #[test]
+    fn get_drc_escrow_invalid_params_and_point_queries() {
+        let mut backend = InMemoryBackend::new();
+        let genesis = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
+            data_commitments: vec![],
+            drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
+            drc_multisign_attachments: vec![],
+        };
+        backend.insert_block(genesis);
+        let mut rpc = RpcDispatcher::new(backend);
+        let bad = rpc.handle(RpcRequest {
+            id: Some(json!(90)),
+            method: "agora_getDrcEscrow".into(),
+            params: json!({"escrow_id": "not-a-hash"}),
+        });
+        assert_eq!(bad.error.as_ref().unwrap().code, -32602);
+        let zero = rpc.handle(RpcRequest {
+            id: Some(json!(91)),
+            method: "agora_getDrcEscrow".into(),
+            params: json!({"escrow_id": Hash::ZERO.to_hex()}),
+        });
+        assert_eq!(zero.error.as_ref().unwrap().code, -32602);
+        let unknown = rpc.handle(RpcRequest {
+            id: Some(json!(92)),
+            method: "agora_getDrcEscrow".into(),
+            params: json!({"escrow_id": Hash([7; 32]).to_hex()}),
+        });
+        assert_eq!(unknown.result.unwrap()["status"], json!("unknown"));
+        let receipt = rpc.handle(RpcRequest {
+            id: Some(json!(93)),
+            method: "agora_getDrcEscrowReceipt".into(),
+            params: json!({"escrow_id": Hash([8; 32]).to_hex()}),
+        });
+        assert_eq!(receipt.result.unwrap()["status"], json!("unknown"));
+    }
+
+    #[test]
+    fn submit_drc_escrow_malformed_structure_returns_invalid_params() {
+        let mut backend = InMemoryBackend::new();
+        let genesis = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
+            data_commitments: vec![],
+            drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
+            drc_multisign_attachments: vec![],
+        };
+        backend.insert_block(genesis);
+        let mut rpc = RpcDispatcher::new(backend);
+        let bad = rpc.handle(RpcRequest {
+            id: Some(json!(94)),
+            method: "agora_submitDrcEscrowCreate".into(),
+            params: json!({"owner": "not-an-address"}),
+        });
+        assert_eq!(bad.error.as_ref().unwrap().code, -32602);
+        let invoice = rpc.handle(RpcRequest {
+            id: Some(json!(95)),
+            method: "agora_submitDrcEscrowCreate".into(),
+            params: json!({
+                "version": 1,
+                "owner": agora_types::Address([1;20]).to_bech32(),
+                "recipient": agora_types::Address([2;20]).to_bech32(),
+                "amount": "1",
+                "fee": "1",
+                "invoice_id": Hash([9;32]).to_hex(),
+                "cancel_after_blue_score": 10,
+                "nonce": 0,
+                "public_key": "",
+                "signature": ""
+            }),
+        });
+        assert_eq!(invoice.error.as_ref().unwrap().code, -32602);
     }
 }

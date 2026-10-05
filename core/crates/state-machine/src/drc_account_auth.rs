@@ -6,8 +6,9 @@ use agora_crypto::{
 };
 use agora_types::{
     validate_exclusive_authorization, AccountTransfer, Address, DrcAccountPolicyAction,
-    DrcAccountPolicyTx, DrcDepositPreauthTx, DrcMultisignAuth, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, DrcTicketCreateTx, NativeAssetId, SignedStakeTx,
+    DrcAccountPolicyTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
+    DrcEscrowFinishTx, DrcMultisignAuth, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, NativeAssetId, SignedStakeTx,
 };
 
 use crate::apply::TxAuthContext;
@@ -348,6 +349,84 @@ pub fn verify_drc_stake_operation(
     verify_multisign_or_single(
         store,
         &tx.actor,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )
+}
+
+pub fn verify_drc_escrow_create_operation(
+    store: &StateStore,
+    tx: &DrcEscrowCreateTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_escrow_create_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.owner,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )
+}
+
+pub fn verify_drc_escrow_finish_operation(
+    store: &StateStore,
+    tx: &DrcEscrowFinishTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_escrow_finish_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.submitter,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )
+}
+
+pub fn verify_drc_escrow_cancel_operation(
+    store: &StateStore,
+    tx: &DrcEscrowCancelTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_escrow_cancel_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.submitter,
         &tx.public_key,
         &tx.signature,
         &tx.multisign,

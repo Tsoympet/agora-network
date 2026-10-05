@@ -188,6 +188,9 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_regular_keys: &'a [agora_types::DrcRegularKeyTx],
     pub drc_signer_lists: &'a [agora_types::DrcSignerListTx],
     pub drc_ticket_creates: &'a [agora_types::DrcTicketCreateTx],
+    pub drc_escrow_creates: &'a [agora_types::DrcEscrowCreateTx],
+    pub drc_escrow_finishes: &'a [agora_types::DrcEscrowFinishTx],
+    pub drc_escrow_cancels: &'a [agora_types::DrcEscrowCancelTx],
 }
 
 impl ChainState {
@@ -552,6 +555,9 @@ impl ChainState {
             drc_regular_keys: lanes.drc_regular_keys.to_vec(),
             drc_signer_lists: lanes.drc_signer_lists.to_vec(),
             drc_ticket_creates: lanes.drc_ticket_creates.to_vec(),
+            drc_escrow_creates: lanes.drc_escrow_creates.to_vec(),
+            drc_escrow_finishes: lanes.drc_escrow_finishes.to_vec(),
+            drc_escrow_cancels: lanes.drc_escrow_cancels.to_vec(),
             drc_multisign_attachments: Vec::new(),
         };
         if let Some(ctx) = self.auth.as_ref() {
@@ -1910,6 +1916,7 @@ impl ChainState {
                 drc_regular_key_meta_before: journal.drc_regular_key_meta_before,
                 drc_signer_list_meta_before: journal.drc_signer_list_meta_before,
                 drc_ticket_meta_before: journal.drc_ticket_meta_before,
+                drc_escrow_meta_before: journal.drc_escrow_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

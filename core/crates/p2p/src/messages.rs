@@ -1,7 +1,8 @@
 use agora_types::{
     AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcAccountPolicyTx,
-    DrcDepositPreauthTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
-    OvlExecutionTx, SignedStakeTx, Transaction,
+    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, OvlExecutionTx, SignedStakeTx,
+    Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -45,6 +46,12 @@ pub enum NetworkMessage {
     DrcSignerList(DrcSignerListTx),
     /// Appended in Trident protocol v15; DRC ticket creation.
     DrcTicketCreate(DrcTicketCreateTx),
+    /// Appended in Trident protocol v17; native DRC escrow create.
+    DrcEscrowCreate(DrcEscrowCreateTx),
+    /// Appended in Trident protocol v17; native DRC escrow finish.
+    DrcEscrowFinish(DrcEscrowFinishTx),
+    /// Appended in Trident protocol v17; native DRC escrow cancel.
+    DrcEscrowCancel(DrcEscrowCancelTx),
 }
 
 impl NetworkMessage {
@@ -71,6 +78,9 @@ impl NetworkMessage {
             && block.drc_regular_keys.is_empty()
             && block.drc_signer_lists.is_empty()
             && block.drc_ticket_creates.is_empty()
+            && block.drc_escrow_creates.is_empty()
+            && block.drc_escrow_finishes.is_empty()
+            && block.drc_escrow_cancels.is_empty()
             && block.drc_multisign_attachments.is_empty()
         {
             Self::CompactBlock {

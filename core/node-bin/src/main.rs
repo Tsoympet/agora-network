@@ -31,7 +31,8 @@ use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
-    admit_account_transfer, admit_drc_account_policy, admit_drc_deposit_preauth, admit_drc_payment,
+    admit_account_transfer, admit_drc_account_policy, admit_drc_deposit_preauth,
+    admit_drc_escrow_cancel, admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_payment,
     admit_drc_regular_key, admit_drc_signer_list, admit_drc_ticket_create, admit_ovl_execution,
     admit_stake_tx, admit_transaction, NodeBackend, NodeBackendConfig,
 };
@@ -1102,6 +1103,69 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "DRC ticket-create gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcEscrowCreate(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_escrow_create(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, escrow_create = %id.to_hex(), "DRC escrow-create gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC escrow-create gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcEscrowFinish(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_escrow_finish(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, escrow_finish = %id.to_hex(), "DRC escrow-finish gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC escrow-finish gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcEscrowCancel(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_escrow_cancel(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, escrow_cancel = %id.to_hex(), "DRC escrow-cancel gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC escrow-cancel gossip rejected");
                             }
                         }
                     }
