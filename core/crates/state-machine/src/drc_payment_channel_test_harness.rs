@@ -60,11 +60,9 @@ pub mod support {
             .checked_add(amount)
             .unwrap();
         put_issued_supply_into(&mut batch, NativeAssetId::DRC, issued);
-        put_burned_supply_into(
-            &mut batch,
-            NativeAssetId::DRC,
-            load_burned_supply(store, NativeAssetId::DRC).unwrap(),
-        );
+        for asset in NativeAssetId::ALL {
+            put_burned_supply_into(&mut batch, asset, load_burned_supply(store, asset).unwrap());
+        }
         put_schema_version_into(&mut batch, SCHEMA_VERSION);
         store.write_batch(batch).unwrap();
     }
