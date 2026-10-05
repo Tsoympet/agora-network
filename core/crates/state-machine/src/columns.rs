@@ -59,7 +59,8 @@ impl ColumnFamily {
 /// - `19` — current additive DRC ticket, escrow, check, payment-channel,
 ///   trust-line, issued-control, receipt, and revert-journal key families
 /// - `20` — per-asset lifetime-burn counters and accepted-only DRC fee burning
-pub const SCHEMA_VERSION: u32 = 20;
+/// - `21` — common DRC ledger-object identity/owner indexes and accepted-operation receipts
+pub const SCHEMA_VERSION: u32 = 21;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {

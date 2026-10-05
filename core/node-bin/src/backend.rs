@@ -22,30 +22,32 @@ use agora_state_machine::{
     apply_drc_escrow_create, apply_drc_escrow_finish, apply_drc_payment_at_blue_score,
     apply_drc_regular_key, apply_drc_signer_list, apply_drc_ticket_create, apply_ovl_execution,
     apply_signed_stake_tx, build_snapshot, canonical_community_root, governance_treasury_root,
-    list_grants as list_canonical_grants, list_hubs as list_canonical_hubs,
-    list_missions as list_canonical_missions, list_passport_attestations,
-    load_canonical_community_summary, load_canonical_governance_policy, load_drc_account_policy,
-    load_drc_check_receipt, load_drc_deposit_preauth, load_drc_escrow_receipt,
-    load_drc_issued_asset_policy_receipt, load_drc_issued_clawback_receipt,
-    load_drc_issued_transfer_receipt, load_drc_payment_by_invoice,
-    load_drc_payment_channel_claim_event, load_drc_payment_channel_fund_event,
-    load_drc_payment_channel_live, load_drc_payment_channel_receipt,
-    load_drc_payment_channel_schedule_event, load_drc_payment_receipt,
-    load_drc_trust_line_issuer_control_receipt, load_drc_trust_line_live, load_epoch,
-    load_known_drc_account_keys, load_known_drc_account_policy,
-    load_known_drc_account_signer_summary, load_known_drc_deposit_authorization,
-    load_native_supply_state, load_protocol_treasuries, load_reward_pool, load_validator,
-    lookup_drc_check_point, lookup_drc_escrow_point, lookup_drc_issuer_liability_point,
-    lookup_drc_payment_channel_point, lookup_drc_ticket_point, lookup_drc_trust_line_point,
-    lookup_tx_location, meta_keys, outpoint_key, plan_drc_mempool_reservation,
-    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, DrcMempoolReservation,
-    DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext, WriteBatch,
+    list_drc_account_objects, list_grants as list_canonical_grants,
+    list_hubs as list_canonical_hubs, list_missions as list_canonical_missions,
+    list_passport_attestations, load_canonical_community_summary, load_canonical_governance_policy,
+    load_drc_account_policy, load_drc_check_receipt, load_drc_deposit_preauth,
+    load_drc_escrow_receipt, load_drc_issued_asset_policy_receipt,
+    load_drc_issued_clawback_receipt, load_drc_issued_transfer_receipt, load_drc_ledger_object,
+    load_drc_operation, load_drc_payment_by_invoice, load_drc_payment_channel_claim_event,
+    load_drc_payment_channel_fund_event, load_drc_payment_channel_live,
+    load_drc_payment_channel_receipt, load_drc_payment_channel_schedule_event,
+    load_drc_payment_receipt, load_drc_transaction, load_drc_trust_line_issuer_control_receipt,
+    load_drc_trust_line_live, load_epoch, load_known_drc_account_keys,
+    load_known_drc_account_policy, load_known_drc_account_signer_summary,
+    load_known_drc_deposit_authorization, load_native_supply_state, load_protocol_treasuries,
+    load_reward_pool, load_validator, lookup_drc_check_point, lookup_drc_escrow_point,
+    lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point, lookup_drc_ticket_point,
+    lookup_drc_trust_line_point, lookup_tx_location, meta_keys, outpoint_key,
+    plan_drc_mempool_reservation, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily,
+    DrcMempoolReservation, DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext,
+    WriteBatch,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAccountPolicy,
-    DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx,
-    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx,
-    DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAcceptedOperationReceipt,
+    DrcAccountPolicy, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
+    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
+    DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcLedgerObjectDescriptor,
+    DrcLedgerObjectKind, DrcLedgerObjectPage, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
     DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
@@ -64,6 +66,13 @@ pub(crate) fn min_relay_fee() -> u64 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_MIN_RELAY_FEE)
+}
+
+fn map_drc_index_error(error: agora_state_machine::StateError) -> RpcError {
+    match error {
+        agora_state_machine::StateError::InvalidTx(message) => RpcError::InvalidParams(message),
+        other => RpcError::Internal(other.to_string()),
+    }
 }
 
 pub(crate) fn currency_hex(code: &agora_types::IssuedCurrencyCode) -> String {
@@ -1744,6 +1753,38 @@ impl RpcBackend for NodeBackend {
                 "status": "unknown",
             })),
         }
+    }
+
+    fn get_drc_object(
+        &self,
+        object_id: &Hash,
+    ) -> Result<Option<DrcLedgerObjectDescriptor>, RpcError> {
+        load_drc_ledger_object(self.store.as_ref(), object_id).map_err(map_drc_index_error)
+    }
+
+    fn get_drc_account_objects(
+        &self,
+        owner: &Address,
+        kind: Option<DrcLedgerObjectKind>,
+        limit: usize,
+        cursor: Option<&str>,
+    ) -> Result<DrcLedgerObjectPage, RpcError> {
+        list_drc_account_objects(self.store.as_ref(), *owner, kind, limit, cursor)
+            .map_err(map_drc_index_error)
+    }
+
+    fn get_drc_operation(
+        &self,
+        operation_id: &Hash,
+    ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError> {
+        load_drc_operation(self.store.as_ref(), operation_id).map_err(map_drc_index_error)
+    }
+
+    fn get_drc_transaction(
+        &self,
+        transaction_id: &Hash,
+    ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError> {
+        load_drc_transaction(self.store.as_ref(), transaction_id).map_err(map_drc_index_error)
     }
 
     fn get_drc_account_policy(

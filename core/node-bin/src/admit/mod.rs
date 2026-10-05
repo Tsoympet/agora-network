@@ -27,10 +27,12 @@ use agora_consensus::{
 };
 use agora_state_machine::{
     apply_block_batched_virtual_at_blue_score, ghostdag_key, index_block_transactions_into,
-    list_tx_inclusions, load_ghostdag_record, load_header, load_utxo_journal, lookup_tx_location,
-    meta_keys, revert_journal_batched, set_primary_tx_location, store_ghostdag_record,
-    store_header, store_header_into, sum_transfer_fees, utxo_diff_key, ColumnFamily,
-    GhostdagRecord, StateStore, TxAuthContext, WriteBatch,
+    list_tx_inclusions, load_ghostdag_record, load_header, load_schema_version, load_utxo_journal,
+    lookup_tx_location, meta_keys, migrate_drc_fee_burn_schema,
+    migrate_drc_ledger_object_index_schema, revert_journal_batched, set_primary_tx_location,
+    store_ghostdag_record, store_header, store_header_into, sum_transfer_fees, utxo_diff_key,
+    verify_drc_ledger_object_index, ColumnFamily, GhostdagRecord, StateStore, TxAuthContext,
+    WriteBatch, DRC_FEE_BURN_SCHEMA_VERSION, DRC_LEDGER_INDEX_DATADIR_SCHEMA,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -272,8 +274,10 @@ impl ChainState {
             let tip = chain.select_virtual_tip()?.unwrap_or(genesis);
             chain.persist_virtual_tip(tip)?;
         }
+        chain.migrate_drc_fee_burn()?;
         // Crash recovery: finish any in-flight virtual reorg before serving.
         chain.recover_pending_virtual()?;
+        chain.migrate_drc_ledger_index()?;
         // Repair pre-PR-79 journals that persisted subsidy=0 so reorg accounting matches.
         chain.migrate_legacy_journal_subsidies()?;
         Ok(chain)
@@ -1866,6 +1870,41 @@ fn template_extranonce(timestamp_ms: u64) -> u32 {
 }
 
 impl ChainState {
+    fn migrate_drc_fee_burn(&self) -> Result<(), AdmitError> {
+        let schema = load_schema_version(self.store.as_ref())
+            .map_err(|error| AdmitError::Storage(error.to_string()))?;
+        if schema == DRC_FEE_BURN_SCHEMA_VERSION - 1 {
+            migrate_drc_fee_burn_schema(self.store.as_ref())
+                .map_err(|error| AdmitError::Storage(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn migrate_drc_ledger_index(&self) -> Result<(), AdmitError> {
+        let schema = load_schema_version(self.store.as_ref())
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        if schema == DRC_LEDGER_INDEX_DATADIR_SCHEMA - 1 {
+            let tip = self.virtual_tip()?;
+            let order = self.applied_blues(tip)?;
+            let applied: Vec<(Hash, u64)> = order
+                .into_iter()
+                .map(|hash| (hash, self.ghostdag.blue_score(&hash).unwrap_or(0)))
+                .collect();
+            migrate_drc_ledger_object_index_schema(self.store.as_ref(), &applied)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            return Ok(());
+        }
+        if schema == DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+            verify_drc_ledger_object_index(self.store.as_ref())
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        } else if schema > DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+            return Err(AdmitError::Storage(format!(
+                "unsupported future datadir schema {schema}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Rewrite legacy journals that loaded with `subsidy = 0` using block bodies.
     ///
     /// Only repairs journals whose `created` set includes the block's coinbase
@@ -1944,6 +1983,7 @@ impl ChainState {
                 drc_check_meta_before: journal.drc_check_meta_before,
                 drc_payment_channel_meta_before: journal.drc_payment_channel_meta_before,
                 drc_trust_line_meta_before: journal.drc_trust_line_meta_before,
+                drc_ledger_index_meta_before: journal.drc_ledger_index_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

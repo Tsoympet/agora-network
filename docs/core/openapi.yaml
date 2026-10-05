@@ -101,6 +101,10 @@ paths:
                     - agora_getDrcIssuedAssetPolicyReceipt
                     - agora_getDrcTrustLineIssuerControlReceipt
                     - agora_getDrcIssuedClawbackReceipt
+                    - agora_getDrcObject
+                    - agora_getDrcAccountObjects
+                    - agora_getDrcOperation
+                    - agora_getDrcTransaction
                     - agora_getBalance
                     - agora_getUtxos
                     - agora_fundAddress
@@ -177,3 +181,105 @@ components:
         net_supply:
           type: string
           pattern: "^[0-9]+$"
+    DrcLedgerObjectKind:
+      type: string
+      enum:
+        - account_policy
+        - deposit_preauthorization
+        - regular_key
+        - signer_list
+        - ticket_set
+        - escrow
+        - check
+        - payment_channel
+        - trust_line
+        - issued_asset_policy
+    DrcAccountObjectsParams:
+      type: object
+      required: [account]
+      additionalProperties: false
+      properties:
+        account:
+          type: string
+          description: Agora bech32m or 20-byte hex address
+        kind:
+          $ref: "#/components/schemas/DrcLedgerObjectKind"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        cursor:
+          type: string
+          description: Opaque versioned cursor bound to account and kind
+    DrcLedgerObjectDescriptor:
+      type: object
+      required: [version, object_id, kind, owner, key, object]
+      additionalProperties: false
+      properties:
+        version: { type: integer }
+        object_id:
+          type: array
+          minItems: 32
+          maxItems: 32
+          items: { type: integer, minimum: 0, maximum: 255 }
+        kind:
+          $ref: "#/components/schemas/DrcLedgerObjectKind"
+        owner:
+          type: array
+          minItems: 20
+          maxItems: 20
+          items: { type: integer, minimum: 0, maximum: 255 }
+        key:
+          type: object
+          description: Closed generated DrcLedgerObjectKey union
+        object:
+          type: object
+          description: Closed generated DrcLedgerObject union; never generic execution data
+    DrcAcceptedOperationReceipt:
+      type: object
+      required:
+        - version
+        - operation_id
+        - historical_transaction_id
+        - owner
+        - kind
+        - canonical_block_id
+        - operation
+        - affected_object_ids
+      additionalProperties: false
+      properties:
+        version: { type: integer }
+        operation_id:
+          type: array
+          minItems: 32
+          maxItems: 32
+          items: { type: integer, minimum: 0, maximum: 255 }
+        historical_transaction_id:
+          type: array
+          minItems: 32
+          maxItems: 32
+          items: { type: integer, minimum: 0, maximum: 255 }
+        owner:
+          type: array
+          minItems: 20
+          maxItems: 20
+          items: { type: integer, minimum: 0, maximum: 255 }
+        kind: { type: string }
+        canonical_block_id:
+          type: array
+          minItems: 32
+          maxItems: 32
+          items: { type: integer, minimum: 0, maximum: 255 }
+        application_blue_score:
+          type: integer
+          nullable: true
+        operation:
+          type: object
+          description: Closed generated DrcOperation union
+        affected_object_ids:
+          type: array
+          items:
+            type: array
+            minItems: 32
+            maxItems: 32
+            items: { type: integer, minimum: 0, maximum: 255 }

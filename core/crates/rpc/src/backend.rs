@@ -6,12 +6,13 @@ use agora_governance::{
     CivicSnapshot, ProposalKind, TopicCategory, VoteChoice,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
-    DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx,
-    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedTransferTx, DrcPaymentChannelClaimTx,
-    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx,
-    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
-    DrcTrustLineSetTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, BlockHeader, DrcAcceptedOperationReceipt,
+    DrcAccountPolicy, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
+    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
+    DrcIssuedTransferTx, DrcLedgerObjectDescriptor, DrcLedgerObjectKind, DrcLedgerObjectPage,
+    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
+    DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -265,6 +266,25 @@ pub trait RpcBackend: Send {
         control_tx_id: &Hash,
     ) -> Result<Value, RpcError>;
     fn get_drc_issued_clawback_receipt(&self, clawback_tx_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_object(
+        &self,
+        object_id: &Hash,
+    ) -> Result<Option<DrcLedgerObjectDescriptor>, RpcError>;
+    fn get_drc_account_objects(
+        &self,
+        owner: &Address,
+        kind: Option<DrcLedgerObjectKind>,
+        limit: usize,
+        cursor: Option<&str>,
+    ) -> Result<DrcLedgerObjectPage, RpcError>;
+    fn get_drc_operation(
+        &self,
+        operation_id: &Hash,
+    ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError>;
+    fn get_drc_transaction(
+        &self,
+        transaction_id: &Hash,
+    ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError>;
     /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
     fn get_drc_account_policy(
         &self,
@@ -952,6 +972,42 @@ impl RpcBackend for InMemoryBackend {
             "clawback_tx_id": clawback_tx_id.to_hex(),
             "status": "unknown",
         }))
+    }
+
+    fn get_drc_object(
+        &self,
+        _object_id: &Hash,
+    ) -> Result<Option<DrcLedgerObjectDescriptor>, RpcError> {
+        Ok(None)
+    }
+
+    fn get_drc_account_objects(
+        &self,
+        owner: &Address,
+        kind: Option<DrcLedgerObjectKind>,
+        _limit: usize,
+        _cursor: Option<&str>,
+    ) -> Result<DrcLedgerObjectPage, RpcError> {
+        Ok(DrcLedgerObjectPage {
+            owner: *owner,
+            kind,
+            objects: Vec::new(),
+            next_cursor: None,
+        })
+    }
+
+    fn get_drc_operation(
+        &self,
+        _operation_id: &Hash,
+    ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError> {
+        Ok(None)
+    }
+
+    fn get_drc_transaction(
+        &self,
+        _transaction_id: &Hash,
+    ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError> {
+        Ok(None)
     }
 
     fn get_drc_account_policy(

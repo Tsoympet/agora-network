@@ -1,7 +1,7 @@
 use agora_types::{
     AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx,
     DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
-    DrcIssuedTransferTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcIssuedTransferTx, DrcLedgerObjectKind, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OvlExecutionTx,
     Transaction,
@@ -549,6 +549,46 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 self.backend
                     .get_drc_issued_clawback_receipt(&clawback_tx_id)
             }
+            RpcMethod::GetDrcObject => {
+                let object_id = param_hash(&req.params, "object_id")?;
+                let object = self.backend.get_drc_object(&object_id)?;
+                Ok(json!({
+                    "object_id": object_id.to_hex(),
+                    "status": if object.is_some() { "live" } else { "unknown" },
+                    "object": object,
+                }))
+            }
+            RpcMethod::GetDrcAccountObjects => {
+                let owner = param_address(&req.params, "account")?;
+                let kind = optional_drc_object_kind(&req.params)?;
+                let limit = optional_limit(&req.params, 50)?;
+                let cursor = optional_string(&req.params, "cursor")?;
+                serde_json::to_value(self.backend.get_drc_account_objects(
+                    &owner,
+                    kind,
+                    limit,
+                    cursor.as_deref(),
+                )?)
+                .map_err(|error| RpcError::Internal(error.to_string()))
+            }
+            RpcMethod::GetDrcOperation => {
+                let operation_id = param_hash(&req.params, "operation_id")?;
+                let receipt = self.backend.get_drc_operation(&operation_id)?;
+                Ok(json!({
+                    "operation_id": operation_id.to_hex(),
+                    "status": if receipt.is_some() { "accepted" } else { "unknown" },
+                    "receipt": receipt,
+                }))
+            }
+            RpcMethod::GetDrcTransaction => {
+                let transaction_id = param_hash(&req.params, "transaction_id")?;
+                let receipt = self.backend.get_drc_transaction(&transaction_id)?;
+                Ok(json!({
+                    "transaction_id": transaction_id.to_hex(),
+                    "status": if receipt.is_some() { "accepted" } else { "unknown" },
+                    "receipt": receipt,
+                }))
+            }
             RpcMethod::GetDrcAccountSignerList => {
                 let account = param_address(&req.params, "account")?;
                 match self.backend.get_drc_account_signer_list(&account)? {
@@ -879,6 +919,34 @@ fn optional_limit(params: &Value, default: usize) -> Result<usize, RpcError> {
         return Ok(default);
     }
     parse_limit_value(params, default)
+}
+
+fn optional_drc_object_kind(params: &Value) -> Result<Option<DrcLedgerObjectKind>, RpcError> {
+    let Some(value) = params.as_object().and_then(|object| object.get("kind")) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let value = value
+        .as_str()
+        .ok_or_else(|| RpcError::InvalidParams("`kind` must be a string".into()))?;
+    DrcLedgerObjectKind::parse(value)
+        .map(Some)
+        .ok_or_else(|| RpcError::InvalidParams(format!("unsupported DRC object kind `{value}`")))
+}
+
+fn optional_string(params: &Value, key: &str) -> Result<Option<String>, RpcError> {
+    let Some(value) = params.as_object().and_then(|object| object.get(key)) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    value
+        .as_str()
+        .map(|value| Some(value.to_owned()))
+        .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be a string")))
 }
 
 fn parse_limit_value(v: &Value, default: usize) -> Result<usize, RpcError> {

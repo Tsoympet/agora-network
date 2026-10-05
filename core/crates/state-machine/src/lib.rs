@@ -55,6 +55,7 @@ mod drc_issued_controls_require_auth_migration_tests;
 mod drc_issued_controls_sequence_auth_matrix_tests;
 #[cfg(test)]
 mod drc_issued_controls_test_harness;
+mod drc_ledger_object;
 #[cfg(test)]
 mod drc_master_key_disable_hardening_tests;
 #[cfg(test)]
@@ -202,6 +203,14 @@ pub use drc_issued_controls::{
     load_drc_issued_asset_policy_receipt, load_drc_issued_clawback_receipt,
     load_drc_trust_line_issuer_control_receipt, normalize_trust_line_live, IssuedMovementKind,
     DRC_ISSUED_CONTROLS_ROOT_DOMAIN,
+};
+pub use drc_ledger_object::{
+    drc_ledger_object_index_root, index_accepted_drc_operations_into,
+    initialize_drc_ledger_index_into, list_drc_account_objects, load_drc_ledger_object,
+    load_drc_operation, load_drc_transaction, migrate_drc_ledger_object_index_schema,
+    reindex_drc_ledger_objects, verify_drc_ledger_index_ready, verify_drc_ledger_object_index,
+    DRC_LEDGER_INDEX_DATADIR_SCHEMA, DRC_LEDGER_INDEX_SCHEMA_VERSION,
+    DRC_LEDGER_OBJECT_INDEX_ROOT_DOMAIN, DRC_LEDGER_OBJECT_PAGE_MAX,
 };
 pub use drc_mempool::{
     drc_ticket_sequence_for_create_nonce, lookup_drc_ticket_point, plan_drc_mempool_reservation,
