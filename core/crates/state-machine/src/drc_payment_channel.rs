@@ -1,15 +1,19 @@
 //! Native DRC payment channel state transitions (locked DRC + cumulative off-ledger claims).
 
 use agora_types::{
-    payment_channel_claim_submitter_allowed, payment_channel_close_submitter_allowed,
-    payment_channel_finalize_allowed, payment_channel_fund_submitter_allowed,
-    resolve_drc_account_sequence, Address, Amount, DrcPaymentChannelClaimTx,
-    DrcPaymentChannelCloseKind, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
-    DrcPaymentChannelFundTx, DrcPaymentChannelLive, DrcPaymentChannelOutcome,
-    DrcPaymentChannelReceipt, Hash, NativeAssetId, DRC_MAX_LIVE_PAYMENT_CHANNELS_PER_ACCOUNT,
-    DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION, DRC_PAYMENT_CHANNEL_CLOSE_TICKET_VERSION,
-    DRC_PAYMENT_CHANNEL_CREATE_TICKET_VERSION, DRC_PAYMENT_CHANNEL_FUND_TICKET_VERSION,
+    payment_channel_cancel_after_valid_at_create, payment_channel_claim_submitter_allowed,
+    payment_channel_close_submitter_allowed, payment_channel_finalize_allowed,
+    payment_channel_fund_submitter_allowed, payment_channel_owner_schedule_deadline,
+    resolve_drc_account_sequence, Address, Amount, DrcPaymentChannelClaimEvent,
+    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseKind, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundEvent, DrcPaymentChannelFundTx,
+    DrcPaymentChannelLive, DrcPaymentChannelOutcome, DrcPaymentChannelReceipt,
+    DrcPaymentChannelScheduleEvent, Hash, NativeAssetId, DRC_MAX_LIVE_PAYMENT_CHANNELS_PER_ACCOUNT,
+    DRC_PAYMENT_CHANNEL_CLAIM_EVENT_VERSION, DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION,
+    DRC_PAYMENT_CHANNEL_CLOSE_TICKET_VERSION, DRC_PAYMENT_CHANNEL_CREATE_TICKET_VERSION,
+    DRC_PAYMENT_CHANNEL_FUND_EVENT_VERSION, DRC_PAYMENT_CHANNEL_FUND_TICKET_VERSION,
     DRC_PAYMENT_CHANNEL_LIVE_STATE_VERSION, DRC_PAYMENT_CHANNEL_RECEIPT_VERSION,
+    DRC_PAYMENT_CHANNEL_SCHEDULE_EVENT_VERSION,
 };
 use borsh::BorshDeserialize;
 
@@ -29,6 +33,9 @@ const LIVE_PREFIX: &[u8] = b"paychan/drc/live/";
 const OWNER_INDEX_PREFIX: &[u8] = b"paychan/drc/owner/";
 const SETTLED_PREFIX: &[u8] = b"paychan/drc/settled/";
 const RECEIPT_PREFIX: &[u8] = b"paychan/drc/receipt/";
+const FUND_EVENT_PREFIX: &[u8] = b"paychan/drc/fund/";
+const CLAIM_EVENT_PREFIX: &[u8] = b"paychan/drc/claim/";
+const SCHEDULE_EVENT_PREFIX: &[u8] = b"paychan/drc/schedule/";
 pub const DRC_PAYMENT_CHANNEL_ROOT_DOMAIN: &[u8] = b"agora-drc-payment-channel-root-v1";
 
 #[derive(Clone, PartialEq, Eq, Debug, borsh::BorshSerialize, borsh::BorshDeserialize)]
@@ -68,6 +75,57 @@ pub fn payment_channel_receipt_key(id: &Hash) -> Vec<u8> {
     key
 }
 
+pub fn payment_channel_fund_event_key(fund_tx_id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(FUND_EVENT_PREFIX.len() + 32);
+    key.extend_from_slice(FUND_EVENT_PREFIX);
+    key.extend_from_slice(fund_tx_id.as_bytes());
+    key
+}
+
+pub fn payment_channel_claim_event_key(claim_tx_id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(CLAIM_EVENT_PREFIX.len() + 32);
+    key.extend_from_slice(CLAIM_EVENT_PREFIX);
+    key.extend_from_slice(claim_tx_id.as_bytes());
+    key
+}
+
+pub fn payment_channel_schedule_event_key(close_tx_id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(SCHEDULE_EVENT_PREFIX.len() + 32);
+    key.extend_from_slice(SCHEDULE_EVENT_PREFIX);
+    key.extend_from_slice(close_tx_id.as_bytes());
+    key
+}
+
+pub fn payment_channel_meta_keys_for_fund(
+    channel_id: &Hash,
+    owner: &Address,
+    fund_tx_id: &Hash,
+) -> Vec<Vec<u8>> {
+    let mut keys = payment_channel_meta_keys_for_mutating(channel_id, owner);
+    keys.push(payment_channel_fund_event_key(fund_tx_id));
+    keys
+}
+
+pub fn payment_channel_meta_keys_for_claim(
+    channel_id: &Hash,
+    owner: &Address,
+    claim_tx_id: &Hash,
+) -> Vec<Vec<u8>> {
+    let mut keys = payment_channel_meta_keys_for_mutating(channel_id, owner);
+    keys.push(payment_channel_claim_event_key(claim_tx_id));
+    keys
+}
+
+pub fn payment_channel_meta_keys_for_schedule_close(
+    channel_id: &Hash,
+    owner: &Address,
+    close_tx_id: &Hash,
+) -> Vec<Vec<u8>> {
+    let mut keys = payment_channel_meta_keys_for_mutating(channel_id, owner);
+    keys.push(payment_channel_schedule_event_key(close_tx_id));
+    keys
+}
+
 pub fn payment_channel_meta_keys_for_create(tx: &DrcPaymentChannelCreateTx) -> Vec<Vec<u8>> {
     let id = tx.channel_id();
     vec![
@@ -103,6 +161,63 @@ pub fn load_drc_payment_channel_live(
         ));
     }
     Ok(Some(live))
+}
+
+pub fn load_drc_payment_channel_fund_event(
+    store: &StateStore,
+    fund_tx_id: &Hash,
+) -> Result<Option<DrcPaymentChannelFundEvent>, StateError> {
+    let Some(bytes) = store.get_cf(
+        ColumnFamily::Meta,
+        &payment_channel_fund_event_key(fund_tx_id),
+    )?
+    else {
+        return Ok(None);
+    };
+    let event = DrcPaymentChannelFundEvent::try_from_slice(&bytes)
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    event
+        .validate()
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    Ok(Some(event))
+}
+
+pub fn load_drc_payment_channel_claim_event(
+    store: &StateStore,
+    claim_tx_id: &Hash,
+) -> Result<Option<DrcPaymentChannelClaimEvent>, StateError> {
+    let Some(bytes) = store.get_cf(
+        ColumnFamily::Meta,
+        &payment_channel_claim_event_key(claim_tx_id),
+    )?
+    else {
+        return Ok(None);
+    };
+    let event = DrcPaymentChannelClaimEvent::try_from_slice(&bytes)
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    event
+        .validate()
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    Ok(Some(event))
+}
+
+pub fn load_drc_payment_channel_schedule_event(
+    store: &StateStore,
+    close_tx_id: &Hash,
+) -> Result<Option<DrcPaymentChannelScheduleEvent>, StateError> {
+    let Some(bytes) = store.get_cf(
+        ColumnFamily::Meta,
+        &payment_channel_schedule_event_key(close_tx_id),
+    )?
+    else {
+        return Ok(None);
+    };
+    let event = DrcPaymentChannelScheduleEvent::try_from_slice(&bytes)
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    event
+        .validate()
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    Ok(Some(event))
 }
 
 pub fn load_drc_payment_channel_receipt(
@@ -255,6 +370,8 @@ fn finalize_channel(
         outcome: DrcPaymentChannelOutcome::Closed,
         owner: live.owner,
         destination: live.destination,
+        destination_tag: live.destination_tag,
+        source_tag: live.source_tag,
         total_funded: live.total_funded,
         cumulative_claimed: live.cumulative_claimed,
         settlement_blue_score: application_blue_score,
@@ -291,6 +408,14 @@ pub fn apply_drc_payment_channel_create(
         return Err(StateError::InvalidTx("duplicate payment channel id".into()));
     }
     ensure_unsettled(store, &channel_id)?;
+
+    payment_channel_cancel_after_valid_at_create(
+        application_blue_score,
+        tx.cancel_after_blue_score,
+    )
+    .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+    payment_channel_owner_schedule_deadline(application_blue_score, tx.settle_delay_blue_scores)
+        .map_err(|e| StateError::InvalidTx(e.to_string()))?;
 
     let recipient_policy = load_drc_account_policy(store, &tx.destination)?;
     if recipient_policy.require_destination_tag && tx.authenticated_destination_tag().is_none() {
@@ -387,7 +512,7 @@ pub fn apply_drc_payment_channel_fund(
     store: &StateStore,
     tx: &DrcPaymentChannelFundTx,
     auth: &TxAuthContext,
-    _application_blue_score: u64,
+    application_blue_score: u64,
     batch: &mut WriteBatch,
     journal: &mut AccountJournal,
 ) -> Result<(), StateError> {
@@ -463,6 +588,23 @@ pub fn apply_drc_payment_channel_fund(
             .ok_or_else(|| StateError::InvalidTx("payment channel total_funded overflow".into()))?,
     );
     put_live(batch, &live)?;
+
+    let fund_event = DrcPaymentChannelFundEvent {
+        version: DRC_PAYMENT_CHANNEL_FUND_EVENT_VERSION,
+        channel_id: live.channel_id,
+        fund_tx_id: tx.fund_tx_id(),
+        amount: tx.amount,
+        total_funded_after: live.total_funded,
+        application_blue_score,
+    };
+    fund_event
+        .validate()
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    batch.put_cf(
+        ColumnFamily::Meta,
+        &payment_channel_fund_event_key(&tx.fund_tx_id()),
+        &borsh::to_vec(&fund_event).map_err(|e| StateError::Storage(e.to_string()))?,
+    );
     Ok(())
 }
 
@@ -470,7 +612,7 @@ pub fn apply_drc_payment_channel_claim(
     store: &StateStore,
     tx: &DrcPaymentChannelClaimTx,
     auth: &TxAuthContext,
-    _application_blue_score: u64,
+    application_blue_score: u64,
     batch: &mut WriteBatch,
     journal: &mut AccountJournal,
 ) -> Result<(), StateError> {
@@ -567,6 +709,23 @@ pub fn apply_drc_payment_channel_claim(
 
     live.cumulative_claimed = tx.cumulative_authorized;
     put_live(batch, &live)?;
+
+    let claim_event = DrcPaymentChannelClaimEvent {
+        version: DRC_PAYMENT_CHANNEL_CLAIM_EVENT_VERSION,
+        channel_id: live.channel_id,
+        claim_tx_id: tx.claim_tx_id(),
+        cumulative_authorized: tx.cumulative_authorized,
+        claim_delta: Amount::from_base_units(delta),
+        application_blue_score,
+    };
+    claim_event
+        .validate()
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    batch.put_cf(
+        ColumnFamily::Meta,
+        &payment_channel_claim_event_key(&tx.claim_tx_id()),
+        &borsh::to_vec(&claim_event).map_err(|e| StateError::Storage(e.to_string()))?,
+    );
     Ok(())
 }
 
@@ -645,13 +804,28 @@ pub fn apply_drc_payment_channel_close(
 
     match tx.close_kind {
         DrcPaymentChannelCloseKind::OwnerScheduleClose => {
-            let finalize_at = application_blue_score
-                .checked_add(live.settle_delay_blue_scores)
-                .ok_or_else(|| {
-                    StateError::InvalidTx("payment channel close finalize score overflow".into())
-                })?;
+            let finalize_at = payment_channel_owner_schedule_deadline(
+                application_blue_score,
+                live.settle_delay_blue_scores,
+            )
+            .map_err(|e| StateError::InvalidTx(e.to_string()))?;
             live.close_finalizable_after = Some(finalize_at);
             put_live(batch, &live)?;
+            let schedule_event = DrcPaymentChannelScheduleEvent {
+                version: DRC_PAYMENT_CHANNEL_SCHEDULE_EVENT_VERSION,
+                channel_id: live.channel_id,
+                close_tx_id: tx.close_tx_id(),
+                close_finalizable_after: finalize_at,
+                application_blue_score,
+            };
+            schedule_event
+                .validate()
+                .map_err(|e| StateError::Storage(e.to_string()))?;
+            batch.put_cf(
+                ColumnFamily::Meta,
+                &payment_channel_schedule_event_key(&tx.close_tx_id()),
+                &borsh::to_vec(&schedule_event).map_err(|e| StateError::Storage(e.to_string()))?,
+            );
             Ok(None)
         }
         DrcPaymentChannelCloseKind::DestinationClose => Ok(Some(finalize_channel(

@@ -28,8 +28,9 @@ use crate::drc_master_key_recovery::assert_drc_recovery_invariant;
 use crate::drc_payment_channel::{
     apply_drc_payment_channel_claim, apply_drc_payment_channel_close,
     apply_drc_payment_channel_create, apply_drc_payment_channel_fund,
-    load_drc_payment_channel_live, payment_channel_meta_keys_for_create,
-    payment_channel_meta_keys_for_mutating,
+    load_drc_payment_channel_live, payment_channel_meta_keys_for_claim,
+    payment_channel_meta_keys_for_create, payment_channel_meta_keys_for_fund,
+    payment_channel_meta_keys_for_mutating, payment_channel_meta_keys_for_schedule_close,
 };
 use crate::drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys};
 use crate::drc_regular_key::{apply_drc_regular_key, drc_regular_key_meta_keys};
@@ -1981,7 +1982,7 @@ fn apply_trident_lanes(
             let meta_before = if let Some(ref live) = live {
                 snapshot_meta_keys(
                     &lane,
-                    &payment_channel_meta_keys_for_mutating(&live.channel_id, &live.owner),
+                    &payment_channel_meta_keys_for_fund(&live.channel_id, &live.owner, &id),
                 )?
             } else {
                 Vec::new()
@@ -2040,7 +2041,7 @@ fn apply_trident_lanes(
             let meta_before = if let Some(ref live) = live {
                 snapshot_meta_keys(
                     &lane,
-                    &payment_channel_meta_keys_for_mutating(&live.channel_id, &live.owner),
+                    &payment_channel_meta_keys_for_claim(&live.channel_id, &live.owner, &id),
                 )?
             } else {
                 Vec::new()
@@ -2098,10 +2099,17 @@ fn apply_trident_lanes(
             let ctx = auth.expect("DRC payment channel auth checked above");
             let live = load_drc_payment_channel_live(&lane, &tx.channel_id)?;
             let meta_before = if let Some(ref live) = live {
-                snapshot_meta_keys(
-                    &lane,
-                    &payment_channel_meta_keys_for_mutating(&live.channel_id, &live.owner),
-                )?
+                let keys = match tx.close_kind {
+                    agora_types::DrcPaymentChannelCloseKind::OwnerScheduleClose => {
+                        payment_channel_meta_keys_for_schedule_close(
+                            &live.channel_id,
+                            &live.owner,
+                            &id,
+                        )
+                    }
+                    _ => payment_channel_meta_keys_for_mutating(&live.channel_id, &live.owner),
+                };
+                snapshot_meta_keys(&lane, &keys)?
             } else {
                 Vec::new()
             };
