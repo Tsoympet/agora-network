@@ -19,10 +19,19 @@ use agora_types::{
     DRC_PAYMENT_CHANNEL_CREATE_TX_VERSION, DRC_PAYMENT_CHANNEL_FUND_TX_VERSION,
 };
 
+fn coinbase_commitment_nonce(parents: &[Hash], timestamp_ms: u64, extranonce: u32) -> u64 {
+    let mut sorted = parents.to_vec();
+    sorted.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+    let tag = Hash::hash_borsh(&(b"agora-cb-parents-v2", sorted));
+    let parent_tag = u32::from_le_bytes(tag.as_bytes()[..4].try_into().unwrap());
+    let low = parent_tag ^ (timestamp_ms as u32);
+    ((extranonce as u64) << 32) | u64::from(low)
+}
+
 use agora_rpc::RpcBackend;
 
 use super::{NodeBackend, NodeBackendConfig};
-use crate::admit::ChainState;
+use crate::admit::{BlockTemplateLanes, ChainState};
 use crate::storage_policy::StoragePolicy;
 
 pub const CHAIN: &str = "agora-dev";
@@ -290,4 +299,138 @@ pub fn account_reserved(backend: &NodeBackend, account: &Address) -> bool {
         .lock()
         .unwrap()
         .account_reserved(NativeAssetId::DRC, account)
+}
+
+pub fn payment_channel_mutation_reserved(backend: &NodeBackend, channel_id: &Hash) -> bool {
+    backend
+        .test_mempool()
+        .lock()
+        .unwrap()
+        .payment_channel_mutation_reserved(channel_id)
+}
+
+pub fn ticket_consumer_reserved(backend: &NodeBackend, account: &Address, sequence: u64) -> bool {
+    backend
+        .test_mempool()
+        .lock()
+        .unwrap()
+        .ticket_consumer_reserved(account, sequence)
+}
+
+/// Mine a block with explicit parents and lane payloads through live `submit_block`.
+pub fn submit_lanes_at_parents(
+    backend: &mut NodeBackend,
+    parents: &[Hash],
+    timestamp_ms: u64,
+    lanes: BlockTemplateLanes<'_>,
+    coinbase_extranonce: u32,
+) -> Hash {
+    let miner = backend.test_miner();
+    let chain = backend.test_chain().lock().unwrap();
+    let parent_ts = parents
+        .iter()
+        .filter_map(|parent| chain.load_block(parent).ok().flatten())
+        .map(|block| block.header.timestamp_ms)
+        .max()
+        .unwrap_or(0);
+    // `timestamp_ms` is a minimum delta above the parent (not an absolute clock time).
+    let timestamp_ms = parent_ts.saturating_add(timestamp_ms.max(1_000));
+    let mut block = chain.block_template_lanes(miner, lanes).unwrap();
+    block.header.parents = parents.to_vec();
+    block.header.bits = chain.expected_bits_for_parents(parents).unwrap();
+    block.header.timestamp_ms = timestamp_ms;
+    if let Some(cb) = block
+        .transactions
+        .iter_mut()
+        .find(|tx| tx.inputs.is_empty())
+    {
+        cb.nonce = coinbase_commitment_nonce(parents, timestamp_ms, coinbase_extranonce);
+    }
+    block.header.tx_root = block.compute_body_root();
+    block.header.nonce = 1;
+    let pow = RandomXPowHasher.pow_hash(&block.header);
+    LeadingZeroPow::new(PowAlgorithm::RandomX)
+        .verify(&block.header, &pow)
+        .unwrap();
+    drop(chain);
+    backend.submit_block(block).unwrap()
+}
+
+pub fn virtual_tip(backend: &NodeBackend) -> Hash {
+    backend.test_chain().lock().unwrap().virtual_tip().unwrap()
+}
+
+pub fn live_cumulative_claimed(store: &StateStore, channel_id: &Hash) -> u64 {
+    load_drc_payment_channel_live(store, channel_id)
+        .ok()
+        .flatten()
+        .map(|live| live.cumulative_claimed.as_base_units())
+        .unwrap_or(0)
+}
+
+/// Apply a sibling claim block, then reorg it away by extending an alternate empty branch.
+pub fn reorg_away_claim_on_fund_tip(
+    backend: &mut NodeBackend,
+    store: &StateStore,
+    fund_tip: Hash,
+    claim: &agora_types::DrcPaymentChannelClaimTx,
+) -> Hash {
+    if live_cumulative_claimed(store, &claim.channel_id) == 0 {
+        let _claim_tip = submit_lanes_at_parents(
+            backend,
+            &[fund_tip],
+            1_000,
+            BlockTemplateLanes {
+                drc_payment_channel_claims: std::slice::from_ref(claim),
+                ..BlockTemplateLanes::default()
+            },
+            51,
+        );
+    }
+    assert!(live_cumulative_claimed(store, &claim.channel_id) > 0);
+    let mut branch_tip = submit_lanes_at_parents(
+        backend,
+        &[fund_tip],
+        2_000,
+        BlockTemplateLanes::default(),
+        52,
+    );
+    let mut extranonce = 53u32;
+    for _ in 0..8 {
+        if live_cumulative_claimed(store, &claim.channel_id) == 0 {
+            break;
+        }
+        branch_tip = submit_lanes_at_parents(
+            backend,
+            &[branch_tip],
+            1_000,
+            BlockTemplateLanes::default(),
+            extranonce,
+        );
+        extranonce += 1;
+    }
+    assert_eq!(
+        live_cumulative_claimed(store, &claim.channel_id),
+        0,
+        "virtual reorg must restore pre-claim cumulative"
+    );
+    branch_tip
+}
+
+pub fn reward_pool_balance(store: &StateStore) -> u64 {
+    agora_state_machine::load_reward_pool(store, NativeAssetId::DRC).unwrap_or(0)
+}
+
+pub fn channel_conservation_quad(
+    store: &StateStore,
+    owner: &Address,
+    destination: &Address,
+    channel_id: &Hash,
+) -> (u64, u64, u64, u64) {
+    (
+        drc_balance(store, owner),
+        drc_balance(store, destination),
+        locked_remainder(store, channel_id),
+        reward_pool_balance(store),
+    )
 }

@@ -3072,6 +3072,13 @@ impl NodeBackend {
         &self.mempool
     }
 
+    pub(crate) fn test_chain(&self) -> &Arc<Mutex<ChainState>> {
+        &self.chain
+    }
+
+    pub(crate) fn test_miner(&self) -> Address {
+        self.miner_address
+    }
 }
 
 #[cfg(test)]
@@ -3086,6 +3093,9 @@ mod drc_payment_channel_public_helpers;
 #[cfg(test)]
 #[path = "drc_payment_channel_public_security_tests.rs"]
 mod drc_payment_channel_public_security_tests;
+#[cfg(test)]
+#[path = "drc_payment_channel_reorg_reservation_tests.rs"]
+mod drc_payment_channel_reorg_reservation_tests;
 #[cfg(test)]
 #[path = "drc_payment_channel_rpc_integration_tests.rs"]
 mod drc_payment_channel_rpc_integration_tests;
