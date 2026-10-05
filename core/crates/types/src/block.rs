@@ -5,13 +5,16 @@ use ts_rs::TS;
 use crate::{
     AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcCheckCancelTx,
     DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
-    DrcEscrowFinishTx, DrcIssuedTransferTx, DrcMultisignBlockAttachment, DrcPaymentChannelClaimTx,
-    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OvlExecutionTx,
-    SignedStakeTx, Transaction,
+    DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx,
+    DrcMultisignBlockAttachment, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
+    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash,
+    OvlExecutionTx, SignedStakeTx, Transaction,
 };
 
 /// Explicit version/domain for bodies carrying native DRC payment channel operations.
+pub const TRIDENT_BLOCK_BODY_V17_VERSION: u16 = 17;
+pub const TRIDENT_BLOCK_BODY_V17_DOMAIN: &[u8] = b"agora-block-body-v17";
 pub const TRIDENT_BLOCK_BODY_V16_VERSION: u16 = 16;
 pub const TRIDENT_BLOCK_BODY_V16_DOMAIN: &[u8] = b"agora-block-body-v16";
 pub const TRIDENT_BLOCK_BODY_V15_VERSION: u16 = 15;
@@ -135,6 +138,15 @@ pub struct Block {
     /// Exact issued-value transfers (issue/redeem/holder transfer).
     #[serde(default)]
     pub drc_issued_transfers: Vec<DrcIssuedTransferTx>,
+    /// Issuer-scoped asset policy (auth/freeze/clawback flags).
+    #[serde(default)]
+    pub drc_issued_asset_policy_sets: Vec<DrcIssuedAssetPolicySetTx>,
+    /// Issuer line authorize/freeze/deep-freeze controls.
+    #[serde(default)]
+    pub drc_trust_line_issuer_controls: Vec<DrcTrustLineIssuerControlTx>,
+    /// Issuer exact clawback from one holder line.
+    #[serde(default)]
+    pub drc_issued_clawbacks: Vec<DrcIssuedClawbackTx>,
     /// Detached, body-root-committed DRC multisign authorization (consensus lane).
     #[serde(default)]
     pub drc_multisign_attachments: Vec<DrcMultisignBlockAttachment>,
@@ -168,6 +180,9 @@ impl Block {
             drc_payment_channel_closes: Vec::new(),
             drc_trust_line_sets: Vec::new(),
             drc_issued_transfers: Vec::new(),
+            drc_issued_asset_policy_sets: Vec::new(),
+            drc_trust_line_issuer_controls: Vec::new(),
+            drc_issued_clawbacks: Vec::new(),
             drc_multisign_attachments: Vec::new(),
         }
     }
@@ -332,6 +347,34 @@ impl Block {
                 inner,
                 set_ids,
                 transfer_ids,
+            ));
+        }
+        if !self.drc_issued_asset_policy_sets.is_empty()
+            || !self.drc_trust_line_issuer_controls.is_empty()
+            || !self.drc_issued_clawbacks.is_empty()
+        {
+            let policy_ids: Vec<Hash> = self
+                .drc_issued_asset_policy_sets
+                .iter()
+                .map(DrcIssuedAssetPolicySetTx::policy_set_tx_id)
+                .collect();
+            let control_ids: Vec<Hash> = self
+                .drc_trust_line_issuer_controls
+                .iter()
+                .map(DrcTrustLineIssuerControlTx::issuer_control_tx_id)
+                .collect();
+            let clawback_ids: Vec<Hash> = self
+                .drc_issued_clawbacks
+                .iter()
+                .map(DrcIssuedClawbackTx::clawback_tx_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V17_DOMAIN,
+                TRIDENT_BLOCK_BODY_V17_VERSION,
+                inner,
+                policy_ids,
+                control_ids,
+                clawback_ids,
             ));
         }
         inner
@@ -545,6 +588,9 @@ impl BorshDeserialize for Block {
             drc_payment_channel_closes: deserialize_trailing_vec(reader)?,
             drc_trust_line_sets: deserialize_trailing_vec(reader)?,
             drc_issued_transfers: deserialize_trailing_vec(reader)?,
+            drc_issued_asset_policy_sets: deserialize_trailing_vec(reader)?,
+            drc_trust_line_issuer_controls: deserialize_trailing_vec(reader)?,
+            drc_issued_clawbacks: deserialize_trailing_vec(reader)?,
             drc_multisign_attachments: deserialize_trailing_vec(reader)?,
         })
     }
@@ -1036,9 +1082,10 @@ mod tests {
 
     #[test]
     fn drc_trust_line_lane_activates_body_root_v16_and_commits_operation_ids() {
-        use agora_types::{
+        use crate::{
             Address, Amount, DrcIssuedTransferTx, DrcTrustLineSetTx, Hash, IssuedAmount,
-            DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
+            IssuedCurrencyCode, DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION,
+            DRC_TRUST_LINE_SET_TX_VERSION,
         };
 
         let mut block = Block::utxo(

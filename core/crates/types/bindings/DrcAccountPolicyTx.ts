@@ -8,11 +8,11 @@ import type { DrcMultisignAuth } from "./DrcMultisignAuth";
 /**
  * Signed DRC account-policy operation.
  */
-export type DrcAccountPolicyTx = { version: number, account: Address, action: DrcAccountPolicyAction,
+export type DrcAccountPolicyTx = { version: number, account: Address, action: DrcAccountPolicyAction, 
 /**
  * Explicit DRC fee credited to the DRC validator reward pool on acceptance.
  */
-fee: Amount,
+fee: Amount, 
 /**
  * Shared DRC nonce used by transfers, stake ops, policies, preauths, and payments.
  */

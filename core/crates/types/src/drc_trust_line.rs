@@ -20,6 +20,8 @@ pub const DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION: u32 = 1;
 pub const DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION: u32 = 2;
 
 pub const DRC_TRUST_LINE_LIVE_STATE_VERSION: u32 = 1;
+/// v2 adds `authorized`, `line_frozen`, `line_deep_frozen` (v1 records unchanged on disk).
+pub const DRC_TRUST_LINE_LIVE_STATE_V2: u32 = 2;
 #[allow(dead_code)]
 pub const DRC_TRUST_LINE_RECEIPT_VERSION: u32 = 1;
 pub const DRC_ISSUER_LIABILITY_STATE_VERSION: u32 = 1;
@@ -342,9 +344,7 @@ impl DrcIssuedTransferTx {
     }
 }
 
-#[derive(
-    Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
-)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct DrcTrustLineLive {
     pub version: u32,
@@ -352,16 +352,56 @@ pub struct DrcTrustLineLive {
     pub asset: IssuedAssetId,
     pub limit: IssuedAmount,
     pub balance: IssuedAmount,
+    /// Under `require_auth` policy, false until issuer authorizes (v1 lines default at load).
+    #[serde(default = "default_authorized_legacy")]
+    pub authorized: bool,
+    #[serde(default)]
+    pub line_frozen: bool,
+    #[serde(default)]
+    pub line_deep_frozen: bool,
+}
+
+fn default_authorized_legacy() -> bool {
+    true
 }
 
 impl DrcTrustLineLive {
+    pub fn v1_defaults(
+        holder: Address,
+        asset: IssuedAssetId,
+        limit: IssuedAmount,
+        balance: IssuedAmount,
+        require_auth: bool,
+    ) -> Self {
+        Self {
+            version: DRC_TRUST_LINE_LIVE_STATE_VERSION,
+            holder,
+            asset,
+            limit,
+            balance,
+            authorized: !require_auth,
+            line_frozen: false,
+            line_deep_frozen: false,
+        }
+    }
+
+    pub fn as_v2_storage(&self) -> Self {
+        let mut out = *self;
+        out.version = DRC_TRUST_LINE_LIVE_STATE_V2;
+        out
+    }
     pub fn validate(&self) -> Result<(), DrcTrustLineError> {
-        if self.version != DRC_TRUST_LINE_LIVE_STATE_VERSION {
+        if self.version != DRC_TRUST_LINE_LIVE_STATE_VERSION
+            && self.version != DRC_TRUST_LINE_LIVE_STATE_V2
+        {
             return Err(DrcTrustLineError::UnsupportedLiveVersion(self.version));
         }
         self.asset.validate().map_err(DrcTrustLineError::Asset)?;
         if self.balance.as_units() > self.limit.as_units() {
             return Err(DrcTrustLineError::BalanceExceedsLimit);
+        }
+        if self.line_deep_frozen && !self.line_frozen {
+            return Err(DrcTrustLineError::DeepFreezeRequiresLineFreeze);
         }
         Ok(())
     }
@@ -437,6 +477,12 @@ pub enum DrcTrustLineError {
     ZeroFee,
     #[error("balance exceeds limit")]
     BalanceExceedsLimit,
+    #[error("deep freeze requires line freeze")]
+    DeepFreezeRequiresLineFreeze,
+    #[error("line not authorized")]
+    LineNotAuthorized,
+    #[error("issued movement frozen")]
+    IssuedMovementFrozen,
 }
 
 /// Meta key prefix for live trust line records (matches canonical state layout).
@@ -479,6 +525,63 @@ pub fn drc_issued_transfer_mutation_meta_keys(tx: &DrcIssuedTransferTx) -> Vec<V
         keys.push(drc_trust_line_issuer_liability_meta_key(&asset));
     }
     keys
+}
+
+impl BorshSerialize for DrcTrustLineLive {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        let v = if self.version == DRC_TRUST_LINE_LIVE_STATE_VERSION {
+            self.as_v2_storage()
+        } else {
+            *self
+        };
+        BorshSerialize::serialize(&v.version, writer)?;
+        BorshSerialize::serialize(&v.holder, writer)?;
+        BorshSerialize::serialize(&v.asset, writer)?;
+        BorshSerialize::serialize(&v.limit, writer)?;
+        BorshSerialize::serialize(&v.balance, writer)?;
+        BorshSerialize::serialize(&v.authorized, writer)?;
+        BorshSerialize::serialize(&v.line_frozen, writer)?;
+        BorshSerialize::serialize(&v.line_deep_frozen, writer)
+    }
+}
+
+impl BorshDeserialize for DrcTrustLineLive {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> borsh::io::Result<Self> {
+        let version: u32 = BorshDeserialize::deserialize_reader(reader)?;
+        let holder: Address = BorshDeserialize::deserialize_reader(reader)?;
+        let asset: IssuedAssetId = BorshDeserialize::deserialize_reader(reader)?;
+        let limit: IssuedAmount = BorshDeserialize::deserialize_reader(reader)?;
+        let balance: IssuedAmount = BorshDeserialize::deserialize_reader(reader)?;
+        if version == DRC_TRUST_LINE_LIVE_STATE_VERSION {
+            return Ok(Self {
+                version,
+                holder,
+                asset,
+                limit,
+                balance,
+                authorized: true,
+                line_frozen: false,
+                line_deep_frozen: false,
+            });
+        }
+        if version == DRC_TRUST_LINE_LIVE_STATE_V2 {
+            Ok(Self {
+                version,
+                holder,
+                asset,
+                limit,
+                balance,
+                authorized: BorshDeserialize::deserialize_reader(reader)?,
+                line_frozen: BorshDeserialize::deserialize_reader(reader)?,
+                line_deep_frozen: BorshDeserialize::deserialize_reader(reader)?,
+            })
+        } else {
+            Err(borsh::io::Error::new(
+                borsh::io::ErrorKind::InvalidData,
+                "trust line live version",
+            ))
+        }
+    }
 }
 
 // Borsh for txs with multisign trailer

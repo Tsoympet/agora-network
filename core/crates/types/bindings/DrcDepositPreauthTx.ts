@@ -8,19 +8,19 @@ import type { DrcMultisignAuth } from "./DrcMultisignAuth";
 /**
  * Owner-signed operation that grants or revokes one address-based preauthorization.
  */
-export type DrcDepositPreauthTx = { version: number,
+export type DrcDepositPreauthTx = { version: number, 
 /**
  * Recipient that owns and controls the preauthorization record.
  */
-owner: Address, action: DrcDepositPreauthAction,
+owner: Address, action: DrcDepositPreauthAction, 
 /**
  * Source account allowed to deposit to `owner` while DepositAuth is enabled.
  */
-authorized_source: Address,
+authorized_source: Address, 
 /**
  * Explicit DRC fee credited to the DRC validator reward pool on acceptance.
  */
-fee: Amount,
+fee: Amount, 
 /**
  * Shared DRC nonce used by transfers, stake ops, policies, preauths, and payments.
  */
