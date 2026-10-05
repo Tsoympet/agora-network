@@ -3,6 +3,8 @@
 //! Five column families (hot / warm / archival / meta / utxo) keep tip validation
 //! off cold compaction paths while fixing genesis supply caps in `meta`.
 
+#![cfg_attr(test, allow(clippy::too_many_arguments))]
+
 mod acceptance;
 mod accounts;
 mod apply;
@@ -82,6 +84,11 @@ mod drc_tickets_stage_d_selector_tests;
 mod drc_tickets_stage_d_semantic_tests;
 #[cfg(test)]
 mod drc_tickets_test_harness;
+mod drc_trust_line;
+#[cfg(test)]
+mod drc_trust_line_test_harness;
+#[cfg(test)]
+mod drc_trust_line_tests;
 mod error;
 mod execution;
 mod finality_store;
@@ -181,6 +188,12 @@ pub use drc_signer_list::{
     DRC_SIGNER_LIST_ROOT_DOMAIN,
 };
 pub use drc_ticket::{apply_drc_ticket_create, load_drc_account_tickets};
+pub use drc_trust_line::{
+    apply_drc_issued_transfer, apply_drc_trust_line_set, drc_trust_line_root,
+    issued_transfer_receipt_key, issuer_liability_key, load_drc_issued_transfer_receipt,
+    load_drc_issuer_liability, load_drc_trust_line_live, lookup_drc_trust_line_point,
+    trust_line_key, trust_line_meta_keys, DRC_TRUST_LINE_ROOT_DOMAIN,
+};
 pub use error::StateError;
 pub use execution::{
     apply_ovl_execution, execution_fee, OvlExecutionReceipt, OVL_EXECUTION_VERSION,

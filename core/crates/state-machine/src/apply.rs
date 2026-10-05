@@ -36,6 +36,10 @@ use crate::drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys};
 use crate::drc_regular_key::{apply_drc_regular_key, drc_regular_key_meta_keys};
 use crate::drc_signer_list::{apply_drc_signer_list, drc_signer_list_meta_keys};
 use crate::drc_ticket::{apply_drc_ticket_create, drc_ticket_meta_keys};
+use crate::drc_trust_line::{
+    apply_drc_issued_transfer, apply_drc_trust_line_set, issued_transfer_meta_keys,
+    trust_line_set_meta_keys,
+};
 use crate::execution::apply_ovl_execution;
 use crate::payments::{apply_drc_payment_with_blue_score, payment_meta_keys};
 use crate::staking::{
@@ -104,6 +108,7 @@ pub struct UtxoJournal {
     /// DRC check live/settlement keys before Accepted check operations.
     pub drc_check_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     pub drc_payment_channel_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    pub drc_trust_line_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -288,10 +293,54 @@ struct UtxoJournalV12 {
     drc_check_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
+/// Multi-lane journal before DRC trust-line / issued-transfer metadata.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct UtxoJournalV13Paychan {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+    fees: u64,
+    subsidy: u64,
+    coinbase_total: u64,
+    account_before: Vec<(NativeAssetId, Address, AccountState)>,
+    stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    data_availability_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_policy_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_deposit_preauth_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_regular_key_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_signer_list_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_ticket_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_escrow_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_check_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_payment_channel_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
 impl UtxoJournal {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(j) = Self::try_from_slice(bytes) {
             return Ok(j);
+        }
+        if let Ok(v13) = UtxoJournalV13Paychan::try_from_slice(bytes) {
+            return Ok(Self {
+                spent: v13.spent,
+                created: v13.created,
+                fees: v13.fees,
+                subsidy: v13.subsidy,
+                coinbase_total: v13.coinbase_total,
+                account_before: v13.account_before,
+                stake_meta_before: v13.stake_meta_before,
+                payment_meta_before: v13.payment_meta_before,
+                data_availability_meta_before: v13.data_availability_meta_before,
+                drc_policy_meta_before: v13.drc_policy_meta_before,
+                drc_deposit_preauth_meta_before: v13.drc_deposit_preauth_meta_before,
+                drc_regular_key_meta_before: v13.drc_regular_key_meta_before,
+                drc_signer_list_meta_before: v13.drc_signer_list_meta_before,
+                drc_ticket_meta_before: v13.drc_ticket_meta_before,
+                drc_escrow_meta_before: v13.drc_escrow_meta_before,
+                drc_check_meta_before: v13.drc_check_meta_before,
+                drc_payment_channel_meta_before: v13.drc_payment_channel_meta_before,
+                drc_trust_line_meta_before: Vec::new(),
+            });
         }
         if let Ok(v12) = UtxoJournalV12::try_from_slice(bytes) {
             return Ok(Self {
@@ -312,6 +361,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: v12.drc_escrow_meta_before,
                 drc_check_meta_before: v12.drc_check_meta_before,
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         if let Ok(v11) = UtxoJournalV11::try_from_slice(bytes) {
@@ -333,6 +383,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: v11.drc_escrow_meta_before,
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         if let Ok(v10) = UtxoJournalV10::try_from_slice(bytes) {
@@ -354,6 +405,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         if let Ok(v9) = UtxoJournalV9::try_from_slice(bytes) {
@@ -375,6 +427,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         if let Ok(v8) = UtxoJournalV8::try_from_slice(bytes) {
@@ -396,6 +449,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         if let Ok(v7) = UtxoJournalV7::try_from_slice(bytes) {
@@ -417,6 +471,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         if let Ok(v6) = UtxoJournalV6::try_from_slice(bytes) {
@@ -438,6 +493,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
@@ -459,6 +515,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
@@ -480,6 +537,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -501,6 +559,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -522,6 +581,7 @@ impl UtxoJournal {
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
+                drc_trust_line_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -544,6 +604,7 @@ impl UtxoJournal {
             drc_escrow_meta_before: Vec::new(),
             drc_check_meta_before: Vec::new(),
             drc_payment_channel_meta_before: Vec::new(),
+            drc_trust_line_meta_before: Vec::new(),
         })
     }
 }
@@ -882,6 +943,8 @@ fn apply_block_batched_mode(
         drc_payment_channel_fund_statuses,
         drc_payment_channel_claim_statuses,
         drc_payment_channel_close_statuses,
+        drc_trust_line_set_statuses,
+        drc_issued_transfer_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -924,6 +987,8 @@ fn apply_block_batched_mode(
             drc_payment_channel_fund_statuses,
             drc_payment_channel_claim_statuses,
             drc_payment_channel_close_statuses,
+            drc_trust_line_set_statuses,
+            drc_issued_transfer_statuses,
             drc_policy_statuses,
             drc_deposit_preauth_statuses,
         },
@@ -987,6 +1052,17 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("DRC check expired")
                 || msg.contains("DRC check cash submitter must be destination")
                 || msg.contains("DRC check cancel submitter not authorized")
+                || msg.contains("bad trust line set nonce")
+                || msg.contains("bad issued transfer nonce")
+                || msg.contains("trust line delete requires zero balance")
+                || msg.contains("recipient missing trust line")
+                || msg.contains("sender missing trust line")
+                || msg.contains("issue exceeds line limit")
+                || msg.contains("transfer exceeds sender balance")
+                || msg.contains("transfer exceeds recipient limit")
+                || msg.contains("redeem exceeds balance")
+                || msg.contains("insufficient DRC for fee")
+                || msg.contains("recipient requires destination tag")
         }
         _ => false,
     }
@@ -1001,6 +1077,8 @@ fn params_for_stake_asset(asset: NativeAssetId) -> Result<StakingParams, StateEr
 }
 
 type TridentLaneAcceptances = (
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
@@ -1044,6 +1122,8 @@ fn apply_trident_lanes(
         && block.drc_payment_channel_funds.is_empty()
         && block.drc_payment_channel_claims.is_empty()
         && block.drc_payment_channel_closes.is_empty()
+        && block.drc_trust_line_sets.is_empty()
+        && block.drc_issued_transfers.is_empty()
         && block.account_transfers.is_empty()
         && block.ovl_executions.is_empty()
         && block.drc_payments.is_empty()
@@ -1055,6 +1135,8 @@ fn apply_trident_lanes(
         && block.stake_ops.is_empty()
     {
         return Ok((
+            Vec::new(),
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -1088,6 +1170,8 @@ fn apply_trident_lanes(
         || !block.drc_payment_channel_funds.is_empty()
         || !block.drc_payment_channel_claims.is_empty()
         || !block.drc_payment_channel_closes.is_empty()
+        || !block.drc_trust_line_sets.is_empty()
+        || !block.drc_issued_transfers.is_empty()
         || !block.stake_ops.is_empty()
         || !block.ovl_executions.is_empty()
         || !block.drc_payments.is_empty()
@@ -1098,7 +1182,7 @@ fn apply_trident_lanes(
         && auth.is_none()
     {
         return Err(StateError::InvalidTx(
-            "stake/execution/payment/policy/preauthorization/regular-key/signer-list/escrow/check/payment-channel ops require network-bound auth"
+            "stake/execution/payment/policy/preauthorization/regular-key/signer-list/escrow/check/payment-channel/trust-line ops require network-bound auth"
                 .into(),
         ));
     }
@@ -1182,6 +1266,11 @@ fn apply_trident_lanes(
     let mut seen_check_cash_ids: HashSet<Hash> = HashSet::new();
     let mut seen_check_cancel_ids: HashSet<Hash> = HashSet::new();
     let mut settled_check_ids: HashSet<Hash> = HashSet::new();
+    let mut drc_trust_line_set_statuses = Vec::with_capacity(block.drc_trust_line_sets.len());
+    let mut drc_issued_transfer_statuses = Vec::with_capacity(block.drc_issued_transfers.len());
+    let mut seen_trust_line_set_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_issued_transfer_ids: HashSet<Hash> = HashSet::new();
+    let mut deleted_trust_line_assets: HashSet<(Address, Hash)> = HashSet::new();
 
     // Ticket creates observe pre-block key/list/policy auth state; minted tickets are
     // visible to every later lane in this block via the copy-on-write overlay.
@@ -2163,6 +2252,131 @@ fn apply_trident_lanes(
         }
     }
 
+    let trust_blue_score =
+        if !block.drc_trust_line_sets.is_empty() || !block.drc_issued_transfers.is_empty() {
+            Some(application_blue_score.ok_or_else(|| {
+                StateError::InvalidTx(
+                    "DRC trust-line operations require a consensus application blue score".into(),
+                )
+            })?)
+        } else {
+            None
+        };
+
+    if let Some(trust_blue_score) = trust_blue_score {
+        for tx in &block.drc_trust_line_sets {
+            let id = tx.trust_line_set_tx_id();
+            if seen_trust_line_set_ids.contains(&id) {
+                drc_trust_line_set_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let ctx = auth.expect("DRC trust-line auth checked above");
+            let meta_before = snapshot_meta_keys(&lane, &trust_line_set_meta_keys(tx))?;
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.holder))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_trust_line_set(
+                &lane,
+                tx,
+                ctx,
+                trust_blue_score,
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(()) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_trust_line_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_trust_line_set_ids.insert(id);
+                    if tx.limit.is_zero() {
+                        deleted_trust_line_assets.insert((tx.holder, tx.asset_id().asset_key()));
+                    }
+                    drc_trust_line_set_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_trust_line_set_ids.contains(&id) {
+                        drc_trust_line_set_statuses.push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_trust_line_set_statuses.push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        for tx in &block.drc_issued_transfers {
+            let id = tx.issued_transfer_tx_id();
+            if seen_issued_transfer_ids.contains(&id) {
+                drc_issued_transfer_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let asset = tx.asset_id();
+            let asset_key = asset.asset_key();
+            if deleted_trust_line_assets.contains(&(tx.sender, asset_key))
+                || (tx.recipient != tx.sender
+                    && deleted_trust_line_assets.contains(&(tx.recipient, asset_key)))
+            {
+                drc_issued_transfer_statuses.push(TransactionAcceptance::ConflictLost);
+                continue;
+            }
+            let ctx = auth.expect("DRC trust-line auth checked above");
+            let meta_before = snapshot_meta_keys(&lane, &issued_transfer_meta_keys(tx))?;
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.sender))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_issued_transfer(
+                &lane,
+                tx,
+                ctx,
+                trust_blue_score,
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(()) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_trust_line_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_issued_transfer_ids.insert(id);
+                    drc_issued_transfer_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_issued_transfer_ids.contains(&id) {
+                        drc_issued_transfer_statuses.push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_issued_transfer_statuses.push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
     if !block.data_commitments.is_empty() {
         let ctx = auth.expect("DA auth checked above");
         let fingerprint = ctx
@@ -2225,6 +2439,8 @@ fn apply_trident_lanes(
         drc_payment_channel_fund_statuses,
         drc_payment_channel_claim_statuses,
         drc_payment_channel_close_statuses,
+        drc_trust_line_set_statuses,
+        drc_issued_transfer_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -2628,6 +2844,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
             None => batch.delete_cf(ColumnFamily::Meta, key),
         }
     }
+    for (key, prior) in journal.drc_trust_line_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
     Ok(batch)
 }
@@ -2878,6 +3100,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
 
@@ -3084,6 +3308,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
@@ -3199,6 +3425,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
@@ -3281,6 +3509,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -3372,6 +3602,8 @@ mod tests {
                 drc_payment_channel_funds: vec![],
                 drc_payment_channel_claims: vec![],
                 drc_payment_channel_closes: vec![],
+                drc_trust_line_sets: vec![],
+                drc_issued_transfers: vec![],
                 drc_multisign_attachments: vec![],
             },
             1,
@@ -3462,6 +3694,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
@@ -3570,6 +3804,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -3660,6 +3896,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         let mut block = block;
@@ -3764,6 +4002,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -3894,6 +4134,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -4535,6 +4777,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
