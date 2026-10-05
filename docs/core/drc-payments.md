@@ -416,8 +416,8 @@ for a known account without enumerating signer identities. Malformed inputs retu
 
 Pinned baseline: rippled 2.5.0 `asfDisableMaster` / `lsfDisableMaster` intent — the
 owner master secp256k1 key stops authorizing DRC account operations while alternate
-recovery remains. **Not XRPL wire/API parity** (no `lsf`, Tickets, credentials, or
-`tec`-class semantics).
+recovery remains. **Not XRPL wire/API parity** (no `lsf`, credential, or
+`tec`-class semantics; Agora's bounded Tickets use separate versioned envelopes).
 
 Supported Agora subset:
 
@@ -461,8 +461,7 @@ isolate the regular-key slice. Frozen payment/policy/preauth encodings remain re
 `agora_getDrcAccountKeys` returns `regular_key` and `account_nonce` for a known
 DRC account, or `unknown` when absent. Malformed inputs return `-32602`.
 
-## Next bounded slice
+## Remaining deferred capabilities
 
-Master-key disable with signer-list-only recovery, credential-based `DepositPreauth`,
-recurring pull payments, and cross-asset routing remain out of scope for the
-native DRC payment lane.
+Credential-based `DepositPreauth`, recurring pull payments, and cross-asset
+routing remain out of scope for the native DRC payment lane.
