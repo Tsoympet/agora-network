@@ -4,7 +4,7 @@
 mod tests {
     use agora_types::{
         DrcIssuedAssetPolicyAction, DrcTrustLineIssuerControlAction, Hash, NativeAssetId,
-        TransactionAcceptance, DRC_TRUST_LINE_LIVE_STATE_V2,
+        TransactionAcceptance,
     };
 
     use crate::accounts::load_account;
@@ -14,11 +14,9 @@ mod tests {
         apply_block, apply_block_journal, apply_issuer_control_direct, apply_policy_direct,
         assert_liability_matches_holders, asset, auth, controls_roots, fund, issuer_drc_nonce,
         issuer_outstanding, key, line_balance, revert_journal, setup_live_line, signed_clawback,
-        signed_issued_transfer, signed_issuer_control, signed_policy_set, signed_trust_line_set,
-        std_code,
+        signed_issued_transfer, signed_issuer_control, signed_policy_set, std_code,
     };
     use crate::drc_trust_line_test_harness::support::coinbase;
-    use crate::state_root::compose_trident_state_root;
     use crate::StateStore;
 
     #[test]
@@ -435,6 +433,10 @@ mod tests {
     #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_reopen_preserves_policy_and_v2_line_flags() {
+        use agora_types::DRC_TRUST_LINE_LIVE_STATE_V2;
+        use crate::drc_issued_controls_test_harness::support::signed_trust_line_set;
+        use crate::state_root::compose_trident_state_root;
+
         let dir = tempfile::tempdir().unwrap();
         let store = StateStore::open(dir.path()).unwrap();
         let ctx = auth();
