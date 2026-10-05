@@ -96,6 +96,8 @@ mod drc_trust_line_multisign_adversary_matrix;
 #[cfg(test)]
 mod drc_trust_line_policy_matrix_tests;
 #[cfg(test)]
+mod drc_trust_line_public_core_parity_tests;
+#[cfg(test)]
 mod drc_trust_line_semantics_matrix_tests;
 #[cfg(test)]
 mod drc_trust_line_sequence_auth_matrix_tests;
@@ -208,8 +210,9 @@ pub use drc_trust_line::{
     apply_drc_issued_transfer, apply_drc_trust_line_set, count_live_trust_line_holders_for_issuer,
     count_live_trust_lines_for_holder, drc_trust_line_root, issued_transfer_receipt_key,
     issuer_liability_key, load_drc_issued_transfer_receipt, load_drc_issuer_liability,
-    load_drc_trust_line_live, lookup_drc_trust_line_point, sum_holder_balances_for_asset,
-    trust_line_key, trust_line_meta_keys, DRC_TRUST_LINE_ROOT_DOMAIN,
+    load_drc_trust_line_live, lookup_drc_issuer_liability_point, lookup_drc_trust_line_point,
+    sum_holder_balances_for_asset, trust_line_key, trust_line_meta_keys,
+    DRC_TRUST_LINE_ROOT_DOMAIN,
 };
 pub use error::StateError;
 pub use execution::{

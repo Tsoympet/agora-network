@@ -67,6 +67,10 @@ pub enum NetworkMessage {
     DrcPaymentChannelClaim(agora_types::DrcPaymentChannelClaimTx),
     /// Appended in Trident protocol v19; native DRC payment channel close.
     DrcPaymentChannelClose(agora_types::DrcPaymentChannelCloseTx),
+    /// Appended in Trident protocol v20; issuer-scoped trust line set.
+    DrcTrustLineSet(agora_types::DrcTrustLineSetTx),
+    /// Appended in Trident protocol v20; exact issued-value transfer.
+    DrcIssuedTransfer(agora_types::DrcIssuedTransferTx),
 }
 
 impl NetworkMessage {
@@ -103,6 +107,8 @@ impl NetworkMessage {
             && block.drc_payment_channel_funds.is_empty()
             && block.drc_payment_channel_claims.is_empty()
             && block.drc_payment_channel_closes.is_empty()
+            && block.drc_trust_line_sets.is_empty()
+            && block.drc_issued_transfers.is_empty()
             && block.drc_multisign_attachments.is_empty()
         {
             Self::CompactBlock {

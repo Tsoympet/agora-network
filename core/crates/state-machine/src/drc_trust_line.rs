@@ -611,3 +611,19 @@ pub fn lookup_drc_trust_line_point(
     }
     Ok("unknown")
 }
+
+/// Canonical issuer liability only (never enumerates holders).
+pub fn lookup_drc_issuer_liability_point(
+    store: &StateStore,
+    asset: &IssuedAssetId,
+) -> Result<(&'static str, IssuedAmount), StateError> {
+    asset
+        .validate()
+        .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+    let outstanding = load_drc_issuer_liability(store, asset)?;
+    Ok(if outstanding.is_zero() {
+        ("unknown", outstanding)
+    } else {
+        ("live", outstanding)
+    })
+}

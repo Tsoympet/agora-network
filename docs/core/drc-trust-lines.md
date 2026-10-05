@@ -36,6 +36,21 @@ Contract-free issuer liabilities in the DRC payment domain. Not native DRC, not 
 
 - Body: `TRIDENT_BLOCK_BODY_V16` when trust-line lanes non-empty.
 - P2P fingerprint: `TRIDENT_PROTOCOL_VERSION` 20; state transition `agora-trident-state-v18`.
+- Gossip: `NetworkMessage::DrcTrustLineSet`, `NetworkMessage::DrcIssuedTransfer` on the transactions topic.
+
+## Public RPC (admission, not finality)
+
+| Method | Role |
+|--------|------|
+| `agora_submitDrcTrustLineSet` | Mempool admit after virtual apply; reserves holder nonce/ticket and line slot |
+| `agora_submitDrcIssuedTransfer` | Mempool admit after virtual apply; reserves sender nonce/ticket, line/liability overlay |
+| `agora_getDrcTrustLine` | Point query: `live` returns limit/balance; `unknown` otherwise |
+| `agora_getDrcIssuerLiability` | Point query: outstanding units for `(issuer, currency)` |
+| `agora_getDrcIssuedTransferReceipt` | `known` receipt or `unknown` |
+
+**Currency input:** exactly 40 hex digits (20 bytes) or uppercase 3-character standard code only. No lowercase standard codes, locale aliases, or string normalization.
+
+**Mempool reservations (public):** one pending `TrustLineSet` per `(holder, asset)`; pending create/delete blocks dependent transfers; pending issue/redeem serializes issuer liability mutation; pending balance deltas enforce recipient limits and sender balances; release on block inclusion, eviction, and reorg.
 
 ## Deferred
 

@@ -35,11 +35,11 @@ use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
     admit_account_transfer, admit_drc_account_policy, admit_drc_check_cancel, admit_drc_check_cash,
     admit_drc_check_create, admit_drc_deposit_preauth, admit_drc_escrow_cancel,
-    admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_payment,
+    admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_issued_transfer, admit_drc_payment,
     admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
     admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
-    admit_drc_signer_list, admit_drc_ticket_create, admit_ovl_execution, admit_stake_tx,
-    admit_transaction, NodeBackend, NodeBackendConfig,
+    admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_set, admit_ovl_execution,
+    admit_stake_tx, admit_transaction, NodeBackend, NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::storage_policy::StoragePolicy;
@@ -1318,6 +1318,48 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "DRC payment-channel-close gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcTrustLineSet(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_trust_line_set(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, trust_line_set = %id.to_hex(), "DRC trust-line-set gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC trust-line-set gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcIssuedTransfer(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_issued_transfer(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, issued_transfer = %id.to_hex(), "DRC issued-transfer gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC issued-transfer gossip rejected");
                             }
                         }
                     }

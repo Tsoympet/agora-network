@@ -8,10 +8,10 @@ use agora_governance::{
 use agora_types::{
     AccountTransfer, Address, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
     DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx,
-    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, OutPoint, OvlExecutionTx,
-    Transaction, TxOut,
+    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedTransferTx, DrcPaymentChannelClaimTx,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx,
+    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
+    DrcTrustLineSetTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -228,6 +228,18 @@ pub trait RpcBackend: Send {
         cumulative_authorized: Amount,
         channel_claim_signature: &[u8],
     ) -> Result<Value, RpcError>;
+    fn submit_drc_trust_line_set(&mut self, tx: DrcTrustLineSetTx) -> Result<Hash, RpcError>;
+    fn submit_drc_issued_transfer(&mut self, tx: DrcIssuedTransferTx) -> Result<Hash, RpcError>;
+    fn get_drc_trust_line(
+        &self,
+        holder: &Address,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_issuer_liability(
+        &self,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_issued_transfer_receipt(&self, transfer_tx_id: &Hash) -> Result<Value, RpcError>;
     /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
     fn get_drc_account_policy(
         &self,
@@ -816,6 +828,43 @@ impl RpcBackend for InMemoryBackend {
         Err(RpcError::Rejected(
             "in-memory backend cannot verify payment channel claims".into(),
         ))
+    }
+
+    fn submit_drc_trust_line_set(&mut self, _tx: DrcTrustLineSetTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit trust line sets".into(),
+        ))
+    }
+
+    fn submit_drc_issued_transfer(&mut self, _tx: DrcIssuedTransferTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit issued transfers".into(),
+        ))
+    }
+
+    fn get_drc_trust_line(
+        &self,
+        _holder: &Address,
+        _asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError> {
+        Ok(json!({ "status": "unknown" }))
+    }
+
+    fn get_drc_issuer_liability(
+        &self,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError> {
+        asset
+            .validate()
+            .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+        Ok(json!({ "status": "unknown", "outstanding": "0" }))
+    }
+
+    fn get_drc_issued_transfer_receipt(&self, transfer_tx_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "transfer_tx_id": transfer_tx_id.to_hex(),
+            "status": "unknown",
+        }))
     }
 
     fn get_drc_account_policy(
