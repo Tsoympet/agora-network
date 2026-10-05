@@ -24,6 +24,11 @@ use crate::drc_escrow::{
     apply_drc_escrow_cancel, apply_drc_escrow_create, apply_drc_escrow_finish,
     escrow_meta_keys_for_create, escrow_meta_keys_for_settlement, load_drc_escrow_live,
 };
+use crate::drc_issued_controls::{
+    apply_drc_issued_asset_policy_set, apply_drc_issued_clawback,
+    apply_drc_trust_line_issuer_control, issued_controls_meta_keys_for_clawback,
+    issued_controls_meta_keys_for_issuer_control, issued_controls_meta_keys_for_policy,
+};
 use crate::drc_master_key_recovery::assert_drc_recovery_invariant;
 use crate::drc_payment_channel::{
     apply_drc_payment_channel_claim, apply_drc_payment_channel_close,
@@ -945,6 +950,9 @@ fn apply_block_batched_mode(
         drc_payment_channel_close_statuses,
         drc_trust_line_set_statuses,
         drc_issued_transfer_statuses,
+        drc_issued_asset_policy_set_statuses,
+        drc_trust_line_issuer_control_statuses,
+        drc_issued_clawback_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -989,6 +997,9 @@ fn apply_block_batched_mode(
             drc_payment_channel_close_statuses,
             drc_trust_line_set_statuses,
             drc_issued_transfer_statuses,
+            drc_issued_asset_policy_set_statuses,
+            drc_trust_line_issuer_control_statuses,
+            drc_issued_clawback_statuses,
             drc_policy_statuses,
             drc_deposit_preauth_statuses,
         },
@@ -1063,6 +1074,11 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("redeem exceeds balance")
                 || msg.contains("insufficient DRC for fee")
                 || msg.contains("recipient requires destination tag")
+                || msg.contains("require_auth only at zero liability")
+                || msg.contains("clawback only at zero liability")
+                || msg.contains("clawback not enabled")
+                || msg.contains("issued movement frozen")
+                || msg.contains("trust line not authorized")
         }
         _ => false,
     }
@@ -1076,7 +1092,11 @@ fn params_for_stake_asset(asset: NativeAssetId) -> Result<StakingParams, StateEr
     }
 }
 
+#[allow(clippy::type_complexity)]
 type TridentLaneAcceptances = (
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
@@ -1124,6 +1144,9 @@ fn apply_trident_lanes(
         && block.drc_payment_channel_closes.is_empty()
         && block.drc_trust_line_sets.is_empty()
         && block.drc_issued_transfers.is_empty()
+        && block.drc_issued_asset_policy_sets.is_empty()
+        && block.drc_trust_line_issuer_controls.is_empty()
+        && block.drc_issued_clawbacks.is_empty()
         && block.account_transfers.is_empty()
         && block.ovl_executions.is_empty()
         && block.drc_payments.is_empty()
@@ -1135,6 +1158,9 @@ fn apply_trident_lanes(
         && block.stake_ops.is_empty()
     {
         return Ok((
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -1172,6 +1198,9 @@ fn apply_trident_lanes(
         || !block.drc_payment_channel_closes.is_empty()
         || !block.drc_trust_line_sets.is_empty()
         || !block.drc_issued_transfers.is_empty()
+        || !block.drc_issued_asset_policy_sets.is_empty()
+        || !block.drc_trust_line_issuer_controls.is_empty()
+        || !block.drc_issued_clawbacks.is_empty()
         || !block.stake_ops.is_empty()
         || !block.ovl_executions.is_empty()
         || !block.drc_payments.is_empty()
@@ -1182,7 +1211,7 @@ fn apply_trident_lanes(
         && auth.is_none()
     {
         return Err(StateError::InvalidTx(
-            "stake/execution/payment/policy/preauthorization/regular-key/signer-list/escrow/check/payment-channel/trust-line ops require network-bound auth"
+            "stake/execution/payment/policy/preauthorization/regular-key/signer-list/escrow/check/payment-channel/trust-line/issued-control ops require network-bound auth"
                 .into(),
         ));
     }
@@ -1268,8 +1297,16 @@ fn apply_trident_lanes(
     let mut settled_check_ids: HashSet<Hash> = HashSet::new();
     let mut drc_trust_line_set_statuses = Vec::with_capacity(block.drc_trust_line_sets.len());
     let mut drc_issued_transfer_statuses = Vec::with_capacity(block.drc_issued_transfers.len());
+    let mut drc_issued_asset_policy_set_statuses =
+        Vec::with_capacity(block.drc_issued_asset_policy_sets.len());
+    let mut drc_trust_line_issuer_control_statuses =
+        Vec::with_capacity(block.drc_trust_line_issuer_controls.len());
+    let mut drc_issued_clawback_statuses = Vec::with_capacity(block.drc_issued_clawbacks.len());
     let mut seen_trust_line_set_ids: HashSet<Hash> = HashSet::new();
     let mut seen_issued_transfer_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_issued_policy_set_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_issuer_control_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_issued_clawback_ids: HashSet<Hash> = HashSet::new();
     let mut deleted_trust_line_assets: HashSet<(Address, Hash)> = HashSet::new();
 
     // Ticket creates observe pre-block key/list/policy auth state; minted tickets are
@@ -2252,18 +2289,129 @@ fn apply_trident_lanes(
         }
     }
 
-    let trust_blue_score =
-        if !block.drc_trust_line_sets.is_empty() || !block.drc_issued_transfers.is_empty() {
-            Some(application_blue_score.ok_or_else(|| {
+    let trust_blue_score = if !block.drc_trust_line_sets.is_empty()
+        || !block.drc_issued_transfers.is_empty()
+        || !block.drc_issued_asset_policy_sets.is_empty()
+        || !block.drc_trust_line_issuer_controls.is_empty()
+        || !block.drc_issued_clawbacks.is_empty()
+    {
+        Some(application_blue_score.ok_or_else(|| {
                 StateError::InvalidTx(
-                    "DRC trust-line operations require a consensus application blue score".into(),
+                    "DRC trust-line and issued-control operations require a consensus application blue score".into(),
                 )
             })?)
-        } else {
-            None
-        };
+    } else {
+        None
+    };
 
     if let Some(trust_blue_score) = trust_blue_score {
+        for tx in &block.drc_issued_asset_policy_sets {
+            let id = tx.policy_set_tx_id();
+            if seen_issued_policy_set_ids.contains(&id) {
+                drc_issued_asset_policy_set_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let ctx = auth.expect("DRC issued-control auth checked above");
+            let meta_before = snapshot_meta_keys(&lane, &issued_controls_meta_keys_for_policy(tx))?;
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.issuer))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_issued_asset_policy_set(
+                &lane,
+                tx,
+                ctx,
+                &mut op_batch,
+                &mut acct_journal,
+                trust_blue_score,
+            ) {
+                Ok(meta) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_trust_line_meta_before.extend(meta_before);
+                    journal.drc_trust_line_meta_before.extend(meta);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_issued_policy_set_ids.insert(id);
+                    drc_issued_asset_policy_set_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_issued_policy_set_ids.contains(&id) {
+                        drc_issued_asset_policy_set_statuses
+                            .push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_issued_asset_policy_set_statuses
+                            .push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        for tx in &block.drc_trust_line_issuer_controls {
+            let id = tx.issuer_control_tx_id();
+            if seen_issuer_control_ids.contains(&id) {
+                drc_trust_line_issuer_control_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let ctx = auth.expect("DRC issued-control auth checked above");
+            let meta_before =
+                snapshot_meta_keys(&lane, &issued_controls_meta_keys_for_issuer_control(tx))?;
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.issuer))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_trust_line_issuer_control(
+                &lane,
+                tx,
+                ctx,
+                &mut op_batch,
+                &mut acct_journal,
+                trust_blue_score,
+            ) {
+                Ok(meta) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_trust_line_meta_before.extend(meta_before);
+                    journal.drc_trust_line_meta_before.extend(meta);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_issuer_control_ids.insert(id);
+                    drc_trust_line_issuer_control_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_issuer_control_ids.contains(&id) {
+                        drc_trust_line_issuer_control_statuses
+                            .push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_trust_line_issuer_control_statuses
+                            .push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
         for tx in &block.drc_trust_line_sets {
             let id = tx.trust_line_set_tx_id();
             if seen_trust_line_set_ids.contains(&id) {
@@ -2375,6 +2523,63 @@ fn apply_trident_lanes(
                 Err(err) => return Err(err),
             }
         }
+
+        for tx in &block.drc_issued_clawbacks {
+            let id = tx.clawback_tx_id();
+            if seen_issued_clawback_ids.contains(&id) {
+                drc_issued_clawback_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let asset_key = tx.asset_id().asset_key();
+            if deleted_trust_line_assets.contains(&(tx.holder, asset_key)) {
+                drc_issued_clawback_statuses.push(TransactionAcceptance::ConflictLost);
+                continue;
+            }
+            let ctx = auth.expect("DRC issued-control auth checked above");
+            let meta_before =
+                snapshot_meta_keys(&lane, &issued_controls_meta_keys_for_clawback(tx))?;
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.issuer))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_issued_clawback(
+                &lane,
+                tx,
+                ctx,
+                &mut op_batch,
+                &mut acct_journal,
+                trust_blue_score,
+            ) {
+                Ok(meta) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_trust_line_meta_before.extend(meta_before);
+                    journal.drc_trust_line_meta_before.extend(meta);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_issued_clawback_ids.insert(id);
+                    drc_issued_clawback_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_issued_clawback_ids.contains(&id) {
+                        drc_issued_clawback_statuses.push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_issued_clawback_statuses.push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
     }
 
     if !block.data_commitments.is_empty() {
@@ -2441,6 +2646,9 @@ fn apply_trident_lanes(
         drc_payment_channel_close_statuses,
         drc_trust_line_set_statuses,
         drc_issued_transfer_statuses,
+        drc_issued_asset_policy_set_statuses,
+        drc_trust_line_issuer_control_statuses,
+        drc_issued_clawback_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -3102,6 +3310,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
 
@@ -3310,6 +3521,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
@@ -3427,6 +3641,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
@@ -3511,6 +3728,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -3604,6 +3824,9 @@ mod tests {
                 drc_payment_channel_closes: vec![],
                 drc_trust_line_sets: vec![],
                 drc_issued_transfers: vec![],
+                drc_issued_asset_policy_sets: vec![],
+                drc_trust_line_issuer_controls: vec![],
+                drc_issued_clawbacks: vec![],
                 drc_multisign_attachments: vec![],
             },
             1,
@@ -3696,6 +3919,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
@@ -3806,6 +4032,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -3898,6 +4127,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         let mut block = block;
@@ -4004,6 +4236,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -4136,6 +4371,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -4779,6 +5017,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();

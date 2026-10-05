@@ -38,6 +38,9 @@ mod drc_escrow_terminal_tests;
 mod drc_escrow_test_harness;
 #[cfg(test)]
 mod drc_escrow_tests;
+mod drc_issued_controls;
+#[cfg(test)]
+mod drc_issued_controls_matrix_tests;
 #[cfg(test)]
 mod drc_master_key_disable_hardening_tests;
 #[cfg(test)]
@@ -175,6 +178,11 @@ pub use drc_deposit_preauth::{
 pub use drc_escrow::{
     apply_drc_escrow_cancel, apply_drc_escrow_create, apply_drc_escrow_finish, drc_escrow_root,
     load_drc_escrow_live, load_drc_escrow_receipt, lookup_drc_escrow_point,
+};
+pub use drc_issued_controls::{
+    apply_drc_issued_asset_policy_set, apply_drc_issued_clawback,
+    apply_drc_trust_line_issuer_control, issued_movement_allowed, load_drc_issued_asset_policy,
+    normalize_trust_line_live, IssuedMovementKind, DRC_ISSUED_CONTROLS_ROOT_DOMAIN,
 };
 pub use drc_mempool::{
     drc_ticket_sequence_for_create_nonce, lookup_drc_ticket_point, plan_drc_mempool_reservation,
