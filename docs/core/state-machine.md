@@ -91,19 +91,20 @@ Transaction index (`cf_warm`): key `tx/` ‖ `tx_id`, value `block_id` ‖ `inde
 
 ## Trident staking + finality store (Phase 3+)
 
-Meta CF keys are additive; exact-delivery DRC receipt indexing raises the
-current `SCHEMA_VERSION` to `11`:
+Meta CF keys are additive; owner-authorized DRC recipient policy and
+payment-v3 destination-tag presence raise the current `SCHEMA_VERSION` to `12`:
 
 - `stake/val|del|unbond|epoch|snap|reward_pool|reserve_remaining/…` — staking + slash/reward + reserve
 - `finality/cert|idx|last_att/…`, `finality/tip_blue_score` — certificates, signer index, tip
 - `compose_trident_state_root` — canonical multi-asset commitment for checkpoint bodies
 
 Node admit enforces reorg-beyond-finality. Account, stake, OVL execution,
-native DRC payments, and authenticated DA commitments enter versioned consensus
-lanes. DRC payment metadata (including exact-delivery receipts), DA records/replay cursors,
-governance/treasuries, and the bounded Hub/Passport/Grant/Mission registry
-commit in `agora-trident-state-root-v5`. Local unsigned civic/community RPC
-state remains excluded. See [`community-registry.md`](community-registry.md),
+native DRC policy/payments, and authenticated DA commitments enter versioned
+consensus lanes. DRC recipient policy and payment metadata (including
+exact-delivery receipts), DA records/replay cursors, governance/treasuries, and
+the bounded Hub/Passport/Grant/Mission registry commit in
+`agora-trident-state-root-v6`. Local unsigned civic/community RPC state remains
+excluded. See [`community-registry.md`](community-registry.md),
 [`data-availability.md`](data-availability.md),
 [`ovl-execution.md`](ovl-execution.md),
 [`drc-payments.md`](drc-payments.md), [`governance.md`](governance.md), and

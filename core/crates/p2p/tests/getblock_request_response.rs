@@ -45,6 +45,7 @@ async fn direct_getblock_returns_full_block() {
         ovl_executions: vec![],
         drc_payments: vec![],
         data_commitments: vec![],
+        drc_account_policies: vec![],
     };
     let hash = block.id();
 

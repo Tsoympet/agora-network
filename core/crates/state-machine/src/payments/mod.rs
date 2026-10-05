@@ -10,6 +10,7 @@ use borsh::BorshDeserialize;
 use crate::accounts::{load_account, put_account_into, AccountJournal};
 use crate::apply::TxAuthContext;
 use crate::columns::ColumnFamily;
+use crate::drc_policy::load_drc_account_policy;
 use crate::store::WriteBatch;
 use crate::{StateError, StateStore};
 
@@ -18,8 +19,9 @@ const INVOICE_PREFIX: &[u8] = b"payment/drc/invoice/";
 const OUTBOX_PREFIX: &[u8] = b"payment/drc/outbox/";
 const RECEIPT_PREFIX: &[u8] = b"payment/drc/receipt/";
 const PAYMENT_ROOT_KEY: &[u8] = b"payment/drc/root";
-const PAYMENT_ROOT_DOMAIN: &[u8] = b"agora-drc-payment-root-v2";
+const PAYMENT_ROOT_DOMAIN: &[u8] = b"agora-drc-payment-root-v3";
 pub const DRC_PAYMENT_LEGACY_VERSION: u32 = agora_types::DRC_PAYMENT_LEGACY_VERSION;
+pub const DRC_PAYMENT_SOURCE_TAG_VERSION: u32 = agora_types::DRC_PAYMENT_SOURCE_TAG_VERSION;
 pub const DRC_PAYMENT_VERSION: u32 = agora_types::DRC_PAYMENT_VERSION;
 
 pub fn payment_seen_key(payment_id: &Hash) -> Vec<u8> {
@@ -210,6 +212,13 @@ pub fn apply_drc_payment(
             "duplicate DRC merchant invoice".into(),
         ));
     }
+    if load_drc_account_policy(store, &tx.to)?.require_destination_tag
+        && tx.authenticated_destination_tag().is_none()
+    {
+        return Err(StateError::InvalidTx(
+            "DRC destination tag required by recipient policy".into(),
+        ));
+    }
 
     let mut from = load_account(store, NativeAssetId::DRC, &tx.from)?;
     let mut to = load_account(store, NativeAssetId::DRC, &tx.to)?;
@@ -283,7 +292,7 @@ pub fn apply_drc_payment(
 #[cfg(test)]
 mod tests {
     use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_drc_payment_bound, Bip44Path};
-    use agora_types::{Amount, DrcPaymentResult, DrcPaymentTx, DRC_PAYMENT_RECEIPT_VERSION};
+    use agora_types::{Amount, DrcPaymentResult, DrcPaymentTx, DRC_PAYMENT_RECEIPT_LEGACY_VERSION};
 
     use super::*;
     use crate::accounts::{credit_account_into, load_account};
@@ -333,10 +342,10 @@ mod tests {
         assert_eq!(receipt.requested_amount, Amount::from_base_units(400));
         assert_eq!(receipt.delivered_amount, receipt.requested_amount);
         assert_eq!(receipt.payment_version, DRC_PAYMENT_LEGACY_VERSION);
-        assert_eq!(receipt.version, DRC_PAYMENT_RECEIPT_VERSION);
+        assert_eq!(receipt.version, DRC_PAYMENT_RECEIPT_LEGACY_VERSION);
         assert_eq!(receipt.result, DrcPaymentResult::DeliveredExact);
         assert_eq!(receipt.source_tag, None);
-        assert_eq!(receipt.destination_tag, 42);
+        assert_eq!(receipt.destination_tag, Some(42));
         assert_eq!(
             load_account(&store, NativeAssetId::DRC, &alice.address())
                 .unwrap()
@@ -354,7 +363,7 @@ mod tests {
             .unwrap();
         assert_eq!(event.payment_version, DRC_PAYMENT_LEGACY_VERSION);
         assert_eq!(event.source_tag, None);
-        assert_eq!(event.destination_tag, 42);
+        assert_eq!(event.destination_tag, Some(42));
         assert_eq!(event.invoice_id, Hash([9; 32]));
         assert_eq!(
             load_drc_payment_receipt(&store, &receipt.payment_id)
@@ -451,12 +460,15 @@ mod tests {
         let (tagged_receipt, tagged_event, tagged_payment_root, tagged_state_root) =
             settle_v2(Some(0));
 
-        assert_eq!(untagged_receipt.payment_version, DRC_PAYMENT_VERSION);
+        assert_eq!(
+            untagged_receipt.payment_version,
+            DRC_PAYMENT_SOURCE_TAG_VERSION
+        );
         assert_eq!(untagged_receipt.source_tag, None);
         assert_eq!(untagged_event.source_tag, None);
         assert_eq!(tagged_receipt.source_tag, Some(0));
         assert_eq!(tagged_event.source_tag, Some(0));
-        assert_eq!(tagged_event.destination_tag, 42);
+        assert_eq!(tagged_event.destination_tag, Some(42));
         assert_ne!(tagged_receipt.payment_id, untagged_receipt.payment_id);
         assert_ne!(tagged_payment_root, untagged_payment_root);
         assert_ne!(tagged_state_root, untagged_state_root);
@@ -587,9 +599,9 @@ mod tests {
         }
         assert_ne!(receipts[0].payment_id, receipts[1].payment_id);
         assert_eq!(receipts[0].source_tag, Some(11));
-        assert_eq!(receipts[0].destination_tag, 21);
+        assert_eq!(receipts[0].destination_tag, Some(21));
         assert_eq!(receipts[1].source_tag, Some(12));
-        assert_eq!(receipts[1].destination_tag, 22);
+        assert_eq!(receipts[1].destination_tag, Some(22));
         assert!(
             load_drc_payment_by_invoice(&store, &other_merchant.address(), &invoice)
                 .unwrap()
@@ -729,7 +741,7 @@ mod tests {
             Hash::ZERO,
             0,
         );
-        unsupported.version += 1;
+        unsupported.version = agora_types::DRC_PAYMENT_VERSION + 1;
 
         let mut legacy_with_source = DrcPaymentTx::unsigned(
             agora_types::Address([1; 20]),
@@ -755,6 +767,139 @@ mod tests {
             assert!(batch.is_empty());
             assert!(journal.before.is_empty());
         }
+    }
+
+    #[test]
+    fn recipient_policy_enforces_presence_accepts_zero_and_leaves_outgoing_unaffected() {
+        use agora_crypto::sign_drc_account_policy_bound;
+        use agora_types::DrcAccountPolicyTx;
+
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let merchant = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis: Hash([4; 32]),
+            data_availability_network_fingerprint: None,
+        };
+        let mut funding = WriteBatch::new();
+        for (owner, amount) in [(&alice, 1_000), (&merchant, 100)] {
+            credit_account_into(
+                &mut funding,
+                &store,
+                NativeAssetId::DRC,
+                &owner.address(),
+                Amount::from_base_units(amount),
+            )
+            .unwrap();
+        }
+        store.write_batch(funding).unwrap();
+
+        let mut set =
+            DrcAccountPolicyTx::set_require_destination_tag(merchant.address(), Amount::ZERO, 0);
+        sign_drc_account_policy_bound(&mut set, &merchant, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        crate::apply_drc_account_policy(&store, &set, &auth, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+
+        let mut missing = DrcPaymentTx::unsigned_v3(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(10),
+            Amount::ZERO,
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        sign_drc_payment_bound(&mut missing, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let mut rejected = WriteBatch::new();
+        let mut rejected_journal = AccountJournal::default();
+        let error = apply_drc_payment(
+            &store,
+            &missing,
+            &auth,
+            &mut rejected,
+            &mut rejected_journal,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("destination tag required"), "{error}");
+        assert!(rejected.is_empty());
+        assert!(rejected_journal.before.is_empty());
+
+        let mut tagged_zero = DrcPaymentTx::unsigned_v3(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(10),
+            Amount::ZERO,
+            Some(0),
+            None,
+            Hash::ZERO,
+            0,
+        );
+        sign_drc_payment_bound(&mut tagged_zero, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        let receipt =
+            apply_drc_payment(&store, &tagged_zero, &auth, &mut batch, &mut journal).unwrap();
+        assert_eq!(receipt.destination_tag, Some(0));
+        store.write_batch(batch).unwrap();
+
+        let mut outgoing = DrcPaymentTx::unsigned_v3(
+            merchant.address(),
+            alice.address(),
+            Amount::from_base_units(5),
+            Amount::ZERO,
+            None,
+            None,
+            Hash::ZERO,
+            1,
+        );
+        sign_drc_payment_bound(&mut outgoing, &merchant, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_payment(&store, &outgoing, &auth, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+
+        let mut clear =
+            DrcAccountPolicyTx::clear_require_destination_tag(merchant.address(), Amount::ZERO, 2);
+        sign_drc_account_policy_bound(&mut clear, &merchant, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        crate::apply_drc_account_policy(&store, &clear, &auth, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+
+        let mut untagged_after_clear = DrcPaymentTx::unsigned_v3(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(10),
+            Amount::ZERO,
+            None,
+            None,
+            Hash::ZERO,
+            1,
+        );
+        sign_drc_payment_bound(
+            &mut untagged_after_clear,
+            &alice,
+            &auth.chain_id,
+            &auth.genesis,
+        )
+        .unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_payment(
+            &store,
+            &untagged_after_clear,
+            &auth,
+            &mut batch,
+            &mut journal,
+        )
+        .unwrap();
     }
 
     #[test]

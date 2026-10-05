@@ -2,6 +2,7 @@
 import type { AccountTransfer } from "./AccountTransfer";
 import type { BlockHeader } from "./BlockHeader";
 import type { DataCommitmentAuthorization } from "./DataCommitmentAuthorization";
+import type { DrcAccountPolicyTx } from "./DrcAccountPolicyTx";
 import type { DrcPaymentTx } from "./DrcPaymentTx";
 import type { OvlExecutionTx } from "./OvlExecutionTx";
 import type { SignedStakeTx } from "./SignedStakeTx";
@@ -34,4 +35,8 @@ drc_payments: Array<DrcPaymentTx>,
 /**
  * Provenance-bound, operator-authorized data commitments.
  */
-data_commitments: Array<DataCommitmentAuthorization>, };
+data_commitments: Array<DataCommitmentAuthorization>,
+/**
+ * Owner-authorized, contract-free DRC recipient-policy operations.
+ */
+drc_account_policies: Array<DrcAccountPolicyTx>, };

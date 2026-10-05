@@ -10,6 +10,7 @@ mod block_zero;
 mod columns;
 mod community_state;
 mod data_availability;
+mod drc_policy;
 mod error;
 mod execution;
 mod finality_store;
@@ -64,6 +65,11 @@ pub use data_availability::{
     load_data_commitment, load_data_commitment_nonce, revert_data_commitment_meta_into,
     AcceptedDataCommitment, ACCEPTED_DATA_COMMITMENT_VERSION, DATA_AVAILABILITY_ROOT_DOMAIN,
 };
+pub use drc_policy::{
+    apply_drc_account_policy, drc_account_policy_key, drc_account_policy_meta_keys,
+    drc_account_policy_root, load_drc_account_policy, load_known_drc_account_policy,
+    DRC_ACCOUNT_POLICY_ROOT_DOMAIN,
+};
 pub use error::StateError;
 pub use execution::{
     apply_ovl_execution, execution_fee, OvlExecutionReceipt, OVL_EXECUTION_VERSION,
@@ -100,7 +106,7 @@ pub use payments::{
     apply_drc_payment, drc_payment_root, list_drc_outbox, load_drc_outbox_event,
     load_drc_payment_by_invoice, load_drc_payment_receipt, payment_invoice_key, payment_meta_keys,
     payment_outbox_key, payment_receipt_key, payment_seen_key, DRC_PAYMENT_LEGACY_VERSION,
-    DRC_PAYMENT_VERSION,
+    DRC_PAYMENT_SOURCE_TAG_VERSION, DRC_PAYMENT_VERSION,
 };
 pub use staking::{
     advance_epoch, advance_epoch_with_params, apply_evidence, apply_signed_stake_tx,

@@ -72,7 +72,7 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 
 ## Mempool
 
-The mempool reserves UTXO outpoints and one shared account nonce per `(asset, address)`. Account transfers, stake ops, OVL execution, and DRC payments cannot race the same native-account nonce.
+The mempool reserves UTXO outpoints and one shared account nonce per `(asset, address)`. Account transfers, stake ops, OVL execution, DRC payments, and DRC account-policy operations cannot race the same native-account nonce. Account-lane replacement is disabled; a peer block consuming the nonce evicts any conflicting local operation.
 
 `agora-node` runs `validate_mempool_tx` (live `cf_utxo` + mempool reserved set) under the same lock before admit on both RPC `agora_submitTransaction` and gossip `Transaction` messages. Missing, foreign, overspending, or already-reserved inputs are rejected at the edge. The implicit fee must be ≥ `AGORA_MIN_RELAY_FEE` (default 1); admission stores the fee for template ordering.
 
@@ -81,7 +81,8 @@ Mining templates pull UTXO transfers plus account/stake lanes and commit all lan
 Authenticated DA authorizations deliberately have no standalone mempool or
 `NetworkMessage` variant. Existing enum discriminants remain unchanged; full
 block propagation carries accepted candidates under the current Trident
-protocol v7 / state-transition v8 fingerprint. The current node leaves DA activation disabled until a
+protocol v8 / state-transition v9 fingerprint. DRC account-policy gossip uses
+an appended enum variant without changing prior discriminants. The current node leaves DA activation disabled until a
 reviewed TLT base-fee/sponsorship policy exists, so there is no free public
 gossip path.
 

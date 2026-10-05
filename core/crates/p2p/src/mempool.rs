@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use agora_types::{
-    AccountTransfer, Address, Block, DrcPaymentTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
-    SignedStakeTx, Transaction,
+    AccountTransfer, Address, Block, DrcAccountPolicyTx, DrcPaymentTx, Hash, NativeAssetId,
+    OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 
 use crate::P2pError;
@@ -25,6 +25,7 @@ pub struct Mempool {
     stake_txs: HashMap<Hash, SignedStakeTx>,
     execution_txs: HashMap<Hash, OvlExecutionTx>,
     payment_txs: HashMap<Hash, DrcPaymentTx>,
+    drc_policy_txs: HashMap<Hash, DrcAccountPolicyTx>,
     /// Account and stake lanes share the same per-asset account nonce.
     reserved_accounts: HashSet<(NativeAssetId, Address)>,
     max_size: usize,
@@ -40,6 +41,7 @@ impl Mempool {
             stake_txs: HashMap::new(),
             execution_txs: HashMap::new(),
             payment_txs: HashMap::new(),
+            drc_policy_txs: HashMap::new(),
             reserved_accounts: HashSet::new(),
             max_size,
         }
@@ -51,6 +53,7 @@ impl Mempool {
             + self.stake_txs.len()
             + self.execution_txs.len()
             + self.payment_txs.len()
+            + self.drc_policy_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -63,6 +66,7 @@ impl Mempool {
             || self.stake_txs.contains_key(tx_id)
             || self.execution_txs.contains_key(tx_id)
             || self.payment_txs.contains_key(tx_id)
+            || self.drc_policy_txs.contains_key(tx_id)
     }
 
     /// Outpoints already claimed by mempool transactions.
@@ -196,6 +200,16 @@ impl Mempool {
         if self.payment_txs.contains_key(&id) {
             return Ok(id);
         }
+        if tx.authenticated_destination_tag().is_none()
+            && self
+                .drc_policy_txs
+                .values()
+                .any(|policy| policy.account == tx.to && policy.action.require_destination_tag())
+        {
+            return Err(P2pError::MempoolRejected(
+                "pending recipient policy requires a DRC destination tag".into(),
+            ));
+        }
         if self.len() >= self.max_size {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
@@ -206,6 +220,49 @@ impl Mempool {
             ));
         }
         self.payment_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    /// Admit a pre-validated owner-authorized DRC account-policy operation.
+    ///
+    /// Account-lane replacement is intentionally disabled: the first resident
+    /// operation reserves the shared nonce until removal or block eviction.
+    pub fn admit_drc_policy(&mut self, tx: DrcAccountPolicyTx) -> Result<Hash, P2pError> {
+        let id = tx.policy_tx_id();
+        if self.drc_policy_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let key = (NativeAssetId::DRC, tx.account);
+        if !self.reserved_accounts.insert(key) {
+            return Err(P2pError::MempoolRejected(
+                "account already has a pending nonce".into(),
+            ));
+        }
+        let account = tx.account;
+        let requires_destination_tag = tx.action.require_destination_tag();
+        self.drc_policy_txs.insert(id, tx);
+        if requires_destination_tag {
+            // A valid owner policy has deterministic precedence over the later
+            // payment lane. Drop candidates that would make local templates
+            // invalid, and reject equivalent candidates while the policy waits.
+            let incompatible: Vec<Hash> = self
+                .payment_txs
+                .iter()
+                .filter_map(|(payment_id, payment)| {
+                    (payment.to == account && payment.authenticated_destination_tag().is_none())
+                        .then_some(*payment_id)
+                })
+                .collect();
+            for payment_id in incompatible {
+                if let Some(payment) = self.payment_txs.remove(&payment_id) {
+                    self.reserved_accounts
+                        .remove(&(NativeAssetId::DRC, payment.from));
+                }
+            }
+        }
         Ok(id)
     }
 
@@ -336,10 +393,23 @@ impl Mempool {
         txs
     }
 
+    pub fn select_drc_account_policies(&self, max: usize) -> Vec<DrcAccountPolicyTx> {
+        let mut txs: Vec<_> = self.drc_policy_txs.values().cloned().collect();
+        txs.sort_by(|a, b| {
+            b.fee
+                .as_base_units()
+                .cmp(&a.fee.as_base_units())
+                .then_with(|| a.policy_tx_id().as_bytes().cmp(b.policy_tx_id().as_bytes()))
+        });
+        txs.truncate(max);
+        txs
+    }
+
     /// Drop included txs and any remaining pool txs that spend the same outpoints.
     pub fn evict_for_block(&mut self, block: &Block) {
         let mut spent = HashSet::new();
         let mut included = HashSet::new();
+        let mut consumed_account_nonces = HashSet::new();
         for tx in &block.transactions {
             included.insert(tx.tx_id());
             for input in &tx.inputs {
@@ -347,18 +417,21 @@ impl Mempool {
             }
         }
         for tx in &block.account_transfers {
+            consumed_account_nonces.insert((tx.asset, tx.from));
             let id = tx.transfer_id();
             if self.account_txs.remove(&id).is_some() {
                 self.reserved_accounts.remove(&(tx.asset, tx.from));
             }
         }
         for tx in &block.stake_ops {
+            consumed_account_nonces.insert((tx.asset, tx.actor));
             let id = tx.stake_tx_id();
             if self.stake_txs.remove(&id).is_some() {
                 self.reserved_accounts.remove(&(tx.asset, tx.actor));
             }
         }
         for tx in &block.ovl_executions {
+            consumed_account_nonces.insert((NativeAssetId::OVL, tx.from));
             let id = tx.tx_id();
             if self.execution_txs.remove(&id).is_some() {
                 self.reserved_accounts
@@ -366,11 +439,35 @@ impl Mempool {
             }
         }
         for tx in &block.drc_payments {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.from));
             let id = tx.payment_id();
             if self.payment_txs.remove(&id).is_some() {
                 self.reserved_accounts
                     .remove(&(NativeAssetId::DRC, tx.from));
             }
+        }
+        for tx in &block.drc_account_policies {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
+            let id = tx.policy_tx_id();
+            if self.drc_policy_txs.remove(&id).is_some() {
+                self.reserved_accounts
+                    .remove(&(NativeAssetId::DRC, tx.account));
+            }
+        }
+        // A peer block can consume a nonce with a different operation than the
+        // local resident. Evict every now-stale operation sharing that nonce.
+        self.account_txs
+            .retain(|_, tx| !consumed_account_nonces.contains(&(tx.asset, tx.from)));
+        self.stake_txs
+            .retain(|_, tx| !consumed_account_nonces.contains(&(tx.asset, tx.actor)));
+        self.execution_txs
+            .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::OVL, tx.from)));
+        self.payment_txs
+            .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.from)));
+        self.drc_policy_txs
+            .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.account)));
+        for key in consumed_account_nonces {
+            self.reserved_accounts.remove(&key);
         }
         let drop: Vec<Hash> = self
             .txs
@@ -556,6 +653,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -616,6 +714,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));
@@ -672,5 +771,81 @@ mod tests {
         assert_eq!(id, payment.payment_id());
         assert_eq!(pool.select_drc_payments(1), vec![payment]);
         assert_eq!(pool.select_drc_payments(1)[0].source_tag, Some(u32::MAX));
+    }
+
+    #[test]
+    fn drc_policy_shares_nonce_and_has_no_mempool_replacement() {
+        use agora_types::DrcAccountPolicyTx;
+
+        let actor = agora_types::Address([8; 20]);
+        let recipient = agora_types::Address([9; 20]);
+        let policy =
+            DrcAccountPolicyTx::set_require_destination_tag(actor, Amount::from_base_units(2), 0);
+        let payment = DrcPaymentTx::unsigned_v3(
+            actor,
+            recipient,
+            Amount::from_base_units(1),
+            Amount::from_base_units(3),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        let replacement = DrcAccountPolicyTx::clear_require_destination_tag(
+            actor,
+            Amount::from_base_units(100),
+            0,
+        );
+
+        let mut pool = Mempool::new(4);
+        let id = pool.admit_drc_policy(policy.clone()).unwrap();
+        assert_eq!(id, policy.policy_tx_id());
+        assert_eq!(pool.select_drc_account_policies(1), vec![policy]);
+        assert!(pool.admit_payment(payment).is_err());
+        assert!(
+            pool.admit_drc_policy(replacement).is_err(),
+            "higher fee does not replace a resident account nonce"
+        );
+    }
+
+    #[test]
+    fn pending_set_policy_evicts_and_blocks_untagged_recipient_payments() {
+        use agora_types::DrcAccountPolicyTx;
+
+        let owner = agora_types::Address([8; 20]);
+        let payer = agora_types::Address([7; 20]);
+        let untagged = DrcPaymentTx::unsigned_v3(
+            payer,
+            owner,
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        let untagged_id = untagged.payment_id();
+        let policy =
+            DrcAccountPolicyTx::set_require_destination_tag(owner, Amount::from_base_units(1), 0);
+
+        let mut pool = Mempool::new(8);
+        pool.admit_payment(untagged.clone()).unwrap();
+        pool.admit_drc_policy(policy).unwrap();
+        assert!(!pool.contains(&untagged_id));
+        assert!(!pool.account_reserved(NativeAssetId::DRC, &payer));
+        assert!(pool.admit_payment(untagged).is_err());
+
+        let tagged_zero = DrcPaymentTx::unsigned_v3(
+            payer,
+            owner,
+            Amount::from_base_units(1),
+            Amount::from_base_units(1),
+            Some(0),
+            None,
+            Hash::ZERO,
+            0,
+        );
+        pool.admit_payment(tagged_zero.clone()).unwrap();
+        assert_eq!(pool.select_drc_payments(1), vec![tagged_zero]);
     }
 }

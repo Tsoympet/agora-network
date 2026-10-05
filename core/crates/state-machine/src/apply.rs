@@ -15,6 +15,7 @@ use crate::accounts::{
 };
 use crate::columns::ColumnFamily;
 use crate::data_availability::{apply_data_commitment, revert_data_commitment_meta_into};
+use crate::drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys};
 use crate::execution::apply_ovl_execution;
 use crate::payments::{apply_drc_payment, payment_meta_keys};
 use crate::staking::{
@@ -68,6 +69,8 @@ pub struct UtxoJournal {
     pub payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     /// DA commitment/index and operator replay keys before Accepted commitments.
     pub data_availability_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    /// Recipient policy keys before Accepted DRC account-policy operations.
+    pub drc_policy_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -112,10 +115,38 @@ struct UtxoJournalV4 {
     payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
+/// Multi-lane journal before DRC recipient-policy metadata.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct UtxoJournalV5 {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+    fees: u64,
+    subsidy: u64,
+    coinbase_total: u64,
+    account_before: Vec<(NativeAssetId, Address, AccountState)>,
+    stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    data_availability_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
 impl UtxoJournal {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(j) = Self::try_from_slice(bytes) {
             return Ok(j);
+        }
+        if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
+            return Ok(Self {
+                spent: v5.spent,
+                created: v5.created,
+                fees: v5.fees,
+                subsidy: v5.subsidy,
+                coinbase_total: v5.coinbase_total,
+                account_before: v5.account_before,
+                stake_meta_before: v5.stake_meta_before,
+                payment_meta_before: v5.payment_meta_before,
+                data_availability_meta_before: v5.data_availability_meta_before,
+                drc_policy_meta_before: Vec::new(),
+            });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
             return Ok(Self {
@@ -128,6 +159,7 @@ impl UtxoJournal {
                 stake_meta_before: v4.stake_meta_before,
                 payment_meta_before: v4.payment_meta_before,
                 data_availability_meta_before: Vec::new(),
+                drc_policy_meta_before: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -141,6 +173,7 @@ impl UtxoJournal {
                 stake_meta_before: v3.stake_meta_before,
                 payment_meta_before: Vec::new(),
                 data_availability_meta_before: Vec::new(),
+                drc_policy_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -154,6 +187,7 @@ impl UtxoJournal {
                 stake_meta_before: Vec::new(),
                 payment_meta_before: Vec::new(),
                 data_availability_meta_before: Vec::new(),
+                drc_policy_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -168,6 +202,7 @@ impl UtxoJournal {
             stake_meta_before: Vec::new(),
             payment_meta_before: Vec::new(),
             data_availability_meta_before: Vec::new(),
+            drc_policy_meta_before: Vec::new(),
         })
     }
 }
@@ -454,6 +489,7 @@ fn apply_block_batched_mode(
         account_statuses,
         execution_statuses,
         stake_statuses,
+        drc_policy_statuses,
         payment_statuses,
         data_commitment_statuses,
     ) = apply_trident_lanes(store, block, auth, mode, &mut batch, &mut journal)?;
@@ -468,6 +504,7 @@ fn apply_block_batched_mode(
             execution_statuses,
             payment_statuses,
             data_commitment_statuses,
+            drc_policy_statuses,
         },
         batch,
     })
@@ -490,6 +527,9 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("insufficient DRC payment balance")
                 || msg.contains("duplicate DRC payment id")
                 || msg.contains("duplicate DRC merchant invoice")
+                || msg.contains("bad DRC account-policy nonce")
+                || msg.contains("insufficient DRC account-policy balance")
+                || msg.contains("DRC destination tag required")
         }
         _ => false,
     }
@@ -504,6 +544,7 @@ fn params_for_stake_asset(asset: NativeAssetId) -> Result<StakingParams, StateEr
 }
 
 type TridentLaneAcceptances = (
+    Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
@@ -524,17 +565,26 @@ fn apply_trident_lanes(
         && block.ovl_executions.is_empty()
         && block.drc_payments.is_empty()
         && block.data_commitments.is_empty()
+        && block.drc_account_policies.is_empty()
         && block.stake_ops.is_empty()
     {
-        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+        return Ok((
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ));
     }
     if (!block.stake_ops.is_empty()
         || !block.ovl_executions.is_empty()
-        || !block.drc_payments.is_empty())
+        || !block.drc_payments.is_empty()
+        || !block.drc_account_policies.is_empty())
         && auth.is_none()
     {
         return Err(StateError::InvalidTx(
-            "stake/execution ops require network-bound auth".into(),
+            "stake/execution/payment/policy ops require network-bound auth".into(),
         ));
     }
     if !block.data_commitments.is_empty() && auth.is_none() {
@@ -555,11 +605,13 @@ fn apply_trident_lanes(
     let mut account_statuses = Vec::with_capacity(block.account_transfers.len());
     let mut execution_statuses = Vec::with_capacity(block.ovl_executions.len());
     let mut stake_statuses = Vec::with_capacity(block.stake_ops.len());
+    let mut drc_policy_statuses = Vec::with_capacity(block.drc_account_policies.len());
     let mut payment_statuses = Vec::with_capacity(block.drc_payments.len());
     let mut data_commitment_statuses = Vec::with_capacity(block.data_commitments.len());
     let mut seen_account_ids: HashSet<Hash> = HashSet::new();
     let mut seen_stake_ids: HashSet<Hash> = HashSet::new();
     let mut seen_execution_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_policy_ids: HashSet<Hash> = HashSet::new();
     let mut seen_payment_ids: HashSet<Hash> = HashSet::new();
 
     for tx in &block.account_transfers {
@@ -657,6 +709,45 @@ fn apply_trident_lanes(
         }
     }
 
+    // Recipient policy is evaluated before payments, so set/clear operations in
+    // this block deterministically govern every later payment in the payment lane.
+    for tx in &block.drc_account_policies {
+        let id = tx.policy_tx_id();
+        let ctx = auth.expect("DRC account-policy auth checked above");
+        let meta_before = snapshot_meta_keys(&lane, &drc_account_policy_meta_keys(tx))?;
+        let mut op_batch = WriteBatch::new();
+        let mut acct_journal = AccountJournal::default();
+        match apply_drc_account_policy(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
+            Ok(_) => {
+                if tx.fee.as_base_units() > 0 {
+                    let pool_snap =
+                        snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                    journal.stake_meta_before.extend(pool_snap);
+                    credit_fee_share_to_reward_pool(
+                        &lane,
+                        &mut op_batch,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
+                }
+                lane.write_batch(op_batch.clone())?;
+                batch.append(op_batch);
+                journal.account_before.extend(acct_journal.before);
+                journal.drc_policy_meta_before.extend(meta_before);
+                seen_policy_ids.insert(id);
+                drc_policy_statuses.push(TransactionAcceptance::Accepted);
+            }
+            Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                if seen_policy_ids.contains(&id) {
+                    drc_policy_statuses.push(TransactionAcceptance::ExactDuplicate);
+                } else {
+                    drc_policy_statuses.push(TransactionAcceptance::ConflictLost);
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
     for tx in &block.drc_payments {
         let id = tx.payment_id();
         let ctx = auth.expect("payment auth checked above");
@@ -746,6 +837,7 @@ fn apply_trident_lanes(
         account_statuses,
         execution_statuses,
         stake_statuses,
+        drc_policy_statuses,
         payment_statuses,
         data_commitment_statuses,
     ))
@@ -1094,6 +1186,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
             None => batch.delete_cf(ColumnFamily::Meta, key),
         }
     }
+    for (key, prior) in journal.drc_policy_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
     Ok(batch)
 }
@@ -1329,6 +1427,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -1519,6 +1618,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -1618,6 +1718,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -1684,6 +1785,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -1759,6 +1861,7 @@ mod tests {
                 ovl_executions: vec![],
                 drc_payments: vec![],
                 data_commitments: vec![],
+                drc_account_policies: vec![],
             },
             1,
             None,
@@ -1833,6 +1936,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -1925,6 +2029,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -1999,6 +2104,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -2087,6 +2193,7 @@ mod tests {
             ovl_executions: vec![execution],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -2201,6 +2308,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![payment],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -2226,14 +2334,14 @@ mod tests {
         assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 7);
         let outbox = load_drc_outbox_event(&store, &payment_id).unwrap().unwrap();
         assert_eq!(outbox.source_tag, Some(84));
-        assert_eq!(outbox.destination_tag, 42);
+        assert_eq!(outbox.destination_tag, Some(42));
         let receipt = load_drc_payment_receipt(&store, &payment_id)
             .unwrap()
             .unwrap();
         assert_eq!(receipt.requested_amount, Amount::from_base_units(400));
         assert_eq!(receipt.delivered_amount, receipt.requested_amount);
         assert_eq!(receipt.source_tag, Some(84));
-        assert_eq!(receipt.destination_tag, 42);
+        assert_eq!(receipt.destination_tag, Some(42));
         assert_eq!(
             load_drc_payment_by_invoice(&store, &merchant.address(), &Hash([9; 32]))
                 .unwrap()
@@ -2264,6 +2372,205 @@ mod tests {
                 .is_none()
         );
         assert_eq!(drc_payment_root(&store).unwrap(), payment_root_before);
+    }
+
+    #[test]
+    fn drc_policy_precedes_payments_and_reorg_restores_policy() {
+        use crate::accounts::{credit_account_into, load_account};
+        use crate::drc_policy::load_drc_account_policy;
+        use crate::staking::load_reward_pool;
+        use agora_crypto::{sign_drc_account_policy_bound, sign_drc_payment_bound};
+        use agora_types::{DrcAccountPolicyTx, DrcPaymentTx, NativeAssetId};
+
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let merchant = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let mut funding = WriteBatch::new();
+        for (owner, amount) in [(&alice, 1_000), (&merchant, 10)] {
+            credit_account_into(
+                &mut funding,
+                &store,
+                NativeAssetId::DRC,
+                &owner.address(),
+                Amount::from_base_units(amount),
+            )
+            .unwrap();
+        }
+        store.write_batch(funding).unwrap();
+
+        let mut set = DrcAccountPolicyTx::set_require_destination_tag(
+            merchant.address(),
+            Amount::from_base_units(1),
+            0,
+        );
+        sign_drc_account_policy_bound(&mut set, &merchant, &auth.chain_id, &auth.genesis).unwrap();
+        let mut missing = DrcPaymentTx::unsigned_v3(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(10),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        sign_drc_payment_bound(&mut missing, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let mut shared_nonce_conflict = DrcPaymentTx::unsigned_v3(
+            merchant.address(),
+            alice.address(),
+            Amount::from_base_units(1),
+            Amount::ZERO,
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        sign_drc_payment_bound(
+            &mut shared_nonce_conflict,
+            &merchant,
+            &auth.chain_id,
+            &auth.genesis,
+        )
+        .unwrap();
+        let mut set_block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 10,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![Transaction::unsigned(
+                1,
+                vec![],
+                vec![TxOut {
+                    value: Amount::ZERO,
+                    address: Address::ZERO,
+                }],
+                10,
+            )],
+        );
+        set_block.drc_account_policies = vec![set];
+        set_block.drc_payments = vec![missing, shared_nonce_conflict];
+        set_block.header.tx_root = set_block.compute_body_root();
+
+        let set_result = apply_block_batched_virtual(&store, &set_block, 0, Some(&auth)).unwrap();
+        assert_eq!(
+            set_result.acceptance.drc_policy_statuses,
+            vec![TransactionAcceptance::Accepted]
+        );
+        assert_eq!(
+            set_result.acceptance.payment_statuses,
+            vec![
+                TransactionAcceptance::ConflictLost,
+                TransactionAcceptance::ConflictLost,
+            ]
+        );
+        let set_journal = set_result.journal.clone();
+        store.write_batch(set_result.batch).unwrap();
+        assert!(
+            load_drc_account_policy(&store, &merchant.address())
+                .unwrap()
+                .require_destination_tag
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &alice.address())
+                .unwrap()
+                .balance,
+            1_000
+        );
+        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 1);
+
+        let mut clear = DrcAccountPolicyTx::clear_require_destination_tag(
+            merchant.address(),
+            Amount::from_base_units(1),
+            1,
+        );
+        sign_drc_account_policy_bound(&mut clear, &merchant, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let mut untagged = DrcPaymentTx::unsigned_v3(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(10),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        sign_drc_payment_bound(&mut untagged, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let mut clear_block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![set_block.id()],
+                timestamp_ms: 11,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![Transaction::unsigned(
+                1,
+                vec![],
+                vec![TxOut {
+                    value: Amount::ZERO,
+                    address: Address::ZERO,
+                }],
+                11,
+            )],
+        );
+        clear_block.drc_account_policies = vec![clear];
+        clear_block.drc_payments = vec![untagged];
+        clear_block.header.tx_root = clear_block.compute_body_root();
+
+        let clear_result =
+            apply_block_batched_virtual(&store, &clear_block, 0, Some(&auth)).unwrap();
+        assert_eq!(
+            clear_result.acceptance.drc_policy_statuses,
+            vec![TransactionAcceptance::Accepted]
+        );
+        assert_eq!(
+            clear_result.acceptance.payment_statuses,
+            vec![TransactionAcceptance::Accepted]
+        );
+        let clear_journal = clear_result.journal.clone();
+        store.write_batch(clear_result.batch).unwrap();
+        assert!(
+            !load_drc_account_policy(&store, &merchant.address())
+                .unwrap()
+                .require_destination_tag
+        );
+
+        store
+            .write_batch(revert_journal_batched(&clear_journal).unwrap())
+            .unwrap();
+        assert!(
+            load_drc_account_policy(&store, &merchant.address())
+                .unwrap()
+                .require_destination_tag
+        );
+        store
+            .write_batch(revert_journal_batched(&set_journal).unwrap())
+            .unwrap();
+        assert!(
+            !load_drc_account_policy(&store, &merchant.address())
+                .unwrap()
+                .require_destination_tag
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &merchant.address())
+                .unwrap()
+                .balance,
+            10
+        );
+        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 0);
     }
 
     #[test]
@@ -2334,6 +2641,7 @@ mod tests {
             ovl_executions: vec![],
             drc_payments: vec![],
             data_commitments: vec![],
+            drc_account_policies: vec![],
         };
         block.header.tx_root = block.compute_body_root();
 

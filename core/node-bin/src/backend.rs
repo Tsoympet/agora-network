@@ -14,19 +14,20 @@ use agora_p2p::{
 };
 use agora_rpc::{FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup, UtxoEntry};
 use agora_state_machine::{
-    apply_account_transfer, apply_drc_payment, apply_ovl_execution, apply_signed_stake_tx,
-    build_snapshot, canonical_community_root, governance_treasury_root,
+    apply_account_transfer, apply_drc_account_policy, apply_drc_payment, apply_ovl_execution,
+    apply_signed_stake_tx, build_snapshot, canonical_community_root, governance_treasury_root,
     list_grants as list_canonical_grants, list_hubs as list_canonical_hubs,
     list_missions as list_canonical_missions, list_passport_attestations,
     load_canonical_community_summary, load_canonical_governance_policy,
-    load_drc_payment_by_invoice, load_drc_payment_receipt, load_epoch, load_protocol_treasuries,
-    load_reward_pool, load_validator, lookup_tx_location, meta_keys, outpoint_key,
-    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, StakingParams, StateStore,
-    TxAuthContext, WriteBatch,
+    load_drc_payment_by_invoice, load_drc_payment_receipt, load_epoch,
+    load_known_drc_account_policy, load_protocol_treasuries, load_reward_pool, load_validator,
+    lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth, AccountJournal,
+    ColumnFamily, StakingParams, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcPaymentReceipt,
-    DrcPaymentTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAccountPolicy,
+    DrcAccountPolicyTx, DrcPaymentReceipt, DrcPaymentTx, Hash, NativeAssetId, OutPoint,
+    OvlExecutionTx, SignedStakeTx, Transaction, TxOut,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -182,6 +183,36 @@ pub(crate) fn admit_drc_payment(
         .map_err(|e| RpcError::Rejected(format!("DRC payment: {e}")))?;
     pool.admit_payment(tx)
         .map_err(|e| RpcError::Rejected(e.to_string()))
+}
+
+/// Validate and reserve an owner-authorized DRC account-policy operation.
+pub(crate) fn admit_drc_account_policy(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: DrcAccountPolicyTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(NativeAssetId::DRC, &tx.account) {
+        return Err(RpcError::Rejected(
+            "DRC account already has a pending nonce".into(),
+        ));
+    }
+    if tx.fee.as_base_units() < min_relay_fee() {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {} < min relay {}",
+            tx.fee.as_base_units(),
+            min_relay_fee()
+        )));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_drc_account_policy(store, &tx, auth, &mut batch, &mut journal)
+        .map_err(|error| RpcError::Rejected(format!("DRC account policy: {error}")))?;
+    pool.admit_drc_policy(tx)
+        .map_err(|error| RpcError::Rejected(error.to_string()))
 }
 
 /// Node RPC surface: tips/blocks from store, signed tx → mempool + gossip.
@@ -508,6 +539,25 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_drc_account_policy(&mut self, tx: DrcAccountPolicyTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_drc_account_policy(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcAccountPolicy(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn get_drc_account_policy(
+        &self,
+        account: &Address,
+    ) -> Result<Option<(DrcAccountPolicy, u64)>, RpcError> {
+        load_known_drc_account_policy(self.store.as_ref(), account)
+            .map(|known| known.map(|(policy, state)| (policy, state.nonce)))
+            .map_err(|error| RpcError::Internal(error.to_string()))
+    }
+
     fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError> {
         load_drc_payment_receipt(self.store.as_ref(), payment_id)
             .map_err(|e| RpcError::Internal(e.to_string()))
@@ -570,7 +620,14 @@ impl RpcBackend for NodeBackend {
     }
 
     fn get_block_template(&self) -> Result<Block, RpcError> {
-        let (transfers, account_transfers, stake_ops, ovl_executions, drc_payments) = {
+        let (
+            transfers,
+            account_transfers,
+            stake_ops,
+            ovl_executions,
+            drc_payments,
+            drc_account_policies,
+        ) = {
             let pool = self
                 .mempool
                 .lock()
@@ -581,6 +638,7 @@ impl RpcBackend for NodeBackend {
                 pool.select_stake_ops(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_ovl_executions(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_payments(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_account_policies(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         self.chain
@@ -594,6 +652,7 @@ impl RpcBackend for NodeBackend {
                     stake_ops: &stake_ops,
                     ovl_executions: &ovl_executions,
                     drc_payments: &drc_payments,
+                    drc_account_policies: &drc_account_policies,
                     ..BlockTemplateLanes::default()
                 },
             )
@@ -1040,8 +1099,9 @@ mod tests {
     use crate::admit::ChainState;
     use agora_consensus::{PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
     use agora_crypto::{
-        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound, sign_drc_payment_bound,
-        sign_ovl_execution_bound, sign_transaction_bound, Bip44Path,
+        derive_bip44, seed_from_mnemonic, sign_account_transfer_bound,
+        sign_drc_account_policy_bound, sign_drc_payment_bound, sign_ovl_execution_bound,
+        sign_transaction_bound, Bip44Path,
     };
     use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
@@ -1279,6 +1339,64 @@ mod tests {
         let template = backend.get_block_template().unwrap();
         assert_eq!(template.drc_payments, vec![tx]);
         assert_eq!(template.drc_payments[0].source_tag, Some(88));
+        assert_eq!(template.header.tx_root, template.compute_body_root());
+    }
+
+    #[test]
+    fn drc_account_policy_enters_template_and_pending_does_not_mutate_query() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let owner = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &owner.address(),
+            Amount::from_base_units(100),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(chain, store, mempool, backend_config(genesis));
+        assert_eq!(
+            backend
+                .get_drc_account_policy(&owner.address())
+                .unwrap()
+                .unwrap(),
+            (DrcAccountPolicy::default(), 0)
+        );
+
+        let mut tx = DrcAccountPolicyTx::set_require_destination_tag(
+            owner.address(),
+            Amount::from_base_units(1),
+            0,
+        );
+        sign_drc_account_policy_bound(&mut tx, &owner, "agora-dev", &genesis).unwrap();
+        let id = backend.submit_drc_account_policy(tx.clone()).unwrap();
+        assert_eq!(id, tx.policy_tx_id());
+        assert_eq!(
+            backend
+                .get_drc_account_policy(&owner.address())
+                .unwrap()
+                .unwrap(),
+            (DrcAccountPolicy::default(), 0),
+            "pending policy is not canonical state"
+        );
+
+        let template = backend.get_block_template().unwrap();
+        assert_eq!(template.drc_account_policies, vec![tx]);
         assert_eq!(template.header.tx_root, template.compute_body_root());
     }
 
