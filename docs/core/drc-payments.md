@@ -321,8 +321,8 @@ Policy and preauthorization reads and exact-delivery receipts describe the
 canonical state-machine virtual view. Acceptance/settlement does not assert PoW
 plus OVL/DRC checkpoint finality; finality remains independently queryable.
 
-Escrow, recurring authorization, cross-district paths, and
-merchant tag registries remain separate future transitions. Destination tags
+Escrow is a separate typed transition. Recurring authorization, cross-district
+paths, and merchant tag registries remain future transitions. Destination tags
 are recipient-local routing metadata (as on XRPL), not globally owned names.
 Source tags are sender-local routing metadata and are not globally registered.
 This bounded feature does not add partial payments, paths, checks, escrow,
