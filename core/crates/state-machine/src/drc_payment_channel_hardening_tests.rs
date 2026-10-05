@@ -470,7 +470,11 @@ mod claim_close_matrix {
         let dest_after = load_account(&store, NativeAssetId::DRC, &dest.address()).unwrap();
         let owner_after = load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
         assert_eq!(dest_after.balance, dest_before.balance + delta - fee);
-        assert_eq!(owner_after.balance, owner_before.balance - delta);
+        assert_eq!(
+            owner_after.balance,
+            owner_before.balance,
+            "claim debits locked remainder only, not owner liquid balance"
+        );
     }
 
     #[test]
