@@ -1165,7 +1165,7 @@ fn apply_trident_lanes(
     application_blue_score: Option<u64>,
     mode: ApplyMode,
     batch: &mut WriteBatch,
-    mut journal: &mut UtxoJournal,
+    journal: &mut UtxoJournal,
 ) -> Result<TridentLaneAcceptances, StateError> {
     if block.drc_ticket_creates.is_empty()
         && block.drc_escrow_creates.is_empty()
