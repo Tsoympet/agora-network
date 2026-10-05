@@ -15,24 +15,14 @@ use agora_types::{
     DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
 };
 
-use super::{NodeBackend, NodeBackendConfig};
-use crate::admit::{BlockTemplateLanes, ChainState};
-use crate::storage_policy::StoragePolicy;
+use super::NodeBackend;
+use crate::admit::BlockTemplateLanes;
 use agora_rpc::RpcBackend;
 
 pub use super::drc_payment_channel_public_helpers::{
-    account_reserved, backend_config, boot_chain, mine_template as mine_template_inner,
-    submit_lanes_at_parents, ticket_consumer_reserved, virtual_tip, CHAIN,
+    account_reserved, backend_config, boot_chain, submit_lanes_at_parents,
+    ticket_consumer_reserved, virtual_tip, CHAIN,
 };
-
-fn coinbase_commitment_nonce(parents: &[Hash], timestamp_ms: u64, extranonce: u32) -> u64 {
-    let mut sorted = parents.to_vec();
-    sorted.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
-    let tag = Hash::hash_borsh(&(b"agora-cb-parents-v2", sorted));
-    let parent_tag = u32::from_le_bytes(tag.as_bytes()[..4].try_into().unwrap());
-    let low = parent_tag ^ (timestamp_ms as u32);
-    ((extranonce as u64) << 32) | u64::from(low)
-}
 
 pub fn std_code(tag: &[u8; 3]) -> IssuedCurrencyCode {
     let mut c = [0u8; 20];
@@ -91,6 +81,7 @@ pub struct TrustLineFixture {
     pub issuer: KeyPair,
     pub holder_b: KeyPair,
     pub cur_usd: IssuedCurrencyCode,
+    #[allow(dead_code)]
     pub cur_eur: IssuedCurrencyCode,
 }
 

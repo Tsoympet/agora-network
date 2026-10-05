@@ -299,11 +299,13 @@ pub fn require_auth_migration_meta_keys(
     Ok(keys)
 }
 
+type TrustLineMetaSnapshot = (Vec<u8>, Option<Vec<u8>>);
+
 pub fn upgrade_trust_lines_for_require_auth(
     store: &StateStore,
     asset: &IssuedAssetId,
     batch: &mut WriteBatch,
-) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>, StateError> {
+) -> Result<Vec<TrustLineMetaSnapshot>, StateError> {
     let mut meta_before = Vec::new();
     for holder in load_issuer_holders_index(store, &asset.issuer, &asset.currency)? {
         let Some(mut line) = load_drc_trust_line_live(store, &holder, asset)? else {

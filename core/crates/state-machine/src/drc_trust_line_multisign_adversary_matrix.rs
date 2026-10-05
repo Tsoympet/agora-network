@@ -276,7 +276,6 @@ mod trust_line_set_matrix {
     #[test]
     fn matrix_trust_line_set_positive_materialize_borsh_body_root_and_apply() {
         use agora_types::validate_drc_multisign_attachment_lane;
-        use borsh::BorshDeserialize;
 
         let store = StateStore::open_in_memory();
         let holder = key(20);
@@ -569,8 +568,6 @@ mod issued_transfer_matrix {
 
     #[test]
     fn matrix_issued_transfer_positive_materialize_borsh_body_root_and_apply() {
-        use borsh::BorshDeserialize;
-
         let store = StateStore::open_in_memory();
         let ctx = auth();
         let issuer = key(30);

@@ -4,13 +4,13 @@ use agora_crypto::sign_drc_ticket_create_bound;
 use agora_rpc::RpcBackend;
 use agora_state_machine::load_drc_issued_transfer_receipt;
 use agora_types::{
-    Amount, DrcAccountSequenceSelector, DrcTicketCreateTx, Hash,
+    Amount, DrcAccountSequenceSelector, DrcTicketCreateTx,
     DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION,
 };
 
 use super::drc_trust_line_public_helpers::{
     account_reserved, assert_liability_equals_sum_balances,
-    assert_template_has_no_invalid_trust_line_lanes, asset, drc_balance, funded_trust_line_fixture,
+    assert_template_has_no_invalid_trust_line_lanes, asset, funded_trust_line_fixture,
     issuer_outstanding, line_balance, mempool_len, mine_template, reorg_away_transfer_on_tip,
     reward_pool_balance, setup_live_line, signed_issued_transfer, signed_trust_line_set,
     submit_lanes_at_parents, ticket_consumer_reserved, trust_line_meta_reserved,

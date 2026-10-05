@@ -12,8 +12,8 @@ use agora_types::{
 
 use super::drc_issued_controls_public_helpers::{
     account_reserved, assert_mining_template_pow_intact, asset, asset_policy_mutation_reserved,
-    funded_trust_line_fixture, issuer_control_mutation_reserved, issuer_nonce, mempool_len,
-    mine_template, setup_live_line, signed_issuer_control, signed_policy_set, CHAIN,
+    funded_trust_line_fixture, issuer_control_mutation_reserved, mempool_len, mine_template,
+    setup_live_line, signed_issuer_control, signed_policy_set, CHAIN,
 };
 
 #[test]

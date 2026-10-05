@@ -5,9 +5,7 @@ use std::sync::{Arc, Mutex};
 use agora_crypto::KeyPair;
 use agora_rpc::{RpcBackend, RpcDispatcher, RpcRequest};
 use agora_state_machine::{credit_account_into, GenesisBuilder, WriteBatch};
-use agora_types::{
-    Amount, DrcIssuedAssetPolicyAction, IssuedAmount, IssuedCurrencyCode, NativeAssetId,
-};
+use agora_types::{Amount, DrcIssuedAssetPolicyAction, NativeAssetId};
 use serde_json::json;
 
 use super::drc_issued_controls_public_helpers::{

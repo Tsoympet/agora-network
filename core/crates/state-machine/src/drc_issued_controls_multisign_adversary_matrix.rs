@@ -436,8 +436,8 @@ mod clawback_grid {
         cur: agora_types::IssuedCurrencyCode,
         ctx: &crate::apply::TxAuthContext,
     ) {
-        fund(&store, issuer, 500);
-        fund(&store, holder, 50);
+        fund(store, issuer, 500);
+        fund(store, holder, 50);
         let mut block =
             crate::drc_trust_line_test_harness::support::coinbase(vec![Hash::ZERO], holder);
         block.drc_trust_line_sets.push(

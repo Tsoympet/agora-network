@@ -260,10 +260,8 @@ pub mod multisign {
 
     use crate::accounts::load_account;
     use crate::apply::TxAuthContext;
-    use crate::drc_trust_line_test_harness::multisign::{
-        install_signer_list, install_signer_list_at_nonce, multisign_bundle,
-    };
-    use crate::drc_trust_line_test_harness::support::{coinbase, fund, std_code};
+    use crate::drc_trust_line_test_harness::multisign::{install_signer_list, multisign_bundle};
+    use crate::drc_trust_line_test_harness::support::coinbase;
     use crate::StateStore;
     use agora_types::NativeAssetId;
 

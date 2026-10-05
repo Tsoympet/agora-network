@@ -4,7 +4,7 @@ pub use super::drc_trust_line_public_helpers::{
     account_reserved, assert_liability_equals_sum_balances, asset, backend_config, boot_chain,
     drc_balance, funded_trust_line_fixture, issuer_outstanding, line_balance, mempool_len,
     mine_template, reward_pool_balance, setup_live_line, signed_issued_transfer,
-    signed_trust_line_set, submit_lanes_at_parents, virtual_tip, TrustLineFixture, CHAIN,
+    submit_lanes_at_parents, virtual_tip, CHAIN,
 };
 
 use agora_consensus::{LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
