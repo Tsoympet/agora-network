@@ -243,6 +243,60 @@ mod tests {
     }
 
     #[test]
+    fn stratum_job_preserves_payment_channel_lane_body_root() {
+        let mut pool = StratumPool::new();
+        let mut block = payment_channel_attachment_block(Hash::ZERO);
+        block.header.tx_root = block.compute_body_root();
+        let job = pool.create_job(block.clone(), 1);
+        assert_eq!(job.block.drc_payment_channel_creates.len(), 1);
+        assert_eq!(job.block.drc_multisign_attachments.len(), 1);
+        assert_eq!(job.block.header.tx_root, block.header.tx_root);
+        let solved = job.with_nonce(3);
+        assert_eq!(solved.header.tx_root, block.header.tx_root);
+        assert_eq!(solved.drc_payment_channel_creates.len(), 1);
+    }
+
+    fn payment_channel_attachment_block(parent: Hash) -> Block {
+        let mut block = empty_block(1, parent);
+        block
+            .drc_payment_channel_creates
+            .push(agora_types::DrcPaymentChannelCreateTx {
+                version: agora_types::DRC_PAYMENT_CHANNEL_CREATE_TX_VERSION,
+                owner: agora_types::Address([2; 20]),
+                destination: agora_types::Address([3; 20]),
+                amount: agora_types::Amount::from_base_units(5),
+                fee: agora_types::Amount::from_base_units(1),
+                claim_public_key: vec![4; 33],
+                settle_delay_blue_scores: 5,
+                destination_tag: None,
+                source_tag: None,
+                invoice_id: Hash::ZERO,
+                cancel_after_blue_score: None,
+                nonce: 0,
+                account_sequence: None,
+                public_key: vec![],
+                signature: vec![],
+                multisign: None,
+            });
+        block
+            .drc_multisign_attachments
+            .push(agora_types::DrcMultisignBlockAttachment {
+                version: agora_types::DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
+                key: agora_types::DrcMultisignAttachmentKey {
+                    version: agora_types::DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
+                    kind: agora_types::DrcMultisignOperationKind::DrcPaymentChannelCreate,
+                    signing_commitment: Hash([6; 32]),
+                },
+                auth: agora_types::DrcMultisignAuth {
+                    version: agora_types::DRC_MULTISIGN_AUTH_VERSION,
+                    signing_for: agora_types::Address([3; 20]),
+                    signatures: vec![],
+                },
+            });
+        block
+    }
+
+    #[test]
     fn accepts_easy_share_and_rejects_duplicate() {
         let mut pool = StratumPool::new();
         pool.authorize("asic-1");

@@ -25,7 +25,7 @@ pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
 pub const TRIDENT_GENESIS_ID_DOMAIN: &[u8] = b"agora-trident-genesis-identity-v1";
 pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-policy-v1";
 /// v10 adds signed DRC payment-v4 GHOSTDAG blue-score expiry.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 14;
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 19;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v8";
 const UNFROZEN: &str = "UNFROZEN";
 
