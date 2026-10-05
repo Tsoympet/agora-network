@@ -97,6 +97,9 @@ fn full_block_with_escrow_lanes_borsh_roundtrip() {
         }],
         drc_escrow_finishes: vec![],
         drc_escrow_cancels: vec![],
+        drc_check_creates: vec![],
+        drc_check_cashes: vec![],
+        drc_check_cancels: vec![],
         drc_multisign_attachments: vec![],
     };
     block.header.tx_root = block.compute_body_root();

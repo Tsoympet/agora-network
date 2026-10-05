@@ -436,3 +436,81 @@ pub fn verify_drc_escrow_cancel_operation(
         None,
     )
 }
+
+pub fn verify_drc_check_create_operation(
+    store: &StateStore,
+    tx: &agora_types::DrcCheckCreateTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_check_create_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.owner,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )
+}
+
+pub fn verify_drc_check_cash_operation(
+    store: &StateStore,
+    tx: &agora_types::DrcCheckCashTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_check_cash_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.submitter,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )
+}
+
+pub fn verify_drc_check_cancel_operation(
+    store: &StateStore,
+    tx: &agora_types::DrcCheckCancelTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_check_cancel_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.submitter,
+        &tx.public_key,
+        &tx.signature,
+        &tx.multisign,
+        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
+    )
+}

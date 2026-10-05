@@ -1,20 +1,19 @@
-//! Block-template and node persistence integration for native DRC escrow.
+//! Block-template and node persistence integration for native DRC check.
 
 use std::sync::{Arc, Mutex};
 
 use agora_consensus::{LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
 use agora_crypto::{
-    sign_drc_escrow_cancel_bound, sign_drc_escrow_create_bound, sign_drc_escrow_finish_bound,
-    KeyPair,
+    sign_drc_check_cancel_bound, sign_drc_check_cash_bound, sign_drc_check_create_bound, KeyPair,
 };
 use agora_p2p::Mempool;
 use agora_state_machine::{
-    credit_account_into, lookup_drc_escrow_point, GenesisBuilder, StateStore, WriteBatch,
+    credit_account_into, lookup_drc_check_point, GenesisBuilder, StateStore, WriteBatch,
 };
 use agora_types::{
-    materialize_drc_multisign_attachments, Block, DrcEscrowCancelTx, DrcEscrowCreateTx,
-    DrcEscrowFinishTx, Hash, NativeAssetId, DRC_ESCROW_CANCEL_TX_VERSION,
-    DRC_ESCROW_CREATE_TX_VERSION, DRC_ESCROW_FINISH_TX_VERSION,
+    materialize_drc_multisign_attachments, Block, DrcCheckCancelTx, DrcCheckCashTx,
+    DrcCheckCreateTx, Hash, NativeAssetId, DRC_CHECK_CANCEL_TX_VERSION, DRC_CHECK_CASH_TX_VERSION,
+    DRC_CHECK_CREATE_TX_VERSION,
 };
 use serde_json::json;
 
@@ -28,7 +27,7 @@ fn funded_backend() -> (NodeBackend, Hash, KeyPair, KeyPair) {
     let store = Arc::new(StateStore::open_in_memory());
     let genesis = GenesisBuilder::default().ignite(&store).unwrap();
     let owner = KeyPair::from_secret_bytes(&[0x50; 32]).unwrap();
-    let recipient = KeyPair::from_secret_bytes(&[0x51; 32]).unwrap();
+    let destination = KeyPair::from_secret_bytes(&[0x51; 32]).unwrap();
     let mut funding = WriteBatch::new();
     credit_account_into(
         &mut funding,
@@ -36,6 +35,14 @@ fn funded_backend() -> (NodeBackend, Hash, KeyPair, KeyPair) {
         NativeAssetId::DRC,
         &owner.address(),
         Amount::from_base_units(50_000),
+    )
+    .unwrap();
+    credit_account_into(
+        &mut funding,
+        &store,
+        NativeAssetId::DRC,
+        &destination.address(),
+        Amount::from_base_units(5_000),
     )
     .unwrap();
     store.write_batch(funding).unwrap();
@@ -60,7 +67,7 @@ fn funded_backend() -> (NodeBackend, Hash, KeyPair, KeyPair) {
             ..backend_config(genesis)
         },
     );
-    (backend, genesis, owner, recipient)
+    (backend, genesis, owner, destination)
 }
 
 use agora_types::Amount;
@@ -93,29 +100,28 @@ use agora_types::Address;
 
 fn signed_create(
     owner: &KeyPair,
-    recipient: agora_types::Address,
+    destination: agora_types::Address,
     genesis: Hash,
     nonce: u64,
-    cancel_after: Option<u64>,
-) -> DrcEscrowCreateTx {
-    let mut tx = DrcEscrowCreateTx {
-        version: DRC_ESCROW_CREATE_TX_VERSION,
+    expires_after: Option<u64>,
+) -> DrcCheckCreateTx {
+    let mut tx = DrcCheckCreateTx {
+        version: DRC_CHECK_CREATE_TX_VERSION,
         owner: owner.address(),
-        recipient,
+        destination,
         amount: Amount::from_base_units(20),
         fee: Amount::from_base_units(1),
         destination_tag: None,
         source_tag: None,
         invoice_id: Hash::ZERO,
-        finish_after_blue_score: None,
-        cancel_after_blue_score: cancel_after,
+        expires_after_blue_score: expires_after,
         nonce,
         account_sequence: None,
         public_key: Vec::new(),
         signature: Vec::new(),
         multisign: None,
     };
-    sign_drc_escrow_create_bound(&mut tx, owner, "agora-dev", &genesis).unwrap();
+    sign_drc_check_create_bound(&mut tx, owner, "agora-dev", &genesis).unwrap();
     tx
 }
 
@@ -131,33 +137,33 @@ fn mine_template(backend: &mut NodeBackend) -> Hash {
 }
 
 #[test]
-fn pending_create_blocks_public_finish_and_cancel_admission() {
-    let (mut backend, genesis, owner, recipient) = funded_backend();
-    let create = signed_create(&owner, recipient.address(), genesis, 0, Some(100));
-    let id = backend.submit_drc_escrow_create(create.clone()).unwrap();
+fn pending_create_blocks_public_cash_and_cancel_admission() {
+    let (mut backend, genesis, owner, destination) = funded_backend();
+    let create = signed_create(&owner, destination.address(), genesis, 0, Some(100));
+    let id = backend.submit_drc_check_create(create.clone()).unwrap();
     assert_eq!(
-        backend.get_drc_escrow(&id).unwrap()["status"],
+        backend.get_drc_check(&id).unwrap()["status"],
         json!("unknown")
     );
 
-    let mut finish = DrcEscrowFinishTx {
-        version: DRC_ESCROW_FINISH_TX_VERSION,
-        submitter: owner.address(),
-        escrow_id: id,
+    let mut cash = DrcCheckCashTx {
+        version: DRC_CHECK_CASH_TX_VERSION,
+        submitter: destination.address(),
+        check_id: id,
         fee: Amount::from_base_units(1),
-        nonce: 1,
+        nonce: 0,
         account_sequence: None,
         public_key: Vec::new(),
         signature: Vec::new(),
         multisign: None,
     };
-    sign_drc_escrow_finish_bound(&mut finish, &owner, "agora-dev", &genesis).unwrap();
-    assert!(backend.submit_drc_escrow_finish(finish).is_err());
+    sign_drc_check_cash_bound(&mut cash, &destination, "agora-dev", &genesis).unwrap();
+    assert!(backend.submit_drc_check_cash(cash).is_err());
 
-    let mut cancel = DrcEscrowCancelTx {
-        version: DRC_ESCROW_CANCEL_TX_VERSION,
+    let mut cancel = DrcCheckCancelTx {
+        version: DRC_CHECK_CANCEL_TX_VERSION,
         submitter: owner.address(),
-        escrow_id: id,
+        check_id: id,
         fee: Amount::from_base_units(1),
         nonce: 1,
         account_sequence: None,
@@ -165,32 +171,43 @@ fn pending_create_blocks_public_finish_and_cancel_admission() {
         signature: Vec::new(),
         multisign: None,
     };
-    sign_drc_escrow_cancel_bound(&mut cancel, &owner, "agora-dev", &genesis).unwrap();
-    assert!(backend.submit_drc_escrow_cancel(cancel).is_err());
+    sign_drc_check_cancel_bound(&mut cancel, &owner, "agora-dev", &genesis).unwrap();
+    assert!(backend.submit_drc_check_cancel(cancel).is_err());
 
     let template = backend.get_block_template().unwrap();
-    assert_eq!(template.drc_escrow_creates, vec![create]);
-    assert!(template.drc_escrow_finishes.is_empty());
-    assert!(template.drc_escrow_cancels.is_empty());
+    assert_eq!(template.drc_check_creates, vec![create]);
+    assert!(template.drc_check_cashes.is_empty());
+    assert!(template.drc_check_cancels.is_empty());
     assert!(template.drc_multisign_attachments.is_empty());
 }
 
 #[test]
-fn template_includes_single_settlement_and_rejects_finish_cancel_conflict() {
-    let (mut backend, genesis, owner, recipient) = funded_backend();
-    let create = signed_create(&owner, recipient.address(), genesis, 0, Some(100));
-    let id = create.escrow_id();
-    backend.submit_drc_escrow_create(create).unwrap();
+fn template_includes_single_settlement_and_rejects_cash_cancel_conflict() {
+    let (mut backend, genesis, owner, destination) = funded_backend();
+    let create = signed_create(&owner, destination.address(), genesis, 0, Some(100));
+    let id = create.check_id();
+    backend.submit_drc_check_create(create).unwrap();
     mine_template(&mut backend);
-    assert_eq!(
-        backend.get_drc_escrow(&id).unwrap()["status"],
-        json!("live")
-    );
+    assert_eq!(backend.get_drc_check(&id).unwrap()["status"], json!("live"));
 
-    let mut finish = DrcEscrowFinishTx {
-        version: DRC_ESCROW_FINISH_TX_VERSION,
-        submitter: owner.address(),
-        escrow_id: id,
+    let mut cash = DrcCheckCashTx {
+        version: DRC_CHECK_CASH_TX_VERSION,
+        submitter: destination.address(),
+        check_id: id,
+        fee: Amount::from_base_units(1),
+        nonce: 0,
+        account_sequence: None,
+        public_key: Vec::new(),
+        signature: Vec::new(),
+        multisign: None,
+    };
+    sign_drc_check_cash_bound(&mut cash, &destination, "agora-dev", &genesis).unwrap();
+    backend.submit_drc_check_cash(cash.clone()).unwrap();
+
+    let mut cancel = DrcCheckCancelTx {
+        version: DRC_CHECK_CANCEL_TX_VERSION,
+        submitter: destination.address(),
+        check_id: id,
         fee: Amount::from_base_units(1),
         nonce: 1,
         account_sequence: None,
@@ -198,27 +215,13 @@ fn template_includes_single_settlement_and_rejects_finish_cancel_conflict() {
         signature: Vec::new(),
         multisign: None,
     };
-    sign_drc_escrow_finish_bound(&mut finish, &owner, "agora-dev", &genesis).unwrap();
-    backend.submit_drc_escrow_finish(finish.clone()).unwrap();
-
-    let mut cancel = DrcEscrowCancelTx {
-        version: DRC_ESCROW_CANCEL_TX_VERSION,
-        submitter: owner.address(),
-        escrow_id: id,
-        fee: Amount::from_base_units(1),
-        nonce: 2,
-        account_sequence: None,
-        public_key: Vec::new(),
-        signature: Vec::new(),
-        multisign: None,
-    };
-    sign_drc_escrow_cancel_bound(&mut cancel, &owner, "agora-dev", &genesis).unwrap();
-    assert!(backend.submit_drc_escrow_cancel(cancel).is_err());
+    sign_drc_check_cancel_bound(&mut cancel, &owner, "agora-dev", &genesis).unwrap();
+    assert!(backend.submit_drc_check_cancel(cancel).is_err());
 
     let template = backend.get_block_template().unwrap();
-    assert_eq!(template.drc_escrow_finishes.len(), 1);
-    assert!(template.drc_escrow_cancels.is_empty());
-    assert_eq!(template.drc_escrow_finishes[0].escrow_id, id);
+    assert_eq!(template.drc_check_cashes.len(), 1);
+    assert!(template.drc_check_cancels.is_empty());
+    assert_eq!(template.drc_check_cashes[0].check_id, id);
 }
 
 #[test]
@@ -229,7 +232,7 @@ fn template_materializes_multisign_attachments_and_borsh_roundtrip() {
     let store = Arc::new(StateStore::open_in_memory());
     let genesis = GenesisBuilder::default().ignite(&store).unwrap();
     let owner = KeyPair::from_secret_bytes(&[0x52; 32]).unwrap();
-    let recipient = KeyPair::from_secret_bytes(&[0x53; 32]).unwrap();
+    let destination = KeyPair::from_secret_bytes(&[0x53; 32]).unwrap();
     let mut funding = WriteBatch::new();
     credit_account_into(
         &mut funding,
@@ -264,9 +267,9 @@ fn template_materializes_multisign_attachments_and_borsh_roundtrip() {
         backend_config(genesis),
     );
     backend
-        .submit_drc_escrow_create(signed_create(
+        .submit_drc_check_create(signed_create(
             &owner,
-            recipient.address(),
+            destination.address(),
             genesis,
             0,
             Some(100),
@@ -276,7 +279,7 @@ fn template_materializes_multisign_attachments_and_borsh_roundtrip() {
     let bytes = borsh::to_vec(&template).unwrap();
     let decoded: Block = BorshDeserialize::try_from_slice(&bytes).unwrap();
     assert_eq!(decoded.header.tx_root, template.compute_body_root());
-    assert_eq!(decoded.drc_escrow_creates.len(), 1);
+    assert_eq!(decoded.drc_check_creates.len(), 1);
     assert!(template.drc_multisign_attachments.is_empty());
     let mut materialized = template.clone();
     materialize_drc_multisign_attachments(&mut materialized, &auth.chain_id, &auth.genesis)
@@ -285,12 +288,12 @@ fn template_materializes_multisign_attachments_and_borsh_roundtrip() {
 }
 
 #[test]
-fn mined_escrow_survives_backend_reopen_and_rpc_queries() {
+fn mined_check_survives_backend_reopen_and_rpc_queries() {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(StateStore::open(dir.path()).unwrap());
     let genesis = GenesisBuilder::default().ignite(&store).unwrap();
     let owner = KeyPair::from_secret_bytes(&[0x55; 32]).unwrap();
-    let recipient = KeyPair::from_secret_bytes(&[0x56; 32]).unwrap();
+    let destination = KeyPair::from_secret_bytes(&[0x56; 32]).unwrap();
     let mut funding = WriteBatch::new();
     credit_account_into(
         &mut funding,
@@ -298,6 +301,14 @@ fn mined_escrow_survives_backend_reopen_and_rpc_queries() {
         NativeAssetId::DRC,
         &owner.address(),
         Amount::from_base_units(20_000),
+    )
+    .unwrap();
+    credit_account_into(
+        &mut funding,
+        &store,
+        NativeAssetId::DRC,
+        &destination.address(),
+        Amount::from_base_units(5_000),
     )
     .unwrap();
     store.write_batch(funding).unwrap();
@@ -310,14 +321,11 @@ fn mined_escrow_survives_backend_reopen_and_rpc_queries() {
             ..backend_config(genesis)
         },
     );
-    let create = signed_create(&owner, recipient.address(), genesis, 0, Some(100));
-    let id = create.escrow_id();
-    backend.submit_drc_escrow_create(create).unwrap();
+    let create = signed_create(&owner, destination.address(), genesis, 0, Some(100));
+    let id = create.check_id();
+    backend.submit_drc_check_create(create).unwrap();
     mine_template(&mut backend);
-    assert_eq!(
-        backend.get_drc_escrow(&id).unwrap()["status"],
-        json!("live")
-    );
+    assert_eq!(backend.get_drc_check(&id).unwrap()["status"], json!("live"));
     drop(backend);
     drop(store);
 
@@ -332,28 +340,28 @@ fn mined_escrow_survives_backend_reopen_and_rpc_queries() {
         },
     );
     assert_eq!(
-        lookup_drc_escrow_point(reopened_store.as_ref(), &id).unwrap(),
+        lookup_drc_check_point(reopened_store.as_ref(), &id).unwrap(),
         "live"
     );
     assert_eq!(
-        backend2.get_drc_escrow(&id).unwrap()["status"],
+        backend2.get_drc_check(&id).unwrap()["status"],
         json!("live")
     );
     drop(backend2);
     drop(reopened_store);
 
-    let mut finish = DrcEscrowFinishTx {
-        version: DRC_ESCROW_FINISH_TX_VERSION,
-        submitter: owner.address(),
-        escrow_id: id,
+    let mut cash = DrcCheckCashTx {
+        version: DRC_CHECK_CASH_TX_VERSION,
+        submitter: destination.address(),
+        check_id: id,
         fee: Amount::from_base_units(1),
-        nonce: 1,
+        nonce: 0,
         account_sequence: None,
         public_key: Vec::new(),
         signature: Vec::new(),
         multisign: None,
     };
-    sign_drc_escrow_finish_bound(&mut finish, &owner, "agora-dev", &genesis).unwrap();
+    sign_drc_check_cash_bound(&mut cash, &destination, "agora-dev", &genesis).unwrap();
     let reopened_store = Arc::new(StateStore::open(dir.path()).unwrap());
     let mut backend3 = NodeBackend::new(
         Arc::new(Mutex::new(boot_chain(reopened_store.clone(), genesis))),
@@ -364,27 +372,27 @@ fn mined_escrow_survives_backend_reopen_and_rpc_queries() {
             ..backend_config(genesis)
         },
     );
-    backend3.submit_drc_escrow_finish(finish).unwrap();
+    backend3.submit_drc_check_cash(cash).unwrap();
     mine_template(&mut backend3);
-    assert!(backend3.get_drc_escrow_receipt(&id).unwrap().is_object());
+    assert!(backend3.get_drc_check_receipt(&id).unwrap().is_object());
     drop(backend3);
     drop(reopened_store);
 
-    let finish_store = Arc::new(StateStore::open(dir.path()).unwrap());
-    let after_finish = NodeBackend::new(
-        Arc::new(Mutex::new(boot_chain(finish_store.clone(), genesis))),
-        finish_store,
+    let cash_store = Arc::new(StateStore::open(dir.path()).unwrap());
+    let after_cash = NodeBackend::new(
+        Arc::new(Mutex::new(boot_chain(cash_store.clone(), genesis))),
+        cash_store,
         Arc::new(Mutex::new(Mempool::new(64))),
         backend_config(genesis),
     );
     assert_eq!(
-        after_finish.get_drc_escrow_receipt(&id).unwrap()["outcome"],
-        json!("finished")
+        after_cash.get_drc_check_receipt(&id).unwrap()["outcome"],
+        json!("cashed")
     );
-    drop(after_finish);
+    drop(after_cash);
 
-    let create2 = signed_create(&owner, recipient.address(), genesis, 2, Some(1));
-    let id2 = create2.escrow_id();
+    let create2 = signed_create(&owner, destination.address(), genesis, 1, Some(1));
+    let id2 = create2.check_id();
     let reopened_store = Arc::new(StateStore::open(dir.path()).unwrap());
     let mut backend_cancel = NodeBackend::new(
         Arc::new(Mutex::new(boot_chain(reopened_store.clone(), genesis))),
@@ -395,21 +403,21 @@ fn mined_escrow_survives_backend_reopen_and_rpc_queries() {
             ..backend_config(genesis)
         },
     );
-    backend_cancel.submit_drc_escrow_create(create2).unwrap();
+    backend_cancel.submit_drc_check_create(create2).unwrap();
     mine_template(&mut backend_cancel);
-    let mut cancel = DrcEscrowCancelTx {
-        version: DRC_ESCROW_CANCEL_TX_VERSION,
+    let mut cancel = DrcCheckCancelTx {
+        version: DRC_CHECK_CANCEL_TX_VERSION,
         submitter: owner.address(),
-        escrow_id: id2,
+        check_id: id2,
         fee: Amount::from_base_units(1),
-        nonce: 3,
+        nonce: 2,
         account_sequence: None,
         public_key: Vec::new(),
         signature: Vec::new(),
         multisign: None,
     };
-    sign_drc_escrow_cancel_bound(&mut cancel, &owner, "agora-dev", &genesis).unwrap();
-    backend_cancel.submit_drc_escrow_cancel(cancel).unwrap();
+    sign_drc_check_cancel_bound(&mut cancel, &owner, "agora-dev", &genesis).unwrap();
+    backend_cancel.submit_drc_check_cancel(cancel).unwrap();
     mine_template(&mut backend_cancel);
     drop(backend_cancel);
     drop(reopened_store);
@@ -422,11 +430,11 @@ fn mined_escrow_survives_backend_reopen_and_rpc_queries() {
         backend_config(genesis),
     );
     assert_eq!(
-        after_cancel.get_drc_escrow_receipt(&id2).unwrap()["outcome"],
+        after_cancel.get_drc_check_receipt(&id2).unwrap()["outcome"],
         json!("cancelled")
     );
     assert!(after_cancel
-        .get_drc_escrow_receipt(&id2)
+        .get_drc_check_receipt(&id2)
         .unwrap()
         .is_object());
 }

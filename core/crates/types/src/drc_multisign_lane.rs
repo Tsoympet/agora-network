@@ -3,13 +3,14 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    attachment_key_for_account_transfer, attachment_key_for_deposit_preauth,
-    attachment_key_for_escrow_cancel, attachment_key_for_escrow_create,
-    attachment_key_for_escrow_finish, attachment_key_for_payment, attachment_key_for_policy,
-    attachment_key_for_regular_key, attachment_key_for_signer_list, attachment_key_for_stake,
-    attachment_key_for_ticket_create, Address, Block, DrcMultisignAttachmentError,
-    DrcMultisignAttachmentKey, DrcMultisignAuth, DrcMultisignBlockAttachment, Hash, NativeAssetId,
-    DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
+    attachment_key_for_account_transfer, attachment_key_for_check_cancel,
+    attachment_key_for_check_cash, attachment_key_for_check_create,
+    attachment_key_for_deposit_preauth, attachment_key_for_escrow_cancel,
+    attachment_key_for_escrow_create, attachment_key_for_escrow_finish, attachment_key_for_payment,
+    attachment_key_for_policy, attachment_key_for_regular_key, attachment_key_for_signer_list,
+    attachment_key_for_stake, attachment_key_for_ticket_create, Address, Block,
+    DrcMultisignAttachmentError, DrcMultisignAttachmentKey, DrcMultisignAuth,
+    DrcMultisignBlockAttachment, Hash, NativeAssetId, DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
 };
 
 fn single_sig_present(public_key: &[u8], signature: &[u8]) -> bool {
@@ -48,6 +49,9 @@ pub fn drc_multisign_attachment_capacity(block: &Block) -> usize {
         + block.drc_escrow_creates.len()
         + block.drc_escrow_finishes.len()
         + block.drc_escrow_cancels.len()
+        + block.drc_check_creates.len()
+        + block.drc_check_cashes.len()
+        + block.drc_check_cancels.len()
 }
 
 fn ensure_sorted(keys: &[DrcMultisignAttachmentKey]) -> Result<(), DrcMultisignAttachmentError> {
@@ -267,6 +271,48 @@ pub fn materialize_drc_multisign_attachments(
         }
     }
 
+    for tx in &mut block.drc_check_creates {
+        if let Some(auth) = tx.multisign.take() {
+            if single_sig_present(&tx.public_key, &tx.signature) {
+                return Err(DrcMultisignAttachmentError::MixedAuthorization);
+            }
+            tx.public_key.clear();
+            tx.signature.clear();
+            let key = attachment_key_for_check_create(tx, chain_id, genesis);
+            push_materialized(&mut attachments, key, tx.owner, auth)?;
+        } else if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
+    for tx in &mut block.drc_check_cashes {
+        if let Some(auth) = tx.multisign.take() {
+            if single_sig_present(&tx.public_key, &tx.signature) {
+                return Err(DrcMultisignAttachmentError::MixedAuthorization);
+            }
+            tx.public_key.clear();
+            tx.signature.clear();
+            let key = attachment_key_for_check_cash(tx, chain_id, genesis);
+            push_materialized(&mut attachments, key, tx.submitter, auth)?;
+        } else if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
+    for tx in &mut block.drc_check_cancels {
+        if let Some(auth) = tx.multisign.take() {
+            if single_sig_present(&tx.public_key, &tx.signature) {
+                return Err(DrcMultisignAttachmentError::MixedAuthorization);
+            }
+            tx.public_key.clear();
+            tx.signature.clear();
+            let key = attachment_key_for_check_cancel(tx, chain_id, genesis);
+            push_materialized(&mut attachments, key, tx.submitter, auth)?;
+        } else if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
     attachments.sort_by_key(|a| a.key);
     ensure_sorted(&attachments.iter().map(|a| a.key).collect::<Vec<_>>())?;
     block.drc_multisign_attachments = attachments;
@@ -387,6 +433,33 @@ fn collect_expected_keys(
         }
     }
 
+    for tx in &block.drc_check_creates {
+        reject_inline_multisign(&tx.multisign)?;
+        if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            expected.push(attachment_key_for_check_create(tx, chain_id, genesis));
+        } else if !single_sig_present(&tx.public_key, &tx.signature) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
+    for tx in &block.drc_check_cashes {
+        reject_inline_multisign(&tx.multisign)?;
+        if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            expected.push(attachment_key_for_check_cash(tx, chain_id, genesis));
+        } else if !single_sig_present(&tx.public_key, &tx.signature) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
+    for tx in &block.drc_check_cancels {
+        reject_inline_multisign(&tx.multisign)?;
+        if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            expected.push(attachment_key_for_check_cancel(tx, chain_id, genesis));
+        } else if !single_sig_present(&tx.public_key, &tx.signature) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
     expected.sort();
     Ok(expected)
 }
@@ -496,6 +569,21 @@ fn owner_for_key(
     }
     for tx in &block.drc_escrow_cancels {
         if attachment_key_for_escrow_cancel(tx, chain_id, genesis) == key {
+            return Ok(tx.submitter);
+        }
+    }
+    for tx in &block.drc_check_creates {
+        if attachment_key_for_check_create(tx, chain_id, genesis) == key {
+            return Ok(tx.owner);
+        }
+    }
+    for tx in &block.drc_check_cashes {
+        if attachment_key_for_check_cash(tx, chain_id, genesis) == key {
+            return Ok(tx.submitter);
+        }
+    }
+    for tx in &block.drc_check_cancels {
+        if attachment_key_for_check_cancel(tx, chain_id, genesis) == key {
             return Ok(tx.submitter);
         }
     }
@@ -646,6 +734,42 @@ pub fn merge_drc_multisign_attachments(
             continue;
         }
         let key = attachment_key_for_escrow_cancel(tx, chain_id, genesis);
+        tx.multisign = Some(
+            map.get(&key)
+                .cloned()
+                .ok_or(DrcMultisignAttachmentError::MissingAttachment)?,
+        );
+    }
+
+    for tx in &mut block.drc_check_creates {
+        if !needs_attachment(&tx.public_key, &tx.signature, &None) {
+            continue;
+        }
+        let key = attachment_key_for_check_create(tx, chain_id, genesis);
+        tx.multisign = Some(
+            map.get(&key)
+                .cloned()
+                .ok_or(DrcMultisignAttachmentError::MissingAttachment)?,
+        );
+    }
+
+    for tx in &mut block.drc_check_cashes {
+        if !needs_attachment(&tx.public_key, &tx.signature, &None) {
+            continue;
+        }
+        let key = attachment_key_for_check_cash(tx, chain_id, genesis);
+        tx.multisign = Some(
+            map.get(&key)
+                .cloned()
+                .ok_or(DrcMultisignAttachmentError::MissingAttachment)?,
+        );
+    }
+
+    for tx in &mut block.drc_check_cancels {
+        if !needs_attachment(&tx.public_key, &tx.signature, &None) {
+            continue;
+        }
+        let key = attachment_key_for_check_cancel(tx, chain_id, genesis);
         tx.multisign = Some(
             map.get(&key)
                 .cloned()

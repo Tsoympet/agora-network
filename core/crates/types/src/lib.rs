@@ -8,6 +8,7 @@ mod amount;
 mod asset;
 mod block;
 mod data_availability;
+mod drc_check;
 mod drc_deposit_preauth;
 mod drc_escrow;
 mod drc_multisign;
@@ -38,13 +39,25 @@ pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{
     Block, BlockHeader, TRIDENT_BLOCK_BODY_DOMAIN, TRIDENT_BLOCK_BODY_V11_DOMAIN,
     TRIDENT_BLOCK_BODY_V11_VERSION, TRIDENT_BLOCK_BODY_V12_DOMAIN, TRIDENT_BLOCK_BODY_V12_VERSION,
-    TRIDENT_BLOCK_BODY_V13_DOMAIN, TRIDENT_BLOCK_BODY_V13_VERSION, TRIDENT_BLOCK_BODY_VERSION,
+    TRIDENT_BLOCK_BODY_V13_DOMAIN, TRIDENT_BLOCK_BODY_V13_VERSION, TRIDENT_BLOCK_BODY_V14_DOMAIN,
+    TRIDENT_BLOCK_BODY_V14_VERSION, TRIDENT_BLOCK_BODY_VERSION,
 };
 pub use data_availability::{
     DataAvailabilityCommitment, DataCommitmentAuthorization, DataCommitmentError,
     DataCommitmentSource, DA_COMMITMENT_AUTHORIZATION_DOMAIN,
     DA_COMMITMENT_AUTHORIZATION_ID_DOMAIN, DA_COMMITMENT_AUTHORIZATION_VERSION,
     DA_COMMITMENT_PAYLOAD_DOMAIN, DA_COMMITMENT_VERSION, MAX_DA_CHAIN_ID_BYTES,
+};
+pub use drc_check::{
+    check_cancel_submitter_allowed, check_cash_allowed, validate_check_expiration_bound,
+    DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcCheckError, DrcCheckLive,
+    DrcCheckOutcome, DrcCheckReceipt, DRC_CHECK_CANCEL_SIGNING_DOMAIN,
+    DRC_CHECK_CANCEL_TICKET_SIGNING_DOMAIN, DRC_CHECK_CANCEL_TICKET_VERSION,
+    DRC_CHECK_CANCEL_TX_VERSION, DRC_CHECK_CASH_SIGNING_DOMAIN,
+    DRC_CHECK_CASH_TICKET_SIGNING_DOMAIN, DRC_CHECK_CASH_TICKET_VERSION, DRC_CHECK_CASH_TX_VERSION,
+    DRC_CHECK_CREATE_SIGNING_DOMAIN, DRC_CHECK_CREATE_TICKET_SIGNING_DOMAIN,
+    DRC_CHECK_CREATE_TICKET_VERSION, DRC_CHECK_CREATE_TX_VERSION, DRC_CHECK_LIVE_STATE_VERSION,
+    DRC_CHECK_MAX_BLUE_SCORE_BOUND, DRC_CHECK_RECEIPT_VERSION, DRC_MAX_LIVE_CHECKS_PER_ACCOUNT,
 };
 pub use drc_deposit_preauth::{
     DrcDepositPreauth, DrcDepositPreauthAction, DrcDepositPreauthError, DrcDepositPreauthTx,
@@ -71,11 +84,12 @@ pub use drc_multisign::{
     DRC_SIGNER_MAX_WEIGHT,
 };
 pub use drc_multisign_attachment::{
-    attachment_key_for_account_transfer, attachment_key_for_deposit_preauth,
-    attachment_key_for_escrow_cancel, attachment_key_for_escrow_create,
-    attachment_key_for_escrow_finish, attachment_key_for_payment, attachment_key_for_policy,
-    attachment_key_for_regular_key, attachment_key_for_signer_list, attachment_key_for_stake,
-    attachment_key_for_ticket_create, drc_multisign_attachment_key,
+    attachment_key_for_account_transfer, attachment_key_for_check_cancel,
+    attachment_key_for_check_cash, attachment_key_for_check_create,
+    attachment_key_for_deposit_preauth, attachment_key_for_escrow_cancel,
+    attachment_key_for_escrow_create, attachment_key_for_escrow_finish, attachment_key_for_payment,
+    attachment_key_for_policy, attachment_key_for_regular_key, attachment_key_for_signer_list,
+    attachment_key_for_stake, attachment_key_for_ticket_create, drc_multisign_attachment_key,
     drc_multisign_signing_commitment, DrcMultisignAttachmentError, DrcMultisignAttachmentKey,
     DrcMultisignBlockAttachment, DrcMultisignOperationKind, DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
     DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION, DRC_MULTISIGN_SIGNING_COMMITMENT_DOMAIN,
@@ -224,6 +238,9 @@ mod tests {
             drc_escrow_creates: vec![],
             drc_escrow_finishes: vec![],
             drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         assert_eq!(block.id(), header.hash());
@@ -322,6 +339,12 @@ mod ts_export {
         DrcEscrowLive::export_all().expect("export DrcEscrowLive");
         DrcEscrowReceipt::export_all().expect("export DrcEscrowReceipt");
         DrcEscrowOutcome::export_all().expect("export DrcEscrowOutcome");
+        DrcCheckCreateTx::export_all().expect("export DrcCheckCreateTx");
+        DrcCheckCashTx::export_all().expect("export DrcCheckCashTx");
+        DrcCheckCancelTx::export_all().expect("export DrcCheckCancelTx");
+        DrcCheckLive::export_all().expect("export DrcCheckLive");
+        DrcCheckReceipt::export_all().expect("export DrcCheckReceipt");
+        DrcCheckOutcome::export_all().expect("export DrcCheckOutcome");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");

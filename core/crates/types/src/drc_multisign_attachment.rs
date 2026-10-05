@@ -6,9 +6,10 @@ use thiserror::Error;
 use ts_rs::TS;
 
 use crate::{
-    AccountTransfer, DrcAccountPolicyTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
-    DrcEscrowFinishTx, DrcMultisignAuth, DrcMultisignError, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, DrcTicketCreateTx, Hash, NativeAssetId, SignedStakeTx,
+    AccountTransfer, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
+    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcMultisignAuth,
+    DrcMultisignError, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
+    NativeAssetId, SignedStakeTx,
 };
 
 pub const DRC_MULTISIGN_ATTACHMENT_KEY_VERSION: u32 = 1;
@@ -46,6 +47,9 @@ pub enum DrcMultisignOperationKind {
     DrcEscrowCreate = 9,
     DrcEscrowFinish = 10,
     DrcEscrowCancel = 11,
+    DrcCheckCreate = 12,
+    DrcCheckCash = 13,
+    DrcCheckCancel = 14,
 }
 
 impl DrcMultisignOperationKind {
@@ -62,6 +66,9 @@ impl DrcMultisignOperationKind {
             Self::DrcEscrowCreate => "drc_escrow_create",
             Self::DrcEscrowFinish => "drc_escrow_finish",
             Self::DrcEscrowCancel => "drc_escrow_cancel",
+            Self::DrcCheckCreate => "drc_check_create",
+            Self::DrcCheckCash => "drc_check_cash",
+            Self::DrcCheckCancel => "drc_check_cancel",
         }
     }
 }
@@ -280,6 +287,39 @@ pub fn attachment_key_for_escrow_cancel(
 ) -> DrcMultisignAttachmentKey {
     drc_multisign_attachment_key(
         DrcMultisignOperationKind::DrcEscrowCancel,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_check_create(
+    tx: &DrcCheckCreateTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcCheckCreate,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_check_cash(
+    tx: &DrcCheckCashTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcCheckCash,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_check_cancel(
+    tx: &DrcCheckCancelTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcCheckCancel,
         &tx.signing_bytes_bound(chain_id, genesis),
     )
 }

@@ -376,7 +376,10 @@ impl NetworkNode {
             | NetworkMessage::DrcTicketCreate(_)
             | NetworkMessage::DrcEscrowCreate(_)
             | NetworkMessage::DrcEscrowFinish(_)
-            | NetworkMessage::DrcEscrowCancel(_) => {
+            | NetworkMessage::DrcEscrowCancel(_)
+            | NetworkMessage::DrcCheckCreate(_)
+            | NetworkMessage::DrcCheckCash(_)
+            | NetworkMessage::DrcCheckCancel(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

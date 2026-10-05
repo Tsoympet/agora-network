@@ -1,9 +1,9 @@
-//! Two-node P2P integration for DRC escrow gossip, full-block transport, and validation.
+//! Two-node P2P integration for DRC check gossip, full-block transport, and validation.
 
 use std::time::Duration;
 
 use agora_crypto::{
-    sign_drc_escrow_cancel_bound, sign_drc_escrow_create_bound, sign_drc_escrow_finish_bound,
+    sign_drc_check_cancel_bound, sign_drc_check_cash_bound, sign_drc_check_create_bound,
     sign_drc_multisign_participant_bound, sign_drc_signer_list_bound, KeyPair,
 };
 use agora_p2p::{
@@ -16,39 +16,38 @@ use agora_state_machine::{
 };
 use agora_types::{
     materialize_drc_multisign_attachments, validate_drc_multisign_attachment_lane, Amount, Block,
-    BlockHeader, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcMultisignAuth,
+    BlockHeader, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcMultisignAuth,
     DrcMultisignEntry, DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId, Transaction,
-    TxOut, DRC_ESCROW_CANCEL_TX_VERSION, DRC_ESCROW_CREATE_TX_VERSION,
-    DRC_ESCROW_FINISH_TX_VERSION, DRC_MULTISIGN_AUTH_VERSION,
+    TxOut, DRC_CHECK_CANCEL_TX_VERSION, DRC_CHECK_CASH_TX_VERSION, DRC_CHECK_CREATE_TX_VERSION,
+    DRC_MULTISIGN_AUTH_VERSION,
 };
 use tokio::time::timeout;
 
 const GENESIS: Hash = Hash([9; 32]);
 const CHAIN: &str = "agora-dev";
 
-fn escrow_create_tx(
+fn check_create_tx(
     owner: &KeyPair,
-    recipient: agora_types::Address,
+    destination: agora_types::Address,
     nonce: u64,
-) -> DrcEscrowCreateTx {
-    let mut tx = DrcEscrowCreateTx {
-        version: DRC_ESCROW_CREATE_TX_VERSION,
+) -> DrcCheckCreateTx {
+    let mut tx = DrcCheckCreateTx {
+        version: DRC_CHECK_CREATE_TX_VERSION,
         owner: owner.address(),
-        recipient,
+        destination,
         amount: Amount::from_base_units(10),
         fee: Amount::from_base_units(1),
         destination_tag: None,
         source_tag: None,
         invoice_id: Hash::ZERO,
-        finish_after_blue_score: None,
-        cancel_after_blue_score: Some(50),
+        expires_after_blue_score: Some(50),
         nonce,
         account_sequence: None,
         public_key: Vec::new(),
         signature: Vec::new(),
         multisign: None,
     };
-    sign_drc_escrow_create_bound(&mut tx, owner, CHAIN, &GENESIS).unwrap();
+    sign_drc_check_create_bound(&mut tx, owner, CHAIN, &GENESIS).unwrap();
     tx
 }
 
@@ -84,7 +83,7 @@ async fn connect_two_nodes(
 }
 
 #[tokio::test]
-async fn gossip_escrow_create_finish_cancel_roundtrip() {
+async fn gossip_check_create_cash_cancel_roundtrip() {
     let _ = tracing_subscriber::fmt::try_init();
     let fp = fingerprint_topic_tag(&trident_network_fingerprint(
         CHAIN,
@@ -94,27 +93,27 @@ async fn gossip_escrow_create_finish_cancel_roundtrip() {
     let (handle_a, mut events_a, handle_b, _) = connect_two_nodes(&fp, &fp).await;
 
     let owner = KeyPair::from_secret_bytes(&[5; 32]).unwrap();
-    let recipient = KeyPair::from_secret_bytes(&[6; 32]).unwrap();
-    let create = escrow_create_tx(&owner, recipient.address(), 0);
-    let id = create.escrow_id();
+    let destination = KeyPair::from_secret_bytes(&[6; 32]).unwrap();
+    let create = check_create_tx(&owner, destination.address(), 0);
+    let id = create.check_id();
 
-    let mut finish = DrcEscrowFinishTx {
-        version: DRC_ESCROW_FINISH_TX_VERSION,
-        submitter: owner.address(),
-        escrow_id: id,
+    let mut cash = DrcCheckCashTx {
+        version: DRC_CHECK_CASH_TX_VERSION,
+        submitter: destination.address(),
+        check_id: id,
         fee: Amount::from_base_units(1),
-        nonce: 1,
+        nonce: 0,
         account_sequence: None,
         public_key: Vec::new(),
         signature: Vec::new(),
         multisign: None,
     };
-    sign_drc_escrow_finish_bound(&mut finish, &owner, CHAIN, &GENESIS).unwrap();
+    sign_drc_check_cash_bound(&mut cash, &destination, CHAIN, &GENESIS).unwrap();
 
-    let mut cancel = DrcEscrowCancelTx {
-        version: DRC_ESCROW_CANCEL_TX_VERSION,
+    let mut cancel = DrcCheckCancelTx {
+        version: DRC_CHECK_CANCEL_TX_VERSION,
         submitter: owner.address(),
-        escrow_id: id,
+        check_id: id,
         fee: Amount::from_base_units(1),
         nonce: 2,
         account_sequence: None,
@@ -122,12 +121,12 @@ async fn gossip_escrow_create_finish_cancel_roundtrip() {
         signature: Vec::new(),
         multisign: None,
     };
-    sign_drc_escrow_cancel_bound(&mut cancel, &owner, CHAIN, &GENESIS).unwrap();
+    sign_drc_check_cancel_bound(&mut cancel, &owner, CHAIN, &GENESIS).unwrap();
 
     for msg in [
-        NetworkMessage::DrcEscrowCreate(create),
-        NetworkMessage::DrcEscrowFinish(finish),
-        NetworkMessage::DrcEscrowCancel(cancel),
+        NetworkMessage::DrcCheckCreate(create),
+        NetworkMessage::DrcCheckCash(cash),
+        NetworkMessage::DrcCheckCancel(cancel),
     ] {
         handle_b.publish_message(msg.clone()).expect("publish");
         let _received = timeout(Duration::from_secs(10), async {
@@ -148,7 +147,7 @@ async fn gossip_escrow_create_finish_cancel_roundtrip() {
 }
 
 #[tokio::test]
-async fn mismatched_fingerprint_isolates_escrow_gossip() {
+async fn mismatched_fingerprint_isolates_check_gossip() {
     let _ = tracing_subscriber::fmt::try_init();
     let fp_a = fingerprint_topic_tag(&trident_network_fingerprint(
         CHAIN,
@@ -162,22 +161,22 @@ async fn mismatched_fingerprint_isolates_escrow_gossip() {
     ));
     let (handle_a, mut events_a, handle_b, _) = connect_two_nodes(&fp_a, &fp_b).await;
     let owner = KeyPair::from_secret_bytes(&[7; 32]).unwrap();
-    let create = escrow_create_tx(
+    let create = check_create_tx(
         &owner,
         KeyPair::from_secret_bytes(&[8; 32]).unwrap().address(),
         0,
     );
     handle_b
-        .publish_message(NetworkMessage::DrcEscrowCreate(create))
+        .publish_message(NetworkMessage::DrcCheckCreate(create))
         .expect("publish");
     let err = timeout(Duration::from_secs(2), async {
         loop {
             if let Some(NetworkEvent::Message {
-                message: NetworkMessage::DrcEscrowCreate(_),
+                message: NetworkMessage::DrcCheckCreate(_),
                 ..
             }) = events_a.recv().await
             {
-                panic!("incompatible fingerprint delivered escrow gossip");
+                panic!("incompatible fingerprint delivered check gossip");
             }
         }
     })
@@ -211,7 +210,7 @@ fn install_signer_list(
 }
 
 #[tokio::test]
-async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
+async fn attachment_check_block_uses_full_block_getblock_and_apply() {
     let _ = tracing_subscriber::fmt::try_init();
     let fp = fingerprint_topic_tag(&trident_network_fingerprint(
         CHAIN,
@@ -221,7 +220,7 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
     let (handle_a, mut events_a, handle_b, _events_b) = connect_two_nodes(&fp, &fp).await;
 
     let owner = KeyPair::from_secret_bytes(&[11; 32]).unwrap();
-    let recipient = KeyPair::from_secret_bytes(&[14; 32]).unwrap();
+    let destination = KeyPair::from_secret_bytes(&[14; 32]).unwrap();
     let s1 = KeyPair::from_secret_bytes(&[13; 32]).unwrap();
     let store = StateStore::open_in_memory();
     let ctx = TxAuthContext {
@@ -241,7 +240,7 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
     store.write_batch(funding).unwrap();
     install_signer_list(&store, &owner, &s1, &ctx);
 
-    let mut create = escrow_create_tx(&owner, recipient.address(), 1);
+    let mut create = check_create_tx(&owner, destination.address(), 1);
     create.public_key.clear();
     create.signature.clear();
     let signing = create.signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
@@ -282,7 +281,7 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
             1,
         )],
     );
-    block.drc_escrow_creates.push(create);
+    block.drc_check_creates.push(create);
     materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
     block.header.tx_root = block.compute_body_root();
     let hash = block.id();
