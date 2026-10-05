@@ -433,9 +433,9 @@ mod tests {
     #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_reopen_preserves_policy_and_v2_line_flags() {
-        use agora_types::DRC_TRUST_LINE_LIVE_STATE_V2;
         use crate::drc_issued_controls_test_harness::support::signed_trust_line_set;
         use crate::state_root::compose_trident_state_root;
+        use agora_types::DRC_TRUST_LINE_LIVE_STATE_V2;
 
         let dir = tempfile::tempdir().unwrap();
         let store = StateStore::open(dir.path()).unwrap();
