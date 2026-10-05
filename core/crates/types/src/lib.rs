@@ -31,6 +31,7 @@ mod payment;
 mod stake;
 mod transaction;
 mod treasury;
+mod trident_header;
 
 pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
 pub use account::{
@@ -219,6 +220,10 @@ pub use stake::{
 };
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 pub use treasury::{TreasuryBalance, TreasuryId};
+pub use trident_header::{
+    TridentHeader, TridentHeaderError, TridentHeaderIdentity, TRIDENT_HEADER_ENCODING_DOMAIN,
+    TRIDENT_HEADER_ENCODING_VERSION,
+};
 
 #[cfg(test)]
 mod tests {
