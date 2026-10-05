@@ -16,7 +16,6 @@ use crate::drc_account_auth::{
     verify_drc_check_cancel_operation, verify_drc_check_cash_operation,
     verify_drc_check_create_operation,
 };
-use crate::drc_deposit_preauth::load_drc_deposit_preauth;
 use crate::drc_policy::load_drc_account_policy;
 use crate::drc_ticket::{begin_drc_account_sequence, finish_drc_account_sequence};
 use crate::store::WriteBatch;
@@ -325,15 +324,9 @@ pub fn apply_drc_check_cash(
         ));
     }
 
-    let destination_policy = load_drc_account_policy(store, &live.destination)?;
-    if destination_policy.deposit_auth_required
-        && live.owner != live.destination
-        && !load_drc_deposit_preauth(store, &live.destination, &live.owner)?
-    {
-        return Err(StateError::InvalidTx(
-            "DRC deposit authorization required by destination policy".into(),
-        ));
-    }
+    // rippled 2.5.0: CheckCash sent by the check destination is permitted even when
+    // DepositAuth is enabled; only third-party credits need DepositPreauth. Agora
+    // requires the cash submitter to be the destination, so no preauth gate here.
 
     let mut submitter = load_account(store, NativeAssetId::DRC, &tx.submitter)?;
     let sequence_ctx = if tx.version >= DRC_CHECK_CASH_TICKET_VERSION {
@@ -368,23 +361,18 @@ pub fn apply_drc_check_cash(
         ));
     }
 
-    let mut destination = load_account(store, NativeAssetId::DRC, &live.destination)?;
-    let new_destination_balance = destination
-        .balance
-        .checked_add(live.amount.as_base_units())
-        .ok_or_else(|| StateError::InvalidTx("DRC check cash destination overflow".into()))?;
-
     journal
         .before
         .push((NativeAssetId::DRC, tx.submitter, submitter.clone()));
     journal
         .before
         .push((NativeAssetId::DRC, live.owner, owner.clone()));
-    journal
-        .before
-        .push((NativeAssetId::DRC, live.destination, destination.clone()));
 
     submitter.balance -= tx.fee.as_base_units();
+    submitter.balance = submitter
+        .balance
+        .checked_add(live.amount.as_base_units())
+        .ok_or_else(|| StateError::InvalidTx("DRC check cash destination overflow".into()))?;
     if let Some(ctx) = sequence_ctx {
         finish_drc_account_sequence(
             batch,
@@ -400,11 +388,9 @@ pub fn apply_drc_check_cash(
             .ok_or_else(|| StateError::InvalidTx("DRC check-cash nonce overflow".into()))?;
     }
     owner.balance -= live.amount.as_base_units();
-    destination.balance = new_destination_balance;
 
     put_account_into(batch, NativeAssetId::DRC, &tx.submitter, &submitter)?;
     put_account_into(batch, NativeAssetId::DRC, &live.owner, &owner)?;
-    put_account_into(batch, NativeAssetId::DRC, &live.destination, &destination)?;
 
     settle_check(
         store,

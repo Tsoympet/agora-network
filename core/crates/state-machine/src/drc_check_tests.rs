@@ -44,7 +44,7 @@ mod tests {
         assert_eq!(snap_before.owner_balance - snap_after.owner_balance, 40);
         assert_eq!(
             snap_after.destination_balance - snap_before.destination_balance,
-            40
+            39
         );
         assert_eq!(
             lookup_drc_check_point(&store, &check_id).unwrap(),

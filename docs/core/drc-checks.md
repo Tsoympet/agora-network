@@ -6,7 +6,7 @@
 
 Rippled `CheckCreate` records a sender→destination authorization for up to a maximum amount (XRP or issued). Funds are **not** locked at create; the sender must have spendable balance when the check is cashed. Optional expiration uses ledger **close time** (not wall clock in consensus). `CheckCash` is submitted by the destination and may deliver **partial** amounts with `DeliverMin`. `CheckCancel` may be submitted by sender or destination before expiration; **after expiration any account** may cancel.
 
-Deposit authorization (`DepositAuth` / `DepositPreauth`) applies to incoming credits; cashing a check credits the destination from the check owner.
+Rippled deposit authorization ([`depositauth.md`](https://github.com/XRPLF/rippled/blob/release-2.5.0/docs/depositauth.md)): for **CheckCash**, credits sent by the **check destination** are allowed even when `DepositAuth` is enabled; **DepositPreauth is not used for CheckCash** (unlike Payment / EscrowFinish from third parties). Agora matches this: cash submitter must be the destination, so no `DepositPreauth(owner → destination)` gate at cash.
 
 ## Agora supported subset (explicit deviations)
 
@@ -21,7 +21,7 @@ Deposit authorization (`DepositAuth` / `DepositPreauth`) applies to incoming cre
 | Live cap | **32 live checks per owner** (no XRPL owner reserve object) |
 | Destination tag | `Option<u32>` from v1; **`Some(0)` is valid** and satisfies RequireDestTag at create |
 | Invoice | **`invoice_id` must be `Hash::ZERO`** (non-zero rejected; no invoice index) |
-| DepositAuth on cash | Same rule as DRC payment / escrow finish: if destination policy requires deposit auth and owner ≠ destination, **`DepositPreauth(owner → destination)`** must exist at cash blue score |
+| DepositAuth on cash | **Rippled-aligned:** destination-signed CheckCash is permitted with `DepositAuth` on; **no** `DepositPreauth` requirement (differs from DRC payment / escrow finish where a third party may submit) |
 | Fee on cash | **Cash submitter (destination) pays its own fee** from its balance **before** owner→destination transfer (fee is never taken from cashed proceeds) |
 | Query | **Point lookup only** (`check_id`); live query returns `live` or `unknown`; outcomes on **receipt** query |
 | Contracts | Checks are **not** smart contracts; OVL remains the only programmable execution domain |
