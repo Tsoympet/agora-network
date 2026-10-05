@@ -49,8 +49,8 @@ agora-network/
 | `core/crates/crypto` | `types`, audited crypto crates | Consensus policy, P2P |
 | `core/crates/kheavyhash` | `keccak` (vendored Kaspa algo) | Networking, consensus policy |
 | `core/crates/governance` | `types` | Networking, UI, storage |
-| `core/crates/ovolos-rollup` | `types` | P2P, UI |
-| `core/crates/bridge-sdk` | `types` | Consensus internals, UI |
+| `core/crates/ovolos-rollup` | `types` | P2P, UI; any VM path for DRC |
+| `core/crates/bridge-sdk` | `types` | Consensus internals, UI; bytecode, VM, deploy/call, or contract APIs |
 | `core/crates/intent-engine` | `types`, `bridge-sdk` | Consensus internals, UI |
 | `core/crates/layers-runtime` | `types`, L2/L3/L4 crates | Consensus internals, RocksDB, UI |
 | `core/layers-bin` | `layers-runtime` | L1 consensus / RocksDB |
@@ -62,6 +62,10 @@ agora-network/
 | `core/node-bin` | all core crates | Client UI |
 | `apps/*` | RPC / generated TS types | Consensus or RocksDB logic |
 | `infrastructure/*` | public RPC / P2P APIs | Core crate internals |
+
+Programmable execution belongs exclusively to OVL. Canonical and historical
+DRC functionality must remain closed typed payment/state transitions; a
+generic execution surface must fail closed if presented with a DRC selector.
 
 ## Shared Types
 

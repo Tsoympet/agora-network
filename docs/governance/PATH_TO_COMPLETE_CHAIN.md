@@ -25,7 +25,7 @@ Trident redesign places TLT/OVL/DRC on one L1; maturity must be labeled explicit
 - Wallets: vault, BIP-44 change chain, fee estimate helper
 - **Non-mint faucet** via treasury signed spends (`AGORA_FAUCET_MODE=treasury`)
 
-### L2 — OVL (Ethereum-class)
+### Historical L2 lab — OVL execution
 
 - Optimistic rollup + native OVL PoW mint
 - Hybrid bonded sequencers for batch submit/finalize
@@ -34,7 +34,7 @@ Trident redesign places TLT/OVL/DRC on one L1; maturity must be labeled explicit
   `eth_sendRawTransaction` (**legacy RLP + secp256k1 recovery**, compact fallback)
 - **Durable L2 checkpoint** via `AGORA_LAYERS_DATA`
 
-### L3 — DRC (XRP-class)
+### Historical L3 lab — DRC typed payments
 
 - Native DRC PoW mint + district balances
 - Hybrid bonded attestors + quorum finality
@@ -42,6 +42,8 @@ Trident redesign places TLT/OVL/DRC on one L1; maturity must be labeled explicit
 - Path payment + `deliverMin`
 - Intent settle with `AwaitingFinality` when quorum is required
 - **Durable L3 checkpoint** (same `AGORA_LAYERS_DATA` file)
+- **No VM/contracts:** these are closed payment-state operations; the historical
+  EVM and every `eth_*` method are OVL-only
 
 See [`docs/scaling/TOKEN_ROLES.md`](../scaling/TOKEN_ROLES.md).
 
@@ -70,8 +72,8 @@ See [`docs/scaling/TOKEN_ROLES.md`](../scaling/TOKEN_ROLES.md).
 | B5 | OpenAPI + TLS story | **done** (docs) |
 | B6 | Devnet / Testnet / Mainnet badge + HRP wiring | **done** (apps) |
 | B7 | Multi-OS desktop + iOS/Android packaging docs | **done** — see [`docs/apps/PLATFORMS.md`](../apps/PLATFORMS.md); store signing is ops |
-| B8 | OVL eth_* + L2 mempool + storage roots | **done** |
-| B9 | DRC tags / path deliverMin / intent finality | **done** |
+| B8 | Historical OVL-only eth_* + L2 mempool + storage roots | **done** (lab only) |
+| B9 | Historical contract-free DRC tags / path deliverMin / intent finality | **done** (lab only) |
 | B10 | Signed RLP Ethereum txs on OVL | **done** (legacy + EIP-155) |
 | B11 | Durable L2/L3 checkpoints | **done** (`AGORA_LAYERS_DATA`) |
 | B12 | Civic constitution + ranks + chambers + proposal engine | **done** |
@@ -143,7 +145,8 @@ Addressing static architecture/security reviews of `main`:
 
 - Full Ethereum MPT state roots (SHA-256 account+storage digests today)
 - EIP-2718 typed txs beyond legacy (1559 / access-list) on OVL
-- XRPL trust lines / issued currencies / DEX order books (native DRC only)
+- Additional XRPL-derived capabilities beyond the documented typed DRC subset;
+  no full XRPL parity and no Hooks/contracts
 - **On-chain governance** (signed gov txs, consensus balance snapshots, locked/refundable deposits, height deadlines, deterministic execution, governance state roots, block replication) — current Meta-CF RPC is an administrative prototype
 - Non-mint faucet via separate cold treasury ops runbook polish
 

@@ -29,7 +29,7 @@ PoW changes, block format readiness, security-critical release readiness, networ
 | Technical execution upgrade | OVL Chamber → Ecclesia review → miner readiness → timelock |
 | Payment-module upgrade | DRC Chamber → Ecclesia review → timelock |
 | Consensus upgrade | OVL supermajority ∧ DRC supermajority ∧ miner readiness ∧ Ecclesia constitutional review → extended timelock |
-| Community grant | DRC grant council/chamber → COI checks → milestone contract |
+| Community grant | DRC grant council/chamber → COI checks → typed milestone agreement/record |
 | Protocol development grant | OVL Chamber (+ Ecclesia as configured) → milestones |
 | Hub accreditation | Ecclesia (+ DRC Community) |
 | Treasury policy | Relevant chamber + Ecclesia |

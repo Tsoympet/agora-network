@@ -20,11 +20,14 @@ cargo run -p agora-layers
 Boots historical Ovolos + Drachma lab genesis documents — see
 [`docs/genesis/README.md`](../genesis/README.md). These artifacts are not
 Trident monetary genesis. When `AGORA_LAYERS_DATA` is set, mutating RPCs persist
-`layers-checkpoint.json` (lab OVL tip/ledger/revm snapshots + DRC bridge state).
+`layers-checkpoint.json` (lab OVL tip/ledger/revm snapshots + contract-free DRC
+bridge state).
 Tracked Ovolos batches and local `recordDa` flags are not checkpointed, so this
 file is not a durable L1 submission outbox.
 
-- `GET /health` — includes `canonical_l1: false` and `maturity: "Experimental"`
+- `GET /health` — includes `canonical_l1: false`, `maturity: "Experimental"`,
+  `programmable_execution_asset: "OVL"`, and
+  `drc_programmable_execution: false`
 - `POST /rpc` — JSON-RPC body
 
 The binary rejects non-loopback binds. Its mixed RPC contains lab mint/credit
@@ -38,17 +41,23 @@ public district service.
 | `agora_layers_getInfo` | all |
 | `agora_layers_mintOvl` / `agora_layers_getOvlBalance` | L2 |
 | `agora_layers_submitBatch` / `agora_layers_recordDa` / `agora_layers_challenge` / `agora_layers_finalizeDue` | L2 |
-| `eth_*` (`chainId`, `blockNumber`, `getBalance`, `getTransactionCount`, `getCode`, `getStorageAt`, `call`, `sendRawTransaction`) | L2 |
-| `agora_layers_creditDrc` / `agora_layers_lockAndMint` / `agora_layers_claimMint` / `agora_layers_getDrcBalance` | L3 |
-| `agora_layers_payDrc` / `agora_layers_pathPayDrc` / tag registry helpers | L3 |
+| `eth_*` (`chainId`, `blockNumber`, `getBalance`, `getTransactionCount`, `getCode`, `getStorageAt`, `call`, `sendRawTransaction`) | Historical OVL-only L2 EVM |
+| `agora_layers_creditDrc` / `agora_layers_lockAndMint` / `agora_layers_claimMint` / `agora_layers_getDrcBalance` | Historical contract-free DRC L3 |
+| `agora_layers_payDrc` / `agora_layers_pathPayDrc` / tag registry helpers | Historical contract-free DRC L3 |
 | `agora_layers_submitIntent` / `agora_layers_settleIntent` / `agora_layers_finalizeIntent` | L4 |
 
 `agora_layers_recordDa` records only an unverified in-process operator
 assertion. It does not contact `agora-node`, and `agora_layers_finalizeDue`
 advances a lab timer status rather than Trident finality.
 
+The generic-looking `eth_*` names are retained only for historical OVL lab
+compatibility. They read or mutate OVL EVM state and cannot select DRC;
+every `eth_*` method rejects an asset selector anywhere in its parameters. DRC
+lab balances remain in the typed
+bridge/payment ledger and have no route to `RevmExecutor`.
+
 `eth_sendRawTransaction` accepts **legacy RLP-signed** Ethereum txs (EIP-155)
-or the compact `to||value||data` bootstrap encoding for lab use only.
+or the compact `to||value||data` bootstrap encoding for OVL lab use only.
 
 `LayersRuntime::l1_da_commitment_candidate` can deterministically map a known
 batch into the source- and genesis-bound prerequisite type. It does not sign or

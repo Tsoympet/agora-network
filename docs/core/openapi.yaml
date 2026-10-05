@@ -5,6 +5,13 @@ info:
   description: |
     HTTP JSON-RPC 2.0-style surface (`POST /rpc`). When `AGORA_RPC_TOKEN` is set,
     wallet/mining methods require `Authorization: Bearer <token>`.
+
+    Programmable execution is OVL-only and is exposed only through
+    `agora_submitOvlExecution`. DRC has no VM, bytecode, deploy/call, Hook, or
+    generic execution API. DRC submission methods below accept closed,
+    protocol-native typed state-machine operations; they are not contracts.
+  x-agora-programmable-execution-asset: OVL
+  x-agora-drc-programmable-execution: false
 servers:
   - url: http://127.0.0.1:8545
 paths:
@@ -16,7 +23,11 @@ paths:
           description: ok
   /rpc:
     post:
-      summary: JSON-RPC
+      summary: Canonical Trident JSON-RPC
+      description: |
+        The method enum is closed. In particular, no generic execution method
+        or DRC contract/VM method exists, and `agora_submitOvlExecution` has no
+        asset selector.
       parameters:
         - in: header
           name: Authorization
@@ -43,11 +54,84 @@ paths:
                     - agora_getNodeInfo
                     - agora_estimateFee
                     - agora_submitTransaction
+                    - agora_submitAccountTransfer
+                    - agora_submitOvlExecution
+                    - agora_submitDrcPayment
+                    - agora_getDrcPayment
+                    - agora_getDrcPaymentByInvoice
+                    - agora_submitDrcAccountPolicy
+                    - agora_getDrcAccountPolicy
+                    - agora_submitDrcDepositPreauth
+                    - agora_getDrcDepositPreauth
+                    - agora_submitDrcRegularKey
+                    - agora_getDrcAccountKeys
+                    - agora_submitDrcSignerList
+                    - agora_getDrcAccountSignerList
+                    - agora_submitDrcTicketCreate
+                    - agora_getDrcTicket
+                    - agora_submitDrcEscrowCreate
+                    - agora_submitDrcEscrowFinish
+                    - agora_submitDrcEscrowCancel
+                    - agora_getDrcEscrow
+                    - agora_getDrcEscrowReceipt
+                    - agora_submitDrcCheckCreate
+                    - agora_submitDrcCheckCash
+                    - agora_submitDrcCheckCancel
+                    - agora_getDrcCheck
+                    - agora_getDrcCheckReceipt
+                    - agora_submitDrcPaymentChannelCreate
+                    - agora_submitDrcPaymentChannelFund
+                    - agora_submitDrcPaymentChannelClaim
+                    - agora_submitDrcPaymentChannelClose
+                    - agora_getDrcPaymentChannel
+                    - agora_getDrcPaymentChannelReceipt
+                    - agora_getDrcPaymentChannelFundEvent
+                    - agora_getDrcPaymentChannelClaimEvent
+                    - agora_getDrcPaymentChannelScheduleEvent
+                    - agora_verifyDrcPaymentChannelClaim
+                    - agora_submitDrcTrustLineSet
+                    - agora_submitDrcIssuedTransfer
+                    - agora_getDrcTrustLine
+                    - agora_getDrcIssuerLiability
+                    - agora_getDrcIssuedTransferReceipt
+                    - agora_submitDrcIssuedAssetPolicySet
+                    - agora_submitDrcTrustLineIssuerControl
+                    - agora_submitDrcIssuedClawback
+                    - agora_getDrcIssuedAssetPolicy
+                    - agora_getDrcIssuedAssetPolicyReceipt
+                    - agora_getDrcTrustLineIssuerControlReceipt
+                    - agora_getDrcIssuedClawbackReceipt
                     - agora_getBalance
                     - agora_getUtxos
                     - agora_fundAddress
                     - agora_getBlockTemplate
                     - agora_submitBlock
+                    - agora_getFinality
+                    - agora_getFinalizedTip
+                    - agora_submitAttestation
+                    - agora_getValidatorSet
+                    - agora_getValidator
+                    - agora_getRewardPool
+                    - agora_getProtocolTreasuries
+                    - agora_getCommunityRegistry
+                    - agora_submitStakeTx
+                    - agora_getConstitution
+                    - agora_getGovernance
+                    - agora_listProposals
+                    - agora_getProposal
+                    - agora_listOffices
+                    - agora_listForumTopics
+                    - agora_submitProposal
+                    - agora_depositProposal
+                    - agora_openProposalVoting
+                    - agora_castGovVote
+                    - agora_tallyProposal
+                    - agora_enterProposalTimelock
+                    - agora_executeProposal
+                    - agora_postForumTopic
+                    - agora_ackConstitution
+                    - agora_sponsorProposal
+                    - agora_assentProposal
                 params:
                   nullable: true
       responses:

@@ -19,6 +19,20 @@ For the Phase 0 audit, gap analysis, impact map, PR sequence, and risk register 
 
 All three are **protocol-native**. They are not ERC-20 or application tokens. OVL is not Ethereum-equivalent. DRC is not XRPL-equivalent and is not a stablecoin unless a separately audited stabilizer exists.
 
+### Execution boundary
+
+OVL is the **only** programmable smart-contract/VM domain. An execution
+envelope is intrinsically OVL; no generic execution API may select DRC.
+Contract creation and calls remain separately version-gated and must not be
+inferred from the existence of the current signed OVL execution envelope.
+
+DRC is permanently contract-free. It accepts no bytecode, VM transaction,
+deploy/call input, Hook, script, callback, or user-defined program. DRC
+payments, escrow, Checks, payment channels, trust lines, issued assets,
+freeze/clawback controls, multisign, Tickets, and related capabilities are
+closed, versioned state-machine operations whose effects are defined directly
+by consensus.
+
 ---
 
 ## Canonical ledger
@@ -57,7 +71,10 @@ Details: [`../consensus/HYBRID_POW_DUAL_POS.md`](../consensus/HYBRID_POW_DUAL_PO
 
 ## State model (decision)
 
-**Mixed model:** TLT remains UTXO; OVL and DRC use native account modules (balances, nonces, staking, vesting, treasuries, execution/payment substate). All commit atomically into one state root.
+**Mixed model:** TLT remains UTXO; OVL and DRC use native account modules
+(balances, nonces, staking, vesting, and treasuries), with an OVL-only
+execution substate and closed DRC payment/settlement substates. All commit
+atomically into one state root.
 
 Rationale: preserve consensus-hardening on the TLT UTXO path (PRs #76–#81); align OVL execution and DRC payments with account semantics without maintaining two OVL balance definitions.
 
@@ -124,7 +141,7 @@ Do **not** use “role-complete” as a substitute for the above.
 | 1 | Shared types + genesis v3 |
 | 2 | Multi-asset state transition + acceptance |
 | 3 | Staking + dual-PoS finality |
-| 4 | OVL execution + DRC payment modules |
+| 4 | OVL-only execution + contract-free DRC payment/state modules |
 | 5 | Governance & community systems |
 | 6 | Migration tooling + layer retirement docs |
 | 7 | Devnet / testnet preparation |
@@ -149,7 +166,7 @@ A Trident v3 node loader remains blocked on the concrete body/PoW rules,
 lossless atomic mappings for UTXOs, accounts, treasury controls, vesting locks,
 validator runtime records and initial finality, and equality between the
 materialized live-state root and header. Networking and RPC must remain
-disabled for v3 until that live-state contract and explicit runtime gates exist.
+disabled for v3 until that live-state invariant and explicit runtime gates exist.
 See [`../core/block-zero.md`](../core/block-zero.md).
 
 PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.

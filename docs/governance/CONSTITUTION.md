@@ -134,9 +134,10 @@ majority of seated voters unless params override.
 
 ## Article IX — Scope & non-goals (v1)
 
-1. L1 civic governance binds **TLT** holders. L2 OVL sequencers and L3 DRC
-   attestors remain **bonded operator sets**, not Ecclesia ranks (see
-   `TOKEN_ROLES.md`).
+1. This v1 civic engine binds **TLT** holders. Under Trident, native L1 OVL and
+   DRC validators remain **bonded operator sets**, not Ecclesia ranks (see
+   `TOKEN_ROLES.md`). OVL governs the sole programmable execution domain; DRC
+   remains contract-free typed payment/state functionality.
 2. This charter does not replace client-software rough consensus for
    non-enactable social upgrades.
 3. Full node persistence, RPC, and wallet UX are layered on after the

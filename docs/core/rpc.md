@@ -72,6 +72,20 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_sponsorProposal` / `agora_assentProposal` | Tamias sponsor / Archon assent |
 | `agora_postForumTopic` / `agora_ackConstitution` | Community board + constitution ack |
 
+## Execution boundary
+
+`agora_submitOvlExecution` is the only programmable-execution submission
+method. Its `OvlExecutionTx` is intrinsically OVL-denominated and has no asset
+selector. Unknown fields such as `"asset": "DRC"` are rejected rather than
+ignored. There is no generic `agora_submitExecution`, DRC deploy/call, DRC VM,
+or contract-facing DRC method.
+
+DRC payment, escrow, Check, payment-channel, trust-line, issued-asset,
+freeze/clawback, multisign, regular-key, and Ticket methods submit closed typed
+protocol operations. Their metadata and authorization fields are inputs to
+deterministic native state transitions, not bytecode or contract-call data.
+This typed surface does not claim full XRPL compatibility.
+
 Civic state is persisted under RocksDB Meta key `meta/governance` (`CivicSnapshot`).
 
 There is no data-commitment submit or confirmation RPC. The TLT
