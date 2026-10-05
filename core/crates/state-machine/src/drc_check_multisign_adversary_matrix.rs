@@ -1,4 +1,4 @@
-//! Reusable multisign attachment adversary matrix for escrow create, finish, and cancel.
+//! Reusable multisign attachment adversary matrix for check create, cash, and cancel.
 
 #[cfg(test)]
 mod matrix {
@@ -12,13 +12,13 @@ mod matrix {
 
     use crate::accounts::load_account;
     use crate::apply::TxAuthContext;
-    use crate::drc_escrow_test_harness::multisign::{
-        self, base_multisign_cancel_block, base_multisign_create_block,
-        base_multisign_finish_block, install_signer_list, install_signer_list_at_nonce,
-        multisign_cancel_block, multisign_finish_block, reject_preserving,
+    use crate::drc_check_test_harness::multisign::{
+        self, base_multisign_cancel_block, base_multisign_cash_block, base_multisign_create_block,
+        install_signer_list, install_signer_list_at_nonce, multisign_cancel_block,
+        multisign_cash_block, reject_preserving,
     };
-    use crate::drc_escrow_test_harness::support::{
-        apply_escrow_block, auth, create_live_escrow, fund, key, snapshot_escrow_state,
+    use crate::drc_check_test_harness::support::{
+        apply_check_block, auth, create_live_check, fund, key, snapshot_check_state,
     };
     use crate::StateStore;
     use agora_types::{Block, NativeAssetId};
@@ -51,16 +51,16 @@ mod matrix {
         _: &[(&KeyPair, u16)],
         _: &TxAuthContext,
     ) {
-        block.drc_escrow_creates.clear();
+        block.drc_check_creates.clear();
     }
 
-    fn tamper_orphan_attachment_finish(
+    fn tamper_orphan_attachment_cash(
         block: &mut Block,
         _: &KeyPair,
         _: &[(&KeyPair, u16)],
         _: &TxAuthContext,
     ) {
-        block.drc_escrow_finishes.clear();
+        block.drc_check_cashes.clear();
     }
 
     fn tamper_orphan_attachment_cancel(
@@ -69,16 +69,16 @@ mod matrix {
         _: &[(&KeyPair, u16)],
         _: &TxAuthContext,
     ) {
-        block.drc_escrow_cancels.clear();
+        block.drc_check_cancels.clear();
     }
 
-    fn tamper_wrong_kind_finish(
+    fn tamper_wrong_kind_cash(
         block: &mut Block,
         _: &KeyPair,
         _: &[(&KeyPair, u16)],
         _: &TxAuthContext,
     ) {
-        block.drc_multisign_attachments[0].key.kind = DrcMultisignOperationKind::DrcEscrowCreate;
+        block.drc_multisign_attachments[0].key.kind = DrcMultisignOperationKind::DrcCheckCreate;
     }
 
     fn tamper_wrong_kind_cancel(
@@ -87,7 +87,7 @@ mod matrix {
         _: &[(&KeyPair, u16)],
         _: &TxAuthContext,
     ) {
-        block.drc_multisign_attachments[0].key.kind = DrcMultisignOperationKind::DrcEscrowFinish;
+        block.drc_multisign_attachments[0].key.kind = DrcMultisignOperationKind::DrcCheckCash;
     }
 
     fn tamper_wrong_kind_create(
@@ -108,7 +108,7 @@ mod matrix {
         block.drc_multisign_attachments[0].key.signing_commitment = Hash([0xee; 32]);
     }
 
-    fn tamper_wrong_signing_commitment_finish(
+    fn tamper_wrong_signing_commitment_cash(
         block: &mut Block,
         _: &KeyPair,
         _: &[(&KeyPair, u16)],
@@ -182,7 +182,7 @@ mod matrix {
                 version: DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
                 key: DrcMultisignAttachmentKey {
                     version: DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
-                    kind: DrcMultisignOperationKind::DrcEscrowCreate,
+                    kind: DrcMultisignOperationKind::DrcCheckCreate,
                     signing_commitment: Hash([0xab; 32]),
                 },
                 auth: agora_types::DrcMultisignAuth {
@@ -199,18 +199,18 @@ mod matrix {
         _: &[(&KeyPair, u16)],
         _: &TxAuthContext,
     ) {
-        block.drc_escrow_creates[0].public_key = master.public_key_bytes().to_vec();
-        block.drc_escrow_creates[0].signature = vec![1; 64];
+        block.drc_check_creates[0].public_key = master.public_key_bytes().to_vec();
+        block.drc_check_creates[0].signature = vec![1; 64];
     }
 
-    fn tamper_mixed_single_and_multisign_finish(
+    fn tamper_mixed_single_and_multisign_cash(
         block: &mut Block,
         submitter: &KeyPair,
         _: &[(&KeyPair, u16)],
         _: &TxAuthContext,
     ) {
-        block.drc_escrow_finishes[0].public_key = submitter.public_key_bytes().to_vec();
-        block.drc_escrow_finishes[0].signature = vec![1; 64];
+        block.drc_check_cashes[0].public_key = submitter.public_key_bytes().to_vec();
+        block.drc_check_cashes[0].signature = vec![1; 64];
     }
 
     fn tamper_mixed_single_and_multisign_cancel(
@@ -219,8 +219,8 @@ mod matrix {
         _: &[(&KeyPair, u16)],
         _: &TxAuthContext,
     ) {
-        block.drc_escrow_cancels[0].public_key = submitter.public_key_bytes().to_vec();
-        block.drc_escrow_cancels[0].signature = vec![1; 64];
+        block.drc_check_cancels[0].public_key = submitter.public_key_bytes().to_vec();
+        block.drc_check_cancels[0].signature = vec![1; 64];
     }
 
     fn tamper_tampered_signature(
@@ -238,18 +238,18 @@ mod matrix {
         _: &[(&KeyPair, u16)],
         ctx: &TxAuthContext,
     ) {
-        let signing = block.drc_escrow_creates[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+        let signing = block.drc_check_creates[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
         block.drc_multisign_attachments[0].auth =
             multisign::multisign_bundle(master.address(), &signing, &[(&key(88), 1)], ctx);
     }
 
-    fn tamper_below_quorum_finish(
+    fn tamper_below_quorum_cash(
         block: &mut Block,
         submitter: &KeyPair,
         signers: &[(&KeyPair, u16)],
         ctx: &TxAuthContext,
     ) {
-        let signing = block.drc_escrow_finishes[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+        let signing = block.drc_check_cashes[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
         block.drc_multisign_attachments[0].auth =
             multisign::multisign_bundle(submitter.address(), &signing, &[signers[0]], ctx);
         if signers.len() > 1 {
@@ -264,7 +264,7 @@ mod matrix {
         _: &[(&KeyPair, u16)],
         ctx: &TxAuthContext,
     ) {
-        let signing = block.drc_escrow_creates[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+        let signing = block.drc_check_creates[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
         block.drc_multisign_attachments[0].auth = multisign::multisign_bundle(
             master.address(),
             &signing,
@@ -273,13 +273,13 @@ mod matrix {
         );
     }
 
-    fn tamper_foreign_signer_finish(
+    fn tamper_foreign_signer_cash(
         block: &mut Block,
         submitter: &KeyPair,
         _: &[(&KeyPair, u16)],
         ctx: &TxAuthContext,
     ) {
-        let signing = block.drc_escrow_finishes[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+        let signing = block.drc_check_cashes[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
         block.drc_multisign_attachments[0].auth = multisign::multisign_bundle(
             submitter.address(),
             &signing,
@@ -294,7 +294,7 @@ mod matrix {
         _: &[(&KeyPair, u16)],
         ctx: &TxAuthContext,
     ) {
-        let signing = block.drc_escrow_cancels[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+        let signing = block.drc_check_cancels[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
         block.drc_multisign_attachments[0].auth = multisign::multisign_bundle(
             submitter.address(),
             &signing,
@@ -309,7 +309,7 @@ mod matrix {
         signers: &[(&KeyPair, u16)],
         ctx: &TxAuthContext,
     ) {
-        let signing = block.drc_escrow_cancels[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+        let signing = block.drc_check_cancels[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
         block.drc_multisign_attachments[0].auth =
             multisign::multisign_bundle(submitter.address(), &signing, &[signers[0]], ctx);
     }
@@ -320,17 +320,17 @@ mod matrix {
             fn $name() {
                 let store = StateStore::open_in_memory();
                 let master = key(10);
-                let recipient = key(11);
+                let destination = key(11);
                 let s1 = key(12);
                 let s2 = key(13);
                 fund(&store, &master, 200_000);
                 let ctx = auth();
                 let signers: &[(&KeyPair, u16)] = &[(&s1, 1), (&s2, 2)];
-                let mut block = base_multisign_create_block(&store, &master, &recipient, signers, &ctx);
-                let before = snapshot_escrow_state(&store, &master, &recipient);
+                let mut block = base_multisign_create_block(&store, &master, &destination, signers, &ctx);
+                let before = snapshot_check_state(&store, &master, &destination);
                 let tamper: Tamper = $tamper;
                 tamper(&mut block, &master, signers, &ctx);
-                reject_preserving(&store, &master, &recipient, block, &ctx, &before);
+                reject_preserving(&store, &master, &destination, block, &ctx, &before);
             })*
         };
     }
@@ -356,80 +356,82 @@ mod matrix {
     fn matrix_create_rejects_stale_signer_list() {
         let store = StateStore::open_in_memory();
         let master = key(14);
-        let recipient = key(15);
+        let destination = key(15);
         let s1 = key(16);
         let s2 = key(17);
         fund(&store, &master, 200_000);
         let ctx = auth();
         let signers: &[(&KeyPair, u16)] = &[(&s1, 1), (&s2, 2)];
-        let block = base_multisign_create_block(&store, &master, &recipient, signers, &ctx);
+        let block = base_multisign_create_block(&store, &master, &destination, signers, &ctx);
         let nonce = load_account(&store, NativeAssetId::DRC, &master.address())
             .unwrap()
             .nonce;
         install_signer_list_at_nonce(&store, &master, &[(&key(18), 1)], &ctx, nonce);
-        let before = snapshot_escrow_state(&store, &master, &recipient);
-        reject_preserving(&store, &master, &recipient, block, &ctx, &before);
+        let before = snapshot_check_state(&store, &master, &destination);
+        reject_preserving(&store, &master, &destination, block, &ctx, &before);
     }
 
-    macro_rules! finish_cases {
+    macro_rules! cash_cases {
         ($($name:ident => $tamper:expr,)*) => {
             $(#[test]
             fn $name() {
                 let store = StateStore::open_in_memory();
                 let master = key(20);
-                let recipient = key(21);
+                let destination = key(21);
                 let s1 = key(22);
                 let s2 = key(23);
                 fund(&store, &master, 200_000);
+                fund(&store, &destination, 500);
                 let ctx = auth();
                 let (id, _) =
-                    create_live_escrow(&store, &master, &recipient, 12, None, Some(90), 1, &ctx);
+                    create_live_check(&store, &master, &destination, 12, Some(90), 1, &ctx);
                 let signers: &[(&KeyPair, u16)] = &[(&s1, 1), (&s2, 2)];
-                install_signer_list(&store, &master, signers, &ctx);
-                let before = snapshot_escrow_state(&store, &master, &recipient);
-                let mut block = multisign_finish_block(&store, &master, id, signers, &ctx);
+                install_signer_list(&store, &destination, signers, &ctx);
+                let before = snapshot_check_state(&store, &master, &destination);
+                let mut block = multisign_cash_block(&store, &destination, id, signers, &ctx);
                 let tamper: Tamper = $tamper;
-                tamper(&mut block, &master, signers, &ctx);
-                reject_preserving(&store, &master, &recipient, block, &ctx, &before);
+                tamper(&mut block, &destination, signers, &ctx);
+                reject_preserving(&store, &master, &destination, block, &ctx, &before);
             })*
         };
     }
 
-    finish_cases! {
-        matrix_finish_rejects_missing_attachment => tamper_missing_attachment,
-        matrix_finish_rejects_duplicate_attachment => tamper_duplicate_attachment,
-        matrix_finish_rejects_orphan_attachment => tamper_orphan_attachment_finish,
-        matrix_finish_rejects_wrong_operation_kind => tamper_wrong_kind_finish,
-        matrix_finish_rejects_wrong_signing_commitment => tamper_wrong_signing_commitment_finish,
-        matrix_finish_rejects_wrong_signing_for => tamper_wrong_signing_for,
-        matrix_finish_rejects_noncanonical_attachment_order => tamper_noncanonical_attachment_order,
-        matrix_finish_rejects_unsorted_signer_entries => tamper_unsorted_signer_entries,
-        matrix_finish_rejects_oversized_auth_entries => tamper_oversized_auth_entries,
-        matrix_finish_rejects_oversized_attachment_lane => tamper_oversized_attachment_lane,
-        matrix_finish_rejects_mixed_single_and_multisign => tamper_mixed_single_and_multisign_finish,
-        matrix_finish_rejects_tampered_signature => tamper_tampered_signature,
-        matrix_finish_rejects_below_quorum => tamper_below_quorum_finish,
-        matrix_finish_rejects_foreign_signer => tamper_foreign_signer_finish,
+    cash_cases! {
+        matrix_cash_rejects_missing_attachment => tamper_missing_attachment,
+        matrix_cash_rejects_duplicate_attachment => tamper_duplicate_attachment,
+        matrix_cash_rejects_orphan_attachment => tamper_orphan_attachment_cash,
+        matrix_cash_rejects_wrong_operation_kind => tamper_wrong_kind_cash,
+        matrix_cash_rejects_wrong_signing_commitment => tamper_wrong_signing_commitment_cash,
+        matrix_cash_rejects_wrong_signing_for => tamper_wrong_signing_for,
+        matrix_cash_rejects_noncanonical_attachment_order => tamper_noncanonical_attachment_order,
+        matrix_cash_rejects_unsorted_signer_entries => tamper_unsorted_signer_entries,
+        matrix_cash_rejects_oversized_auth_entries => tamper_oversized_auth_entries,
+        matrix_cash_rejects_oversized_attachment_lane => tamper_oversized_attachment_lane,
+        matrix_cash_rejects_mixed_single_and_multisign => tamper_mixed_single_and_multisign_cash,
+        matrix_cash_rejects_tampered_signature => tamper_tampered_signature,
+        matrix_cash_rejects_below_quorum => tamper_below_quorum_cash,
+        matrix_cash_rejects_foreign_signer => tamper_foreign_signer_cash,
     }
 
     #[test]
-    fn matrix_finish_rejects_stale_signer_list() {
+    fn matrix_cash_rejects_stale_signer_list() {
         let store = StateStore::open_in_memory();
         let master = key(24);
-        let recipient = key(25);
+        let destination = key(25);
         let s1 = key(26);
         fund(&store, &master, 200_000);
         let ctx = auth();
-        let (id, _) = create_live_escrow(&store, &master, &recipient, 12, None, Some(90), 1, &ctx);
+        fund(&store, &destination, 500);
+        let (id, _) = create_live_check(&store, &master, &destination, 12, Some(90), 1, &ctx);
         let signers: &[(&KeyPair, u16)] = &[(&s1, 1)];
-        install_signer_list(&store, &master, signers, &ctx);
-        let block = multisign_finish_block(&store, &master, id, signers, &ctx);
-        let nonce = load_account(&store, NativeAssetId::DRC, &master.address())
+        install_signer_list(&store, &destination, signers, &ctx);
+        let block = multisign_cash_block(&store, &destination, id, signers, &ctx);
+        let nonce = load_account(&store, NativeAssetId::DRC, &destination.address())
             .unwrap()
             .nonce;
-        install_signer_list_at_nonce(&store, &master, &[(&key(27), 1)], &ctx, nonce);
-        let before = snapshot_escrow_state(&store, &master, &recipient);
-        reject_preserving(&store, &master, &recipient, block, &ctx, &before);
+        install_signer_list_at_nonce(&store, &destination, &[(&key(27), 1)], &ctx, nonce);
+        let before = snapshot_check_state(&store, &master, &destination);
+        reject_preserving(&store, &master, &destination, block, &ctx, &before);
     }
 
     macro_rules! cancel_cases {
@@ -439,22 +441,22 @@ mod matrix {
                 let store = StateStore::open_in_memory();
                 let master = key(30);
                 let helper = key(31);
-                let recipient = key(32);
+                let destination = key(32);
                 let s1 = key(33);
                 let s2 = key(34);
                 fund(&store, &master, 200_000);
                 fund(&store, &helper, 500);
                 let ctx = auth();
                 let (id, _) =
-                    create_live_escrow(&store, &master, &recipient, 12, None, Some(60), 1, &ctx);
+                    create_live_check(&store, &master, &destination, 12, Some(60), 1, &ctx);
                 let signers: &[(&KeyPair, u16)] = &[(&s1, 1), (&s2, 2)];
                 install_signer_list(&store, &helper, signers, &ctx);
-                let before = snapshot_escrow_state(&store, &master, &recipient);
+                let before = snapshot_check_state(&store, &master, &destination);
                 let mut block =
                     multisign_cancel_block(&store, &helper, &master, id, signers, &ctx);
                 let tamper: Tamper = $tamper;
                 tamper(&mut block, &helper, signers, &ctx);
-                reject_preserving(&store, &master, &recipient, block, &ctx, &before);
+                reject_preserving(&store, &master, &destination, block, &ctx, &before);
             })*
         };
     }
@@ -481,58 +483,60 @@ mod matrix {
         let store = StateStore::open_in_memory();
         let master = key(35);
         let helper = key(36);
-        let recipient = key(37);
+        let destination = key(37);
         let s1 = key(38);
         fund(&store, &master, 200_000);
         fund(&store, &helper, 500);
         let ctx = auth();
-        let (id, _) = create_live_escrow(&store, &master, &recipient, 12, None, Some(60), 1, &ctx);
+        let (id, _) = create_live_check(&store, &master, &destination, 12, Some(60), 1, &ctx);
         install_signer_list(&store, &helper, &[(&s1, 1)], &ctx);
         let block = multisign_cancel_block(&store, &helper, &master, id, &[(&s1, 1)], &ctx);
         let nonce = load_account(&store, NativeAssetId::DRC, &helper.address())
             .unwrap()
             .nonce;
         install_signer_list_at_nonce(&store, &helper, &[(&key(39), 1)], &ctx, nonce);
-        let before = snapshot_escrow_state(&store, &master, &recipient);
-        reject_preserving(&store, &master, &recipient, block, &ctx, &before);
+        let before = snapshot_check_state(&store, &master, &destination);
+        reject_preserving(&store, &master, &destination, block, &ctx, &before);
     }
 
     #[test]
     fn matrix_create_positive_borsh_body_root_and_apply() {
         let store = StateStore::open_in_memory();
         let master = key(40);
-        let recipient = key(41);
+        let destination = key(41);
         let s1 = key(42);
         fund(&store, &master, 50_000);
         let ctx = auth();
-        let mut block = base_multisign_create_block(&store, &master, &recipient, &[(&s1, 1)], &ctx);
+        let mut block =
+            base_multisign_create_block(&store, &master, &destination, &[(&s1, 1)], &ctx);
         validate_drc_multisign_attachment_lane(&block, &ctx.chain_id, &ctx.genesis).unwrap();
         let root = block.compute_body_root();
         block.header.tx_root = root;
         let bytes = borsh::to_vec(&block).unwrap();
         let decoded: Block = borsh::from_slice(&bytes).unwrap();
         assert_eq!(decoded.header.tx_root, root);
-        apply_escrow_block(&store, decoded, 1, &ctx);
+        apply_check_block(&store, decoded, 1, &ctx);
     }
 
     #[test]
-    fn matrix_finish_positive_borsh_body_root_and_apply() {
+    fn matrix_cash_positive_borsh_body_root_and_apply() {
         let store = StateStore::open_in_memory();
         let master = key(43);
-        let recipient = key(44);
+        let destination = key(44);
         let s1 = key(45);
         fund(&store, &master, 50_000);
         let ctx = auth();
-        let (id, _) = create_live_escrow(&store, &master, &recipient, 15, None, Some(80), 1, &ctx);
+        fund(&store, &destination, 500);
+        let (id, _) = create_live_check(&store, &master, &destination, 15, Some(80), 1, &ctx);
         let mut block =
-            base_multisign_finish_block(&store, &master, &recipient, id, &[(&s1, 1)], &ctx);
+            base_multisign_cash_block(&store, &master, &destination, id, &[(&s1, 1)], &ctx);
         validate_drc_multisign_attachment_lane(&block, &ctx.chain_id, &ctx.genesis).unwrap();
         let root = block.compute_body_root();
         block.header.tx_root = root;
         let bytes = borsh::to_vec(&block).unwrap();
         let decoded: Block = borsh::from_slice(&bytes).unwrap();
         assert_eq!(decoded.header.tx_root, root);
-        apply_escrow_block(&store, decoded, 2, &ctx);
+        apply_check_block(&store, decoded, 2, &ctx);
     }
 
     #[test]
@@ -540,17 +544,17 @@ mod matrix {
         let store = StateStore::open_in_memory();
         let master = key(46);
         let helper = key(47);
-        let recipient = key(48);
+        let destination = key(48);
         let s1 = key(49);
         fund(&store, &master, 50_000);
         fund(&store, &helper, 500);
         let ctx = auth();
-        let (id, _) = create_live_escrow(&store, &master, &recipient, 20, None, Some(40), 1, &ctx);
+        let (id, _) = create_live_check(&store, &master, &destination, 20, Some(40), 1, &ctx);
         let mut block = base_multisign_cancel_block(
             &store,
             &helper,
             &master,
-            &recipient,
+            &destination,
             id,
             &[(&s1, 1)],
             &ctx,
@@ -561,6 +565,6 @@ mod matrix {
         let bytes = borsh::to_vec(&block).unwrap();
         let decoded: Block = borsh::from_slice(&bytes).unwrap();
         assert_eq!(decoded.header.tx_root, root);
-        apply_escrow_block(&store, decoded, 40, &ctx);
+        apply_check_block(&store, decoded, 40, &ctx);
     }
 }

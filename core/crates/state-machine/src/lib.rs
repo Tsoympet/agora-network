@@ -13,6 +13,10 @@ mod data_availability;
 mod drc_account_auth;
 mod drc_check;
 #[cfg(test)]
+mod drc_check_auth_cutoff_tranche_tests;
+#[cfg(test)]
+mod drc_check_multisign_adversary_matrix;
+#[cfg(test)]
 mod drc_check_test_harness;
 #[cfg(test)]
 mod drc_check_tests;

@@ -491,26 +491,26 @@ pub mod multisign {
 
     pub fn base_multisign_cash_block(
         store: &StateStore,
-        master: &KeyPair,
-        _destination: &KeyPair,
+        _owner: &KeyPair,
+        destination: &KeyPair,
         check_id: Hash,
         signers: &[(&KeyPair, u16)],
         ctx: &TxAuthContext,
     ) -> Block {
-        install_signer_list(store, master, signers, ctx);
-        let nonce = load_account(store, NativeAssetId::DRC, &master.address())
+        install_signer_list(store, destination, signers, ctx);
+        let nonce = load_account(store, NativeAssetId::DRC, &destination.address())
             .unwrap()
             .nonce;
-        let mut cash = signed_cash(master, check_id, nonce, ctx);
+        let mut cash = signed_cash(destination, check_id, nonce, ctx);
         cash.public_key.clear();
         cash.signature.clear();
         cash.multisign = Some(multisign_bundle(
-            master.address(),
+            destination.address(),
             &cash.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
             signers,
             ctx,
         ));
-        let mut block = coinbase(vec![Hash::ZERO], master);
+        let mut block = coinbase(vec![Hash::ZERO], destination);
         block.drc_check_cashes.push(cash);
         materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
         block
