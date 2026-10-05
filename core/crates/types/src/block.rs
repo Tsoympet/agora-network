@@ -1013,6 +1013,31 @@ mod tests {
         drc_payments: Vec<DrcPaymentTx>,
     }
 
+    #[test]
+    fn empty_post_v4_lanes_preserve_v4_block_bytes() {
+        let header = BlockHeader {
+            version: 1,
+            parents: vec![Hash([7; 32])],
+            timestamp_ms: 8,
+            bits: 9,
+            nonce: 10,
+            tx_root: Hash([11; 32]),
+        };
+        let block = Block::utxo(header.clone(), Vec::new());
+        let legacy = LegacyV4Block {
+            header,
+            transactions: Vec::new(),
+            account_transfers: Vec::new(),
+            stake_ops: Vec::new(),
+            ovl_executions: Vec::new(),
+            drc_payments: Vec::new(),
+        };
+
+        let bytes = borsh::to_vec(&block).unwrap();
+        assert_eq!(bytes, borsh::to_vec(&legacy).unwrap());
+        assert_eq!(Block::try_from_slice(&bytes).unwrap(), block);
+    }
+
     #[derive(BorshSerialize)]
     struct LegacyV5Block {
         header: BlockHeader,
