@@ -3,6 +3,9 @@ import type { AccountTransfer } from "./AccountTransfer";
 import type { BlockHeader } from "./BlockHeader";
 import type { DataCommitmentAuthorization } from "./DataCommitmentAuthorization";
 import type { DrcAccountPolicyTx } from "./DrcAccountPolicyTx";
+import type { DrcCheckCancelTx } from "./DrcCheckCancelTx";
+import type { DrcCheckCashTx } from "./DrcCheckCashTx";
+import type { DrcCheckCreateTx } from "./DrcCheckCreateTx";
 import type { DrcDepositPreauthTx } from "./DrcDepositPreauthTx";
 import type { DrcEscrowCancelTx } from "./DrcEscrowCancelTx";
 import type { DrcEscrowCreateTx } from "./DrcEscrowCreateTx";
@@ -73,9 +76,21 @@ drc_escrow_creates: Array<DrcEscrowCreateTx>,
  */
 drc_escrow_finishes: Array<DrcEscrowFinishTx>,
 /**
- * Owner-authorized native DRC escrow cancels.
+ * Submitter-authorized native DRC escrow cancels.
  */
 drc_escrow_cancels: Array<DrcEscrowCancelTx>,
+/**
+ * Owner-authorized native DRC check creates.
+ */
+drc_check_creates: Array<DrcCheckCreateTx>,
+/**
+ * Destination-authorized native DRC check cash (exact value).
+ */
+drc_check_cashes: Array<DrcCheckCashTx>,
+/**
+ * Authorized native DRC check cancels.
+ */
+drc_check_cancels: Array<DrcCheckCancelTx>,
 /**
  * Detached, body-root-committed DRC multisign authorization (consensus lane).
  */

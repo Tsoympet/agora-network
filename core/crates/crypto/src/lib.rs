@@ -8,6 +8,7 @@ mod address;
 mod attestation;
 mod bip44;
 mod data_availability;
+mod drc_check;
 mod drc_deposit_preauth;
 mod drc_escrow;
 mod drc_multisign;
@@ -34,6 +35,10 @@ pub use bip44::{
     derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,
 };
 pub use data_availability::{sign_data_commitment_bound, verify_data_commitment_bound};
+pub use drc_check::{
+    sign_drc_check_cancel_bound, sign_drc_check_cash_bound, sign_drc_check_create_bound,
+    verify_drc_check_cancel_bound, verify_drc_check_cash_bound, verify_drc_check_create_bound,
+};
 pub use drc_deposit_preauth::{sign_drc_deposit_preauth_bound, verify_drc_deposit_preauth_bound};
 pub use drc_escrow::{
     sign_drc_escrow_cancel_bound, sign_drc_escrow_create_bound, sign_drc_escrow_finish_bound,

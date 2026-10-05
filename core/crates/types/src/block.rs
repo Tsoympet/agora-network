@@ -3,13 +3,15 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::{
-    AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcDepositPreauthTx,
-    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcMultisignBlockAttachment,
-    DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash, OvlExecutionTx,
-    SignedStakeTx, Transaction,
+    AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcCheckCancelTx,
+    DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
+    DrcEscrowFinishTx, DrcMultisignBlockAttachment, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 
-/// Explicit version/domain for bodies carrying native DRC escrow operations.
+/// Explicit version/domain for bodies carrying native DRC check operations.
+pub const TRIDENT_BLOCK_BODY_V14_VERSION: u16 = 14;
+pub const TRIDENT_BLOCK_BODY_V14_DOMAIN: &[u8] = b"agora-block-body-v14";
 pub const TRIDENT_BLOCK_BODY_V13_VERSION: u16 = 13;
 pub const TRIDENT_BLOCK_BODY_V13_DOMAIN: &[u8] = b"agora-block-body-v13";
 /// Explicit version/domain for bodies carrying DRC ticket-create operations.
@@ -96,9 +98,18 @@ pub struct Block {
     /// Submitter-authorized native DRC escrow finishes.
     #[serde(default)]
     pub drc_escrow_finishes: Vec<DrcEscrowFinishTx>,
-    /// Owner-authorized native DRC escrow cancels.
+    /// Submitter-authorized native DRC escrow cancels.
     #[serde(default)]
     pub drc_escrow_cancels: Vec<DrcEscrowCancelTx>,
+    /// Owner-authorized native DRC check creates.
+    #[serde(default)]
+    pub drc_check_creates: Vec<DrcCheckCreateTx>,
+    /// Destination-authorized native DRC check cash (exact value).
+    #[serde(default)]
+    pub drc_check_cashes: Vec<DrcCheckCashTx>,
+    /// Authorized native DRC check cancels.
+    #[serde(default)]
+    pub drc_check_cancels: Vec<DrcCheckCancelTx>,
     /// Detached, body-root-committed DRC multisign authorization (consensus lane).
     #[serde(default)]
     pub drc_multisign_attachments: Vec<DrcMultisignBlockAttachment>,
@@ -123,6 +134,9 @@ impl Block {
             drc_escrow_creates: Vec::new(),
             drc_escrow_finishes: Vec::new(),
             drc_escrow_cancels: Vec::new(),
+            drc_check_creates: Vec::new(),
+            drc_check_cashes: Vec::new(),
+            drc_check_cancels: Vec::new(),
             drc_multisign_attachments: Vec::new(),
         }
     }
@@ -163,7 +177,7 @@ impl Block {
     /// data commitments use v5; DRC account policies use v6; address-based DRC
     /// deposit preauthorizations use v7; payment-v4 expiry uses v8; regular keys use v9;
     /// signer lists use v10; detached multisign attachments use v11; ticket creates use v12;
-    /// native DRC escrow uses v13.
+    /// native DRC escrow uses v13; native DRC checks use v14.
     pub fn compute_body_root(&self) -> Hash {
         let mut inner = self.compute_body_root_with_multisign_attachments();
         if !self.drc_ticket_creates.is_empty() {
@@ -198,12 +212,40 @@ impl Block {
                 .iter()
                 .map(DrcEscrowCancelTx::cancel_tx_id)
                 .collect();
-            return Hash::hash_borsh(&(
+            inner = Hash::hash_borsh(&(
                 TRIDENT_BLOCK_BODY_V13_DOMAIN,
                 TRIDENT_BLOCK_BODY_V13_VERSION,
                 inner,
                 create_ids,
                 finish_ids,
+                cancel_ids,
+            ));
+        }
+        if !self.drc_check_creates.is_empty()
+            || !self.drc_check_cashes.is_empty()
+            || !self.drc_check_cancels.is_empty()
+        {
+            let create_ids: Vec<Hash> = self
+                .drc_check_creates
+                .iter()
+                .map(DrcCheckCreateTx::check_id)
+                .collect();
+            let cash_ids: Vec<Hash> = self
+                .drc_check_cashes
+                .iter()
+                .map(DrcCheckCashTx::cash_tx_id)
+                .collect();
+            let cancel_ids: Vec<Hash> = self
+                .drc_check_cancels
+                .iter()
+                .map(DrcCheckCancelTx::cancel_tx_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V14_DOMAIN,
+                TRIDENT_BLOCK_BODY_V14_VERSION,
+                inner,
+                create_ids,
+                cash_ids,
                 cancel_ids,
             ));
         }
@@ -409,6 +451,9 @@ impl BorshDeserialize for Block {
             drc_escrow_creates: deserialize_trailing_vec(reader)?,
             drc_escrow_finishes: deserialize_trailing_vec(reader)?,
             drc_escrow_cancels: deserialize_trailing_vec(reader)?,
+            drc_check_creates: deserialize_trailing_vec(reader)?,
+            drc_check_cashes: deserialize_trailing_vec(reader)?,
+            drc_check_cancels: deserialize_trailing_vec(reader)?,
             drc_multisign_attachments: deserialize_trailing_vec(reader)?,
         })
     }
