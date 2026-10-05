@@ -152,17 +152,24 @@ pub fn load_drc_issued_clawback_receipt(
 }
 
 pub fn issued_controls_meta_keys_for_policy(tx: &DrcIssuedAssetPolicySetTx) -> Vec<Vec<u8>> {
-    vec![drc_issued_asset_policy_meta_key(&tx.asset_id())]
+    vec![
+        drc_issued_asset_policy_meta_key(&tx.asset_id()),
+        policy_receipt_key(&tx.policy_set_tx_id()),
+    ]
 }
 
 pub fn issued_controls_meta_keys_for_issuer_control(
     tx: &DrcTrustLineIssuerControlTx,
 ) -> Vec<Vec<u8>> {
-    agora_types::drc_trust_line_issuer_control_mutation_meta_keys(tx)
+    let mut keys = agora_types::drc_trust_line_issuer_control_mutation_meta_keys(tx);
+    keys.push(control_receipt_key(&tx.issuer_control_tx_id()));
+    keys
 }
 
 pub fn issued_controls_meta_keys_for_clawback(tx: &DrcIssuedClawbackTx) -> Vec<Vec<u8>> {
-    agora_types::drc_issued_clawback_mutation_meta_keys(tx)
+    let mut keys = agora_types::drc_issued_clawback_mutation_meta_keys(tx);
+    keys.push(clawback_receipt_key(&tx.clawback_tx_id()));
+    keys
 }
 
 pub fn drc_issued_controls_root(store: &StateStore) -> Result<Hash, StateError> {

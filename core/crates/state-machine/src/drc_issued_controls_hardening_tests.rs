@@ -9,7 +9,10 @@ mod tests {
 
     use crate::accounts::load_account;
     use crate::apply::apply_block_batched_virtual_at_blue_score;
-    use crate::drc_issued_controls::load_drc_issued_asset_policy;
+    use crate::drc_issued_controls::{
+        load_drc_issued_asset_policy, load_drc_issued_asset_policy_receipt,
+        load_drc_issued_clawback_receipt, load_drc_trust_line_issuer_control_receipt,
+    };
     use crate::drc_issued_controls_test_harness::support::{
         apply_block, apply_block_journal, apply_issuer_control_direct, apply_policy_direct,
         assert_liability_matches_holders, asset, auth, controls_roots, fund, issuer_drc_nonce,
@@ -413,6 +416,7 @@ mod tests {
             0,
             &ctx,
         );
+        let policy_id = pol.policy_set_tx_id();
         let mut block = coinbase(vec![Hash::ZERO], &issuer);
         block.drc_issued_asset_policy_sets.push(pol);
         block.header.tx_root = block.compute_body_root();
@@ -422,11 +426,100 @@ mod tests {
                 .unwrap()
                 .global_freeze
         );
+        assert!(
+            load_drc_issued_asset_policy_receipt(&store, &policy_id)
+                .unwrap()
+                .is_some()
+        );
         revert_journal(&store, &journal);
         assert!(
             !load_drc_issued_asset_policy(&store, &ast)
                 .unwrap()
                 .global_freeze
+        );
+        assert!(
+            load_drc_issued_asset_policy_receipt(&store, &policy_id)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn journal_revert_removes_control_and_clawback_receipts() {
+        let store = StateStore::open_in_memory();
+        let ctx = auth();
+        let issuer = key(0x32);
+        let holder = key(0x33);
+        let cur = std_code(b"JR2");
+        setup_live_line(&store, &holder, &issuer, cur, 50, 1);
+        apply_policy_direct(
+            &store,
+            &signed_policy_set(
+                &issuer,
+                cur,
+                DrcIssuedAssetPolicyAction::EnableClawback,
+                1,
+                0,
+                &ctx,
+            ),
+            &ctx,
+            2,
+        )
+        .unwrap();
+        let mut issue_block = coinbase(vec![Hash::ZERO], &issuer);
+        issue_block
+            .drc_issued_transfers
+            .push(signed_issued_transfer(
+                &issuer,
+                holder.address(),
+                &issuer,
+                cur,
+                10,
+                1,
+                1,
+                &ctx,
+            ));
+        issue_block.header.tx_root = issue_block.compute_body_root();
+        apply_block(&store, issue_block, 3, &ctx);
+
+        let control = signed_issuer_control(
+            &issuer,
+            holder.address(),
+            cur,
+            DrcTrustLineIssuerControlAction::SetLineFrozen(true),
+            1,
+            2,
+            &ctx,
+        );
+        let clawback = signed_clawback(&issuer, holder.address(), cur, 4, 1, 3, &ctx);
+        let control_id = control.issuer_control_tx_id();
+        let clawback_id = clawback.clawback_tx_id();
+        let mut block = coinbase(vec![Hash::ZERO], &issuer);
+        block.drc_trust_line_issuer_controls.push(control);
+        block.drc_issued_clawbacks.push(clawback);
+        block.header.tx_root = block.compute_body_root();
+        let journal = apply_block_journal(&store, block, 4, &ctx);
+
+        assert!(
+            load_drc_trust_line_issuer_control_receipt(&store, &control_id)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            load_drc_issued_clawback_receipt(&store, &clawback_id)
+                .unwrap()
+                .is_some()
+        );
+        revert_journal(&store, &journal);
+        assert!(
+            load_drc_trust_line_issuer_control_receipt(&store, &control_id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            load_drc_issued_clawback_receipt(&store, &clawback_id)
+                .unwrap()
+                .is_none()
         );
     }
 
