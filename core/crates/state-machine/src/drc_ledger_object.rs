@@ -1736,13 +1736,16 @@ mod tests {
                 close_finalizable_after: None,
                 create_blue_score: 1,
             }),
-            DrcLedgerObject::TrustLine(DrcTrustLineLive::v1_defaults(
-                owner,
-                asset,
-                IssuedAmount::from_units(100),
-                IssuedAmount::from_units(4),
-                false,
-            )),
+            DrcLedgerObject::TrustLine(
+                DrcTrustLineLive::v1_defaults(
+                    owner,
+                    asset,
+                    IssuedAmount::from_units(100),
+                    IssuedAmount::from_units(4),
+                    false,
+                )
+                .as_v2_storage(),
+            ),
             DrcLedgerObject::IssuedAssetPolicy(DrcIssuedAssetPolicyLive::default_for_asset(asset)),
         ]
     }
