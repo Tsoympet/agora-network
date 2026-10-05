@@ -689,11 +689,7 @@ impl LayersRuntime {
             sequencer_bonds: self.rollup.sequencers().bonds_snapshot(),
             revm_snapshots,
             bridge: self.intents.bridge().export_checkpoint(),
-            l2_mempool: self
-                .ovl_evm_mempool
-                .iter()
-                .map(|t| t.0.clone())
-                .collect(),
+            l2_mempool: self.ovl_evm_mempool.iter().map(|t| t.0.clone()).collect(),
         };
         cp.save(dir)
     }
@@ -837,9 +833,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            runtime
-                .drc_balance("agora-hub", account)
-                .as_base_units(),
+            runtime.drc_balance("agora-hub", account).as_base_units(),
             500
         );
         assert_eq!(runtime.ovl_balance(account), Amount::ZERO);
@@ -893,10 +887,7 @@ mod tests {
         let info = rt.info();
         assert!(!info.canonical_l1);
         assert_eq!(info.maturity, "Experimental");
-        assert_eq!(
-            info.programmable_execution_asset,
-            NativeAssetId::OVL
-        );
+        assert_eq!(info.programmable_execution_asset, NativeAssetId::OVL);
         assert!(!info.drc_programmable_execution);
         assert_eq!(info.ovl_chain_id, "agora-ovolos-testnet-1");
         assert_eq!(info.drc_chain_id, "agora-drachma-testnet-1");

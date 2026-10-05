@@ -108,9 +108,7 @@ pub fn apply_ovl_execution(
         .checked_add(tx.value.as_base_units())
         .ok_or_else(|| StateError::InvalidTx("OVL recipient overflow".into()))?;
 
-    journal
-        .before
-        .push((asset, tx.from, from.clone()));
+    journal.before.push((asset, tx.from, from.clone()));
     journal.before.push((asset, tx.to, to.clone()));
     from.balance -= debit;
     from.nonce = from
@@ -256,8 +254,7 @@ mod tests {
         sign_ovl_execution_bound(&mut tx, &alice, &auth.chain_id, &auth.genesis).unwrap();
         let mut batch = WriteBatch::new();
         let mut journal = AccountJournal::default();
-        let error =
-            apply_ovl_execution(&store, &tx, &auth, &mut batch, &mut journal).unwrap_err();
+        let error = apply_ovl_execution(&store, &tx, &auth, &mut batch, &mut journal).unwrap_err();
 
         assert!(error
             .to_string()
