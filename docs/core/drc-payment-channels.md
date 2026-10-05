@@ -36,6 +36,20 @@ After check lanes (v14): `drc_payment_channel_creates`, `drc_payment_channel_fun
 
 `DrcPaymentChannelCreate`, `Fund`, `Claim`, `Close` (appended enum discriminants).
 
-## Mempool
+## rippled 2.5.0 pinned behavior matrix (containing-block blue score)
+
+| Scenario | Agora rule (fail-closed) |
+| --- | --- |
+| Fund after owner schedule close | **Allowed** — adds locked DRC; does not mutate claim key, destination, or `cancel_after_blue_score`; writes immutable fund event |
+| Claim during owner settle delay | **Allowed** — destination-only; off-ledger sig required; cumulative strictly increases |
+| Claim at/after `CancelAfter` | **Allowed** until channel finalized — finalize also allowed at inclusive `blue_score >= cancel_after` |
+| Repeat owner schedule | Each `OwnerScheduleClose` sets `close_finalizable_after = score + settle_delay` (resets delay from containing block) |
+| Destination immediate close | `DestinationClose` finalizes in same block; remainder returns owner once |
+| Who may `Finalize` | Owner or destination when `payment_channel_finalize_allowed` (inclusive `>=` scheduled finalize or cancel cutoff) |
+| Create `CancelAfter` | Strictly **future** vs create block score; bounded `<= MAX_BLUE_SCORE_BOUND` |
+| Create settle delay | Non-zero; `score + delay` must not overflow at create apply |
+| RequireDestTag | Enforced at create; `Some(0)` satisfies policy |
+| DepositAuth | Does **not** block destination-submitted claims |
+
 
 Pending create blocks fund/claim/close for the same `channel_id`. One pending mutating settlement per live channel (claim vs close conflict reservation).

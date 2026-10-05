@@ -20,7 +20,10 @@ pub const DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION: u32 = 2;
 pub const DRC_PAYMENT_CHANNEL_CLOSE_TX_VERSION: u32 = 1;
 pub const DRC_PAYMENT_CHANNEL_CLOSE_TICKET_VERSION: u32 = 2;
 pub const DRC_PAYMENT_CHANNEL_LIVE_STATE_VERSION: u32 = 1;
-pub const DRC_PAYMENT_CHANNEL_RECEIPT_VERSION: u32 = 1;
+pub const DRC_PAYMENT_CHANNEL_RECEIPT_VERSION: u32 = 2;
+pub const DRC_PAYMENT_CHANNEL_FUND_EVENT_VERSION: u32 = 1;
+pub const DRC_PAYMENT_CHANNEL_CLAIM_EVENT_VERSION: u32 = 1;
+pub const DRC_PAYMENT_CHANNEL_SCHEDULE_EVENT_VERSION: u32 = 1;
 
 pub const DRC_PAYMENT_CHANNEL_CREATE_TX_TYPE: &[u8] = b"drc_payment_channel_create";
 pub const DRC_PAYMENT_CHANNEL_FUND_TX_TYPE: &[u8] = b"drc_payment_channel_fund";
@@ -82,6 +85,30 @@ pub fn validate_payment_channel_blue_score_bound(
     Ok(())
 }
 
+pub fn payment_channel_owner_schedule_deadline(
+    application_blue_score: u64,
+    settle_delay_blue_scores: u64,
+) -> Result<u64, DrcPaymentChannelError> {
+    application_blue_score
+        .checked_add(settle_delay_blue_scores)
+        .ok_or(DrcPaymentChannelError::BlueScoreBoundOverflow)
+}
+
+/// `CancelAfter` must be strictly after the containing block blue score at create.
+pub fn payment_channel_cancel_after_valid_at_create(
+    application_blue_score: u64,
+    cancel_after_blue_score: Option<u64>,
+) -> Result<(), DrcPaymentChannelError> {
+    if let Some(cancel) = cancel_after_blue_score {
+        if cancel <= application_blue_score {
+            return Err(DrcPaymentChannelError::CancelAfterNotFuture);
+        }
+        validate_payment_channel_blue_score_bound(Some(cancel))?;
+    }
+    Ok(())
+}
+
+/// Inclusive finalize boundary: `blue_score >= deadline`.
 pub fn payment_channel_finalize_allowed(
     blue_score: u64,
     close_finalizable_after: Option<u64>,
@@ -188,6 +215,9 @@ impl DrcPaymentChannelCreateTx {
         }
         if self.amount.as_base_units() == 0 {
             return Err(DrcPaymentChannelError::ZeroAmount);
+        }
+        if self.fee.as_base_units() == 0 {
+            return Err(DrcPaymentChannelError::ZeroFee);
         }
         if self.claim_public_key.len() != 33 {
             return Err(DrcPaymentChannelError::MalformedClaimPublicKey);
@@ -693,6 +723,8 @@ pub struct DrcPaymentChannelReceipt {
     pub outcome: DrcPaymentChannelOutcome,
     pub owner: Address,
     pub destination: Address,
+    pub destination_tag: Option<u32>,
+    pub source_tag: Option<u32>,
     pub total_funded: Amount,
     pub cumulative_claimed: Amount,
     pub settlement_blue_score: u64,
@@ -708,8 +740,80 @@ impl DrcPaymentChannelReceipt {
     }
 }
 
+/// Immutable fund audit record (keyed by `fund_tx_id`).
+#[derive(
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+)]
+#[ts(export)]
+pub struct DrcPaymentChannelFundEvent {
+    pub version: u32,
+    pub channel_id: Hash,
+    pub fund_tx_id: Hash,
+    pub amount: Amount,
+    pub total_funded_after: Amount,
+    pub application_blue_score: u64,
+}
+
+impl DrcPaymentChannelFundEvent {
+    pub fn validate(&self) -> Result<(), DrcPaymentChannelError> {
+        if self.version != DRC_PAYMENT_CHANNEL_FUND_EVENT_VERSION {
+            return Err(DrcPaymentChannelError::UnsupportedVersion(self.version));
+        }
+        Ok(())
+    }
+}
+
+/// Immutable claim audit record (keyed by `claim_tx_id`).
+#[derive(
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+)]
+#[ts(export)]
+pub struct DrcPaymentChannelClaimEvent {
+    pub version: u32,
+    pub channel_id: Hash,
+    pub claim_tx_id: Hash,
+    pub cumulative_authorized: Amount,
+    pub claim_delta: Amount,
+    pub application_blue_score: u64,
+}
+
+impl DrcPaymentChannelClaimEvent {
+    pub fn validate(&self) -> Result<(), DrcPaymentChannelError> {
+        if self.version != DRC_PAYMENT_CHANNEL_CLAIM_EVENT_VERSION {
+            return Err(DrcPaymentChannelError::UnsupportedVersion(self.version));
+        }
+        Ok(())
+    }
+}
+
+/// Immutable owner schedule-close audit record (keyed by `close_tx_id`).
+#[derive(
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+)]
+#[ts(export)]
+pub struct DrcPaymentChannelScheduleEvent {
+    pub version: u32,
+    pub channel_id: Hash,
+    pub close_tx_id: Hash,
+    pub close_finalizable_after: u64,
+    pub application_blue_score: u64,
+}
+
+impl DrcPaymentChannelScheduleEvent {
+    pub fn validate(&self) -> Result<(), DrcPaymentChannelError> {
+        if self.version != DRC_PAYMENT_CHANNEL_SCHEDULE_EVENT_VERSION {
+            return Err(DrcPaymentChannelError::UnsupportedVersion(self.version));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DrcPaymentChannelError {
+    #[error("zero fee")]
+    ZeroFee,
+    #[error("cancel after must be strictly future at create")]
+    CancelAfterNotFuture,
     #[error("unsupported version {0}")]
     UnsupportedVersion(u32),
     #[error("zero address")]

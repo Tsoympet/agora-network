@@ -4,4 +4,4 @@ import type { Amount } from "./Amount";
 import type { DrcPaymentChannelOutcome } from "./DrcPaymentChannelOutcome";
 import type { Hash } from "./Hash";
 
-export type DrcPaymentChannelReceipt = { version: number, channel_id: Hash, outcome: DrcPaymentChannelOutcome, owner: Address, destination: Address, total_funded: Amount, cumulative_claimed: Amount, settlement_blue_score: bigint, settlement_tx_id: Hash, };
+export type DrcPaymentChannelReceipt = { version: number, channel_id: Hash, outcome: DrcPaymentChannelOutcome, owner: Address, destination: Address, destination_tag: number | null, source_tag: number | null, total_funded: Amount, cumulative_claimed: Amount, settlement_blue_score: bigint, settlement_tx_id: Hash, };

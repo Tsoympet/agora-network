@@ -103,23 +103,26 @@ pub use drc_multisign_lane::{
     merge_drc_multisign_attachments, validate_drc_multisign_attachment_lane,
 };
 pub use drc_payment_channel::{
-    payment_channel_claim_submitter_allowed, payment_channel_close_submitter_allowed,
-    payment_channel_finalize_allowed, payment_channel_fund_submitter_allowed,
-    payment_channel_offledger_claim_signing_bytes, validate_payment_channel_blue_score_bound,
-    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseKind, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelError, DrcPaymentChannelFundTx,
-    DrcPaymentChannelLive, DrcPaymentChannelOutcome, DrcPaymentChannelReceipt,
-    DRC_MAX_LIVE_PAYMENT_CHANNELS_PER_ACCOUNT, DRC_PAYMENT_CHANNEL_CLAIM_SIGNING_DOMAIN,
-    DRC_PAYMENT_CHANNEL_CLAIM_TICKET_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION,
-    DRC_PAYMENT_CHANNEL_CLAIM_TX_VERSION, DRC_PAYMENT_CHANNEL_CLOSE_SIGNING_DOMAIN,
-    DRC_PAYMENT_CHANNEL_CLOSE_TICKET_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_CLOSE_TICKET_VERSION,
-    DRC_PAYMENT_CHANNEL_CLOSE_TX_VERSION, DRC_PAYMENT_CHANNEL_CREATE_SIGNING_DOMAIN,
-    DRC_PAYMENT_CHANNEL_CREATE_TICKET_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_CREATE_TICKET_VERSION,
-    DRC_PAYMENT_CHANNEL_CREATE_TX_VERSION, DRC_PAYMENT_CHANNEL_FUND_SIGNING_DOMAIN,
+    payment_channel_cancel_after_valid_at_create, payment_channel_claim_submitter_allowed,
+    payment_channel_close_submitter_allowed, payment_channel_finalize_allowed,
+    payment_channel_fund_submitter_allowed, payment_channel_offledger_claim_signing_bytes,
+    payment_channel_owner_schedule_deadline, validate_payment_channel_blue_score_bound,
+    DrcPaymentChannelClaimEvent, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseKind,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelError,
+    DrcPaymentChannelFundEvent, DrcPaymentChannelFundTx, DrcPaymentChannelLive,
+    DrcPaymentChannelOutcome, DrcPaymentChannelReceipt, DrcPaymentChannelScheduleEvent,
+    DRC_MAX_LIVE_PAYMENT_CHANNELS_PER_ACCOUNT, DRC_PAYMENT_CHANNEL_CLAIM_EVENT_VERSION,
+    DRC_PAYMENT_CHANNEL_CLAIM_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_CLAIM_TICKET_SIGNING_DOMAIN,
+    DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION, DRC_PAYMENT_CHANNEL_CLAIM_TX_VERSION,
+    DRC_PAYMENT_CHANNEL_CLOSE_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_CLOSE_TICKET_SIGNING_DOMAIN,
+    DRC_PAYMENT_CHANNEL_CLOSE_TICKET_VERSION, DRC_PAYMENT_CHANNEL_CLOSE_TX_VERSION,
+    DRC_PAYMENT_CHANNEL_CREATE_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_CREATE_TICKET_SIGNING_DOMAIN,
+    DRC_PAYMENT_CHANNEL_CREATE_TICKET_VERSION, DRC_PAYMENT_CHANNEL_CREATE_TX_VERSION,
+    DRC_PAYMENT_CHANNEL_FUND_EVENT_VERSION, DRC_PAYMENT_CHANNEL_FUND_SIGNING_DOMAIN,
     DRC_PAYMENT_CHANNEL_FUND_TICKET_SIGNING_DOMAIN, DRC_PAYMENT_CHANNEL_FUND_TICKET_VERSION,
     DRC_PAYMENT_CHANNEL_FUND_TX_VERSION, DRC_PAYMENT_CHANNEL_LIVE_STATE_VERSION,
     DRC_PAYMENT_CHANNEL_MAX_BLUE_SCORE_BOUND, DRC_PAYMENT_CHANNEL_OFFLEDGER_CLAIM_DOMAIN,
-    DRC_PAYMENT_CHANNEL_RECEIPT_VERSION,
+    DRC_PAYMENT_CHANNEL_RECEIPT_VERSION, DRC_PAYMENT_CHANNEL_SCHEDULE_EVENT_VERSION,
 };
 pub use drc_policy::{
     DrcAccountPolicy, DrcAccountPolicyAction, DrcAccountPolicyError, DrcAccountPolicyTx,
@@ -380,6 +383,10 @@ mod ts_export {
         DrcPaymentChannelLive::export_all().expect("export DrcPaymentChannelLive");
         DrcPaymentChannelReceipt::export_all().expect("export DrcPaymentChannelReceipt");
         DrcPaymentChannelOutcome::export_all().expect("export DrcPaymentChannelOutcome");
+        DrcPaymentChannelFundEvent::export_all().expect("export DrcPaymentChannelFundEvent");
+        DrcPaymentChannelClaimEvent::export_all().expect("export DrcPaymentChannelClaimEvent");
+        DrcPaymentChannelScheduleEvent::export_all()
+            .expect("export DrcPaymentChannelScheduleEvent");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");
