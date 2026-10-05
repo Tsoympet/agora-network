@@ -4,13 +4,15 @@ use std::sync::{Arc, Mutex};
 
 use agora_crypto::KeyPair;
 use agora_rpc::{RpcBackend, RpcDispatcher, RpcRequest};
-use agora_state_machine::{credit_account_into, GenesisBuilder, WriteBatch};
+use agora_state_machine::{
+    credit_account_into, put_issued_supply_into, GenesisBuilder, WriteBatch,
+};
 use agora_types::{Amount, NativeAssetId};
 use serde_json::json;
 
 use super::drc_trust_line_public_helpers::{
-    assert_liability_equals_sum_balances, backend_config, boot_chain, drc_balance, mine_template,
-    reward_pool_balance, setup_live_line, signed_issued_transfer, signed_trust_line_set,
+    assert_liability_equals_sum_balances, backend_config, boot_chain, burned_supply_balance,
+    drc_balance, mine_template, setup_live_line, signed_issued_transfer, signed_trust_line_set,
 };
 
 fn snapshot_native_totals(
@@ -21,7 +23,7 @@ fn snapshot_native_totals(
     for a in addrs {
         spendable += drc_balance(store, a);
     }
-    (spendable, reward_pool_balance(store))
+    (spendable, burned_supply_balance(store))
 }
 
 #[test]
@@ -47,6 +49,7 @@ fn public_invariant_two_assets_multi_holder_reorg_restart() {
         )
         .unwrap();
     }
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 15_000_000);
     store.write_batch(funding).unwrap();
 
     let mut backend = super::NodeBackend::new(
@@ -62,7 +65,7 @@ fn public_invariant_two_assets_multi_holder_reorg_restart() {
         issuer.address(),
         miner.address(),
     ];
-    let (native0, pool0) = snapshot_native_totals(store.as_ref(), &addrs);
+    let (native0, burned0) = snapshot_native_totals(store.as_ref(), &addrs);
 
     setup_live_line(&mut backend, genesis, &holder, &issuer, cur_usd, 1_000, 0);
     setup_live_line(&mut backend, genesis, &holder_b, &issuer, cur_eur, 2_000, 0);
@@ -141,11 +144,11 @@ fn public_invariant_two_assets_multi_holder_reorg_restart() {
     mine_template(&mut backend);
     assert_liability_equals_sum_balances(store.as_ref(), &issuer.address(), &cur_usd);
 
-    let (native1, pool1) = snapshot_native_totals(store.as_ref(), &addrs);
+    let (native1, burned1) = snapshot_native_totals(store.as_ref(), &addrs);
     assert_eq!(
-        native1 + pool1,
-        native0 + pool0,
-        "native DRC + reward pool conserved"
+        native1 + burned1,
+        native0 + burned0,
+        "native DRC plus lifetime burn is conserved"
     );
 
     drop(backend);

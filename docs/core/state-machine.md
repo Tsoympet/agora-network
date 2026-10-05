@@ -113,18 +113,20 @@ Transaction index (`cf_warm`): key `tx/` ‖ `tx_id`, value `block_id` ‖ `inde
 
 ## Trident staking + finality store (Phase 3+)
 
-Meta CF keys are additive; the current `SCHEMA_VERSION` is `19`:
+Meta CF keys are additive; the current `SCHEMA_VERSION` is `20`:
 
 - `stake/val|del|unbond|epoch|snap|reward_pool|reserve_remaining/…` — staking + slash/reward + reserve
 - `finality/cert|idx|last_att/…`, `finality/tip_blue_score` — certificates, signer index, tip
-- `compose_trident_state_root` — canonical multi-asset commitment for checkpoint bodies (`agora-trident-state-root-v13`)
+- `meta/issued_supply|burned_supply/<asset>` — native issued/burned counters
+- `compose_trident_state_root` — canonical multi-asset commitment for checkpoint bodies (`agora-trident-state-root-v14`)
 
 Node admit enforces reorg-beyond-finality. Account, stake, OVL execution,
 native DRC policy/preauthorization/payments, contract-free settlement objects,
 issuer-scoped trust lines and controls, and authenticated DA commitments enter
 versioned consensus lanes. Their live records, point-query receipts, and
-reorg snapshots commit through `agora-trident-state-root-v13`; issued controls
-are nested with the trust-line/liability commitment. Local unsigned
+reorg snapshots commit through `agora-trident-state-root-v14`; issued controls
+are nested with the trust-line/liability commitment, and native maximum,
+issued, burned, and net supply are committed as a separate component. Local unsigned
 civic/community RPC state remains excluded. See
 [`community-registry.md`](community-registry.md),
 [`data-availability.md`](data-availability.md),

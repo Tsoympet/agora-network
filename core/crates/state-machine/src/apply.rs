@@ -52,6 +52,7 @@ use crate::staking::{
     snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
 };
 use crate::store::WriteBatch;
+use crate::supply::{burn_drc_fee_into, burned_supply_key};
 use crate::utxo::outpoint_key;
 use crate::{StateError, StateStore};
 
@@ -92,7 +93,7 @@ pub struct UtxoJournal {
     pub coinbase_total: u64,
     /// OVL/DRC account states before Accepted account/stake lane ops.
     pub account_before: Vec<(NativeAssetId, Address, AccountState)>,
-    /// Meta key snapshots before Accepted stake ops (`None` = key absent).
+    /// Meta snapshots before Accepted stake ops and account-lane fee settlement.
     pub stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     /// DRC payment duplicate/invoice/outbox/receipt keys before Accepted payments.
     pub payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
@@ -1093,6 +1094,40 @@ fn params_for_stake_asset(asset: NativeAssetId) -> Result<StakingParams, StateEr
     }
 }
 
+fn apply_accepted_account_fee(
+    store: &StateStore,
+    batch: &mut WriteBatch,
+    journal: &mut UtxoJournal,
+    asset: NativeAssetId,
+    fee: u64,
+) -> Result<(), StateError> {
+    if asset == NativeAssetId::DRC && fee == 0 {
+        return burn_drc_fee_into(store, batch, 0);
+    }
+    if fee == 0 {
+        return Ok(());
+    }
+    let key = match asset {
+        NativeAssetId::DRC => burned_supply_key(NativeAssetId::DRC),
+        NativeAssetId::OVL => reward_pool_meta_key(NativeAssetId::OVL),
+        NativeAssetId::TLT => {
+            return Err(StateError::InvalidTx(
+                "TLT fees are settled by the UTXO/coinbase lane".into(),
+            ));
+        }
+    };
+    journal
+        .stake_meta_before
+        .extend(snapshot_meta_keys(store, &[key])?);
+    match asset {
+        NativeAssetId::DRC => burn_drc_fee_into(store, batch, fee),
+        NativeAssetId::OVL => {
+            credit_fee_share_to_reward_pool(store, batch, NativeAssetId::OVL, fee)
+        }
+        NativeAssetId::TLT => unreachable!("TLT returned before mutation"),
+    }
+}
+
 #[allow(clippy::type_complexity)]
 type TridentLaneAcceptances = (
     Vec<TransactionAcceptance>,
@@ -1122,7 +1157,7 @@ type TridentLaneAcceptances = (
     Vec<TransactionAcceptance>,
 );
 
-/// Apply canonical Trident lanes and credit only Accepted fees to reward pools.
+/// Apply canonical Trident lanes and settle fees only for Accepted operations.
 fn apply_trident_lanes(
     store: &StateStore,
     block: &Block,
@@ -1320,17 +1355,13 @@ fn apply_trident_lanes(
         let mut acct_journal = AccountJournal::default();
         match apply_drc_ticket_create(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
             Ok(_) => {
-                if tx.fee.as_base_units() > 0 {
-                    let pool_snap =
-                        snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                    journal.stake_meta_before.extend(pool_snap);
-                    credit_fee_share_to_reward_pool(
-                        &lane,
-                        &mut op_batch,
-                        NativeAssetId::DRC,
-                        tx.fee.as_base_units(),
-                    )?;
-                }
+                apply_accepted_account_fee(
+                    &lane,
+                    &mut op_batch,
+                    &mut journal,
+                    NativeAssetId::DRC,
+                    tx.fee.as_base_units(),
+                )?;
                 lane.write_batch(op_batch.clone())?;
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
@@ -1379,17 +1410,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(_) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -1437,17 +1464,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(_) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -1498,17 +1521,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(_) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -1562,17 +1581,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(_) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -1620,17 +1635,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(_) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -1680,17 +1691,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(_) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -1725,16 +1732,13 @@ fn apply_trident_lanes(
         let mut acct_journal = AccountJournal::default();
         match apply_account_transfer_checked(&lane, tx, auth, &mut op_batch, &mut acct_journal) {
             Ok(()) => {
-                if tx.fee.as_base_units() > 0 {
-                    let pool_snap = snapshot_meta_keys(&lane, &[reward_pool_meta_key(tx.asset)])?;
-                    journal.stake_meta_before.extend(pool_snap);
-                    credit_fee_share_to_reward_pool(
-                        &lane,
-                        &mut op_batch,
-                        tx.asset,
-                        tx.fee.as_base_units(),
-                    )?;
-                }
+                apply_accepted_account_fee(
+                    &lane,
+                    &mut op_batch,
+                    &mut journal,
+                    tx.asset,
+                    tx.fee.as_base_units(),
+                )?;
                 lane.write_batch(op_batch.clone())?;
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
@@ -1762,12 +1766,10 @@ fn apply_trident_lanes(
         let mut acct_journal = AccountJournal::default();
         match apply_ovl_execution(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
             Ok(receipt) => {
-                let pool_snap =
-                    snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::OVL)])?;
-                journal.stake_meta_before.extend(pool_snap);
-                credit_fee_share_to_reward_pool(
+                apply_accepted_account_fee(
                     &lane,
                     &mut op_batch,
+                    &mut journal,
                     NativeAssetId::OVL,
                     receipt.fee_paid,
                 )?;
@@ -1836,17 +1838,13 @@ fn apply_trident_lanes(
         let mut acct_journal = AccountJournal::default();
         match apply_drc_regular_key(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
             Ok(_) => {
-                if tx.fee.as_base_units() > 0 {
-                    let pool_snap =
-                        snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                    journal.stake_meta_before.extend(pool_snap);
-                    credit_fee_share_to_reward_pool(
-                        &lane,
-                        &mut op_batch,
-                        NativeAssetId::DRC,
-                        tx.fee.as_base_units(),
-                    )?;
-                }
+                apply_accepted_account_fee(
+                    &lane,
+                    &mut op_batch,
+                    &mut journal,
+                    NativeAssetId::DRC,
+                    tx.fee.as_base_units(),
+                )?;
                 lane.write_batch(op_batch.clone())?;
                 assert_drc_recovery_invariant(&lane, &tx.owner)?;
                 batch.append(op_batch);
@@ -1877,17 +1875,13 @@ fn apply_trident_lanes(
         let mut acct_journal = AccountJournal::default();
         match apply_drc_signer_list(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
             Ok(_) => {
-                if tx.fee.as_base_units() > 0 {
-                    let pool_snap =
-                        snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                    journal.stake_meta_before.extend(pool_snap);
-                    credit_fee_share_to_reward_pool(
-                        &lane,
-                        &mut op_batch,
-                        NativeAssetId::DRC,
-                        tx.fee.as_base_units(),
-                    )?;
-                }
+                apply_accepted_account_fee(
+                    &lane,
+                    &mut op_batch,
+                    &mut journal,
+                    NativeAssetId::DRC,
+                    tx.fee.as_base_units(),
+                )?;
                 lane.write_batch(op_batch.clone())?;
                 assert_drc_recovery_invariant(&lane, &tx.owner)?;
                 batch.append(op_batch);
@@ -1919,17 +1913,13 @@ fn apply_trident_lanes(
         let mut acct_journal = AccountJournal::default();
         match apply_drc_account_policy(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
             Ok(_) => {
-                if tx.fee.as_base_units() > 0 {
-                    let pool_snap =
-                        snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                    journal.stake_meta_before.extend(pool_snap);
-                    credit_fee_share_to_reward_pool(
-                        &lane,
-                        &mut op_batch,
-                        NativeAssetId::DRC,
-                        tx.fee.as_base_units(),
-                    )?;
-                }
+                apply_accepted_account_fee(
+                    &lane,
+                    &mut op_batch,
+                    &mut journal,
+                    NativeAssetId::DRC,
+                    tx.fee.as_base_units(),
+                )?;
                 lane.write_batch(op_batch.clone())?;
                 assert_drc_recovery_invariant(&lane, &tx.account)?;
                 batch.append(op_batch);
@@ -1961,17 +1951,13 @@ fn apply_trident_lanes(
         let mut acct_journal = AccountJournal::default();
         match apply_drc_deposit_preauth(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
             Ok(_) => {
-                if tx.fee.as_base_units() > 0 {
-                    let pool_snap =
-                        snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                    journal.stake_meta_before.extend(pool_snap);
-                    credit_fee_share_to_reward_pool(
-                        &lane,
-                        &mut op_batch,
-                        NativeAssetId::DRC,
-                        tx.fee.as_base_units(),
-                    )?;
-                }
+                apply_accepted_account_fee(
+                    &lane,
+                    &mut op_batch,
+                    &mut journal,
+                    NativeAssetId::DRC,
+                    tx.fee.as_base_units(),
+                )?;
                 lane.write_batch(op_batch.clone())?;
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
@@ -2007,12 +1993,10 @@ fn apply_trident_lanes(
             &mut acct_journal,
         ) {
             Ok(receipt) => {
-                let pool_snap =
-                    snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                journal.stake_meta_before.extend(pool_snap);
-                credit_fee_share_to_reward_pool(
+                apply_accepted_account_fee(
                     &lane,
                     &mut op_batch,
+                    &mut journal,
                     NativeAssetId::DRC,
                     receipt.fee_paid.as_base_units(),
                 )?;
@@ -2066,17 +2050,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(_) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -2126,17 +2106,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(_) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -2185,17 +2161,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(_) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -2252,17 +2224,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(maybe_receipt) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -2326,17 +2294,13 @@ fn apply_trident_lanes(
                 trust_blue_score,
             ) {
                 Ok(meta) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -2380,17 +2344,13 @@ fn apply_trident_lanes(
                 trust_blue_score,
             ) {
                 Ok(meta) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -2433,17 +2393,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(()) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -2495,17 +2451,13 @@ fn apply_trident_lanes(
                 &mut acct_journal,
             ) {
                 Ok(()) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -2551,17 +2503,13 @@ fn apply_trident_lanes(
                 trust_blue_score,
             ) {
                 Ok(meta) => {
-                    if tx.fee.as_base_units() > 0 {
-                        let pool_snap =
-                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
-                        journal.stake_meta_before.extend(pool_snap);
-                        credit_fee_share_to_reward_pool(
-                            &lane,
-                            &mut op_batch,
-                            NativeAssetId::DRC,
-                            tx.fee.as_base_units(),
-                        )?;
-                    }
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        &mut journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.account_before.extend(acct_journal.before);
@@ -4294,6 +4242,7 @@ mod tests {
             load_drc_payment_receipt,
         };
         use crate::staking::load_reward_pool;
+        use crate::supply::{load_burned_supply, native_supply_root, put_issued_supply_into};
         use agora_crypto::sign_drc_payment_bound;
         use agora_types::{DrcPaymentTx, NativeAssetId};
 
@@ -4316,6 +4265,7 @@ mod tests {
             Amount::from_base_units(1_000),
         )
         .unwrap();
+        put_issued_supply_into(&mut funding, NativeAssetId::DRC, 1_000);
         store.write_batch(funding).unwrap();
 
         let mut payment = DrcPaymentTx::unsigned_v2(
@@ -4331,6 +4281,7 @@ mod tests {
         sign_drc_payment_bound(&mut payment, &alice, &auth.chain_id, &auth.genesis).unwrap();
         let payment_id = payment.payment_id();
         let payment_root_before = drc_payment_root(&store).unwrap();
+        let supply_root_before = native_supply_root(&store).unwrap();
         let coinbase = Transaction::unsigned(
             1,
             vec![],
@@ -4398,7 +4349,9 @@ mod tests {
                 .balance,
             400
         );
-        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 7);
+        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 0);
+        assert_eq!(load_burned_supply(&store, NativeAssetId::DRC).unwrap(), 7);
+        assert_ne!(native_supply_root(&store).unwrap(), supply_root_before);
         let outbox = load_drc_outbox_event(&store, &payment_id).unwrap().unwrap();
         assert_eq!(outbox.source_tag, Some(84));
         assert_eq!(outbox.destination_tag, Some(42));
@@ -4427,6 +4380,8 @@ mod tests {
             1_000
         );
         assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 0);
+        assert_eq!(load_burned_supply(&store, NativeAssetId::DRC).unwrap(), 0);
+        assert_eq!(native_supply_root(&store).unwrap(), supply_root_before);
         assert!(load_drc_outbox_event(&store, &payment_id)
             .unwrap()
             .is_none());
@@ -4446,6 +4401,7 @@ mod tests {
         use crate::accounts::{credit_account_into, load_account};
         use crate::drc_policy::load_drc_account_policy;
         use crate::staking::load_reward_pool;
+        use crate::supply::{load_burned_supply, put_issued_supply_into};
         use agora_crypto::{sign_drc_account_policy_bound, sign_drc_payment_bound};
         use agora_types::{DrcAccountPolicyTx, DrcPaymentTx, NativeAssetId};
 
@@ -4470,6 +4426,7 @@ mod tests {
             )
             .unwrap();
         }
+        put_issued_supply_into(&mut funding, NativeAssetId::DRC, 1_010);
         store.write_batch(funding).unwrap();
 
         let merchant_nonce = load_account(&store, NativeAssetId::DRC, &merchant.address())
@@ -4558,7 +4515,8 @@ mod tests {
                 .balance,
             1_000
         );
-        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 1);
+        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 0);
+        assert_eq!(load_burned_supply(&store, NativeAssetId::DRC).unwrap(), 1);
 
         let mut clear = DrcAccountPolicyTx::clear_require_destination_tag(
             merchant.address(),
@@ -4618,6 +4576,7 @@ mod tests {
                 .unwrap()
                 .require_destination_tag
         );
+        assert_eq!(load_burned_supply(&store, NativeAssetId::DRC).unwrap(), 3);
 
         store
             .write_batch(revert_journal_batched(&clear_journal).unwrap())
@@ -4627,6 +4586,7 @@ mod tests {
                 .unwrap()
                 .require_destination_tag
         );
+        assert_eq!(load_burned_supply(&store, NativeAssetId::DRC).unwrap(), 1);
         store
             .write_batch(revert_journal_batched(&set_journal).unwrap())
             .unwrap();
@@ -4642,6 +4602,7 @@ mod tests {
             10
         );
         assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 0);
+        assert_eq!(load_burned_supply(&store, NativeAssetId::DRC).unwrap(), 0);
     }
 
     #[test]
@@ -4650,6 +4611,7 @@ mod tests {
         use crate::drc_deposit_preauth::load_drc_deposit_preauth;
         use crate::drc_policy::load_drc_account_policy;
         use crate::staking::load_reward_pool;
+        use crate::supply::put_issued_supply_into;
         use agora_crypto::{
             sign_drc_account_policy_bound, sign_drc_deposit_preauth_bound, sign_drc_payment_bound,
         };
@@ -4677,6 +4639,7 @@ mod tests {
             )
             .unwrap();
         }
+        put_issued_supply_into(&mut funding, NativeAssetId::DRC, 300);
         store.write_batch(funding).unwrap();
 
         // A record may be granted while DepositAuth is off and remains dormant.

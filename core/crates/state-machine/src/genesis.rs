@@ -340,8 +340,8 @@ mod tests {
     #[test]
     fn genesis_ignites_working_staking_reserves() {
         use crate::{
-            load_schema_version, load_staking_reserve_remaining, DRC_WORKING_RESERVE_BASE,
-            OVL_WORKING_RESERVE_BASE, SCHEMA_VERSION,
+            load_burned_supply, load_schema_version, load_staking_reserve_remaining,
+            DRC_WORKING_RESERVE_BASE, OVL_WORKING_RESERVE_BASE, SCHEMA_VERSION,
         };
         use agora_types::NativeAssetId;
 
@@ -356,6 +356,9 @@ mod tests {
             load_staking_reserve_remaining(&store, NativeAssetId::DRC).unwrap(),
             DRC_WORKING_RESERVE_BASE
         );
+        for asset in NativeAssetId::ALL {
+            assert_eq!(load_burned_supply(&store, asset).unwrap(), 0);
+        }
     }
 
     #[test]

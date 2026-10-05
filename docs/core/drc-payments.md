@@ -56,8 +56,8 @@ Before any write is appended, the transition verifies:
 8. exact account nonce
 9. checked `amount + fee`, sender balance, and recipient overflow
 
-Acceptance debits `amount + fee`, credits the recipient amount, sends the fee
-to the DRC validator reward pool, records duplicate/invoice indexes, and writes
+Acceptance debits `amount + fee`, credits the recipient amount, destroys the
+exact signed fee, records duplicate/invoice indexes, and writes
 an immutable, payment-versioned `DrcPaymentOutboxEvent` that preserves both
 tags. Frozen v1 event bytes remain readable; v2/v3 events use explicit trailing
 extensions. It also writes a versioned `DrcPaymentReceipt` under the canonical
@@ -121,7 +121,7 @@ contradict the policy-before-payment lane order. Tagged payments remain
 eligible; a clear operation does not authorize untagged relay until it is
 canonical.
 
-Accepted policy state, fee reward, account nonce, acceptance result, and reorg
+Accepted policy state, fee burn, account nonce, acceptance result, and reorg
 journal commit atomically. Clearing deletes the policy key because absence is
 the one canonical false representation. The sorted policy map has a dedicated
 root in the composed Trident state root.
@@ -149,15 +149,15 @@ distinct, non-zero, existing canonical DRC accounts. Granting an existing
 record, revoking a missing record, wrong-owner signing, tampering, replay,
 wrong chain/genesis, future versions, and insufficient fee balance all fail
 before writes. A rejected operation charges no fee. Accepted operations consume
-the owner's shared DRC nonce and credit their fee to the DRC validator reward
-pool atomically with the record and acceptance result.
+the owner's shared DRC nonce and burn their exact fee atomically with the record
+and acceptance result.
 
 Policy operations run before preauthorizations, and preauthorizations run
 before payments. Consequently, a same-block enable governs all payments; a
 grant can authorize a later payment; a revoke blocks a later payment; and a
 disable makes records dormant before the payment lane. Earlier account,
 execution, or stake operations retain their existing shared-nonce precedence.
-Reorg journals restore the account, fee pool, policy, preauthorization record,
+Reorg journals restore the account, burned-supply counter, policy, preauthorization record,
 payment metadata, and roots. The sorted `(owner, source)` record map has a
 dedicated root in the composed state root and persists across RocksDB restart.
 
@@ -254,7 +254,7 @@ Trident state root.
 flow. Payment-v4 expiry entered at Trident protocol v10,
 transaction-signing v5, state-transition `agora-trident-state-v11`,
 state-root v8, and body-root v8. The current aggregate protocol/state
-fingerprint is v21 / `agora-trident-state-v19`; those later lanes do not
+fingerprint is v22 / `agora-trident-state-v20`; those later lanes do not
 reinterpret payment-v4. This raised the Experimental datadir schema to v14; an
 older Experimental datadir must be replayed/reindexed (or recreated). Frozen
 payment-v1/v2/v3, policy-v1, outbox-v1/v2/v3, receipt-v1/v2, body-v1–v7, and

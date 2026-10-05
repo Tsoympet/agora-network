@@ -34,12 +34,12 @@ use agora_state_machine::{
     load_drc_trust_line_issuer_control_receipt, load_drc_trust_line_live, load_epoch,
     load_known_drc_account_keys, load_known_drc_account_policy,
     load_known_drc_account_signer_summary, load_known_drc_deposit_authorization,
-    load_protocol_treasuries, load_reward_pool, load_validator, lookup_drc_check_point,
-    lookup_drc_escrow_point, lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point,
-    lookup_drc_ticket_point, lookup_drc_trust_line_point, lookup_tx_location, meta_keys,
-    outpoint_key, plan_drc_mempool_reservation, validate_mempool_tx_with_auth, AccountJournal,
-    ColumnFamily, DrcMempoolReservation, DrcTicketPointStatus, StakingParams, StateStore,
-    TxAuthContext, WriteBatch,
+    load_native_supply_state, load_protocol_treasuries, load_reward_pool, load_validator,
+    lookup_drc_check_point, lookup_drc_escrow_point, lookup_drc_issuer_liability_point,
+    lookup_drc_payment_channel_point, lookup_drc_ticket_point, lookup_drc_trust_line_point,
+    lookup_tx_location, meta_keys, outpoint_key, plan_drc_mempool_reservation,
+    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, DrcMempoolReservation,
+    DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAccountPolicy,
@@ -76,6 +76,17 @@ fn parse_stake_asset(asset: &str) -> Result<NativeAssetId, RpcError> {
         "DRC" | "DRACHMA" => Ok(NativeAssetId::DRC),
         other => Err(RpcError::InvalidParams(format!(
             "staking asset must be OVL or DRC, got {other}"
+        ))),
+    }
+}
+
+fn parse_native_asset(asset: &str) -> Result<NativeAssetId, RpcError> {
+    match asset.trim().to_ascii_uppercase().as_str() {
+        "TLT" | "TALANTON" => Ok(NativeAssetId::TLT),
+        "OVL" | "OVOLOS" => Ok(NativeAssetId::OVL),
+        "DRC" | "DRACHMA" => Ok(NativeAssetId::DRC),
+        other => Err(RpcError::InvalidParams(format!(
+            "native asset must be TLT, OVL, or DRC, got {other}"
         ))),
     }
 }
@@ -2127,6 +2138,19 @@ impl RpcBackend for NodeBackend {
         }))
     }
 
+    fn get_native_asset_supply(&self, asset: &str) -> Result<Value, RpcError> {
+        let asset = parse_native_asset(asset)?;
+        let supply = load_native_supply_state(self.store.as_ref(), asset)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "asset": supply.asset.ticker(),
+            "maximum_supply": supply.maximum_supply.to_string(),
+            "issued_supply": supply.issued_supply.to_string(),
+            "burned_supply": supply.burned_supply.to_string(),
+            "net_supply": supply.net_supply.to_string(),
+        }))
+    }
+
     fn get_protocol_treasuries(&self) -> Result<Value, RpcError> {
         let policy = load_canonical_governance_policy(self.store.as_ref())
             .map_err(|e| RpcError::Internal(e.to_string()))?;
@@ -2394,7 +2418,10 @@ mod tests {
         sign_drc_account_policy_bound, sign_drc_deposit_preauth_bound, sign_drc_payment_bound,
         sign_ovl_execution_bound, sign_transaction_bound, Bip44Path, KeyPair,
     };
-    use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder, WriteBatch};
+    use agora_state_machine::{
+        credit_account_into, put_burned_supply_into, put_issued_supply_into, ColumnFamily,
+        GenesisBuilder, WriteBatch,
+    };
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
     use borsh::BorshDeserialize;
 
@@ -2442,6 +2469,39 @@ mod tests {
         assert_eq!(treasuries[1]["asset"], "OVL");
         assert_eq!(treasuries[2]["asset"], "DRC");
         assert!(treasuries.iter().all(|t| t["balance"] == 0));
+    }
+
+    #[test]
+    fn native_asset_supply_rpc_reads_decimal_string_counters() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut batch = WriteBatch::new();
+        put_issued_supply_into(&mut batch, NativeAssetId::DRC, 100);
+        put_burned_supply_into(&mut batch, NativeAssetId::DRC, 7);
+        store.write_batch(batch).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let backend = NodeBackend::new(
+            chain,
+            store,
+            Arc::new(Mutex::new(Mempool::new(8))),
+            backend_config(genesis),
+        );
+
+        let value = backend.get_native_asset_supply("drc").unwrap();
+        assert_eq!(value["asset"], "DRC");
+        assert_eq!(value["issued_supply"], "100");
+        assert_eq!(value["burned_supply"], "7");
+        assert_eq!(value["net_supply"], "93");
+        assert!(backend.get_native_asset_supply("issued-drc").is_err());
     }
 
     #[test]

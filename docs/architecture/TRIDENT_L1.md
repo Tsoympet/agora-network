@@ -92,11 +92,13 @@ Concepts are ported from the unmerged-to-main acceptance lineage (#82–#84) ont
 
 ## Fee categories
 
-1. **TLT** — base network (bytes, state growth, anti-spam, inclusion) → miners (+ policy burn/treasury).  
-2. **OVL** — execution (compute, storage, deploy) → OVL validators / builder treasury / burn.  
-3. **DRC** — payments (transfers, merchants, tags, escrow) → DRC validators / community treasury / burn.
+1. **TLT** — UTXO transfer fees remain part of miner coinbase accounting.
+2. **OVL** — accepted account/execution fees credit the OVL reward pool.
+3. **DRC** — exact signed fees are destroyed only for accepted typed DRC operations.
 
-Sponsorship and wallet-assisted acquisition are allowed; consensus must not convert assets via external oracles. Fees credit only for `Accepted` txs.
+Sponsorship and wallet-assisted acquisition are allowed; consensus must not
+convert assets via external oracles. Non-accepted operations never settle a fee.
+See [`../core/drc-fee-burning.md`](../core/drc-fee-burning.md).
 
 ---
 
@@ -177,6 +179,7 @@ PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.
 
 - [`../assets/NATIVE_ASSETS.md`](../assets/NATIVE_ASSETS.md)
 - [`../core/drc-xrpl-capability-profile.md`](../core/drc-xrpl-capability-profile.md)
+- [`../core/drc-fee-burning.md`](../core/drc-fee-burning.md)
 - [`../assets/MONETARY_POLICY.md`](../assets/MONETARY_POLICY.md)
 - [`../staking/OVL_STAKING.md`](../staking/OVL_STAKING.md)
 - [`../staking/DRC_STAKING.md`](../staking/DRC_STAKING.md)

@@ -10,9 +10,9 @@ use agora_types::{
 
 use super::drc_trust_line_public_helpers::{
     account_reserved, assert_liability_equals_sum_balances,
-    assert_template_has_no_invalid_trust_line_lanes, asset, funded_trust_line_fixture,
-    issuer_outstanding, line_balance, mempool_len, mine_template, reorg_away_transfer_on_tip,
-    reward_pool_balance, setup_live_line, signed_issued_transfer, signed_trust_line_set,
+    assert_template_has_no_invalid_trust_line_lanes, asset, burned_supply_balance,
+    funded_trust_line_fixture, issuer_outstanding, line_balance, mempool_len, mine_template,
+    reorg_away_transfer_on_tip, setup_live_line, signed_issued_transfer, signed_trust_line_set,
     submit_lanes_at_parents, ticket_consumer_reserved, trust_line_meta_reserved,
     trust_line_mutation_reserved, virtual_tip, CHAIN,
 };
@@ -62,7 +62,7 @@ fn nodebackend_reorg_reverts_issue_restores_liability_and_resubmit_once() {
         0,
     );
     let ast = asset(&fx.issuer, fx.cur_usd);
-    let pool0 = reward_pool_balance(fx.store.as_ref());
+    let burned0 = burned_supply_balance(fx.store.as_ref());
     let issue = signed_issued_transfer(
         &fx.issuer,
         fx.holder.address(),
@@ -81,7 +81,7 @@ fn nodebackend_reorg_reverts_issue_restores_liability_and_resubmit_once() {
         0
     );
     assert_eq!(issuer_outstanding(fx.store.as_ref(), &ast), 0);
-    assert_eq!(reward_pool_balance(fx.store.as_ref()), pool0);
+    assert_eq!(burned_supply_balance(fx.store.as_ref()), burned0);
     assert_liability_equals_sum_balances(fx.store.as_ref(), &fx.issuer.address(), &fx.cur_usd);
     assert!(!fx
         .backend

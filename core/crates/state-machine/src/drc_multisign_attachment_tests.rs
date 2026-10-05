@@ -15,7 +15,11 @@ mod tests {
     use crate::apply::{apply_block_batched_with_auth, TxAuthContext};
     use crate::drc_signer_list::apply_drc_signer_list;
     use crate::store::WriteBatch;
-    use crate::{AccountJournal, StateStore};
+    use crate::supply::{
+        load_burned_supply, load_issued_supply, put_burned_supply_into, put_issued_supply_into,
+        put_schema_version_into,
+    };
+    use crate::{AccountJournal, StateStore, SCHEMA_VERSION};
 
     fn auth() -> TxAuthContext {
         TxAuthContext {
@@ -39,6 +43,17 @@ mod tests {
             Amount::from_base_units(amount),
         )
         .unwrap();
+        let issued = load_issued_supply(store, NativeAssetId::DRC)
+            .unwrap()
+            .checked_add(amount)
+            .unwrap();
+        put_issued_supply_into(&mut batch, NativeAssetId::DRC, issued);
+        put_burned_supply_into(
+            &mut batch,
+            NativeAssetId::DRC,
+            load_burned_supply(store, NativeAssetId::DRC).unwrap(),
+        );
+        put_schema_version_into(&mut batch, SCHEMA_VERSION);
         store.write_batch(batch).unwrap();
     }
 

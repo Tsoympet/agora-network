@@ -650,6 +650,10 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let asset = param_string(&req.params, "asset")?;
                 self.backend.get_reward_pool(&asset)
             }
+            RpcMethod::GetNativeAssetSupply => {
+                let asset = param_string(&req.params, "asset")?;
+                self.backend.get_native_asset_supply(&asset)
+            }
             RpcMethod::GetProtocolTreasuries => self.backend.get_protocol_treasuries(),
             RpcMethod::GetCommunityRegistry => {
                 let limit = optional_limit(&req.params, 64)?;
@@ -1360,6 +1364,23 @@ mod tests {
         assert_eq!(info_res["mempool_count"], json!(1));
         assert_eq!(info_res["archival"], json!(true));
         assert_eq!(info_res["genesis_hash"], json!(genesis_id.to_hex()));
+
+        let supply = rpc.handle(RpcRequest {
+            id: Some(json!(313)),
+            method: "agora_getNativeAssetSupply".into(),
+            params: json!({"asset": "DRC"}),
+        });
+        let supply_res = supply.result.unwrap();
+        assert_eq!(supply_res["asset"], json!("DRC"));
+        assert_eq!(supply_res["burned_supply"], json!("0"));
+        assert_eq!(supply_res["net_supply"], json!("0"));
+
+        let invalid_supply = rpc.handle(RpcRequest {
+            id: Some(json!(314)),
+            method: "agora_getNativeAssetSupply".into(),
+            params: json!({"asset": "USD"}),
+        });
+        assert_eq!(invalid_supply.error.unwrap().code, -32602);
 
         let unknown = rpc.handle(RpcRequest {
             id: Some(json!(32)),

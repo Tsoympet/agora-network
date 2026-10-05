@@ -5,8 +5,8 @@ use agora_state_machine::load_drc_issued_asset_policy_receipt;
 use agora_types::DrcIssuedAssetPolicyAction;
 
 use super::drc_issued_controls_public_helpers::{
-    assert_liability_equals_sum_balances, asset, funded_trust_line_fixture, issuer_nonce,
-    mempool_len, mine_template, reward_pool_balance, setup_live_line, signed_policy_set,
+    assert_liability_equals_sum_balances, asset, burned_supply_balance, funded_trust_line_fixture,
+    issuer_nonce, mempool_len, mine_template, setup_live_line, signed_policy_set,
     submit_lanes_at_parents, virtual_tip, CHAIN,
 };
 use crate::admit::BlockTemplateLanes;
@@ -45,7 +45,7 @@ fn nodebackend_reorg_reverts_policy_resubmit_once() {
     );
     let policy_id = policy.policy_set_tx_id();
     let ast = asset(&fx.issuer, fx.cur_usd);
-    let pool0 = reward_pool_balance(fx.store.as_ref());
+    let burned0 = burned_supply_balance(fx.store.as_ref());
     let fund_tip = virtual_tip(&fx.backend);
     let policy_tip = submit_lanes_at_parents(
         &mut fx.backend,
@@ -99,7 +99,7 @@ fn nodebackend_reorg_reverts_policy_resubmit_once() {
             .unwrap()
             .is_none()
     );
-    assert_eq!(reward_pool_balance(fx.store.as_ref()), pool0);
+    assert_eq!(burned_supply_balance(fx.store.as_ref()), burned0);
     assert_liability_equals_sum_balances(fx.store.as_ref(), &fx.issuer.address(), &fx.cur_usd);
     assert!(fx
         .backend

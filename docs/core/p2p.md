@@ -89,7 +89,7 @@ releases reservations.
 Authenticated DA authorizations deliberately have no standalone mempool or
 `NetworkMessage` variant. Existing enum discriminants remain unchanged; full
 block propagation carries accepted candidates under the current Trident
-protocol v21 / state-transition v19 fingerprint. DRC account-policy,
+protocol v22 / state-transition v20 fingerprint. DRC account-policy,
 deposit-preauthorization, contract-free settlement, trust-line, and
 issued-control gossip use appended enum variants without changing prior
 discriminants. The current node leaves DA activation disabled until a reviewed

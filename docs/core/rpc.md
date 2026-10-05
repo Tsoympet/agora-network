@@ -56,6 +56,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_getValidatorSet` | OVL/DRC validator snapshot (`asset`, optional `epoch`) |
 | `agora_getValidator` | One validator record |
 | `agora_getRewardPool` | Slash/reward pool balance for OVL or DRC |
+| `agora_getNativeAssetSupply` | Read maximum, issued, lifetime burned, and checked net supply for TLT/OVL/DRC as decimal strings |
 | `agora_getProtocolTreasuries` | Canonical governance policy/root and asset-isolated treasury balances |
 | `agora_getCommunityRegistry` | Read canonical Hub, Passport, Grant, and Mission registry summary/records |
 | `agora_submitStakeTx` | Validate, reserve, and gossip a secp256k1-signed stake tx for block inclusion |

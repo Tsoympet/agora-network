@@ -10,7 +10,8 @@ use agora_crypto::{
 };
 use agora_p2p::Mempool;
 use agora_state_machine::{
-    credit_account_into, load_drc_payment_channel_live, GenesisBuilder, StateStore, WriteBatch,
+    credit_account_into, load_drc_payment_channel_live, put_issued_supply_into, GenesisBuilder,
+    StateStore, WriteBatch,
 };
 use agora_types::{
     Address, Amount, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseKind,
@@ -131,6 +132,7 @@ pub fn funded_fixture() -> FundedChannelFixture {
         Amount::from_base_units(200_000),
     )
     .unwrap();
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 2_200_000);
     store.write_batch(funding).unwrap();
     let backend = NodeBackend::new(
         Arc::new(Mutex::new(boot_chain(store.clone(), genesis))),
@@ -421,6 +423,10 @@ pub fn reward_pool_balance(store: &StateStore) -> u64 {
     agora_state_machine::load_reward_pool(store, NativeAssetId::DRC).unwrap_or(0)
 }
 
+pub fn burned_supply_balance(store: &StateStore) -> u64 {
+    agora_state_machine::load_burned_supply(store, NativeAssetId::DRC).unwrap()
+}
+
 pub fn channel_conservation_quad(
     store: &StateStore,
     owner: &Address,
@@ -431,6 +437,6 @@ pub fn channel_conservation_quad(
         drc_balance(store, owner),
         drc_balance(store, destination),
         locked_remainder(store, channel_id),
-        reward_pool_balance(store),
+        burned_supply_balance(store),
     )
 }

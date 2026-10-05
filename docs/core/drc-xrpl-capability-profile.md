@@ -1,6 +1,7 @@
 # DRC / XRPL capability profile
 
 **Audited code baseline:** `bb3abe4` (`cursor/drc-contract-free-boundary-cdcf`)  
+**Current profile:** Trident protocol v22 accepted-only DRC fee burning
 **Audit date:** 2026-10-05  
 **Canonical DRC maturity:** Experimental  
 **Purpose:** executable capability inventory and dependency-ordered verification plan
@@ -55,7 +56,7 @@ signed DRC fee only for `TransactionAcceptance::Accepted`.
 
 ## Executive audit result
 
-The current v21 stack already contains substantially more than the earlier DRC
+The audited v21 stack already contained substantially more than the earlier DRC
 roadmap described:
 
 - native DRC accounts, transfers, exact payments, tags, invoices, expiry,
@@ -67,10 +68,12 @@ roadmap described:
   generated TypeScript bindings, and adversarial tests; and
 - independent DRC staking and the Trident triple-conjunction finality gadget.
 
-The two assumptions in the requested program are confirmed:
+The audit confirmed both starting assumptions. Protocol v22 now resolves the
+first; the second remains:
 
-1. Accepted, fee-bearing DRC operations debit DRC but credit
-   `stake/reward_pool/DRC`; they do **not** burn it.
+1. On the audited v21 baseline, accepted DRC fees credited
+   `stake/reward_pool/DRC`. Protocol v22 replaces that attribution with exact
+   accepted-only burning and committed lifetime/net-supply accounting.
 2. No canonical Offer object, OfferCreate/OfferCancel transaction, order-book
    index, crossing engine, order-book RPC, or wallet integration exists.
 
@@ -98,7 +101,7 @@ public-testnet readiness or XRPL parity.
 | Validator/finality | DRC validators sign the same checkpoints as OVL validators; finality requires PoW + both independent quorums | No UNL/Ripple consensus; no stake price mixing or admin bypass | Executable · Experimental |
 | Native accounts | `(DRC, address)` balance and shared nonce; recipients can acquire account state through transfer | No XRP reserve/account-delete model; no public balance+sequence account query | Executable core · Experimental; RPC gap |
 | Native transfer/payment | Exact amount, explicit DRC fee, secp256k1 auth, duplicate/replay checks, deterministic receipt/outbox | Full delivery only; no paths or partial payment | Executable · Experimental |
-| Fee disposition | Accepted fees are credited to the DRC staking reward pool | Differs from XRP fee destruction; reward pool also receives reserve drips/slashes | Missing requested burn |
+| Fee disposition | Accepted signed DRC fees increment lifetime burned supply; all non-accepted results burn zero | Reward pool retains historical mixed-provenance funds and still receives reserve drips/slashes; TLT/OVL behavior is unchanged | Executable · Experimental |
 | Sequence/replay | Shared nonce across DRC account families; network-bound chain/genesis signing | `u64` Agora sequence model, not XRPL `UInt32` wire encoding | Executable · Experimental |
 | Tickets | One ticket created per operation, 32-ticket cap, one-use nonce alternative, ticket-aware operation versions | No batch create, reserve, cancellation, expiry, or enumeration | Executable · Experimental / Single-node prototype |
 | Regular key | One rotatable secp256k1 regular key | No Ed25519 | Executable · Experimental |
@@ -120,22 +123,22 @@ public-testnet readiness or XRPL parity.
 | Mempool/template | Shared nonce/Ticket and family-specific object reservations; deterministic lane order; full-body templates | Same-block dependencies are often intentionally fail-closed in public admission | Executable · Experimental |
 | P2P/IBD | Typed operation gossip and full multi-lane block relay; compact blocks fall back to full body | No XRPL peer/wire protocol | Executable · Experimental |
 | Reorg/restart | Account/object/root snapshots revert atomically; RocksDB paths and family tests exist | Included typed operations generally require explicit resubmission after reorg | Executable core · Experimental |
-| Genesis/migration | Draft v3 commits versions/policy; schema v19 names current key families | Draft is unfrozen, loader is disabled, and no migration/reindex/verify CLI exists | Scaffold / Experimental |
+| Genesis/migration | Draft v3 commits versions/policy; schema v20 initializes burn counters; an explicit 19→20 library migration initializes zero | Draft is unfrozen, loader is disabled, and no migration/reindex/verify CLI exists | Scaffold / Experimental |
 | Smart contracts | DRC selectors/payloads/generic execution routes reject; OVL execution remains separate | Permanent exclusion | Enforced |
 
 ## Current protocol profile
 
 | Surface | Current value |
 | --- | --- |
-| Trident protocol | `21` |
+| Trident protocol | `22` |
 | Transaction signing profile | `agora-trident-tx-v9` |
-| State transition | `agora-trident-state-v19` |
+| State transition | `agora-trident-state-v20` |
 | Highest DRC block-body wrapper | `agora-block-body-v17` |
-| Composed state-root domain | `agora-trident-state-root-v13` |
-| Datadir schema | `19` |
+| Composed state-root domain | `agora-trident-state-root-v14` |
+| Datadir schema | `20` |
 | Genesis | v3 draft, `UNFROZEN`; not bootable as a live Trident network |
 | DRC exchange | none |
-| DRC fee sink | staking reward pool |
+| DRC fee sink | lifetime burned-supply counter |
 
 The P2P fingerprint commits the protocol, signing, state-transition, consensus
 policy, chain identity, and genesis identity. Any consensus fee-burn or Offer
@@ -164,13 +167,11 @@ Known cross-cutting limitations:
   lane operation IDs do not have one common canonical transaction lookup.
 - Point-query key families are not a common owner/object directory and cannot
   support complete wallet synchronization.
-- Current state-root composition commits account balances and DRC object
-  roots, but there is no explicit native supply/burn component.
-- `verify_supply_invariants` checks only `issued <= max`; it does not track
-  lifetime burn, net issued supply, or full balance/lock/stake/pool
-  conservation.
+- State-root composition now commits maximum, issued, burned, and checked net
+  native supply. Full balance/lock/stake/pool conservation scanning remains
+  unavailable.
 
-## Fee accounting decision
+## Implemented fee accounting
 
 The high-confidence adaptation is:
 
@@ -191,8 +192,8 @@ Rules:
 6. Keep pre-activation DRC reward-pool value intact. It may contain fees,
    staking-reserve drips, and slash proceeds, so retroactive fee extraction is
    not deterministic.
-7. Commit issued, burned, and net accounting to the canonical state root;
-   expose it through read-only RPC.
+7. Issued, burned, and net accounting is committed to the canonical state root
+   and exposed through `agora_getNativeAssetSupply`.
 8. Snapshot the burned counter in the same operation batch/journal so rollback,
    reorg, and restart are exact.
 9. Initialize lifetime burned to zero at the activation boundary. A future
@@ -313,11 +314,11 @@ execution path working.
 
 ## Dependency-ordered implementation queue
 
-1. This audited capability profile and documentation reconciliation.
-2. Accepted-only DRC fee burn, lifetime counter, net-supply invariant,
-   state-root/version/schema/fingerprint activation, journal/reorg/restart,
-   genesis initialization, RPC, client read support, and tests.
-3. Common DRC ledger-object identity/owner index and canonical typed operation
+1. Completed: audited capability profile and documentation reconciliation.
+2. Completed: accepted-only DRC fee burn, lifetime counter, net-supply
+   invariant, state-root/version/schema/fingerprint activation, journal/reorg,
+   genesis/migration initialization, RPC, client read support, and tests.
+3. Next: common DRC ledger-object identity/owner index and canonical typed operation
    lookup, without adding a generic mutation API.
 4. Native order-book Offer objects plus OfferCreate/OfferCancel and deterministic
    crossing.

@@ -4,8 +4,9 @@
 //! UTXO ∥ OVL accounts ∥ DRC accounts ∥ OVL stake snap ∥ DRC stake snap ∥
 //! DRC authorization/settlement state (including issuer-scoped trust lines and
 //! controls) ∥ DRC policy ∥ DRC deposit preauthorization ∥ DRC payment state ∥
-//! tip acceptance ∥ finalized tip ∥ governance/treasuries ∥ canonical community
-//! registry ∥ authenticated data-commitment state.
+//! native supply accounting ∥ tip acceptance ∥ finalized tip ∥
+//! governance/treasuries ∥ canonical community registry ∥ authenticated
+//! data-commitment state.
 
 use agora_types::{Hash, NativeAssetId, OutPoint, TxOut};
 use borsh::BorshDeserialize;
@@ -28,10 +29,11 @@ use crate::finality_store::load_finalized_blue_score;
 use crate::governance_state::governance_treasury_root;
 use crate::payments::drc_payment_root;
 use crate::staking::{build_snapshot, load_epoch};
+use crate::supply::native_supply_root;
 use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
 
 /// Domain tag for the composed state root (versioned).
-pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v13";
+pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v14";
 
 /// Deterministic UTXO-set commitment (sorted outpoint keys).
 pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
@@ -114,6 +116,7 @@ pub fn compose_trident_state_root(
     let drc_account_policies = drc_account_policy_root(store)?;
     let drc_deposit_preauths = drc_deposit_preauth_root(store)?;
     let drc_payments = drc_payment_root(store)?;
+    let native_supply = native_supply_root(store)?;
     let acceptance = acceptance_root(store, tip_block)?;
     let finality_tip = finalized_tip_commitment(store)?;
     let gov_treasury = governance_treasury_root(store)?;
@@ -136,6 +139,7 @@ pub fn compose_trident_state_root(
         drc_account_policies,
         drc_deposit_preauths,
         drc_payments,
+        native_supply,
         acceptance,
         finality_tip,
         gov_treasury,
@@ -151,6 +155,7 @@ mod tests {
     use super::*;
     use crate::accounts::credit_account_into;
     use crate::store::WriteBatch;
+    use crate::supply::{put_burned_supply_into, put_issued_supply_into};
     use crate::StateStore;
 
     #[test]
@@ -183,5 +188,22 @@ mod tests {
             acceptance_root(&store, &tip).unwrap(),
             acceptance_root(&store, &tip).unwrap()
         );
+    }
+
+    #[test]
+    fn state_root_commits_native_burn_accounting() {
+        let store = StateStore::open_in_memory();
+        let tip = Hash([3u8; 32]);
+        let mut batch = WriteBatch::new();
+        put_issued_supply_into(&mut batch, NativeAssetId::DRC, 10);
+        put_burned_supply_into(&mut batch, NativeAssetId::DRC, 0);
+        store.write_batch(batch).unwrap();
+        let before = compose_trident_state_root(&store, &tip).unwrap();
+
+        let mut batch = WriteBatch::new();
+        put_burned_supply_into(&mut batch, NativeAssetId::DRC, 1);
+        store.write_batch(batch).unwrap();
+        let after = compose_trident_state_root(&store, &tip).unwrap();
+        assert_ne!(before, after);
     }
 }

@@ -112,6 +112,7 @@ paths:
                     - agora_getValidatorSet
                     - agora_getValidator
                     - agora_getRewardPool
+                    - agora_getNativeAssetSupply
                     - agora_getProtocolTreasuries
                     - agora_getCommunityRegistry
                     - agora_submitStakeTx
@@ -157,3 +158,22 @@ components:
         min_relay_fee: { type: integer }
         pow_algorithm: { type: string }
         genesis_hash: { type: string, nullable: true }
+    NativeAssetSupply:
+      type: object
+      required: [asset, maximum_supply, issued_supply, burned_supply, net_supply]
+      properties:
+        asset:
+          type: string
+          enum: [TLT, OVL, DRC]
+        maximum_supply:
+          type: string
+          pattern: "^[0-9]+$"
+        issued_supply:
+          type: string
+          pattern: "^[0-9]+$"
+        burned_supply:
+          type: string
+          pattern: "^[0-9]+$"
+        net_supply:
+          type: string
+          pattern: "^[0-9]+$"

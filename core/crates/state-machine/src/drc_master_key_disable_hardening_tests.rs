@@ -38,7 +38,11 @@ mod tests {
     use crate::staking::{apply_signed_stake_tx, StakingParams};
     use crate::state_root::compose_trident_state_root;
     use crate::store::WriteBatch;
-    use crate::{AccountJournal, StateError, StateStore};
+    use crate::supply::{
+        load_burned_supply, load_issued_supply, put_burned_supply_into, put_issued_supply_into,
+        put_schema_version_into,
+    };
+    use crate::{AccountJournal, StateError, StateStore, SCHEMA_VERSION};
 
     const TIP: Hash = Hash([4; 32]);
 
@@ -64,6 +68,17 @@ mod tests {
             Amount::from_base_units(amount),
         )
         .unwrap();
+        let issued = load_issued_supply(store, NativeAssetId::DRC)
+            .unwrap()
+            .checked_add(amount)
+            .unwrap();
+        put_issued_supply_into(&mut batch, NativeAssetId::DRC, issued);
+        put_burned_supply_into(
+            &mut batch,
+            NativeAssetId::DRC,
+            load_burned_supply(store, NativeAssetId::DRC).unwrap(),
+        );
+        put_schema_version_into(&mut batch, SCHEMA_VERSION);
         store.write_batch(batch).unwrap();
     }
 

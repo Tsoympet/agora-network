@@ -171,6 +171,7 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getValidatorSet"
             | "agora_getValidator"
             | "agora_getRewardPool"
+            | "agora_getNativeAssetSupply"
             | "agora_getProtocolTreasuries"
             | "agora_getCommunityRegistry"
     )
@@ -327,6 +328,7 @@ mod tests {
         assert!(!method_requires_token("agora_getMempool"));
         assert!(!method_requires_token("agora_getNodeInfo"));
         assert!(!method_requires_token("agora_estimateFee"));
+        assert!(!method_requires_token("agora_getNativeAssetSupply"));
         assert!(!method_requires_token("agora_getConstitution"));
         assert!(!method_requires_token("agora_listProposals"));
         assert!(!method_requires_token("agora_listOffices"));
