@@ -44,10 +44,11 @@ pub use accounts::{
     AccountState,
 };
 pub use apply::{
-    apply_block, apply_block_batched, apply_block_batched_virtual, apply_block_batched_with_auth,
-    apply_block_with_auth, balance_of, revert_journal, revert_journal_batched, sum_transfer_fees,
-    transfer_fee, validate_mempool_tx, validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult,
-    TxAuthContext, UtxoJournal,
+    apply_block, apply_block_batched, apply_block_batched_virtual,
+    apply_block_batched_virtual_at_blue_score, apply_block_batched_with_auth,
+    apply_block_batched_with_auth_at_blue_score, apply_block_with_auth, balance_of, revert_journal,
+    revert_journal_batched, sum_transfer_fees, transfer_fee, validate_mempool_tx,
+    validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult, TxAuthContext, UtxoJournal,
 };
 pub use block_zero::{
     BlockZeroAllocation, BlockZeroFinality, BlockZeroSupply, BlockZeroTreasury, BlockZeroValidator,
@@ -110,9 +111,10 @@ pub use network::{
 };
 pub use orphans::{delete_orphan, list_orphans, load_orphan, orphan_key, store_orphan};
 pub use payments::{
-    apply_drc_payment, drc_payment_root, list_drc_outbox, load_drc_outbox_event,
-    load_drc_payment_by_invoice, load_drc_payment_receipt, payment_invoice_key, payment_meta_keys,
-    payment_outbox_key, payment_receipt_key, payment_seen_key, DRC_PAYMENT_LEGACY_VERSION,
+    apply_drc_payment, apply_drc_payment_at_blue_score, drc_payment_root, list_drc_outbox,
+    load_drc_outbox_event, load_drc_payment_by_invoice, load_drc_payment_receipt,
+    payment_invoice_key, payment_meta_keys, payment_outbox_key, payment_receipt_key,
+    payment_seen_key, DRC_PAYMENT_DESTINATION_TAG_VERSION, DRC_PAYMENT_LEGACY_VERSION,
     DRC_PAYMENT_SOURCE_TAG_VERSION, DRC_PAYMENT_VERSION,
 };
 pub use staking::{

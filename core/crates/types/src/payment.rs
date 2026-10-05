@@ -11,18 +11,24 @@ use crate::{Address, Amount, Hash};
 pub const DRC_PAYMENT_LEGACY_VERSION: u32 = 1;
 /// Frozen v2 payment envelope; adds an authenticated optional source tag.
 pub const DRC_PAYMENT_SOURCE_TAG_VERSION: u32 = 2;
-/// Current payment envelope; v3 makes destination-tag presence explicit.
-pub const DRC_PAYMENT_VERSION: u32 = 3;
+/// Frozen v3 payment envelope; makes destination-tag presence explicit.
+pub const DRC_PAYMENT_DESTINATION_TAG_VERSION: u32 = 3;
+/// Current payment envelope; v4 adds an optional last-valid GHOSTDAG blue score.
+pub const DRC_PAYMENT_VERSION: u32 = 4;
 /// Frozen exact-delivery receipt version for payment v1/v2.
 pub const DRC_PAYMENT_RECEIPT_LEGACY_VERSION: u32 = 1;
-/// Current durable exact-delivery receipt version.
-pub const DRC_PAYMENT_RECEIPT_VERSION: u32 = 2;
+/// Frozen exact-delivery receipt version for payment v3.
+pub const DRC_PAYMENT_RECEIPT_DESTINATION_TAG_VERSION: u32 = 2;
+/// Current durable exact-delivery receipt version for payment v4.
+pub const DRC_PAYMENT_RECEIPT_VERSION: u32 = 3;
 /// Frozen domain separator for v1 network-bound DRC payment signatures.
 pub const DRC_PAYMENT_V1_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v1";
 /// Domain separator for v2 network-bound DRC payment signatures.
 pub const DRC_PAYMENT_V2_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v2";
 /// Domain separator for v3 network-bound DRC payment signatures.
 pub const DRC_PAYMENT_V3_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v3";
+/// Domain separator for v4 network-bound DRC payment signatures.
+pub const DRC_PAYMENT_V4_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v4";
 /// Backward-compatible name for the frozen v1 signing domain.
 pub const DRC_PAYMENT_SIGNING_DOMAIN: &[u8] = DRC_PAYMENT_V1_SIGNING_DOMAIN;
 
@@ -43,19 +49,26 @@ pub struct DrcPaymentTx {
     /// `Hash::ZERO` indicates that the payment is not associated with an invoice.
     pub invoice_id: Hash,
     pub nonce: u64,
+    /// Inclusive containing-block GHOSTDAG blue-score cutoff. `None` never expires.
+    #[serde(default)]
+    pub last_valid_blue_score: Option<u64>,
     pub public_key: Vec<u8>,
     pub signature: Vec<u8>,
 }
 
 impl DrcPaymentTx {
     pub fn validate_envelope_version(&self) -> Result<(), DrcPaymentEnvelopeError> {
+        if self.version < DRC_PAYMENT_VERSION && self.last_valid_blue_score.is_some() {
+            return Err(DrcPaymentEnvelopeError::LegacyExpiry);
+        }
         match self.version {
             DRC_PAYMENT_LEGACY_VERSION if self.source_tag.is_some() => {
                 Err(DrcPaymentEnvelopeError::LegacySourceTag)
             }
-            DRC_PAYMENT_LEGACY_VERSION | DRC_PAYMENT_SOURCE_TAG_VERSION | DRC_PAYMENT_VERSION => {
-                Ok(())
-            }
+            DRC_PAYMENT_LEGACY_VERSION
+            | DRC_PAYMENT_SOURCE_TAG_VERSION
+            | DRC_PAYMENT_DESTINATION_TAG_VERSION
+            | DRC_PAYMENT_VERSION => Ok(()),
             version => Err(DrcPaymentEnvelopeError::UnsupportedVersion(version)),
         }
     }
@@ -96,8 +109,26 @@ impl DrcPaymentTx {
             .expect("borsh serialize DRC payment v2 body");
         }
 
+        if self.version == DRC_PAYMENT_DESTINATION_TAG_VERSION {
+            return borsh::to_vec(&(
+                DRC_PAYMENT_V3_SIGNING_DOMAIN,
+                chain_id,
+                genesis.as_bytes(),
+                self.version,
+                self.from,
+                self.to,
+                self.amount,
+                self.fee,
+                self.destination_tag,
+                self.source_tag,
+                self.invoice_id,
+                self.nonce,
+            ))
+            .expect("borsh serialize DRC payment v3 body");
+        }
+
         borsh::to_vec(&(
-            DRC_PAYMENT_V3_SIGNING_DOMAIN,
+            DRC_PAYMENT_V4_SIGNING_DOMAIN,
             chain_id,
             genesis.as_bytes(),
             self.version,
@@ -109,8 +140,9 @@ impl DrcPaymentTx {
             self.source_tag,
             self.invoice_id,
             self.nonce,
+            self.last_valid_blue_score,
         ))
-        .expect("borsh serialize DRC payment v3 body")
+        .expect("borsh serialize DRC payment v4 body")
     }
 
     fn legacy_destination_tag(&self) -> u32 {
@@ -126,6 +158,12 @@ impl DrcPaymentTx {
         } else {
             self.destination_tag
         }
+    }
+
+    /// Inclusive expiry: valid at the cutoff, expired only after it.
+    pub fn is_expired_at_blue_score(&self, application_blue_score: u64) -> bool {
+        self.last_valid_blue_score
+            .is_some_and(|cutoff| application_blue_score > cutoff)
     }
 
     /// Hashes the complete signed envelope, including authorization material.
@@ -154,6 +192,7 @@ impl DrcPaymentTx {
             source_tag: None,
             invoice_id,
             nonce,
+            last_valid_blue_score: None,
             public_key: Vec::new(),
             signature: Vec::new(),
         }
@@ -181,6 +220,7 @@ impl DrcPaymentTx {
             source_tag,
             invoice_id,
             nonce,
+            last_valid_blue_score: None,
             public_key: Vec::new(),
             signature: Vec::new(),
         }
@@ -199,6 +239,35 @@ impl DrcPaymentTx {
         nonce: u64,
     ) -> Self {
         Self {
+            version: DRC_PAYMENT_DESTINATION_TAG_VERSION,
+            from,
+            to,
+            amount,
+            fee,
+            destination_tag,
+            source_tag,
+            invoice_id,
+            nonce,
+            last_valid_blue_score: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+        }
+    }
+
+    /// Construct a v4 payment with an inclusive GHOSTDAG blue-score cutoff.
+    #[allow(clippy::too_many_arguments)]
+    pub fn unsigned_v4(
+        from: Address,
+        to: Address,
+        amount: Amount,
+        fee: Amount,
+        destination_tag: Option<u32>,
+        source_tag: Option<u32>,
+        invoice_id: Hash,
+        nonce: u64,
+        last_valid_blue_score: Option<u64>,
+    ) -> Self {
+        Self {
             version: DRC_PAYMENT_VERSION,
             from,
             to,
@@ -208,6 +277,7 @@ impl DrcPaymentTx {
             source_tag,
             invoice_id,
             nonce,
+            last_valid_blue_score,
             public_key: Vec::new(),
             signature: Vec::new(),
         }
@@ -221,6 +291,8 @@ pub enum DrcPaymentEnvelopeError {
     UnsupportedVersion(u32),
     #[error("DRC payment v1 cannot carry a source tag")]
     LegacySourceTag,
+    #[error("DRC payment v1-v3 cannot carry a last-valid blue score")]
+    LegacyExpiry,
 }
 
 impl BorshSerialize for DrcPaymentTx {
@@ -240,6 +312,9 @@ impl BorshSerialize for DrcPaymentTx {
         }
         BorshSerialize::serialize(&self.invoice_id, writer)?;
         BorshSerialize::serialize(&self.nonce, writer)?;
+        if self.version >= DRC_PAYMENT_VERSION {
+            BorshSerialize::serialize(&self.last_valid_blue_score, writer)?;
+        }
         BorshSerialize::serialize(&self.public_key, writer)?;
         BorshSerialize::serialize(&self.signature, writer)
     }
@@ -263,6 +338,13 @@ impl BorshDeserialize for DrcPaymentTx {
         } else {
             Option::<u32>::deserialize_reader(reader)?
         };
+        let invoice_id = Hash::deserialize_reader(reader)?;
+        let nonce = u64::deserialize_reader(reader)?;
+        let last_valid_blue_score = if version >= DRC_PAYMENT_VERSION {
+            Option::<u64>::deserialize_reader(reader)?
+        } else {
+            None
+        };
         Ok(Self {
             version,
             from,
@@ -271,8 +353,9 @@ impl BorshDeserialize for DrcPaymentTx {
             fee,
             destination_tag,
             source_tag,
-            invoice_id: Hash::deserialize_reader(reader)?,
-            nonce: u64::deserialize_reader(reader)?,
+            invoice_id,
+            nonce,
+            last_valid_blue_score,
             public_key: Vec::<u8>::deserialize_reader(reader)?,
             signature: Vec::<u8>::deserialize_reader(reader)?,
         })
@@ -320,15 +403,19 @@ pub struct DrcPaymentReceipt {
     pub source_tag: Option<u32>,
     pub destination_tag: Option<u32>,
     pub invoice_id: Hash,
+    #[serde(default)]
+    pub last_valid_blue_score: Option<u64>,
 }
 
 impl DrcPaymentReceipt {
     pub fn delivered_exact(tx: &DrcPaymentTx) -> Self {
         Self {
-            version: if tx.version <= DRC_PAYMENT_SOURCE_TAG_VERSION {
-                DRC_PAYMENT_RECEIPT_LEGACY_VERSION
-            } else {
-                DRC_PAYMENT_RECEIPT_VERSION
+            version: match tx.version {
+                DRC_PAYMENT_LEGACY_VERSION | DRC_PAYMENT_SOURCE_TAG_VERSION => {
+                    DRC_PAYMENT_RECEIPT_LEGACY_VERSION
+                }
+                DRC_PAYMENT_DESTINATION_TAG_VERSION => DRC_PAYMENT_RECEIPT_DESTINATION_TAG_VERSION,
+                _ => DRC_PAYMENT_RECEIPT_VERSION,
             },
             payment_id: tx.payment_id(),
             payment_version: tx.version,
@@ -341,6 +428,7 @@ impl DrcPaymentReceipt {
             source_tag: tx.source_tag,
             destination_tag: tx.authenticated_destination_tag(),
             invoice_id: tx.invoice_id,
+            last_valid_blue_score: tx.last_valid_blue_score,
         }
     }
 
@@ -348,7 +436,9 @@ impl DrcPaymentReceipt {
     pub fn validate_exact(&self) -> Result<(), DrcPaymentReceiptError> {
         if !matches!(
             self.version,
-            DRC_PAYMENT_RECEIPT_LEGACY_VERSION | DRC_PAYMENT_RECEIPT_VERSION
+            DRC_PAYMENT_RECEIPT_LEGACY_VERSION
+                | DRC_PAYMENT_RECEIPT_DESTINATION_TAG_VERSION
+                | DRC_PAYMENT_RECEIPT_VERSION
         ) {
             return Err(DrcPaymentReceiptError::UnsupportedVersion(self.version));
         }
@@ -365,6 +455,13 @@ impl DrcPaymentReceipt {
             DRC_PAYMENT_LEGACY_VERSION if self.source_tag.is_some() => {
                 Err(DrcPaymentReceiptError::LegacySourceTag)
             }
+            DRC_PAYMENT_LEGACY_VERSION
+            | DRC_PAYMENT_SOURCE_TAG_VERSION
+            | DRC_PAYMENT_DESTINATION_TAG_VERSION
+                if self.last_valid_blue_score.is_some() =>
+            {
+                Err(DrcPaymentReceiptError::LegacyExpiry)
+            }
             DRC_PAYMENT_LEGACY_VERSION | DRC_PAYMENT_SOURCE_TAG_VERSION
                 if self.destination_tag == Some(0) =>
             {
@@ -375,10 +472,16 @@ impl DrcPaymentReceipt {
             {
                 Ok(())
             }
-            DRC_PAYMENT_VERSION if self.version == DRC_PAYMENT_RECEIPT_VERSION => Ok(()),
-            DRC_PAYMENT_LEGACY_VERSION | DRC_PAYMENT_SOURCE_TAG_VERSION | DRC_PAYMENT_VERSION => {
-                Err(DrcPaymentReceiptError::VersionMismatch)
+            DRC_PAYMENT_DESTINATION_TAG_VERSION
+                if self.version == DRC_PAYMENT_RECEIPT_DESTINATION_TAG_VERSION =>
+            {
+                Ok(())
             }
+            DRC_PAYMENT_VERSION if self.version == DRC_PAYMENT_RECEIPT_VERSION => Ok(()),
+            DRC_PAYMENT_LEGACY_VERSION
+            | DRC_PAYMENT_SOURCE_TAG_VERSION
+            | DRC_PAYMENT_DESTINATION_TAG_VERSION
+            | DRC_PAYMENT_VERSION => Err(DrcPaymentReceiptError::VersionMismatch),
             version => Err(DrcPaymentReceiptError::UnsupportedPaymentVersion(version)),
         }
     }
@@ -400,6 +503,9 @@ impl BorshSerialize for DrcPaymentReceipt {
         BorshSerialize::serialize(&self.invoice_id, writer)?;
         if self.version != DRC_PAYMENT_RECEIPT_LEGACY_VERSION {
             BorshSerialize::serialize(&self.destination_tag, writer)?;
+        }
+        if self.version >= DRC_PAYMENT_RECEIPT_VERSION {
+            BorshSerialize::serialize(&self.last_valid_blue_score, writer)?;
         }
         Ok(())
     }
@@ -431,6 +537,11 @@ impl BorshDeserialize for DrcPaymentReceipt {
             }
             tag
         };
+        let last_valid_blue_score = if version >= DRC_PAYMENT_RECEIPT_VERSION {
+            Option::<u64>::deserialize_reader(reader)?
+        } else {
+            None
+        };
         Ok(Self {
             version,
             payment_id,
@@ -444,6 +555,7 @@ impl BorshDeserialize for DrcPaymentReceipt {
             source_tag,
             destination_tag,
             invoice_id,
+            last_valid_blue_score,
         })
     }
 }
@@ -462,6 +574,8 @@ pub enum DrcPaymentReceiptError {
     UnsupportedPaymentVersion(u32),
     #[error("DRC payment v1 receipt cannot carry a source tag")]
     LegacySourceTag,
+    #[error("DRC payment v1-v3 receipt cannot carry a last-valid blue score")]
+    LegacyExpiry,
     #[error("DRC payment v1/v2 receipt cannot distinguish destination tag 0 from no tag")]
     LegacyDestinationTagZero,
     #[error("DRC payment and receipt versions are incompatible")]
@@ -482,6 +596,8 @@ pub struct DrcPaymentOutboxEvent {
     pub source_tag: Option<u32>,
     pub destination_tag: Option<u32>,
     pub invoice_id: Hash,
+    #[serde(default)]
+    pub last_valid_blue_score: Option<u64>,
 }
 
 const fn legacy_payment_version() -> u32 {
@@ -499,13 +615,14 @@ impl DrcPaymentOutboxEvent {
             source_tag: tx.source_tag,
             destination_tag: tx.authenticated_destination_tag(),
             invoice_id: tx.invoice_id,
+            last_valid_blue_score: tx.last_valid_blue_score,
         }
     }
 }
 
 impl BorshSerialize for DrcPaymentOutboxEvent {
     fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> Result<(), borsh::io::Error> {
-        // v1/v2 storage prefixes are frozen; v3 adds an explicit trailing tag option.
+        // v1/v2 storage prefixes are frozen; later versions append extensions.
         BorshSerialize::serialize(&self.payment_id, writer)?;
         BorshSerialize::serialize(&self.from, writer)?;
         BorshSerialize::serialize(&self.to, writer)?;
@@ -516,8 +633,11 @@ impl BorshSerialize for DrcPaymentOutboxEvent {
             BorshSerialize::serialize(&self.payment_version, writer)?;
             BorshSerialize::serialize(&self.source_tag, writer)?;
         }
-        if self.payment_version >= DRC_PAYMENT_VERSION {
+        if self.payment_version >= DRC_PAYMENT_DESTINATION_TAG_VERSION {
             BorshSerialize::serialize(&self.destination_tag, writer)?;
+        }
+        if self.payment_version >= DRC_PAYMENT_VERSION {
+            BorshSerialize::serialize(&self.last_valid_blue_score, writer)?;
         }
         Ok(())
     }
@@ -535,9 +655,9 @@ impl BorshDeserialize for DrcPaymentOutboxEvent {
             deserialize_optional_u32(reader)?.unwrap_or(DRC_PAYMENT_LEGACY_VERSION);
         let source_tag = match payment_version {
             DRC_PAYMENT_LEGACY_VERSION => None,
-            DRC_PAYMENT_SOURCE_TAG_VERSION | DRC_PAYMENT_VERSION => {
-                Option::<u32>::deserialize_reader(reader)?
-            }
+            DRC_PAYMENT_SOURCE_TAG_VERSION
+            | DRC_PAYMENT_DESTINATION_TAG_VERSION
+            | DRC_PAYMENT_VERSION => Option::<u32>::deserialize_reader(reader)?,
             version => {
                 return Err(borsh::io::Error::new(
                     borsh::io::ErrorKind::InvalidData,
@@ -545,7 +665,7 @@ impl BorshDeserialize for DrcPaymentOutboxEvent {
                 ));
             }
         };
-        let destination_tag = if payment_version >= DRC_PAYMENT_VERSION {
+        let destination_tag = if payment_version >= DRC_PAYMENT_DESTINATION_TAG_VERSION {
             let tag = Option::<u32>::deserialize_reader(reader)?;
             if tag.unwrap_or(0) != legacy_destination_tag {
                 return Err(borsh::io::Error::new(
@@ -557,6 +677,11 @@ impl BorshDeserialize for DrcPaymentOutboxEvent {
         } else {
             (legacy_destination_tag != 0).then_some(legacy_destination_tag)
         };
+        let last_valid_blue_score = if payment_version >= DRC_PAYMENT_VERSION {
+            Option::<u64>::deserialize_reader(reader)?
+        } else {
+            None
+        };
         Ok(Self {
             payment_id,
             payment_version,
@@ -566,6 +691,7 @@ impl BorshDeserialize for DrcPaymentOutboxEvent {
             source_tag,
             destination_tag,
             invoice_id,
+            last_valid_blue_score,
         })
     }
 }
@@ -767,6 +893,22 @@ mod tests {
         legacy_tag_zero.destination_tag = Some(0);
         legacy_tag_zero.validate_envelope_version().unwrap();
         assert_eq!(legacy_tag_zero.authenticated_destination_tag(), None);
+
+        let mut v3_with_expiry = DrcPaymentTx::unsigned_v3(
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(1),
+            Amount::ZERO,
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        );
+        v3_with_expiry.last_valid_blue_score = Some(1);
+        assert_eq!(
+            v3_with_expiry.validate_envelope_version(),
+            Err(DrcPaymentEnvelopeError::LegacyExpiry)
+        );
     }
 
     #[test]
@@ -774,6 +916,11 @@ mod tests {
         let tx = legacy_payment();
         let mut value = serde_json::to_value(&tx).unwrap();
         value.as_object_mut().unwrap().remove("source_tag").unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("last_valid_blue_score")
+            .unwrap();
         assert_eq!(serde_json::from_value::<DrcPaymentTx>(value).unwrap(), tx);
     }
 
@@ -799,6 +946,7 @@ mod tests {
         assert_eq!(event.source_tag, tx.source_tag);
         assert_eq!(event.destination_tag, tx.destination_tag);
         assert_eq!(event.invoice_id, tx.invoice_id);
+        assert_eq!(event.last_valid_blue_score, None);
         let bytes = borsh::to_vec(&event).unwrap();
         assert_eq!(
             DrcPaymentOutboxEvent::try_from_slice(&bytes).unwrap(),
@@ -895,8 +1043,9 @@ mod tests {
             assert_eq!(DrcPaymentTx::try_from_slice(&bytes).unwrap(), tx);
 
             let receipt = DrcPaymentReceipt::delivered_exact(&tx);
-            assert_eq!(receipt.version, DRC_PAYMENT_RECEIPT_VERSION);
+            assert_eq!(receipt.version, DRC_PAYMENT_RECEIPT_DESTINATION_TAG_VERSION);
             assert_eq!(receipt.destination_tag, tx.destination_tag);
+            assert_eq!(receipt.last_valid_blue_score, None);
             receipt.validate_exact().unwrap();
             let receipt_bytes = borsh::to_vec(&receipt).unwrap();
             assert_eq!(
@@ -908,6 +1057,79 @@ mod tests {
             let event_bytes = borsh::to_vec(&event).unwrap();
             assert_eq!(
                 DrcPaymentOutboxEvent::try_from_slice(&event_bytes).unwrap(),
+                event
+            );
+        }
+    }
+
+    #[test]
+    fn v3_bytes_and_id_are_frozen() {
+        let tx = DrcPaymentTx::unsigned_v3(
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(3),
+            Amount::from_base_units(4),
+            Some(0),
+            None,
+            Hash([6; 32]),
+            7,
+        );
+        let expected = hex::decode(
+            "030000000101010101010101010101010101010101010101020202020202020202020202020202020202020203000000000000000400000000000000010000000000060606060606060606060606060606060606060606060606060606060606060607000000000000000000000000000000",
+        )
+        .unwrap();
+        assert_eq!(borsh::to_vec(&tx).unwrap(), expected);
+        assert_eq!(
+            tx.payment_id(),
+            Hash::from_hex("b675ce76d09eef1cb56bc717120429f6465dc9f69ca0b38abdd9cc91ba3ccc16")
+                .unwrap()
+        );
+        assert_eq!(DrcPaymentTx::try_from_slice(&expected).unwrap(), tx);
+    }
+
+    #[test]
+    fn v4_expiry_roundtrips_and_changes_every_committed_representation() {
+        let without_expiry = DrcPaymentTx::unsigned_v4(
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(3),
+            Amount::from_base_units(4),
+            Some(0),
+            Some(u32::MAX),
+            Hash([6; 32]),
+            7,
+            None,
+        );
+        let with_expiry = DrcPaymentTx {
+            last_valid_blue_score: Some(u64::MAX),
+            ..without_expiry.clone()
+        };
+
+        assert_ne!(without_expiry.payment_id(), with_expiry.payment_id());
+        assert_ne!(
+            borsh::to_vec(&without_expiry).unwrap(),
+            borsh::to_vec(&with_expiry).unwrap()
+        );
+        for tx in [without_expiry, with_expiry] {
+            tx.validate_envelope_version().unwrap();
+            assert_eq!(
+                DrcPaymentTx::try_from_slice(&borsh::to_vec(&tx).unwrap()).unwrap(),
+                tx
+            );
+
+            let receipt = DrcPaymentReceipt::delivered_exact(&tx);
+            assert_eq!(receipt.version, DRC_PAYMENT_RECEIPT_VERSION);
+            assert_eq!(receipt.last_valid_blue_score, tx.last_valid_blue_score);
+            receipt.validate_exact().unwrap();
+            assert_eq!(
+                DrcPaymentReceipt::try_from_slice(&borsh::to_vec(&receipt).unwrap()).unwrap(),
+                receipt
+            );
+
+            let event = DrcPaymentOutboxEvent::from_tx(&tx);
+            assert_eq!(event.last_valid_blue_score, tx.last_valid_blue_score);
+            assert_eq!(
+                DrcPaymentOutboxEvent::try_from_slice(&borsh::to_vec(&event).unwrap()).unwrap(),
                 event
             );
         }

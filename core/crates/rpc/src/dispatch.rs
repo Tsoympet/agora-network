@@ -117,6 +117,8 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .unwrap_or_else(|| req.params.clone());
                 let tx: DrcPaymentTx = serde_json::from_value(raw)
                     .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+                tx.validate_envelope_version()
+                    .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
                 let id = self.backend.submit_drc_payment(tx)?;
                 Ok(json!({ "payment_id": id.to_hex() }))
             }
@@ -453,7 +455,7 @@ fn mempool_entry_to_json(entry: &crate::backend::MempoolEntry) -> Value {
 }
 
 fn drc_payment_receipt_to_json(receipt: &DrcPaymentReceipt) -> Value {
-    json!({
+    let mut receipt_json = json!({
         "version": receipt.version,
         "payment_version": receipt.payment_version,
         "result": receipt.result.as_str(),
@@ -465,7 +467,14 @@ fn drc_payment_receipt_to_json(receipt: &DrcPaymentReceipt) -> Value {
         "source_tag": receipt.source_tag,
         "destination_tag": receipt.destination_tag,
         "invoice_id": receipt.invoice_id.to_hex(),
-    })
+    });
+    if let Some(cutoff) = receipt.last_valid_blue_score {
+        receipt_json
+            .as_object_mut()
+            .expect("receipt object")
+            .insert("last_valid_blue_score".into(), json!(cutoff));
+    }
+    receipt_json
 }
 
 fn node_info_to_json(info: &crate::backend::NodeInfo) -> Value {
@@ -1144,6 +1153,57 @@ mod tests {
             });
             assert_eq!(response.error.unwrap().code, -32602);
         }
+    }
+
+    #[test]
+    fn drc_payment_v4_receipt_includes_last_valid_blue_score_only_when_committed() {
+        let payment = DrcPaymentTx::unsigned_v4(
+            Address([1; 20]),
+            Address([2; 20]),
+            Amount::from_base_units(100),
+            Amount::from_base_units(2),
+            Some(0),
+            None,
+            Hash([4; 32]),
+            0,
+            Some(99),
+        );
+        let receipt = DrcPaymentReceipt::delivered_exact(&payment);
+        let payment_id = receipt.payment_id;
+        let mut backend = InMemoryBackend::new();
+        backend.insert_drc_payment_receipt(receipt);
+        let mut rpc = RpcDispatcher::new(backend);
+        let response = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getDrcPayment".into(),
+            params: json!({ "payment_id": payment_id.to_hex() }),
+        });
+        let result = response.result.unwrap();
+        assert_eq!(result["receipt"]["last_valid_blue_score"], 99);
+        assert_eq!(result["receipt"]["payment_version"], 4);
+
+        let legacy_receipt = DrcPaymentReceipt::delivered_exact(&DrcPaymentTx::unsigned_v3(
+            Address([3; 20]),
+            Address([4; 20]),
+            Amount::from_base_units(1),
+            Amount::ZERO,
+            None,
+            None,
+            Hash::ZERO,
+            0,
+        ));
+        let legacy_id = legacy_receipt.payment_id;
+        let mut backend = InMemoryBackend::new();
+        backend.insert_drc_payment_receipt(legacy_receipt);
+        let mut rpc = RpcDispatcher::new(backend);
+        let response = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getDrcPayment".into(),
+            params: json!({ "payment_id": legacy_id.to_hex() }),
+        });
+        assert!(response.result.unwrap()["receipt"]
+            .get("last_valid_blue_score")
+            .is_none());
     }
 
     #[test]

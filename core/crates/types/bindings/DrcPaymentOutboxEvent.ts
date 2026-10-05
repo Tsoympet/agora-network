@@ -6,4 +6,4 @@ import type { Hash } from "./Hash";
 /**
  * Durable notification emitted after accepting a DRC payment.
  */
-export type DrcPaymentOutboxEvent = { payment_id: Hash, payment_version: number, from: Address, to: Address, amount: Amount, source_tag: number | null, destination_tag: number | null, invoice_id: Hash, };
+export type DrcPaymentOutboxEvent = { payment_id: Hash, payment_version: number, from: Address, to: Address, amount: Amount, source_tag: number | null, destination_tag: number | null, invoice_id: Hash, last_valid_blue_score: bigint | null, };

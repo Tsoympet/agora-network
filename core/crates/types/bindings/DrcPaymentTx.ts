@@ -18,4 +18,8 @@ source_tag: number | null,
 /**
  * `Hash::ZERO` indicates that the payment is not associated with an invoice.
  */
-invoice_id: Hash, nonce: bigint, public_key: Array<number>, signature: Array<number>, };
+invoice_id: Hash, nonce: bigint,
+/**
+ * Inclusive containing-block GHOSTDAG blue-score cutoff. `None` never expires.
+ */
+last_valid_blue_score: bigint | null, public_key: Array<number>, signature: Array<number>, };
