@@ -87,6 +87,44 @@ pub fn load_drc_payment_receipt(
     Ok(Some(receipt))
 }
 
+/// Resolve the canonical recipient-scoped invoice index to an exact-delivery receipt.
+///
+/// The index is derived from root-committed receipt fields, so every component is
+/// re-checked before returning data. This prevents a corrupt index from crossing
+/// recipient boundaries or exposing an unrelated payment.
+pub fn load_drc_payment_by_invoice(
+    store: &StateStore,
+    recipient: &agora_types::Address,
+    invoice_id: &Hash,
+) -> Result<Option<DrcPaymentReceipt>, StateError> {
+    if *invoice_id == Hash::ZERO {
+        return Ok(None);
+    }
+    let Some(bytes) = store.get_cf(
+        ColumnFamily::Meta,
+        &payment_invoice_key(recipient, invoice_id),
+    )?
+    else {
+        return Ok(None);
+    };
+    if bytes.len() != 32 {
+        return Err(StateError::Storage(
+            "invalid DRC payment invoice index value length".into(),
+        ));
+    }
+    let mut payment_id = [0u8; 32];
+    payment_id.copy_from_slice(&bytes);
+    let receipt = load_drc_payment_receipt(store, &Hash(payment_id))?.ok_or_else(|| {
+        StateError::Storage("DRC payment invoice index points to a missing receipt".into())
+    })?;
+    if receipt.to != *recipient || receipt.invoice_id != *invoice_id {
+        return Err(StateError::Storage(
+            "DRC payment invoice index does not match receipt routing".into(),
+        ));
+    }
+    Ok(Some(receipt))
+}
+
 pub fn load_drc_outbox_event(
     store: &StateStore,
     payment_id: &Hash,
@@ -325,6 +363,12 @@ mod tests {
             receipt
         );
         assert_eq!(
+            load_drc_payment_by_invoice(&store, &merchant.address(), &Hash([9; 32]))
+                .unwrap()
+                .unwrap(),
+            receipt
+        );
+        assert_eq!(
             drc_payment_root(&store).unwrap(),
             Hash::hash_borsh(&(PAYMENT_ROOT_DOMAIN, root_before, &event, &receipt))
         );
@@ -480,6 +524,125 @@ mod tests {
         assert!(error.contains("does not match index key"));
     }
 
+    #[test]
+    fn invoice_lookup_is_recipient_scoped_deterministic_and_fail_closed() {
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let first_merchant = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let second_merchant = derive_bip44(&seed, &Bip44Path::external(2)).unwrap();
+        let other_merchant = derive_bip44(&seed, &Bip44Path::external(3)).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis: Hash([7; 32]),
+            data_availability_network_fingerprint: None,
+        };
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &alice.address(),
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+
+        let invoice = Hash([8; 32]);
+        let mut receipts = Vec::new();
+        for (nonce, merchant, source_tag, destination_tag) in [
+            (0, &first_merchant, Some(11), 21),
+            (1, &second_merchant, Some(12), 22),
+        ] {
+            let mut tx = DrcPaymentTx::unsigned_v2(
+                alice.address(),
+                merchant.address(),
+                Amount::from_base_units(100),
+                Amount::from_base_units(1),
+                destination_tag,
+                source_tag,
+                invoice,
+                nonce,
+            );
+            sign_drc_payment_bound(&mut tx, &alice, &auth.chain_id, &auth.genesis).unwrap();
+            let mut batch = WriteBatch::new();
+            let mut journal = AccountJournal::default();
+            let receipt = apply_drc_payment(&store, &tx, &auth, &mut batch, &mut journal).unwrap();
+            store.write_batch(batch).unwrap();
+            receipts.push(receipt);
+        }
+
+        for (merchant, expected) in [
+            (&first_merchant, &receipts[0]),
+            (&second_merchant, &receipts[1]),
+        ] {
+            let first = load_drc_payment_by_invoice(&store, &merchant.address(), &invoice)
+                .unwrap()
+                .unwrap();
+            let second = load_drc_payment_by_invoice(&store, &merchant.address(), &invoice)
+                .unwrap()
+                .unwrap();
+            assert_eq!(&first, expected);
+            assert_eq!(second, first);
+        }
+        assert_ne!(receipts[0].payment_id, receipts[1].payment_id);
+        assert_eq!(receipts[0].source_tag, Some(11));
+        assert_eq!(receipts[0].destination_tag, 21);
+        assert_eq!(receipts[1].source_tag, Some(12));
+        assert_eq!(receipts[1].destination_tag, 22);
+        assert!(
+            load_drc_payment_by_invoice(&store, &other_merchant.address(), &invoice)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            load_drc_payment_by_invoice(&store, &first_merchant.address(), &Hash([7; 32]))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            load_drc_payment_by_invoice(&store, &first_merchant.address(), &Hash::ZERO)
+                .unwrap()
+                .is_none()
+        );
+
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                &payment_invoice_key(&other_merchant.address(), &invoice),
+                &[1; 31],
+            )
+            .unwrap();
+        let error = load_drc_payment_by_invoice(&store, &other_merchant.address(), &invoice)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("invoice index value length"));
+
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                &payment_invoice_key(&other_merchant.address(), &invoice),
+                Hash([6; 32]).as_bytes(),
+            )
+            .unwrap();
+        let error = load_drc_payment_by_invoice(&store, &other_merchant.address(), &invoice)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("points to a missing receipt"));
+
+        store
+            .put_cf(
+                ColumnFamily::Meta,
+                &payment_invoice_key(&other_merchant.address(), &invoice),
+                receipts[0].payment_id.as_bytes(),
+            )
+            .unwrap();
+        let error = load_drc_payment_by_invoice(&store, &other_merchant.address(), &invoice)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("does not match receipt routing"));
+    }
+
     #[cfg(feature = "rocksdb")]
     #[test]
     fn exact_delivery_receipt_persists_across_rocksdb_reopen() {
@@ -534,6 +697,12 @@ mod tests {
         let reopened = StateStore::open(&directory).unwrap();
         assert_eq!(
             load_drc_payment_receipt(&reopened, &expected.payment_id)
+                .unwrap()
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            load_drc_payment_by_invoice(&reopened, &merchant.address(), &Hash([9; 32]))
                 .unwrap()
                 .unwrap(),
             expected

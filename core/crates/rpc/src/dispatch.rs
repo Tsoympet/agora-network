@@ -129,6 +129,19 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     "receipt": receipt.as_ref().map(drc_payment_receipt_to_json),
                 }))
             }
+            RpcMethod::GetDrcPaymentByInvoice => {
+                let (recipient, invoice_id) = drc_invoice_params(&req.params)?;
+                let receipt = self
+                    .backend
+                    .get_drc_payment_by_invoice(&recipient, &invoice_id)?;
+                Ok(json!({
+                    "recipient": recipient.to_bech32(),
+                    "invoice_id": invoice_id.to_hex(),
+                    "payment_id": receipt.as_ref().map(|receipt| receipt.payment_id.to_hex()),
+                    "status": if receipt.is_some() { "settled" } else { "unknown" },
+                    "receipt": receipt.as_ref().map(drc_payment_receipt_to_json),
+                }))
+            }
             RpcMethod::GetBalance => {
                 let address = param_address(&req.params, "address")?;
                 let bal = self.backend.get_balance(&address);
@@ -510,6 +523,10 @@ fn block_param(params: &Value) -> Result<Value, RpcError> {
 
 fn param_hash(params: &Value, key: &str) -> Result<Hash, RpcError> {
     let v = single_or_named(params, key)?;
+    parse_hash_value(&v, key)
+}
+
+fn parse_hash_value(v: &Value, key: &str) -> Result<Hash, RpcError> {
     let s = v
         .as_str()
         .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be hex string")))?;
@@ -518,10 +535,41 @@ fn param_hash(params: &Value, key: &str) -> Result<Hash, RpcError> {
 
 fn param_address(params: &Value, key: &str) -> Result<Address, RpcError> {
     let v = single_or_named(params, key)?;
+    parse_address_value(&v, key)
+}
+
+fn parse_address_value(v: &Value, key: &str) -> Result<Address, RpcError> {
     let s = v
         .as_str()
         .ok_or_else(|| RpcError::InvalidParams(format!("`{key}` must be bech32 or hex string")))?;
     Address::parse(s).ok_or_else(|| RpcError::InvalidParams(format!("invalid address `{s}`")))
+}
+
+fn drc_invoice_params(params: &Value) -> Result<(Address, Hash), RpcError> {
+    let (recipient, invoice_id) = if let Some(obj) = params.as_object() {
+        let recipient = obj
+            .get("recipient")
+            .ok_or_else(|| RpcError::InvalidParams("missing `recipient`".into()))?;
+        let invoice_id = obj
+            .get("invoice_id")
+            .ok_or_else(|| RpcError::InvalidParams("missing `invoice_id`".into()))?;
+        (recipient, invoice_id)
+    } else if let Some(arr) = params.as_array() {
+        if arr.len() != 2 {
+            return Err(RpcError::InvalidParams(
+                "expected `[recipient, invoice_id]`".into(),
+            ));
+        }
+        (&arr[0], &arr[1])
+    } else {
+        return Err(RpcError::InvalidParams(
+            "expected `{recipient, invoice_id}` or `[recipient, invoice_id]`".into(),
+        ));
+    };
+    Ok((
+        parse_address_value(recipient, "recipient")?,
+        parse_hash_value(invoice_id, "invoice_id")?,
+    ))
 }
 
 fn param_amount(params: &Value, key: &str) -> Result<Amount, RpcError> {
@@ -811,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn drc_payment_query_serializes_exact_receipt_unknown_and_malformed_ids() {
+    fn drc_payment_queries_serialize_exact_receipts_and_isolate_invoices() {
         let payment = DrcPaymentTx::unsigned_v2(
             Address([1; 20]),
             Address([2; 20]),
@@ -826,6 +874,19 @@ mod tests {
         let payment_id = receipt.payment_id;
         let mut backend = InMemoryBackend::new();
         backend.insert_drc_payment_receipt(receipt);
+        let second_payment = DrcPaymentTx::unsigned_v2(
+            Address([3; 20]),
+            Address([4; 20]),
+            Amount::from_base_units(500),
+            Amount::from_base_units(8),
+            43,
+            None,
+            payment.invoice_id,
+            6,
+        );
+        let second_receipt = DrcPaymentReceipt::delivered_exact(&second_payment);
+        let second_payment_id = second_receipt.payment_id;
+        backend.insert_drc_payment_receipt(second_receipt);
         let mut rpc = RpcDispatcher::new(backend);
 
         let settled = rpc.handle(RpcRequest {
@@ -854,6 +915,39 @@ mod tests {
             })
         );
 
+        let by_invoice = rpc.handle(RpcRequest {
+            id: Some(json!(11)),
+            method: "agora_getDrcPaymentByInvoice".into(),
+            params: json!({
+                "recipient": payment.to.to_hex(),
+                "invoice_id": payment.invoice_id.to_hex(),
+            }),
+        });
+        let by_invoice_result = by_invoice.result.unwrap();
+        assert_eq!(by_invoice_result["recipient"], payment.to.to_bech32());
+        assert_eq!(by_invoice_result["invoice_id"], payment.invoice_id.to_hex());
+        assert_eq!(by_invoice_result["payment_id"], payment_id.to_hex());
+        assert_eq!(by_invoice_result["status"], "settled");
+        assert_eq!(by_invoice_result["receipt"]["source_tag"], 84);
+        assert_eq!(by_invoice_result["receipt"]["destination_tag"], 42);
+        assert!(by_invoice_result["receipt"].get("signature").is_none());
+        assert!(by_invoice_result["receipt"].get("public_key").is_none());
+
+        let same_invoice_other_recipient = rpc.handle(RpcRequest {
+            id: Some(json!(12)),
+            method: "agora_getDrcPaymentByInvoice".into(),
+            params: json!([
+                second_payment.to.to_bech32(),
+                second_payment.invoice_id.to_hex()
+            ]),
+        });
+        let other_result = same_invoice_other_recipient.result.unwrap();
+        assert_eq!(other_result["payment_id"], second_payment_id.to_hex());
+        assert_eq!(other_result["receipt"]["to"], second_payment.to.to_bech32());
+        assert_eq!(other_result["receipt"]["source_tag"], Value::Null);
+        assert_eq!(other_result["receipt"]["destination_tag"], 43);
+        assert_ne!(other_result["payment_id"], by_invoice_result["payment_id"]);
+
         let unknown_id = Hash([3; 32]);
         let unknown = rpc.handle(RpcRequest {
             id: Some(json!(2)),
@@ -869,6 +963,50 @@ mod tests {
             })
         );
 
+        let wrong_recipient = Address([5; 20]);
+        let unknown_invoice = rpc.handle(RpcRequest {
+            id: Some(json!(21)),
+            method: "agora_getDrcPaymentByInvoice".into(),
+            params: json!({
+                "recipient": wrong_recipient.to_bech32(),
+                "invoice_id": payment.invoice_id.to_hex(),
+            }),
+        });
+        assert_eq!(
+            unknown_invoice.result.unwrap(),
+            json!({
+                "recipient": wrong_recipient.to_bech32(),
+                "invoice_id": payment.invoice_id.to_hex(),
+                "payment_id": null,
+                "status": "unknown",
+                "receipt": null,
+            })
+        );
+
+        let absent_invoice = Hash([6; 32]);
+        let absent = rpc.handle(RpcRequest {
+            id: Some(json!(22)),
+            method: "agora_getDrcPaymentByInvoice".into(),
+            params: json!({
+                "recipient": payment.to.to_bech32(),
+                "invoice_id": absent_invoice.to_hex(),
+            }),
+        });
+        assert_eq!(absent.result.unwrap()["status"], "unknown");
+
+        let no_invoice = rpc.handle(RpcRequest {
+            id: Some(json!(23)),
+            method: "agora_getDrcPaymentByInvoice".into(),
+            params: json!({
+                "recipient": payment.to.to_bech32(),
+                "invoice_id": Hash::ZERO.to_hex(),
+            }),
+        });
+        let no_invoice_result = no_invoice.result.unwrap();
+        assert_eq!(no_invoice_result["status"], "unknown");
+        assert_eq!(no_invoice_result["payment_id"], Value::Null);
+        assert_eq!(no_invoice_result["receipt"], Value::Null);
+
         for malformed in ["abcd".to_string(), "g".repeat(64)] {
             let response = rpc.handle(RpcRequest {
                 id: Some(json!(3)),
@@ -878,6 +1016,29 @@ mod tests {
             let error = response.error.unwrap();
             assert_eq!(error.code, -32602);
             assert!(error.message.contains("invalid hash"));
+        }
+
+        for params in [
+            json!({
+                "recipient": "abcd",
+                "invoice_id": payment.invoice_id.to_hex(),
+            }),
+            json!({
+                "recipient": payment.to.to_bech32(),
+                "invoice_id": "abcd",
+            }),
+            json!([payment.to.to_bech32()]),
+            json!({
+                "recipient": payment.to.to_bech32(),
+                "invoice_id": 7,
+            }),
+        ] {
+            let response = rpc.handle(RpcRequest {
+                id: Some(json!(4)),
+                method: "agora_getDrcPaymentByInvoice".into(),
+                params,
+            });
+            assert_eq!(response.error.unwrap().code, -32602);
         }
     }
 

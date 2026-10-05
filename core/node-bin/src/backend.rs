@@ -18,10 +18,11 @@ use agora_state_machine::{
     build_snapshot, canonical_community_root, governance_treasury_root,
     list_grants as list_canonical_grants, list_hubs as list_canonical_hubs,
     list_missions as list_canonical_missions, list_passport_attestations,
-    load_canonical_community_summary, load_canonical_governance_policy, load_drc_payment_receipt,
-    load_epoch, load_protocol_treasuries, load_reward_pool, load_validator, lookup_tx_location,
-    meta_keys, outpoint_key, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily,
-    StakingParams, StateStore, TxAuthContext, WriteBatch,
+    load_canonical_community_summary, load_canonical_governance_policy,
+    load_drc_payment_by_invoice, load_drc_payment_receipt, load_epoch, load_protocol_treasuries,
+    load_reward_pool, load_validator, lookup_tx_location, meta_keys, outpoint_key,
+    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, StakingParams, StateStore,
+    TxAuthContext, WriteBatch,
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcPaymentReceipt,
@@ -509,6 +510,15 @@ impl RpcBackend for NodeBackend {
 
     fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError> {
         load_drc_payment_receipt(self.store.as_ref(), payment_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))
+    }
+
+    fn get_drc_payment_by_invoice(
+        &self,
+        recipient: &Address,
+        invoice_id: &Hash,
+    ) -> Result<Option<DrcPaymentReceipt>, RpcError> {
+        load_drc_payment_by_invoice(self.store.as_ref(), recipient, invoice_id)
             .map_err(|e| RpcError::Internal(e.to_string()))
     }
 
@@ -1259,6 +1269,13 @@ mod tests {
             backend.get_drc_payment(&id).unwrap().is_none(),
             "pending mempool payments are intentionally not reported as settled"
         );
+        assert!(
+            backend
+                .get_drc_payment_by_invoice(&merchant.address(), &tx.invoice_id)
+                .unwrap()
+                .is_none(),
+            "pending mempool invoices are intentionally not reported as settled"
+        );
         let template = backend.get_block_template().unwrap();
         assert_eq!(template.drc_payments, vec![tx]);
         assert_eq!(template.drc_payments[0].source_tag, Some(88));
@@ -1333,6 +1350,17 @@ mod tests {
                 .unwrap(),
             expected
         );
+        assert_eq!(
+            backend
+                .get_drc_payment_by_invoice(&merchant.address(), &payment.invoice_id)
+                .unwrap()
+                .unwrap(),
+            expected
+        );
+        assert!(backend
+            .get_drc_payment_by_invoice(&Address([7; 20]), &payment.invoice_id)
+            .unwrap()
+            .is_none());
         assert!(backend.get_drc_payment(&Hash::ZERO).unwrap().is_none());
     }
 

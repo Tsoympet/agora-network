@@ -174,6 +174,12 @@ pub trait RpcBackend: Send {
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError>;
     /// Root-committed canonical settlement only; pending is intentionally out of scope.
     fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError>;
+    /// Exact recipient/invoice lookup; never scans or reports pending payments.
+    fn get_drc_payment_by_invoice(
+        &self,
+        recipient: &Address,
+        invoice_id: &Hash,
+    ) -> Result<Option<DrcPaymentReceipt>, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
     /// Live UTXO set for wallet coin selection.
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError>;
@@ -254,6 +260,8 @@ pub struct InMemoryBackend {
     tx_index: HashMap<Hash, (Hash, u32)>,
     /// Canonical exact-delivery receipts keyed by signed payment id.
     drc_payment_receipts: HashMap<Hash, DrcPaymentReceipt>,
+    /// Recipient-scoped invoice key → signed payment id, mirroring canonical storage.
+    drc_payment_invoice_index: HashMap<(Address, Hash), Hash>,
     template_bits: u32,
     fund_nonce: u64,
     civic: Mutex<CivicSnapshot>,
@@ -269,6 +277,7 @@ impl Default for InMemoryBackend {
             mempool: HashMap::new(),
             tx_index: HashMap::new(),
             drc_payment_receipts: HashMap::new(),
+            drc_payment_invoice_index: HashMap::new(),
             template_bits: 0,
             fund_nonce: 0,
             civic: Mutex::new(CivicSnapshot::genesis(10_000)),
@@ -308,6 +317,10 @@ impl InMemoryBackend {
     }
 
     pub fn insert_drc_payment_receipt(&mut self, receipt: DrcPaymentReceipt) {
+        if receipt.invoice_id != Hash::ZERO {
+            self.drc_payment_invoice_index
+                .insert((receipt.to, receipt.invoice_id), receipt.payment_id);
+        }
         self.drc_payment_receipts
             .insert(receipt.payment_id, receipt);
     }
@@ -458,6 +471,35 @@ impl RpcBackend for InMemoryBackend {
 
     fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError> {
         Ok(self.drc_payment_receipts.get(payment_id).cloned())
+    }
+
+    fn get_drc_payment_by_invoice(
+        &self,
+        recipient: &Address,
+        invoice_id: &Hash,
+    ) -> Result<Option<DrcPaymentReceipt>, RpcError> {
+        if *invoice_id == Hash::ZERO {
+            return Ok(None);
+        }
+        let Some(payment_id) = self
+            .drc_payment_invoice_index
+            .get(&(*recipient, *invoice_id))
+        else {
+            return Ok(None);
+        };
+        let receipt = self
+            .drc_payment_receipts
+            .get(payment_id)
+            .ok_or_else(|| RpcError::Internal("DRC invoice index is missing its receipt".into()))?;
+        if receipt.to != *recipient
+            || receipt.invoice_id != *invoice_id
+            || receipt.payment_id != *payment_id
+        {
+            return Err(RpcError::Internal(
+                "DRC invoice index does not match receipt routing".into(),
+            ));
+        }
+        Ok(Some(receipt.clone()))
     }
 
     fn get_balance(&self, address: &Address) -> Amount {
