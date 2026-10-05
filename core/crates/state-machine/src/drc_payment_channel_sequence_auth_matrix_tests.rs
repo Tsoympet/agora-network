@@ -606,9 +606,9 @@ mod ticket_matrix {
             .contains(&seq));
 
         let mut batch2 = WriteBatch::new();
-        let mut acct = load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
-        acct.balance = 1;
-        crate::accounts::put_account_into(&mut batch2, NativeAssetId::DRC, &owner.address(), &acct)
+        let mut acct = load_account(&store, NativeAssetId::DRC, &dest.address()).unwrap();
+        acct.balance = 0;
+        crate::accounts::put_account_into(&mut batch2, NativeAssetId::DRC, &dest.address(), &acct)
             .unwrap();
         store.write_batch(batch2).unwrap();
         assert!(apply_drc_payment_channel_claim(
