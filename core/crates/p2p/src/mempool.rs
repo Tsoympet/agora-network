@@ -71,6 +71,8 @@ pub struct Mempool {
     pending_trust_line_create_slots: HashSet<(Address, Hash)>,
     reserved_issuer_liability_assets: HashMap<Hash, Hash>,
     pending_trust_line_balance_delta: HashMap<(Address, Hash), i128>,
+    /// One pending mempool consumer per canonical Meta mutation key byte sequence.
+    reserved_trust_line_meta_keys: HashMap<Vec<u8>, Hash>,
     /// One pending consumer per `(owner, ticket_sequence)`.
     reserved_tickets: HashSet<(Address, u64)>,
     /// How each DRC lane operation reserved its sender slot (release on eviction).
@@ -133,6 +135,7 @@ impl Mempool {
             pending_trust_line_create_slots: HashSet::new(),
             reserved_issuer_liability_assets: HashMap::new(),
             pending_trust_line_balance_delta: HashMap::new(),
+            reserved_trust_line_meta_keys: HashMap::new(),
             reserved_tickets: HashSet::new(),
             drc_slot_reservations: HashMap::new(),
             deposit_auth_required_payments: HashSet::new(),

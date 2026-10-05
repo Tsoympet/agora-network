@@ -1035,6 +1035,82 @@ mod tests {
     }
 
     #[test]
+    fn drc_trust_line_lane_activates_body_root_v16_and_commits_operation_ids() {
+        use agora_types::{
+            Address, Amount, DrcIssuedTransferTx, DrcTrustLineSetTx, Hash, IssuedAmount,
+            DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
+        };
+
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        let legacy = block.compute_body_root();
+        block.drc_trust_line_sets.push(DrcTrustLineSetTx {
+            version: DRC_TRUST_LINE_SET_TX_VERSION,
+            holder: Address([1; 20]),
+            issuer: Address([2; 20]),
+            currency: IssuedCurrencyCode([0u8; 20]),
+            limit: IssuedAmount::from_units(10),
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![],
+            signature: vec![],
+            multisign: None,
+        });
+        let set_id = block.drc_trust_line_sets[0].trust_line_set_tx_id();
+        let v16_set = block.compute_body_root();
+        block.drc_issued_transfers.push(DrcIssuedTransferTx {
+            version: DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION,
+            sender: Address([2; 20]),
+            recipient: Address([1; 20]),
+            issuer: Address([2; 20]),
+            currency: IssuedCurrencyCode([0u8; 20]),
+            amount: IssuedAmount::from_units(1),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![],
+            signature: vec![],
+            multisign: None,
+        });
+        let transfer_id = block.drc_issued_transfers[0].issued_transfer_tx_id();
+        let v16_root = block.compute_body_root();
+        assert_eq!(
+            v16_set,
+            Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V16_DOMAIN,
+                TRIDENT_BLOCK_BODY_V16_VERSION,
+                legacy,
+                vec![set_id],
+                Vec::<Hash>::new(),
+            ))
+        );
+        assert_eq!(
+            v16_root,
+            Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V16_DOMAIN,
+                TRIDENT_BLOCK_BODY_V16_VERSION,
+                legacy,
+                vec![set_id],
+                vec![transfer_id],
+            ))
+        );
+        assert_ne!(v16_root, legacy);
+    }
+
+    #[test]
     fn partial_appended_lane_length_is_not_treated_as_legacy_eof() {
         let legacy = LegacyUtxoBlock {
             header: BlockHeader {

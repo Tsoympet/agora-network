@@ -84,6 +84,21 @@ fn validate_issued_transfer_mempool_overlay(
     Ok(())
 }
 
+pub(crate) fn revalidate_trust_line_mempool(store: &StateStore, pool: &mut Mempool) {
+    let pending = pool.pending_issued_transfer_txs();
+    let stale: Vec<Hash> = pending
+        .iter()
+        .filter_map(|tx| {
+            validate_issued_transfer_mempool_overlay(store, pool, tx)
+                .err()
+                .map(|_| tx.issued_transfer_tx_id())
+        })
+        .collect();
+    for id in stale {
+        let _ = pool.remove_drc_issued_transfer(&id);
+    }
+}
+
 pub(crate) fn admit_drc_trust_line_set(
     store: &StateStore,
     mempool: &Mutex<Mempool>,

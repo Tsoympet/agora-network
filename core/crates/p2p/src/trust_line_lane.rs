@@ -1,8 +1,9 @@
 //! Mempool admission for DRC trust line set and issued-value transfer lanes.
 
 use agora_types::{
-    Address, DrcIssuedTransferTx, DrcTrustLineSetTx, Hash,
-    DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION, DRC_TRUST_LINE_SET_TICKET_VERSION,
+    drc_issued_transfer_mutation_meta_keys, drc_trust_line_set_mutation_meta_keys, Address,
+    DrcIssuedTransferTx, DrcTrustLineSetTx, Hash, DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION,
+    DRC_TRUST_LINE_SET_TICKET_VERSION,
 };
 
 use crate::P2pError;
@@ -44,6 +45,56 @@ impl Mempool {
             .unwrap_or(0)
     }
 
+    pub fn trust_line_meta_key_reserved(&self, key: &[u8]) -> bool {
+        self.reserved_trust_line_meta_keys.contains_key(key)
+    }
+
+    pub fn trust_line_meta_key_owner_tx(&self, key: &[u8]) -> Option<Hash> {
+        self.reserved_trust_line_meta_keys.get(key).copied()
+    }
+
+    pub fn revalidate_pending_trust_line_transfers<F>(&mut self, mut still_valid: F)
+    where
+        F: FnMut(&DrcIssuedTransferTx) -> bool,
+    {
+        let stale: Vec<Hash> = self
+            .drc_issued_transfer_txs
+            .iter()
+            .filter_map(|(id, tx)| (!still_valid(tx)).then_some(*id))
+            .collect();
+        for id in stale {
+            let _ = self.remove_drc_issued_transfer(&id);
+        }
+    }
+
+    pub fn pending_issued_transfer_txs(&self) -> Vec<DrcIssuedTransferTx> {
+        self.drc_issued_transfer_txs.values().cloned().collect()
+    }
+
+    fn reserve_mutation_meta_keys(
+        &mut self,
+        tx_id: Hash,
+        keys: Vec<Vec<u8>>,
+    ) -> Result<(), P2pError> {
+        for key in keys {
+            if let Some(existing) = self.reserved_trust_line_meta_keys.get(&key) {
+                if *existing != tx_id {
+                    return Err(P2pError::MempoolRejected(
+                        "trust line meta mutation already reserved".into(),
+                    ));
+                }
+                continue;
+            }
+            self.reserved_trust_line_meta_keys.insert(key, tx_id);
+        }
+        Ok(())
+    }
+
+    fn release_mutation_meta_keys_for_tx(&mut self, tx_id: &Hash) {
+        self.reserved_trust_line_meta_keys
+            .retain(|_, owner| owner != tx_id);
+    }
+
     pub fn admit_drc_trust_line_set(
         &mut self,
         tx: DrcTrustLineSetTx,
@@ -74,7 +125,13 @@ impl Mempool {
             tx.account_sequence,
         )?;
         self.reserve_trust_line_set_slot(slot, id, pending_create, pending_delete)?;
+        let meta_keys = drc_trust_line_set_mutation_meta_keys(&tx);
+        if let Err(e) = self.reserve_mutation_meta_keys(id, meta_keys) {
+            self.release_trust_line_set_slot(&slot);
+            return Err(e);
+        }
         if let Err(e) = self.reserve_drc_slot(id, tx.holder, reservation) {
+            self.release_mutation_meta_keys_for_tx(&id);
             self.release_trust_line_set_slot(&slot);
             return Err(e);
         }
@@ -140,7 +197,16 @@ impl Mempool {
             self.reserved_issuer_liability_assets.insert(asset_key, id);
         }
 
+        let meta_keys = drc_issued_transfer_mutation_meta_keys(&tx);
+        if let Err(e) = self.reserve_mutation_meta_keys(id, meta_keys) {
+            if touches_liability {
+                self.reserved_issuer_liability_assets.remove(&asset_key);
+            }
+            return Err(e);
+        }
+
         if let Err(e) = self.apply_pending_transfer_deltas(&tx, asset_key, issuer) {
+            self.release_mutation_meta_keys_for_tx(&id);
             if touches_liability {
                 self.reserved_issuer_liability_assets.remove(&asset_key);
             }
@@ -149,6 +215,7 @@ impl Mempool {
 
         if let Err(e) = self.reserve_drc_slot(id, tx.sender, reservation) {
             self.rollback_pending_transfer_deltas(&tx, asset_key, issuer);
+            self.release_mutation_meta_keys_for_tx(&id);
             if touches_liability {
                 self.reserved_issuer_liability_assets.remove(&asset_key);
             }
@@ -268,6 +335,7 @@ impl Mempool {
         let asset_key = tx.asset_id().asset_key();
         let slot = (tx.holder, asset_key);
         self.release_trust_line_set_slot(&slot);
+        self.release_mutation_meta_keys_for_tx(id);
         self.release_drc_slot(id, tx.holder);
         Some(tx)
     }
@@ -278,6 +346,7 @@ impl Mempool {
         let issuer = tx.asset_id().issuer;
         self.rollback_pending_transfer_deltas(&tx, asset_key, issuer);
         self.reserved_issuer_liability_assets.remove(&asset_key);
+        self.release_mutation_meta_keys_for_tx(id);
         self.release_drc_slot(id, tx.sender);
         Some(tx)
     }

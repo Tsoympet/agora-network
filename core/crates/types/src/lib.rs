@@ -160,6 +160,8 @@ pub use drc_ticket::{
     DRC_TICKET_CREATE_TX_TYPE, DRC_TICKET_CREATE_TX_VERSION, DRC_TICKET_STATE_VERSION,
 };
 pub use drc_trust_line::{
+    drc_issued_transfer_mutation_meta_keys, drc_trust_line_issuer_liability_meta_key,
+    drc_trust_line_live_meta_key, drc_trust_line_set_mutation_meta_keys,
     DrcIssuedTransferReceipt, DrcIssuedTransferTx, DrcIssuerLiability, DrcTrustLineError,
     DrcTrustLineLive, DrcTrustLineSetTx, IssuedAmount, IssuedAssetId, IssuedCurrencyCode,
     IssuedCurrencyError, DRC_ISSUED_TRANSFER_RECEIPT_VERSION, DRC_ISSUED_TRANSFER_SIGNING_DOMAIN,

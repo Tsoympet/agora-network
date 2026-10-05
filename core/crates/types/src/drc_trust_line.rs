@@ -439,6 +439,48 @@ pub enum DrcTrustLineError {
     BalanceExceedsLimit,
 }
 
+/// Meta key prefix for live trust line records (matches canonical state layout).
+pub const DRC_TRUST_LINE_LINE_META_PREFIX: &[u8] = b"trust/drc/line/";
+/// Meta key prefix for issuer outstanding liability.
+pub const DRC_TRUST_LINE_LIABILITY_META_PREFIX: &[u8] = b"trust/drc/liability/";
+
+/// Canonical Meta CF key for `(holder, issued asset)` live line state.
+pub fn drc_trust_line_live_meta_key(holder: &Address, asset: &IssuedAssetId) -> Vec<u8> {
+    let mut key = Vec::with_capacity(DRC_TRUST_LINE_LINE_META_PREFIX.len() + 20 + 32);
+    key.extend_from_slice(DRC_TRUST_LINE_LINE_META_PREFIX);
+    key.extend_from_slice(&holder.0);
+    key.extend_from_slice(asset.asset_key().as_bytes());
+    key
+}
+
+/// Canonical Meta CF key for issuer liability on an issued asset.
+pub fn drc_trust_line_issuer_liability_meta_key(asset: &IssuedAssetId) -> Vec<u8> {
+    let mut key = Vec::with_capacity(DRC_TRUST_LINE_LIABILITY_META_PREFIX.len() + 32);
+    key.extend_from_slice(DRC_TRUST_LINE_LIABILITY_META_PREFIX);
+    key.extend_from_slice(asset.asset_key().as_bytes());
+    key
+}
+
+/// Mempool / admission reservation keys touched by a trust line set (line record only).
+pub fn drc_trust_line_set_mutation_meta_keys(tx: &DrcTrustLineSetTx) -> Vec<Vec<u8>> {
+    let asset = tx.asset_id();
+    vec![drc_trust_line_live_meta_key(&tx.holder, &asset)]
+}
+
+/// Mempool / admission reservation keys for source, destination, and liability when changed.
+pub fn drc_issued_transfer_mutation_meta_keys(tx: &DrcIssuedTransferTx) -> Vec<Vec<u8>> {
+    let asset = tx.asset_id();
+    let issuer = asset.issuer;
+    let mut keys = vec![drc_trust_line_live_meta_key(&tx.sender, &asset)];
+    if tx.recipient != tx.sender {
+        keys.push(drc_trust_line_live_meta_key(&tx.recipient, &asset));
+    }
+    if tx.sender == issuer || tx.recipient == issuer {
+        keys.push(drc_trust_line_issuer_liability_meta_key(&asset));
+    }
+    keys
+}
+
 // Borsh for txs with multisign trailer
 impl BorshSerialize for DrcTrustLineSetTx {
     fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
