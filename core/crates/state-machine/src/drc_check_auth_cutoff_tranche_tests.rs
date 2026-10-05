@@ -133,6 +133,7 @@ mod cutoff_deterministic {
         apply_drc_check_cash(store, &cash, ctx, score, &mut batch, &mut journal).is_ok()
     }
 
+    #[allow(dead_code)]
     fn apply_cancel_at(
         store: &StateStore,
         id: Hash,
