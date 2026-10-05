@@ -33,6 +33,8 @@ pub struct BlockAcceptanceRecord {
     pub drc_policy_statuses: Vec<TransactionAcceptance>,
     /// Aligned to `block.drc_deposit_preauths`.
     pub drc_deposit_preauth_statuses: Vec<TransactionAcceptance>,
+    /// Aligned to `block.drc_regular_keys`.
+    pub drc_regular_key_statuses: Vec<TransactionAcceptance>,
 }
 
 #[derive(Debug, Clone, BorshDeserialize)]
@@ -91,10 +93,37 @@ struct MultiLaneV6AcceptanceRecord {
     drc_policy_statuses: Vec<TransactionAcceptance>,
 }
 
+#[derive(Debug, Clone, BorshDeserialize)]
+struct MultiLaneV7AcceptanceRecord {
+    block_hash: Hash,
+    statuses: Vec<TransactionAcceptance>,
+    account_statuses: Vec<TransactionAcceptance>,
+    stake_statuses: Vec<TransactionAcceptance>,
+    execution_statuses: Vec<TransactionAcceptance>,
+    payment_statuses: Vec<TransactionAcceptance>,
+    data_commitment_statuses: Vec<TransactionAcceptance>,
+    drc_policy_statuses: Vec<TransactionAcceptance>,
+    drc_deposit_preauth_statuses: Vec<TransactionAcceptance>,
+}
+
 impl BlockAcceptanceRecord {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(rec) = Self::try_from_slice(bytes) {
             return Ok(rec);
+        }
+        if let Ok(v7) = MultiLaneV7AcceptanceRecord::try_from_slice(bytes) {
+            return Ok(Self {
+                block_hash: v7.block_hash,
+                statuses: v7.statuses,
+                account_statuses: v7.account_statuses,
+                stake_statuses: v7.stake_statuses,
+                execution_statuses: v7.execution_statuses,
+                payment_statuses: v7.payment_statuses,
+                data_commitment_statuses: v7.data_commitment_statuses,
+                drc_policy_statuses: v7.drc_policy_statuses,
+                drc_deposit_preauth_statuses: v7.drc_deposit_preauth_statuses,
+                drc_regular_key_statuses: Vec::new(),
+            });
         }
         if let Ok(v6) = MultiLaneV6AcceptanceRecord::try_from_slice(bytes) {
             return Ok(Self {
@@ -107,6 +136,7 @@ impl BlockAcceptanceRecord {
                 data_commitment_statuses: v6.data_commitment_statuses,
                 drc_policy_statuses: v6.drc_policy_statuses,
                 drc_deposit_preauth_statuses: Vec::new(),
+                drc_regular_key_statuses: Vec::new(),
             });
         }
         if let Ok(v5) = MultiLaneV5AcceptanceRecord::try_from_slice(bytes) {
@@ -120,6 +150,7 @@ impl BlockAcceptanceRecord {
                 data_commitment_statuses: v5.data_commitment_statuses,
                 drc_policy_statuses: Vec::new(),
                 drc_deposit_preauth_statuses: Vec::new(),
+                drc_regular_key_statuses: Vec::new(),
             });
         }
         if let Ok(v4) = MultiLaneV4AcceptanceRecord::try_from_slice(bytes) {
@@ -133,6 +164,7 @@ impl BlockAcceptanceRecord {
                 data_commitment_statuses: Vec::new(),
                 drc_policy_statuses: Vec::new(),
                 drc_deposit_preauth_statuses: Vec::new(),
+                drc_regular_key_statuses: Vec::new(),
             });
         }
         if let Ok(v3) = MultiLaneV3AcceptanceRecord::try_from_slice(bytes) {
@@ -146,6 +178,7 @@ impl BlockAcceptanceRecord {
                 data_commitment_statuses: Vec::new(),
                 drc_policy_statuses: Vec::new(),
                 drc_deposit_preauth_statuses: Vec::new(),
+                drc_regular_key_statuses: Vec::new(),
             });
         }
         if let Ok(v2) = MultiLaneV2AcceptanceRecord::try_from_slice(bytes) {
@@ -159,6 +192,7 @@ impl BlockAcceptanceRecord {
                 data_commitment_statuses: Vec::new(),
                 drc_policy_statuses: Vec::new(),
                 drc_deposit_preauth_statuses: Vec::new(),
+                drc_regular_key_statuses: Vec::new(),
             });
         }
         let legacy = LegacyBlockAcceptanceRecord::try_from_slice(bytes)
@@ -173,6 +207,7 @@ impl BlockAcceptanceRecord {
             data_commitment_statuses: Vec::new(),
             drc_policy_statuses: Vec::new(),
             drc_deposit_preauth_statuses: Vec::new(),
+            drc_regular_key_statuses: Vec::new(),
         })
     }
 
@@ -219,6 +254,11 @@ impl BlockAcceptanceRecord {
                 .count()
             + self
                 .drc_deposit_preauth_statuses
+                .iter()
+                .filter(|s| s.is_accepted())
+                .count()
+            + self
+                .drc_regular_key_statuses
                 .iter()
                 .filter(|s| s.is_accepted())
                 .count()
@@ -299,10 +339,11 @@ mod tests {
             data_commitment_statuses: vec![TransactionAcceptance::ExactDuplicate],
             drc_policy_statuses: vec![TransactionAcceptance::Accepted],
             drc_deposit_preauth_statuses: vec![TransactionAcceptance::Accepted],
+            drc_regular_key_statuses: vec![TransactionAcceptance::Accepted],
         };
         store_acceptance(&store, &rec.block_hash, &rec).unwrap();
         let loaded = load_acceptance(&store, &rec.block_hash).unwrap().unwrap();
-        assert_eq!(loaded.accepted_count(), 4);
+        assert_eq!(loaded.accepted_count(), 5);
         let bm = loaded.bitmap();
         assert_eq!(bm.get(0), Some(true));
         assert_eq!(bm.get(1), Some(false));

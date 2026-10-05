@@ -3,7 +3,7 @@
 //! TLT remains UTXO. OVL and DRC balances + nonces live here and commit into the
 //! same atomic [`WriteBatch`] as UTXO apply when callers include account ops.
 
-use agora_crypto::verify_account_transfer_bound;
+use crate::drc_account_auth::verify_drc_account_transfer_operation;
 use agora_types::{AccountTransfer, Address, Amount, Hash, NativeAssetId};
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -142,8 +142,7 @@ pub(crate) fn apply_account_transfer_checked(
 
     // Auth before any mutation.
     if let Some(ctx) = auth {
-        verify_account_transfer_bound(tx, &ctx.chain_id, &ctx.genesis)
-            .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+        verify_drc_account_transfer_operation(store, tx, ctx)?;
     } else if tx.public_key.is_empty() && tx.signature.is_empty() {
         // Unsigned only allowed in tests that pass auth=None explicitly — still
         // require from address consistency via empty skip; production callers

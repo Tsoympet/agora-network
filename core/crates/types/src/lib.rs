@@ -10,6 +10,7 @@ mod block;
 mod data_availability;
 mod drc_deposit_preauth;
 mod drc_policy;
+mod drc_regular_key;
 mod execution;
 mod finality;
 mod hash;
@@ -42,6 +43,11 @@ pub use drc_policy::{
     DRC_ACCOUNT_POLICY_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_STATE_VERSION,
     DRC_ACCOUNT_POLICY_TX_TYPE, DRC_ACCOUNT_POLICY_TX_VERSION,
     DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_V2_SIGNING_DOMAIN,
+};
+pub use drc_regular_key::{
+    DrcAccountRegularKey, DrcRegularKeyAction, DrcRegularKeyError, DrcRegularKeyTx,
+    DRC_REGULAR_KEY_SIGNING_DOMAIN, DRC_REGULAR_KEY_STATE_VERSION, DRC_REGULAR_KEY_TX_TYPE,
+    DRC_REGULAR_KEY_TX_VERSION,
 };
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
@@ -142,6 +148,7 @@ mod tests {
             data_commitments: vec![],
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);

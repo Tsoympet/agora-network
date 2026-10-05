@@ -1,6 +1,6 @@
 //! Recipient-controlled, address-based DRC deposit-preauthorization state.
 
-use agora_crypto::verify_drc_deposit_preauth_bound;
+use crate::drc_account_auth::verify_drc_deposit_preauth_operation;
 use agora_types::{
     Address, DrcDepositPreauth, DrcDepositPreauthAction, DrcDepositPreauthTx, Hash, NativeAssetId,
 };
@@ -127,8 +127,7 @@ pub fn apply_drc_deposit_preauth(
 ) -> Result<bool, StateError> {
     tx.validate_structure()
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
-    verify_drc_deposit_preauth_bound(tx, &auth.chain_id, &auth.genesis)
-        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    verify_drc_deposit_preauth_operation(store, tx, auth)?;
 
     if !account_exists(store, NativeAssetId::DRC, &tx.owner)? {
         return Err(StateError::InvalidTx(

@@ -1,6 +1,6 @@
 //! Recipient-controlled DRC account-policy state and transition.
 
-use agora_crypto::verify_drc_account_policy_bound;
+use crate::drc_account_auth::verify_drc_account_policy_operation;
 use agora_types::{
     Address, DrcAccountPolicy, DrcAccountPolicyTx, Hash, NativeAssetId,
     DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION, DRC_ACCOUNT_POLICY_STATE_VERSION,
@@ -95,8 +95,7 @@ pub fn apply_drc_account_policy(
 ) -> Result<DrcAccountPolicy, StateError> {
     tx.validate_version()
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
-    verify_drc_account_policy_bound(tx, &auth.chain_id, &auth.genesis)
-        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    verify_drc_account_policy_operation(store, tx, auth)?;
 
     if tx.action.deposit_auth_requirement().is_some()
         && !account_exists(store, NativeAssetId::DRC, &tx.account)?

@@ -101,8 +101,9 @@ payments are unaffected. Clearing the flag restores untagged receipt.
 The canonical same-block lane order is:
 
 ```text
-account transfers → OVL executions → stake ops → DRC policy ops
-  → DRC deposit-preauthorization ops → DRC payments → data commitments
+account transfers → OVL executions → stake ops → DRC regular-key ops
+  → DRC policy ops → DRC deposit-preauthorization ops → DRC payments
+  → data commitments
 ```
 
 Policy operations therefore govern all later payments in the same block.
@@ -327,7 +328,49 @@ channels, trust lines, issued currencies, a DEX/AMM, NFTs, credentials,
 memos-as-execution, Hooks/EVM, or contracts. It provides no XRP/XRPL wire or
 feature parity, and DRC is not a stablecoin by virtue of this payment module.
 
+## secp256k1 regular keys (bounded)
+
+`DrcRegularKeyTx` v1 is a dedicated set/clear operation for one rotatable
+secondary key per DRC account. It is never a payment and has no privileged RPC
+mutation. Signatures bind domain, chain ID, genesis hash, operation type,
+version, owner, action, canonical regular-key identity (33-byte compressed
+secp256k1 public key and derived address for `set`; empty for `clear`), shared
+nonce, and fee.
+
+The master-derived address is always authorized. The installed regular key may
+also authorize every in-scope DRC account operation: DRC account transfers, DRC
+stake operations, policy, deposit preauthorization, payments, and further
+regular-key rotation/clear. OVL lanes remain master-only in this slice.
+
+Pinned against `rippled` 2.5.0 `SetRegularKey` / `RegularKey` semantics with
+explicit deviations:
+
+- secp256k1 only; no Ed25519 or XRPL wire compatibility
+- master-key disable, signer lists, and multisig are excluded (no-lockout invariant)
+- master cannot be installed as its own regular key; zero keys are rejected
+- the current regular key may rotate or clear itself; the master can always recover
+- Agora uses address-derived identity plus an explicit 33-byte pubkey binding on set
+- rejected operations charge no fee; there is no XRPL `tec` class emulation
+
+Canonical same-block order:
+
+```text
+account transfers → OVL executions → stake ops → DRC regular-key ops
+  → DRC policy ops → DRC deposit-preauthorization ops → DRC payments
+```
+
+Regular-key state commits to `agora-drc-regular-key-root-v1` inside composed
+state root `agora-trident-state-root-v9`. Body commitment uses
+`agora-block-body-v9` when the lane is non-empty. Trident protocol v11,
+state transition `agora-trident-state-v12`, and Experimental datadir schema v15
+isolate this slice. Frozen payment/policy/preauth encodings remain readable.
+
+`agora_submitDrcRegularKey` admits a fully signed operation.
+`agora_getDrcAccountKeys` returns `regular_key` and `account_nonce` for a known
+DRC account, or `unknown` when absent. Malformed inputs return `-32602`.
+
 ## Next bounded slice
 
-Credential-based `DepositPreauth`, recurring pull payments, and cross-asset
-routing remain out of scope for the native DRC payment lane.
+Master-key disable with signer-list recovery, credential-based `DepositPreauth`,
+recurring pull payments, and cross-asset routing remain out of scope for the
+native DRC payment lane.

@@ -2,8 +2,8 @@
 
 use agora_types::{DrcDepositPreauthTx, Hash};
 
-use crate::address::address_from_pubkey;
-use crate::{CryptoError, KeyPair, PublicKeyBytes, SignatureBytes};
+use crate::drc_operation::verify_bound_secp256k1;
+use crate::{CryptoError, KeyPair};
 
 pub fn sign_drc_deposit_preauth_bound(
     tx: &mut DrcDepositPreauthTx,
@@ -13,10 +13,6 @@ pub fn sign_drc_deposit_preauth_bound(
 ) -> Result<(), CryptoError> {
     tx.validate_structure()
         .map_err(|_| CryptoError::InvalidTransactionAuth)?;
-    if keypair.address() != tx.owner {
-        return Err(CryptoError::InvalidTransactionAuth);
-    }
-
     let signature = keypair.sign(&tx.signing_bytes_bound(chain_id, genesis))?;
     tx.public_key = keypair.public_key_bytes().to_vec();
     tx.signature = signature.to_vec();
@@ -30,22 +26,11 @@ pub fn verify_drc_deposit_preauth_bound(
 ) -> Result<(), CryptoError> {
     tx.validate_structure()
         .map_err(|_| CryptoError::InvalidTransactionAuth)?;
-    if tx.public_key.len() != 33 || tx.signature.len() != 64 {
-        return Err(CryptoError::InvalidTransactionAuth);
-    }
-
-    let mut public_key: PublicKeyBytes = [0; 33];
-    public_key.copy_from_slice(&tx.public_key);
-    let mut signature: SignatureBytes = [0; 64];
-    signature.copy_from_slice(&tx.signature);
-    KeyPair::verify(
-        &public_key,
+    verify_bound_secp256k1(
+        &tx.public_key,
+        &tx.signature,
         &tx.signing_bytes_bound(chain_id, genesis),
-        &signature,
     )?;
-    if address_from_pubkey(&public_key) != tx.owner {
-        return Err(CryptoError::InvalidTransactionAuth);
-    }
     Ok(())
 }
 
@@ -135,33 +120,28 @@ mod tests {
     }
 
     #[test]
-    fn wrong_owner_self_zero_and_future_versions_are_rejected() {
+    fn malformed_self_zero_and_future_versions_are_rejected() {
         let owner = keypair(1);
         let other = keypair(2);
-        let mut wrong_owner =
+        let valid =
             DrcDepositPreauthTx::authorize(owner.address(), other.address(), Amount::ZERO, 0);
-        assert!(
-            sign_drc_deposit_preauth_bound(&mut wrong_owner, &other, "agora-dev", &Hash::ZERO)
-                .is_err()
-        );
-        assert!(wrong_owner.public_key.is_empty());
 
         for mut malformed in [
             DrcDepositPreauthTx {
                 version: 0,
-                ..wrong_owner.clone()
+                ..valid.clone()
             },
             DrcDepositPreauthTx {
                 version: agora_types::DRC_DEPOSIT_PREAUTH_TX_VERSION + 1,
-                ..wrong_owner.clone()
+                ..valid.clone()
             },
             DrcDepositPreauthTx {
                 authorized_source: owner.address(),
-                ..wrong_owner.clone()
+                ..valid.clone()
             },
             DrcDepositPreauthTx {
                 authorized_source: agora_types::Address::ZERO,
-                ..wrong_owner
+                ..valid
             },
         ] {
             assert!(sign_drc_deposit_preauth_bound(

@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use agora_types::{
     AccountTransfer, Address, Block, DrcAccountPolicyTx, DrcDepositPreauthAction,
-    DrcDepositPreauthTx, DrcPaymentTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
-    SignedStakeTx, Transaction,
+    DrcDepositPreauthTx, DrcPaymentTx, DrcRegularKeyTx, Hash, NativeAssetId, OutPoint,
+    OvlExecutionTx, SignedStakeTx, Transaction,
 };
 
 use crate::P2pError;
@@ -28,6 +28,7 @@ pub struct Mempool {
     payment_txs: HashMap<Hash, DrcPaymentTx>,
     drc_policy_txs: HashMap<Hash, DrcAccountPolicyTx>,
     drc_deposit_preauth_txs: HashMap<Hash, DrcDepositPreauthTx>,
+    drc_regular_key_txs: HashMap<Hash, DrcRegularKeyTx>,
     /// Payments admitted while canonical or pending DepositAuth is enabled.
     deposit_auth_required_payments: HashSet<Hash>,
     /// Payments whose source has a canonical dormant/active preauthorization.
@@ -49,6 +50,7 @@ impl Mempool {
             payment_txs: HashMap::new(),
             drc_policy_txs: HashMap::new(),
             drc_deposit_preauth_txs: HashMap::new(),
+            drc_regular_key_txs: HashMap::new(),
             deposit_auth_required_payments: HashSet::new(),
             deposit_preauthorized_payments: HashSet::new(),
             reserved_accounts: HashSet::new(),
@@ -64,6 +66,7 @@ impl Mempool {
             + self.payment_txs.len()
             + self.drc_policy_txs.len()
             + self.drc_deposit_preauth_txs.len()
+            + self.drc_regular_key_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -78,6 +81,7 @@ impl Mempool {
             || self.payment_txs.contains_key(tx_id)
             || self.drc_policy_txs.contains_key(tx_id)
             || self.drc_deposit_preauth_txs.contains_key(tx_id)
+            || self.drc_regular_key_txs.contains_key(tx_id)
     }
 
     /// Outpoints already claimed by mempool transactions.
@@ -380,6 +384,24 @@ impl Mempool {
     }
 
     /// Admit a pre-validated owner-authorized DRC deposit preauthorization.
+    pub fn admit_drc_regular_key(&mut self, tx: DrcRegularKeyTx) -> Result<Hash, P2pError> {
+        let id = tx.regular_key_tx_id();
+        if self.drc_regular_key_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let key = (NativeAssetId::DRC, tx.owner);
+        if !self.reserved_accounts.insert(key) {
+            return Err(P2pError::MempoolRejected(
+                "account already has a pending nonce".into(),
+            ));
+        }
+        self.drc_regular_key_txs.insert(id, tx);
+        Ok(id)
+    }
+
     pub fn admit_drc_deposit_preauth(&mut self, tx: DrcDepositPreauthTx) -> Result<Hash, P2pError> {
         let id = tx.preauth_tx_id();
         if self.drc_deposit_preauth_txs.contains_key(&id) {
@@ -576,6 +598,22 @@ impl Mempool {
         txs
     }
 
+    pub fn select_drc_regular_keys(&self, max: usize) -> Vec<DrcRegularKeyTx> {
+        let mut txs: Vec<_> = self.drc_regular_key_txs.values().cloned().collect();
+        txs.sort_by(|a, b| {
+            b.fee
+                .as_base_units()
+                .cmp(&a.fee.as_base_units())
+                .then_with(|| {
+                    a.regular_key_tx_id()
+                        .as_bytes()
+                        .cmp(b.regular_key_tx_id().as_bytes())
+                })
+        });
+        txs.truncate(max);
+        txs
+    }
+
     pub fn select_drc_account_policies(&self, max: usize) -> Vec<DrcAccountPolicyTx> {
         let mut txs: Vec<_> = self.drc_policy_txs.values().cloned().collect();
         txs.sort_by(|a, b| {
@@ -643,6 +681,14 @@ impl Mempool {
             let id = tx.payment_id();
             self.remove_payment(&id);
         }
+        for tx in &block.drc_regular_keys {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
+            let id = tx.regular_key_tx_id();
+            if self.drc_regular_key_txs.remove(&id).is_some() {
+                self.reserved_accounts
+                    .remove(&(NativeAssetId::DRC, tx.owner));
+            }
+        }
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
             let id = tx.policy_tx_id();
@@ -682,6 +728,8 @@ impl Mempool {
         self.drc_policy_txs
             .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.account)));
         self.drc_deposit_preauth_txs
+            .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.owner)));
+        self.drc_regular_key_txs
             .retain(|_, tx| !consumed_account_nonces.contains(&(NativeAssetId::DRC, tx.owner)));
         for key in consumed_account_nonces {
             self.reserved_accounts.remove(&key);
@@ -940,6 +988,7 @@ mod tests {
             data_commitments: vec![],
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -1002,6 +1051,7 @@ mod tests {
             data_commitments: vec![],
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));
