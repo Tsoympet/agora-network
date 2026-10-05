@@ -119,10 +119,31 @@ mod tests {
         assert!(sign_drc_payment_bound(&mut legacy, &keypair, "agora-dev", &Hash::ZERO).is_err());
 
         let mut unsupported = payment_v2(keypair.address(), None);
-        unsupported.version = agora_types::DRC_PAYMENT_VERSION + 1;
+        unsupported.version = agora_types::DRC_PAYMENT_TICKET_VERSION + 1;
         assert!(
             sign_drc_payment_bound(&mut unsupported, &keypair, "agora-dev", &Hash::ZERO).is_err()
         );
+    }
+
+    #[test]
+    fn drc_payment_ticket_version_requires_bound_account_sequence() {
+        let keypair = keypair();
+        let genesis = Hash([7; 32]);
+        let mut tx = DrcPaymentTx::unsigned_v4(
+            keypair.address(),
+            Address([2; 20]),
+            Amount::from_base_units(3),
+            Amount::from_base_units(1),
+            None,
+            None,
+            Hash::ZERO,
+            0,
+            None,
+        );
+        tx.version = agora_types::DRC_PAYMENT_TICKET_VERSION;
+        tx.account_sequence = Some(agora_types::DrcAccountSequenceSelector::nonce(0));
+        sign_drc_payment_bound(&mut tx, &keypair, "agora-dev", &genesis).unwrap();
+        verify_drc_payment_bound(&tx, "agora-dev", &genesis).unwrap();
     }
 
     #[test]

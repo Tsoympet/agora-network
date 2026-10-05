@@ -18,6 +18,7 @@ use crate::drc_deposit_preauth::drc_deposit_preauth_root;
 use crate::drc_policy::drc_account_policy_root;
 use crate::drc_regular_key::drc_regular_key_root;
 use crate::drc_signer_list::drc_signer_list_root;
+use crate::drc_ticket::drc_ticket_root;
 use crate::finality_store::load_finalized_blue_score;
 use crate::governance_state::governance_treasury_root;
 use crate::payments::drc_payment_root;
@@ -88,6 +89,7 @@ pub fn compose_trident_state_root(
     let drc_stake = build_snapshot(store, NativeAssetId::DRC, epoch_drc)?.commitment();
     let drc_regular_keys = drc_regular_key_root(store)?;
     let drc_signer_lists = drc_signer_list_root(store)?;
+    let drc_tickets = drc_ticket_root(store)?;
     let drc_account_policies = drc_account_policy_root(store)?;
     let drc_deposit_preauths = drc_deposit_preauth_root(store)?;
     let drc_payments = drc_payment_root(store)?;
@@ -107,6 +109,7 @@ pub fn compose_trident_state_root(
         drc_stake,
         drc_regular_keys,
         drc_signer_lists,
+        drc_tickets,
         drc_account_policies,
         drc_deposit_preauths,
         drc_payments,

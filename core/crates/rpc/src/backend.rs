@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use agora_governance::{
@@ -7,8 +7,8 @@ use agora_governance::{
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
-    DrcDepositPreauthTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash,
-    OutPoint, OvlExecutionTx, Transaction, TxOut,
+    DrcDepositPreauthTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -185,6 +185,8 @@ pub trait RpcBackend: Send {
     fn submit_drc_deposit_preauth(&mut self, tx: DrcDepositPreauthTx) -> Result<Hash, RpcError>;
     fn submit_drc_regular_key(&mut self, tx: DrcRegularKeyTx) -> Result<Hash, RpcError>;
     fn submit_drc_signer_list(&mut self, tx: DrcSignerListTx) -> Result<Hash, RpcError>;
+    fn submit_drc_ticket_create(&mut self, tx: DrcTicketCreateTx) -> Result<Hash, RpcError>;
+    fn get_drc_ticket(&self, owner: &Address, ticket_sequence: u64) -> Result<Value, RpcError>;
     /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
     fn get_drc_account_policy(
         &self,
@@ -299,6 +301,8 @@ pub struct InMemoryBackend {
     drc_account_policies: HashMap<Address, (DrcAccountPolicy, u64)>,
     /// Exact owner/source DepositAuth statuses for RPC tests.
     drc_deposit_preauths: HashMap<(Address, Address), DrcDepositPreauthStatus>,
+    /// Live `(owner, ticket_sequence)` pairs for `agora_getDrcTicket` RPC tests.
+    drc_live_tickets: HashSet<(Address, u64)>,
     template_bits: u32,
     fund_nonce: u64,
     civic: Mutex<CivicSnapshot>,
@@ -317,6 +321,7 @@ impl Default for InMemoryBackend {
             drc_payment_invoice_index: HashMap::new(),
             drc_account_policies: HashMap::new(),
             drc_deposit_preauths: HashMap::new(),
+            drc_live_tickets: HashSet::new(),
             template_bits: 0,
             fund_nonce: 0,
             civic: Mutex::new(CivicSnapshot::genesis(10_000)),
@@ -371,6 +376,10 @@ impl InMemoryBackend {
         nonce: u64,
     ) {
         self.drc_account_policies.insert(account, (policy, nonce));
+    }
+
+    pub fn insert_drc_live_ticket(&mut self, owner: Address, ticket_sequence: u64) {
+        self.drc_live_tickets.insert((owner, ticket_sequence));
     }
 
     pub fn insert_drc_deposit_preauth(
@@ -551,6 +560,32 @@ impl RpcBackend for InMemoryBackend {
         ))
     }
 
+    fn submit_drc_ticket_create(&mut self, _tx: DrcTicketCreateTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC ticket creates".into(),
+        ))
+    }
+
+    fn get_drc_ticket(&self, owner: &Address, ticket_sequence: u64) -> Result<Value, RpcError> {
+        if *owner == Address::ZERO {
+            return Err(RpcError::InvalidParams("zero DRC ticket owner".into()));
+        }
+        let live = self.drc_live_tickets.contains(&(*owner, ticket_sequence));
+        Ok(if live {
+            json!({
+                "owner": owner.to_bech32(),
+                "ticket_sequence": ticket_sequence,
+                "status": "live",
+            })
+        } else {
+            json!({
+                "owner": owner.to_bech32(),
+                "ticket_sequence": ticket_sequence,
+                "status": "unknown",
+            })
+        })
+    }
+
     fn get_drc_account_policy(
         &self,
         account: &Address,
@@ -678,6 +713,7 @@ impl RpcBackend for InMemoryBackend {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         })
     }

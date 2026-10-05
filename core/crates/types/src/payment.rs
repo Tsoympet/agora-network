@@ -6,6 +6,7 @@ use thiserror::Error;
 use ts_rs::TS;
 
 use crate::drc_multisign::{read_multisign_trailer, write_multisign_trailer, DrcMultisignAuth};
+use crate::drc_sequence::DrcAccountSequenceSelector;
 use crate::{Address, Amount, Hash};
 
 /// Frozen legacy payment envelope version.
@@ -16,6 +17,8 @@ pub const DRC_PAYMENT_SOURCE_TAG_VERSION: u32 = 2;
 pub const DRC_PAYMENT_DESTINATION_TAG_VERSION: u32 = 3;
 /// Current payment envelope; v4 adds an optional last-valid GHOSTDAG blue score.
 pub const DRC_PAYMENT_VERSION: u32 = 4;
+/// Ticket-aware payment operations bind an explicit sequence selector.
+pub const DRC_PAYMENT_TICKET_VERSION: u32 = 5;
 /// Frozen exact-delivery receipt version for payment v1/v2.
 pub const DRC_PAYMENT_RECEIPT_LEGACY_VERSION: u32 = 1;
 /// Frozen exact-delivery receipt version for payment v3.
@@ -30,6 +33,8 @@ pub const DRC_PAYMENT_V2_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v2"
 pub const DRC_PAYMENT_V3_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v3";
 /// Domain separator for v4 network-bound DRC payment signatures.
 pub const DRC_PAYMENT_V4_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v4";
+/// Domain separator for v5 network-bound DRC payment signatures.
+pub const DRC_PAYMENT_V5_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-payment-v5";
 /// Backward-compatible name for the frozen v1 signing domain.
 pub const DRC_PAYMENT_SIGNING_DOMAIN: &[u8] = DRC_PAYMENT_V1_SIGNING_DOMAIN;
 
@@ -50,6 +55,8 @@ pub struct DrcPaymentTx {
     /// `Hash::ZERO` indicates that the payment is not associated with an invoice.
     pub invoice_id: Hash,
     pub nonce: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_sequence: Option<DrcAccountSequenceSelector>,
     /// Inclusive containing-block GHOSTDAG blue-score cutoff. `None` never expires.
     #[serde(default)]
     pub last_valid_blue_score: Option<u64>,
@@ -61,6 +68,13 @@ pub struct DrcPaymentTx {
 
 impl DrcPaymentTx {
     pub fn validate_envelope_version(&self) -> Result<(), DrcPaymentEnvelopeError> {
+        if self.version < DRC_PAYMENT_TICKET_VERSION
+            && self
+                .account_sequence
+                .is_some_and(|s| s.kind == crate::drc_sequence::DrcAccountSequence::Ticket)
+        {
+            return Err(DrcPaymentEnvelopeError::TicketSelectorOnLegacyVersion);
+        }
         if self.version < DRC_PAYMENT_VERSION && self.last_valid_blue_score.is_some() {
             return Err(DrcPaymentEnvelopeError::LegacyExpiry);
         }
@@ -71,7 +85,8 @@ impl DrcPaymentTx {
             DRC_PAYMENT_LEGACY_VERSION
             | DRC_PAYMENT_SOURCE_TAG_VERSION
             | DRC_PAYMENT_DESTINATION_TAG_VERSION
-            | DRC_PAYMENT_VERSION => Ok(()),
+            | DRC_PAYMENT_VERSION
+            | DRC_PAYMENT_TICKET_VERSION => Ok(()),
             version => Err(DrcPaymentEnvelopeError::UnsupportedVersion(version)),
         }
     }
@@ -128,6 +143,28 @@ impl DrcPaymentTx {
                 self.nonce,
             ))
             .expect("borsh serialize DRC payment v3 body");
+        }
+
+        if self.version >= DRC_PAYMENT_TICKET_VERSION {
+            let sequence = self
+                .account_sequence
+                .expect("payment v5 requires account_sequence");
+            return borsh::to_vec(&(
+                DRC_PAYMENT_V5_SIGNING_DOMAIN,
+                chain_id,
+                genesis.as_bytes(),
+                self.version,
+                self.from,
+                self.to,
+                self.amount,
+                self.fee,
+                self.destination_tag,
+                self.source_tag,
+                self.invoice_id,
+                sequence,
+                self.last_valid_blue_score,
+            ))
+            .expect("borsh serialize DRC payment v5 body");
         }
 
         borsh::to_vec(&(
@@ -195,6 +232,7 @@ impl DrcPaymentTx {
             source_tag: None,
             invoice_id,
             nonce,
+            account_sequence: None,
             last_valid_blue_score: None,
             public_key: Vec::new(),
             signature: Vec::new(),
@@ -224,6 +262,7 @@ impl DrcPaymentTx {
             source_tag,
             invoice_id,
             nonce,
+            account_sequence: None,
             last_valid_blue_score: None,
             public_key: Vec::new(),
             signature: Vec::new(),
@@ -253,6 +292,7 @@ impl DrcPaymentTx {
             source_tag,
             invoice_id,
             nonce,
+            account_sequence: None,
             last_valid_blue_score: None,
             public_key: Vec::new(),
             signature: Vec::new(),
@@ -283,6 +323,7 @@ impl DrcPaymentTx {
             source_tag,
             invoice_id,
             nonce,
+            account_sequence: None,
             last_valid_blue_score,
             public_key: Vec::new(),
             signature: Vec::new(),
@@ -300,6 +341,8 @@ pub enum DrcPaymentEnvelopeError {
     LegacySourceTag,
     #[error("DRC payment v1-v3 cannot carry a last-valid blue score")]
     LegacyExpiry,
+    #[error("ticket sequence selector requires a ticket-capable operation version")]
+    TicketSelectorOnLegacyVersion,
 }
 
 impl BorshSerialize for DrcPaymentTx {
@@ -318,7 +361,16 @@ impl BorshSerialize for DrcPaymentTx {
             BorshSerialize::serialize(&self.source_tag, writer)?;
         }
         BorshSerialize::serialize(&self.invoice_id, writer)?;
-        BorshSerialize::serialize(&self.nonce, writer)?;
+        if self.version >= DRC_PAYMENT_TICKET_VERSION {
+            BorshSerialize::serialize(
+                &self
+                    .account_sequence
+                    .expect("payment v5 missing account_sequence"),
+                writer,
+            )?;
+        } else {
+            BorshSerialize::serialize(&self.nonce, writer)?;
+        }
         if self.version >= DRC_PAYMENT_VERSION {
             BorshSerialize::serialize(&self.last_valid_blue_score, writer)?;
         }
@@ -347,7 +399,14 @@ impl BorshDeserialize for DrcPaymentTx {
             Option::<u32>::deserialize_reader(reader)?
         };
         let invoice_id = Hash::deserialize_reader(reader)?;
-        let nonce = u64::deserialize_reader(reader)?;
+        let (nonce, account_sequence) = if version >= DRC_PAYMENT_TICKET_VERSION {
+            (
+                0,
+                Some(DrcAccountSequenceSelector::deserialize_reader(reader)?),
+            )
+        } else {
+            (u64::deserialize_reader(reader)?, None)
+        };
         let last_valid_blue_score = if version >= DRC_PAYMENT_VERSION {
             Option::<u64>::deserialize_reader(reader)?
         } else {
@@ -363,6 +422,7 @@ impl BorshDeserialize for DrcPaymentTx {
             source_tag,
             invoice_id,
             nonce,
+            account_sequence,
             last_valid_blue_score,
             public_key: Vec::<u8>::deserialize_reader(reader)?,
             signature: Vec::<u8>::deserialize_reader(reader)?,
@@ -883,11 +943,11 @@ mod tests {
             Hash([7u8; 32]),
             8,
         );
-        unsupported.version = DRC_PAYMENT_VERSION + 1;
+        unsupported.version = DRC_PAYMENT_TICKET_VERSION + 1;
         assert_eq!(
             unsupported.validate_envelope_version(),
             Err(DrcPaymentEnvelopeError::UnsupportedVersion(
-                DRC_PAYMENT_VERSION + 1
+                DRC_PAYMENT_TICKET_VERSION + 1
             ))
         );
 

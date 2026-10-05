@@ -8,10 +8,15 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::drc_multisign::{read_multisign_trailer, write_multisign_trailer, DrcMultisignAuth};
+use crate::drc_sequence::DrcAccountSequenceSelector;
 use crate::{Address, Hash, NativeAssetId};
 
 /// Domain separator for stake transaction signatures.
 pub const STAKE_TX_SIGNING_DOMAIN: &[u8] = b"agora-trident-stake-tx-v1";
+/// DRC ticket-aware stake operations bind an explicit sequence selector.
+pub const STAKE_TX_SIGNING_DOMAIN_V2: &[u8] = b"agora-trident-stake-tx-v2";
+pub const STAKE_TX_VERSION: u32 = 1;
+pub const STAKE_TX_TICKET_VERSION: u32 = 2;
 
 /// Kind of staking mutation.
 #[derive(
@@ -57,6 +62,8 @@ pub struct SignedStakeTx {
     pub metadata_hash: Hash,
     /// Actor account nonce (must match current on-chain nonce).
     pub nonce: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_sequence: Option<DrcAccountSequenceSelector>,
     pub public_key: Vec<u8>,
     pub signature: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -65,6 +72,28 @@ pub struct SignedStakeTx {
 
 impl SignedStakeTx {
     pub fn signing_bytes_bound(&self, chain_id: &str, genesis: &Hash) -> Vec<u8> {
+        if self.version >= STAKE_TX_TICKET_VERSION {
+            let sequence = self
+                .account_sequence
+                .expect("stake v2 requires account_sequence");
+            let body = (
+                STAKE_TX_SIGNING_DOMAIN_V2,
+                chain_id,
+                genesis.as_bytes(),
+                self.version,
+                self.asset,
+                self.kind,
+                self.actor,
+                self.validator,
+                self.amount,
+                &self.consensus_pubkey,
+                self.withdrawal,
+                self.commission_bps,
+                self.metadata_hash,
+                sequence,
+            );
+            return borsh::to_vec(&body).expect("borsh serialize stake tx v2 body");
+        }
         let body = (
             STAKE_TX_SIGNING_DOMAIN,
             chain_id,
@@ -112,6 +141,34 @@ impl SignedStakeTx {
             public_key: Vec::new(),
             signature: Vec::new(),
             multisign: None,
+            account_sequence: None,
+        }
+    }
+
+    pub fn unsigned_bond_v2(
+        actor: Address,
+        amount: u64,
+        consensus_pubkey: Vec<u8>,
+        withdrawal: Address,
+        commission_bps: u16,
+        account_sequence: DrcAccountSequenceSelector,
+    ) -> Self {
+        Self {
+            version: STAKE_TX_TICKET_VERSION,
+            asset: NativeAssetId::DRC,
+            kind: StakeOpKind::Bond,
+            actor,
+            validator: actor,
+            amount,
+            consensus_pubkey,
+            withdrawal,
+            commission_bps,
+            metadata_hash: Hash::ZERO,
+            nonce: 0,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+            account_sequence: Some(account_sequence),
         }
     }
 
@@ -137,6 +194,7 @@ impl SignedStakeTx {
             public_key: Vec::new(),
             signature: Vec::new(),
             multisign: None,
+            account_sequence: None,
         }
     }
 
@@ -156,6 +214,7 @@ impl SignedStakeTx {
             public_key: Vec::new(),
             signature: Vec::new(),
             multisign: None,
+            account_sequence: None,
         }
     }
 
@@ -175,6 +234,7 @@ impl SignedStakeTx {
             public_key: Vec::new(),
             signature: Vec::new(),
             multisign: None,
+            account_sequence: None,
         }
     }
 }
@@ -191,7 +251,16 @@ impl BorshSerialize for SignedStakeTx {
         BorshSerialize::serialize(&self.withdrawal, writer)?;
         BorshSerialize::serialize(&self.commission_bps, writer)?;
         BorshSerialize::serialize(&self.metadata_hash, writer)?;
-        BorshSerialize::serialize(&self.nonce, writer)?;
+        if self.version >= STAKE_TX_TICKET_VERSION {
+            BorshSerialize::serialize(
+                &self
+                    .account_sequence
+                    .expect("stake v2 missing account_sequence"),
+                writer,
+            )?;
+        } else {
+            BorshSerialize::serialize(&self.nonce, writer)?;
+        }
         BorshSerialize::serialize(&self.public_key, writer)?;
         BorshSerialize::serialize(&self.signature, writer)?;
         write_multisign_trailer(&self.multisign, writer)
@@ -200,18 +269,37 @@ impl BorshSerialize for SignedStakeTx {
 
 impl BorshDeserialize for SignedStakeTx {
     fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let version = u32::deserialize_reader(reader)?;
+        let asset = NativeAssetId::deserialize_reader(reader)?;
+        let kind = StakeOpKind::deserialize_reader(reader)?;
+        let actor = Address::deserialize_reader(reader)?;
+        let validator = Address::deserialize_reader(reader)?;
+        let amount = u64::deserialize_reader(reader)?;
+        let consensus_pubkey = Vec::<u8>::deserialize_reader(reader)?;
+        let withdrawal = Address::deserialize_reader(reader)?;
+        let commission_bps = u16::deserialize_reader(reader)?;
+        let metadata_hash = Hash::deserialize_reader(reader)?;
+        let (nonce, account_sequence) = if version >= STAKE_TX_TICKET_VERSION {
+            (
+                0,
+                Some(DrcAccountSequenceSelector::deserialize_reader(reader)?),
+            )
+        } else {
+            (u64::deserialize_reader(reader)?, None)
+        };
         Ok(Self {
-            version: u32::deserialize_reader(reader)?,
-            asset: NativeAssetId::deserialize_reader(reader)?,
-            kind: StakeOpKind::deserialize_reader(reader)?,
-            actor: Address::deserialize_reader(reader)?,
-            validator: Address::deserialize_reader(reader)?,
-            amount: u64::deserialize_reader(reader)?,
-            consensus_pubkey: Vec::<u8>::deserialize_reader(reader)?,
-            withdrawal: Address::deserialize_reader(reader)?,
-            commission_bps: u16::deserialize_reader(reader)?,
-            metadata_hash: Hash::deserialize_reader(reader)?,
-            nonce: u64::deserialize_reader(reader)?,
+            version,
+            asset,
+            kind,
+            actor,
+            validator,
+            amount,
+            consensus_pubkey,
+            withdrawal,
+            commission_bps,
+            metadata_hash,
+            nonce,
+            account_sequence,
             public_key: Vec::<u8>::deserialize_reader(reader)?,
             signature: Vec::<u8>::deserialize_reader(reader)?,
             multisign: read_multisign_trailer(reader)?,

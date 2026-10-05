@@ -153,15 +153,36 @@ pub(crate) fn apply_account_transfer_checked(
         ));
     }
 
+    use crate::drc_ticket::{begin_drc_account_sequence, finish_drc_account_sequence};
+    use agora_types::{resolve_drc_account_sequence, ACCOUNT_TRANSFER_DRC_TICKET_VERSION};
+
+    if tx.version >= ACCOUNT_TRANSFER_DRC_TICKET_VERSION && tx.asset != NativeAssetId::DRC {
+        return Err(StateError::InvalidTx(
+            "ticket-aware account transfer is DRC-only".into(),
+        ));
+    }
+
     let mut from = load_account(store, tx.asset, &tx.from)?;
     let mut to = load_account(store, tx.asset, &tx.to)?;
 
-    if from.nonce != tx.nonce {
-        return Err(StateError::InvalidTx(format!(
-            "bad nonce: got {} expected {}",
-            tx.nonce, from.nonce
-        )));
-    }
+    let sequence_ctx = if tx.asset == NativeAssetId::DRC {
+        let selector = resolve_drc_account_sequence(
+            tx.version,
+            ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+        Some(begin_drc_account_sequence(store, &tx.from, selector)?)
+    } else {
+        if from.nonce != tx.nonce {
+            return Err(StateError::InvalidTx(format!(
+                "bad nonce: got {} expected {}",
+                tx.nonce, from.nonce
+            )));
+        }
+        None
+    };
     // Recipient overflow before debit. Fee is same-asset and never credited to `to`.
     let new_to = to
         .balance
@@ -180,10 +201,20 @@ pub(crate) fn apply_account_transfer_checked(
     journal.before.push((tx.asset, tx.to, to.clone()));
 
     from.balance -= debit;
-    from.nonce = from
-        .nonce
-        .checked_add(1)
-        .ok_or_else(|| StateError::InvalidTx("nonce overflow".into()))?;
+    if let Some(ctx) = sequence_ctx {
+        finish_drc_account_sequence(
+            batch,
+            &tx.from,
+            &mut from,
+            ctx.consumption,
+            &ctx.tickets_before,
+        )?;
+    } else {
+        from.nonce = from
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| StateError::InvalidTx("nonce overflow".into()))?;
+    }
     to.balance = new_to;
 
     put_account_into(batch, tx.asset, &tx.from, &from)?;

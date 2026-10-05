@@ -1,7 +1,7 @@
 use agora_types::{
     AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcAccountPolicyTx,
-    DrcDepositPreauthTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash, OvlExecutionTx,
-    SignedStakeTx, Transaction,
+    DrcDepositPreauthTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
+    OvlExecutionTx, SignedStakeTx, Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -43,6 +43,8 @@ pub enum NetworkMessage {
     DrcRegularKey(DrcRegularKeyTx),
     /// Appended in Trident protocol v12; DRC weighted signer lists.
     DrcSignerList(DrcSignerListTx),
+    /// Appended in Trident protocol v15; DRC ticket creation.
+    DrcTicketCreate(DrcTicketCreateTx),
 }
 
 impl NetworkMessage {
@@ -68,6 +70,7 @@ impl NetworkMessage {
             && block.drc_deposit_preauths.is_empty()
             && block.drc_regular_keys.is_empty()
             && block.drc_signer_lists.is_empty()
+            && block.drc_ticket_creates.is_empty()
             && block.drc_multisign_attachments.is_empty()
         {
             Self::CompactBlock {
@@ -243,5 +246,34 @@ mod tests {
         let message = NetworkMessage::DrcDepositPreauth(preauth);
         assert_eq!(message.encode()[0], 11);
         assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+
+        let ticket_create =
+            DrcTicketCreateTx::unsigned(Address([6; 20]), Amount::from_base_units(1), 0);
+        let message = NetworkMessage::DrcTicketCreate(ticket_create.clone());
+        assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+    }
+
+    #[test]
+    fn drc_ticket_create_gossip_roundtrip_and_full_block_lane() {
+        let owner = Address([0x33; 20]);
+        let create = DrcTicketCreateTx::unsigned(owner, Amount::from_base_units(2), 3);
+        let gossip = NetworkMessage::DrcTicketCreate(create.clone());
+        assert_eq!(NetworkMessage::decode(&gossip.encode()).unwrap(), gossip);
+
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 1,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.drc_ticket_creates.push(create);
+        block.header.tx_root = block.compute_body_root();
+        let full = NetworkMessage::compact_from_block(&block);
+        assert_eq!(full, NetworkMessage::Block(block));
     }
 }

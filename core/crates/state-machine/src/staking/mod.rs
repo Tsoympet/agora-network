@@ -716,12 +716,33 @@ pub fn apply_signed_stake_tx(
     verify_drc_stake_operation(store, tx, auth)?;
 
     let acct = load_account(store, tx.asset, &tx.actor)?;
-    if acct.nonce != tx.nonce {
-        return Err(StateError::InvalidTx(format!(
-            "bad stake nonce: got {} expected {}",
-            tx.nonce, acct.nonce
-        )));
+    use crate::drc_ticket::{begin_drc_account_sequence, finish_drc_account_sequence};
+    use agora_types::{resolve_drc_account_sequence, STAKE_TX_TICKET_VERSION};
+
+    if tx.version >= STAKE_TX_TICKET_VERSION && tx.asset != NativeAssetId::DRC {
+        return Err(StateError::InvalidTx(
+            "ticket-aware stake version requires DRC".into(),
+        ));
     }
+
+    let sequence_ctx = if tx.asset == NativeAssetId::DRC {
+        let selector = resolve_drc_account_sequence(
+            tx.version,
+            STAKE_TX_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+        Some(begin_drc_account_sequence(store, &tx.actor, selector)?)
+    } else {
+        if acct.nonce != tx.nonce {
+            return Err(StateError::InvalidTx(format!(
+                "bad stake nonce: got {} expected {}",
+                tx.nonce, acct.nonce
+            )));
+        }
+        None
+    };
 
     let mut after = acct.clone();
     match tx.kind {
@@ -765,10 +786,20 @@ pub fn apply_signed_stake_tx(
                 .ok_or_else(|| StateError::InvalidTx("balance overflow".into()))?;
         }
     }
-    after.nonce = tx
-        .nonce
-        .checked_add(1)
-        .ok_or_else(|| StateError::InvalidTx("nonce overflow".into()))?;
+    if let Some(ctx) = sequence_ctx {
+        finish_drc_account_sequence(
+            batch,
+            &tx.actor,
+            &mut after,
+            ctx.consumption,
+            &ctx.tickets_before,
+        )?;
+    } else {
+        after.nonce = tx
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| StateError::InvalidTx("nonce overflow".into()))?;
+    }
     put_account_into(batch, tx.asset, &tx.actor, &after)?;
     Ok(())
 }

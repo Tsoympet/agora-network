@@ -14,7 +14,9 @@ mod drc_multisign_attachment;
 mod drc_multisign_lane;
 mod drc_policy;
 mod drc_regular_key;
+mod drc_sequence;
 mod drc_signer_list;
+mod drc_ticket;
 mod execution;
 mod finality;
 mod hash;
@@ -26,7 +28,10 @@ mod transaction;
 mod treasury;
 
 pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
-pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
+pub use account::{
+    AccountTransfer, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, ACCOUNT_TRANSFER_LEGACY_VERSION,
+    ACCOUNT_TRANSFER_VERSION, ACCOUNT_TX_SIGNING_DOMAIN, ACCOUNT_TX_SIGNING_DOMAIN_V3,
+};
 pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
 pub use block::{
@@ -42,7 +47,8 @@ pub use data_availability::{
 pub use drc_deposit_preauth::{
     DrcDepositPreauth, DrcDepositPreauthAction, DrcDepositPreauthError, DrcDepositPreauthTx,
     DRC_DEPOSIT_PREAUTH_SIGNING_DOMAIN, DRC_DEPOSIT_PREAUTH_STATE_VERSION,
-    DRC_DEPOSIT_PREAUTH_TX_TYPE, DRC_DEPOSIT_PREAUTH_TX_VERSION,
+    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TX_TYPE,
+    DRC_DEPOSIT_PREAUTH_TX_VERSION, DRC_DEPOSIT_PREAUTH_V2_SIGNING_DOMAIN,
 };
 pub use drc_multisign::{
     read_multisign_trailer, validate_exclusive_authorization, write_multisign_trailer,
@@ -53,10 +59,11 @@ pub use drc_multisign::{
 pub use drc_multisign_attachment::{
     attachment_key_for_account_transfer, attachment_key_for_deposit_preauth,
     attachment_key_for_payment, attachment_key_for_policy, attachment_key_for_regular_key,
-    attachment_key_for_signer_list, attachment_key_for_stake, drc_multisign_attachment_key,
-    drc_multisign_signing_commitment, DrcMultisignAttachmentError, DrcMultisignAttachmentKey,
-    DrcMultisignBlockAttachment, DrcMultisignOperationKind, DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
-    DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION, DRC_MULTISIGN_SIGNING_COMMITMENT_DOMAIN,
+    attachment_key_for_signer_list, attachment_key_for_stake, attachment_key_for_ticket_create,
+    drc_multisign_attachment_key, drc_multisign_signing_commitment, DrcMultisignAttachmentError,
+    DrcMultisignAttachmentKey, DrcMultisignBlockAttachment, DrcMultisignOperationKind,
+    DRC_MULTISIGN_ATTACHMENT_KEY_VERSION, DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
+    DRC_MULTISIGN_SIGNING_COMMITMENT_DOMAIN,
 };
 pub use drc_multisign_lane::{
     drc_multisign_attachment_capacity, materialize_drc_multisign_attachments,
@@ -67,20 +74,31 @@ pub use drc_policy::{
     DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION, DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION,
     DRC_ACCOUNT_POLICY_MASTER_KEY_STATE_VERSION, DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION,
     DRC_ACCOUNT_POLICY_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_STATE_VERSION,
-    DRC_ACCOUNT_POLICY_TX_TYPE, DRC_ACCOUNT_POLICY_TX_VERSION,
-    DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_V2_SIGNING_DOMAIN,
-    DRC_ACCOUNT_POLICY_V3_SIGNING_DOMAIN,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_ACCOUNT_POLICY_TX_TYPE,
+    DRC_ACCOUNT_POLICY_TX_VERSION, DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN,
+    DRC_ACCOUNT_POLICY_V2_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_V3_SIGNING_DOMAIN,
+    DRC_ACCOUNT_POLICY_V4_SIGNING_DOMAIN,
 };
 pub use drc_regular_key::{
     DrcAccountRegularKey, DrcRegularKeyAction, DrcRegularKeyError, DrcRegularKeyTx,
-    DRC_REGULAR_KEY_SIGNING_DOMAIN, DRC_REGULAR_KEY_STATE_VERSION, DRC_REGULAR_KEY_TX_TYPE,
-    DRC_REGULAR_KEY_TX_VERSION,
+    DRC_REGULAR_KEY_SIGNING_DOMAIN, DRC_REGULAR_KEY_STATE_VERSION,
+    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_REGULAR_KEY_TX_TYPE, DRC_REGULAR_KEY_TX_VERSION,
+    DRC_REGULAR_KEY_V2_SIGNING_DOMAIN,
+};
+pub use drc_sequence::{
+    resolve_drc_account_sequence, DrcAccountSequence, DrcAccountSequenceError,
+    DrcAccountSequenceSelector, DRC_MAX_OUTSTANDING_TICKETS_PER_ACCOUNT,
 };
 pub use drc_signer_list::{
     canonical_sorted_entries, validate_signer_list_payload, DrcAccountSignerList,
     DrcSignerListAction, DrcSignerListEntry, DrcSignerListError, DrcSignerListTx,
-    DRC_SIGNER_LIST_SIGNING_DOMAIN, DRC_SIGNER_LIST_STATE_VERSION, DRC_SIGNER_LIST_TX_TYPE,
-    DRC_SIGNER_LIST_TX_VERSION,
+    DRC_SIGNER_LIST_SIGNING_DOMAIN, DRC_SIGNER_LIST_STATE_VERSION,
+    DRC_SIGNER_LIST_TICKET_TX_VERSION, DRC_SIGNER_LIST_TX_TYPE, DRC_SIGNER_LIST_TX_VERSION,
+    DRC_SIGNER_LIST_V2_SIGNING_DOMAIN,
+};
+pub use drc_ticket::{
+    DrcAccountTickets, DrcTicketCreateError, DrcTicketCreateTx, DRC_TICKET_CREATE_SIGNING_DOMAIN,
+    DRC_TICKET_CREATE_TX_TYPE, DRC_TICKET_CREATE_TX_VERSION, DRC_TICKET_STATE_VERSION,
 };
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
@@ -98,10 +116,14 @@ pub use payment::{
     DrcPaymentResult, DrcPaymentTx, DRC_PAYMENT_DESTINATION_TAG_VERSION,
     DRC_PAYMENT_LEGACY_VERSION, DRC_PAYMENT_RECEIPT_DESTINATION_TAG_VERSION,
     DRC_PAYMENT_RECEIPT_LEGACY_VERSION, DRC_PAYMENT_RECEIPT_VERSION, DRC_PAYMENT_SIGNING_DOMAIN,
-    DRC_PAYMENT_SOURCE_TAG_VERSION, DRC_PAYMENT_V1_SIGNING_DOMAIN, DRC_PAYMENT_V2_SIGNING_DOMAIN,
-    DRC_PAYMENT_V3_SIGNING_DOMAIN, DRC_PAYMENT_V4_SIGNING_DOMAIN, DRC_PAYMENT_VERSION,
+    DRC_PAYMENT_SOURCE_TAG_VERSION, DRC_PAYMENT_TICKET_VERSION, DRC_PAYMENT_V1_SIGNING_DOMAIN,
+    DRC_PAYMENT_V2_SIGNING_DOMAIN, DRC_PAYMENT_V3_SIGNING_DOMAIN, DRC_PAYMENT_V4_SIGNING_DOMAIN,
+    DRC_PAYMENT_V5_SIGNING_DOMAIN, DRC_PAYMENT_VERSION,
 };
-pub use stake::{SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN};
+pub use stake::{
+    SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN, STAKE_TX_SIGNING_DOMAIN_V2,
+    STAKE_TX_TICKET_VERSION, STAKE_TX_VERSION,
+};
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 pub use treasury::{TreasuryBalance, TreasuryId};
 
@@ -183,6 +205,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         assert_eq!(block.id(), header.hash());
@@ -210,6 +233,10 @@ mod ts_export {
         "DrcAccountPolicy.ts",
         "DrcAccountPolicyAction.ts",
         "DrcAccountPolicyTx.ts",
+        "DrcAccountSequence.ts",
+        "DrcAccountSequenceSelector.ts",
+        "DrcAccountTickets.ts",
+        "DrcTicketCreateTx.ts",
         "DrcPaymentReceipt.ts",
         "DrcPaymentResult.ts",
         "DrcPaymentTx.ts",
@@ -261,6 +288,10 @@ mod ts_export {
         DrcAccountPolicyAction::export_all().expect("export DrcAccountPolicyAction");
         DrcAccountPolicyTx::export_all().expect("export DrcAccountPolicyTx");
         DrcAccountPolicy::export_all().expect("export DrcAccountPolicy");
+        DrcAccountSequence::export_all().expect("export DrcAccountSequence");
+        DrcAccountSequenceSelector::export_all().expect("export DrcAccountSequenceSelector");
+        DrcAccountTickets::export_all().expect("export DrcAccountTickets");
+        DrcTicketCreateTx::export_all().expect("export DrcTicketCreateTx");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");

@@ -112,27 +112,52 @@ pub fn apply_drc_signer_list(
 
     let key = drc_signer_list_meta_key(&tx.owner);
     let mut owner = load_account(store, NativeAssetId::DRC, &tx.owner)?;
-    if owner.nonce != tx.nonce {
-        return Err(StateError::InvalidTx(format!(
-            "bad DRC signer-list nonce: got {} expected {}",
-            tx.nonce, owner.nonce
-        )));
-    }
+    use crate::drc_ticket::{begin_drc_account_sequence, finish_drc_account_sequence};
+    use agora_types::{resolve_drc_account_sequence, DRC_SIGNER_LIST_TICKET_TX_VERSION};
+
+    let sequence_ctx = if tx.version >= DRC_SIGNER_LIST_TICKET_TX_VERSION {
+        let selector = resolve_drc_account_sequence(
+            tx.version,
+            DRC_SIGNER_LIST_TICKET_TX_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+        Some(begin_drc_account_sequence(store, &tx.owner, selector)?)
+    } else {
+        if owner.nonce != tx.nonce {
+            return Err(StateError::InvalidTx(format!(
+                "bad DRC signer-list nonce: got {} expected {}",
+                tx.nonce, owner.nonce
+            )));
+        }
+        None
+    };
+
     if owner.balance < tx.fee.as_base_units() {
         return Err(StateError::InvalidTx(
             "insufficient DRC signer-list balance".into(),
         ));
     }
-    let next_nonce = owner
-        .nonce
-        .checked_add(1)
-        .ok_or_else(|| StateError::InvalidTx("DRC signer-list nonce overflow".into()))?;
 
     journal
         .before
         .push((NativeAssetId::DRC, tx.owner, owner.clone()));
     owner.balance -= tx.fee.as_base_units();
-    owner.nonce = next_nonce;
+    if let Some(ctx) = sequence_ctx {
+        finish_drc_account_sequence(
+            batch,
+            &tx.owner,
+            &mut owner,
+            ctx.consumption,
+            &ctx.tickets_before,
+        )?;
+    } else {
+        owner.nonce = owner
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| StateError::InvalidTx("DRC signer-list nonce overflow".into()))?;
+    }
     put_account_into(batch, NativeAssetId::DRC, &tx.owner, &owner)?;
 
     match tx.action {

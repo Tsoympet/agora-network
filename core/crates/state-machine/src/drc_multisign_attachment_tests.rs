@@ -2,16 +2,12 @@
 
 #[cfg(test)]
 mod tests {
-    use agora_crypto::{
-        sign_drc_multisign_participant_bound, sign_drc_signer_list_bound,
-        KeyPair,
-    };
+    use agora_crypto::{sign_drc_multisign_participant_bound, sign_drc_signer_list_bound, KeyPair};
     use agora_types::{
         materialize_drc_multisign_attachments, merge_drc_multisign_attachments,
         validate_drc_multisign_attachment_lane, Amount, Block, BlockHeader, DrcMultisignAuth,
-        DrcMultisignEntry, DrcMultisignOperationKind, DrcPaymentTx,
-        DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId, Transaction,
-        DRC_MULTISIGN_AUTH_VERSION,
+        DrcMultisignEntry, DrcMultisignOperationKind, DrcPaymentTx, DrcSignerListEntry,
+        DrcSignerListTx, Hash, NativeAssetId, Transaction, DRC_MULTISIGN_AUTH_VERSION,
     };
     use borsh::BorshDeserialize;
 

@@ -6,6 +6,7 @@ use thiserror::Error;
 use ts_rs::TS;
 
 use crate::drc_multisign::{read_multisign_trailer, write_multisign_trailer, DrcMultisignAuth};
+use crate::drc_sequence::DrcAccountSequenceSelector;
 use crate::{Address, Amount, Hash};
 
 /// Frozen destination-tag-only account-policy envelope.
@@ -14,6 +15,8 @@ pub const DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION: u32 = 1;
 pub const DRC_ACCOUNT_POLICY_TX_VERSION: u32 = 2;
 /// Master-key disable set/clear (DRC-scoped; rippled `asfDisableMaster` subset).
 pub const DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION: u32 = 3;
+/// Ticket-aware account-policy operations bind an explicit sequence selector (all actions).
+pub const DRC_ACCOUNT_POLICY_TICKET_TX_VERSION: u32 = 4;
 /// Frozen destination-tag-only persisted policy encoding.
 pub const DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION: u32 = 1;
 /// Current persisted policy encoding; appends `deposit_auth_required`.
@@ -26,6 +29,8 @@ pub const DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-acco
 pub const DRC_ACCOUNT_POLICY_V2_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-account-policy-v2";
 /// V3 signature domain for master-key disable policy actions.
 pub const DRC_ACCOUNT_POLICY_V3_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-account-policy-v3";
+/// V4 signature domain for ticket-aware policy actions.
+pub const DRC_ACCOUNT_POLICY_V4_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-account-policy-v4";
 /// Backward-compatible name for the frozen v1 signing domain.
 pub const DRC_ACCOUNT_POLICY_SIGNING_DOMAIN: &[u8] = DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN;
 /// Explicit operation type bound by v2 signatures.
@@ -99,6 +104,8 @@ pub struct DrcAccountPolicyTx {
     pub fee: Amount,
     /// Shared DRC nonce used by transfers, stake ops, policies, preauths, and payments.
     pub nonce: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_sequence: Option<DrcAccountSequenceSelector>,
     pub public_key: Vec<u8>,
     pub signature: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,6 +114,13 @@ pub struct DrcAccountPolicyTx {
 
 impl DrcAccountPolicyTx {
     pub fn validate_version(&self) -> Result<(), DrcAccountPolicyError> {
+        if self.version < DRC_ACCOUNT_POLICY_TICKET_TX_VERSION
+            && self
+                .account_sequence
+                .is_some_and(|s| s.kind == crate::drc_sequence::DrcAccountSequence::Ticket)
+        {
+            return Err(DrcAccountPolicyError::TicketSelectorOnLegacyVersion);
+        }
         match (self.version, self.action) {
             (
                 DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION,
@@ -123,6 +137,7 @@ impl DrcAccountPolicyTx {
                 DrcAccountPolicyAction::SetMasterKeyDisabled
                 | DrcAccountPolicyAction::ClearMasterKeyDisabled,
             ) => Ok(()),
+            (DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, _) => Ok(()),
             (
                 DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION
                 | DRC_ACCOUNT_POLICY_TX_VERSION
@@ -132,7 +147,7 @@ impl DrcAccountPolicyTx {
                 version: self.version,
                 action,
             }),
-            (_, _) if self.version > DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION => {
+            (_, _) if self.version > DRC_ACCOUNT_POLICY_TICKET_TX_VERSION => {
                 Err(DrcAccountPolicyError::UnsupportedVersion(self.version))
             }
             (version, _) => Err(DrcAccountPolicyError::UnsupportedVersion(version)),
@@ -140,6 +155,23 @@ impl DrcAccountPolicyTx {
     }
 
     pub fn signing_bytes_bound(&self, chain_id: &str, genesis: &Hash) -> Vec<u8> {
+        if self.version == DRC_ACCOUNT_POLICY_TICKET_TX_VERSION {
+            let sequence = self
+                .account_sequence
+                .expect("account-policy v4 requires account_sequence");
+            return borsh::to_vec(&(
+                DRC_ACCOUNT_POLICY_V4_SIGNING_DOMAIN,
+                chain_id,
+                genesis.as_bytes(),
+                DRC_ACCOUNT_POLICY_TX_TYPE,
+                self.version,
+                self.account,
+                self.action,
+                self.fee,
+                sequence,
+            ))
+            .expect("borsh serialize DRC account-policy v4 body");
+        }
         if self.version == DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION {
             return borsh::to_vec(&(
                 DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN,
@@ -201,6 +233,7 @@ impl DrcAccountPolicyTx {
             public_key: Vec::new(),
             signature: Vec::new(),
             multisign: None,
+            account_sequence: None,
         }
     }
 
@@ -273,7 +306,16 @@ impl BorshSerialize for DrcAccountPolicyTx {
         BorshSerialize::serialize(&self.account, writer)?;
         BorshSerialize::serialize(&self.action, writer)?;
         BorshSerialize::serialize(&self.fee, writer)?;
-        BorshSerialize::serialize(&self.nonce, writer)?;
+        if self.version >= DRC_ACCOUNT_POLICY_TICKET_TX_VERSION {
+            BorshSerialize::serialize(
+                &self
+                    .account_sequence
+                    .expect("account-policy v4 missing account_sequence"),
+                writer,
+            )?;
+        } else {
+            BorshSerialize::serialize(&self.nonce, writer)?;
+        }
         BorshSerialize::serialize(&self.public_key, writer)?;
         BorshSerialize::serialize(&self.signature, writer)?;
         write_multisign_trailer(&self.multisign, writer)
@@ -282,12 +324,25 @@ impl BorshSerialize for DrcAccountPolicyTx {
 
 impl BorshDeserialize for DrcAccountPolicyTx {
     fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let version = u32::deserialize_reader(reader)?;
+        let account = Address::deserialize_reader(reader)?;
+        let action = DrcAccountPolicyAction::deserialize_reader(reader)?;
+        let fee = Amount::deserialize_reader(reader)?;
+        let (nonce, account_sequence) = if version >= DRC_ACCOUNT_POLICY_TICKET_TX_VERSION {
+            (
+                0,
+                Some(DrcAccountSequenceSelector::deserialize_reader(reader)?),
+            )
+        } else {
+            (u64::deserialize_reader(reader)?, None)
+        };
         Ok(Self {
-            version: u32::deserialize_reader(reader)?,
-            account: Address::deserialize_reader(reader)?,
-            action: DrcAccountPolicyAction::deserialize_reader(reader)?,
-            fee: Amount::deserialize_reader(reader)?,
-            nonce: u64::deserialize_reader(reader)?,
+            version,
+            account,
+            action,
+            fee,
+            nonce,
+            account_sequence,
             public_key: Vec::<u8>::deserialize_reader(reader)?,
             signature: Vec::<u8>::deserialize_reader(reader)?,
             multisign: read_multisign_trailer(reader)?,
@@ -412,6 +467,8 @@ pub enum DrcAccountPolicyError {
     V2MasterKeyDisabled,
     #[error("DRC account-policy v1 state cannot carry DepositAuth")]
     LegacyDepositAuth,
+    #[error("ticket sequence selector requires a ticket-capable operation version")]
+    TicketSelectorOnLegacyVersion,
 }
 
 #[cfg(test)]
@@ -442,10 +499,10 @@ mod tests {
     fn policy_version_fails_closed() {
         let mut tx =
             DrcAccountPolicyTx::set_require_destination_tag(Address([1; 20]), Amount::ZERO, 0);
-        tx.version = DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION + 1;
+        tx.version = DRC_ACCOUNT_POLICY_TICKET_TX_VERSION + 1;
         assert_eq!(
             tx.validate_version(),
-            Err(DrcAccountPolicyError::UnsupportedVersion(4))
+            Err(DrcAccountPolicyError::UnsupportedVersion(5))
         );
     }
 

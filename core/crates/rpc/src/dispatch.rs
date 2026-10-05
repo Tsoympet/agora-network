@@ -1,7 +1,7 @@
 use agora_types::{
     AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcDepositPreauthTx,
-    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash, OvlExecutionTx,
-    Transaction,
+    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, Hash,
+    OvlExecutionTx, Transaction,
 };
 use serde_json::{json, Value};
 
@@ -251,6 +251,23 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
                 let id = self.backend.submit_drc_signer_list(tx)?;
                 Ok(json!({ "signer_list_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcTicketCreate => {
+                let raw = req
+                    .params
+                    .get("ticket_create")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcTicketCreateTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_ticket_create(tx)?;
+                Ok(json!({ "ticket_create_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcTicket => {
+                let (owner, ticket_sequence) = drc_ticket_params(&req.params)?;
+                self.backend.get_drc_ticket(&owner, ticket_sequence)
             }
             RpcMethod::GetDrcAccountSignerList => {
                 let account = param_address(&req.params, "account")?;
@@ -710,6 +727,34 @@ fn drc_invoice_params(params: &Value) -> Result<(Address, Hash), RpcError> {
     ))
 }
 
+fn drc_ticket_params(params: &Value) -> Result<(Address, u64), RpcError> {
+    let (owner, ticket_sequence) = if let Some(obj) = params.as_object() {
+        let owner = obj
+            .get("owner")
+            .ok_or_else(|| RpcError::InvalidParams("missing `owner`".into()))?;
+        let ticket_sequence = obj
+            .get("ticket_sequence")
+            .ok_or_else(|| RpcError::InvalidParams("missing `ticket_sequence`".into()))?;
+        (owner, ticket_sequence)
+    } else if let Some(arr) = params.as_array() {
+        if arr.len() != 2 {
+            return Err(RpcError::InvalidParams(
+                "expected `[owner, ticket_sequence]`".into(),
+            ));
+        }
+        (&arr[0], &arr[1])
+    } else {
+        return Err(RpcError::InvalidParams(
+            "expected `{owner, ticket_sequence}` or `[owner, ticket_sequence]`".into(),
+        ));
+    };
+    let sequence = ticket_sequence
+        .as_u64()
+        .or_else(|| ticket_sequence.as_str().and_then(|s| s.parse().ok()))
+        .ok_or_else(|| RpcError::InvalidParams("`ticket_sequence` must be u64".into()))?;
+    Ok((parse_address_value(owner, "owner")?, sequence))
+}
+
 fn drc_deposit_preauth_params(params: &Value) -> Result<(Address, Address), RpcError> {
     let (owner, authorized_source) = if let Some(obj) = params.as_object() {
         let owner = obj
@@ -839,8 +884,10 @@ fn param_topic_category(params: &Value) -> Result<agora_governance::TopicCategor
 mod tests {
     use super::*;
     use crate::backend::InMemoryBackend;
+    use crate::methods::RpcMethod;
     use agora_types::{
-        Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx, DrcPaymentTx, TxOut,
+        Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx, DrcPaymentTx,
+        DrcTicketCreateTx, TxOut,
     };
 
     #[test]
@@ -865,6 +912,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
@@ -982,6 +1030,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
@@ -1018,6 +1067,7 @@ mod tests {
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
             drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
             drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
@@ -1436,6 +1486,89 @@ mod tests {
             params: json!({ "preauth": valid }),
         });
         assert_eq!(rejected.error.unwrap().code, -32001);
+    }
+
+    #[test]
+    fn drc_ticket_rpc_handles_live_unknown_malformed_and_submit_rejection() {
+        let owner = Address([0x11; 20]);
+        let other = Address([0x12; 20]);
+        let mut backend = InMemoryBackend::new();
+        backend.insert_drc_live_ticket(owner, 7);
+        let mut rpc = RpcDispatcher::new(backend);
+
+        let live = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getDrcTicket".into(),
+            params: json!({
+                "owner": owner.to_hex(),
+                "ticket_sequence": 7,
+            }),
+        });
+        let live_result = live.result.unwrap();
+        assert_eq!(live_result["status"], "live");
+        assert_eq!(live_result["ticket_sequence"], 7);
+        assert_eq!(live_result["owner"], owner.to_bech32());
+        assert!(live_result.get("private_key").is_none());
+        assert!(live_result.as_object().unwrap().len() <= 3);
+
+        let unknown = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getDrcTicket".into(),
+            params: json!([owner.to_bech32(), 8]),
+        });
+        assert_eq!(unknown.result.unwrap()["status"], "unknown");
+
+        let consumed = rpc.handle(RpcRequest {
+            id: Some(json!(3)),
+            method: "agora_getDrcTicket".into(),
+            params: json!({
+                "owner": owner.to_hex(),
+                "ticket_sequence": 99,
+            }),
+        });
+        assert_eq!(consumed.result.unwrap()["status"], "unknown");
+
+        for params in [
+            json!({}),
+            json!({"owner": owner.to_hex()}),
+            json!({"owner": "not-an-address", "ticket_sequence": 1}),
+            json!({"owner": owner.to_hex(), "ticket_sequence": "x"}),
+            json!([owner.to_hex()]),
+        ] {
+            let response = rpc.handle(RpcRequest {
+                id: Some(json!(4)),
+                method: "agora_getDrcTicket".into(),
+                params,
+            });
+            assert_eq!(response.error.unwrap().code, -32602);
+        }
+
+        let zero_owner = rpc.handle(RpcRequest {
+            id: Some(json!(5)),
+            method: "agora_getDrcTicket".into(),
+            params: json!({
+                "owner": Address::ZERO.to_hex(),
+                "ticket_sequence": 1,
+            }),
+        });
+        assert_eq!(zero_owner.error.unwrap().code, -32602);
+
+        let malformed_submit = rpc.handle(RpcRequest {
+            id: Some(json!(6)),
+            method: "agora_submitDrcTicketCreate".into(),
+            params: json!({ "ticket_create": { "version": 1 } }),
+        });
+        assert_eq!(malformed_submit.error.unwrap().code, -32602);
+
+        let valid = DrcTicketCreateTx::unsigned(other, Amount::from_base_units(1), 0);
+        let rejected = rpc.handle(RpcRequest {
+            id: Some(json!(7)),
+            method: "agora_submitDrcTicketCreate".into(),
+            params: json!({ "ticket_create": valid }),
+        });
+        assert_eq!(rejected.error.unwrap().code, -32001);
+        assert!(RpcMethod::parse("agora_getDrcTicket").is_some());
+        assert!(RpcMethod::parse("agora_submitDrcTicketCreate").is_some());
     }
 
     #[test]

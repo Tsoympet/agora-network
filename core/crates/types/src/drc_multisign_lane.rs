@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use crate::{
     attachment_key_for_account_transfer, attachment_key_for_deposit_preauth,
     attachment_key_for_payment, attachment_key_for_policy, attachment_key_for_regular_key,
-    attachment_key_for_signer_list, attachment_key_for_stake, Address, Block,
-    DrcMultisignAttachmentError, DrcMultisignAttachmentKey, DrcMultisignAuth,
+    attachment_key_for_signer_list, attachment_key_for_stake, attachment_key_for_ticket_create,
+    Address, Block, DrcMultisignAttachmentError, DrcMultisignAttachmentKey, DrcMultisignAuth,
     DrcMultisignBlockAttachment, Hash, NativeAssetId, DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
 };
 
@@ -42,6 +42,7 @@ pub fn drc_multisign_attachment_capacity(block: &Block) -> usize {
         + block.drc_account_policies.len()
         + block.drc_deposit_preauths.len()
         + block.drc_payments.len()
+        + block.drc_ticket_creates.len()
 }
 
 fn ensure_sorted(keys: &[DrcMultisignAttachmentKey]) -> Result<(), DrcMultisignAttachmentError> {
@@ -205,6 +206,20 @@ pub fn materialize_drc_multisign_attachments(
         }
     }
 
+    for tx in &mut block.drc_ticket_creates {
+        if let Some(auth) = tx.multisign.take() {
+            if single_sig_present(&tx.public_key, &tx.signature) {
+                return Err(DrcMultisignAttachmentError::MixedAuthorization);
+            }
+            tx.public_key.clear();
+            tx.signature.clear();
+            let key = attachment_key_for_ticket_create(tx, chain_id, genesis);
+            push_materialized(&mut attachments, key, tx.owner, auth)?;
+        } else if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
     attachments.sort_by_key(|a| a.key);
     ensure_sorted(&attachments.iter().map(|a| a.key).collect::<Vec<_>>())?;
     block.drc_multisign_attachments = attachments;
@@ -284,6 +299,15 @@ fn collect_expected_keys(
         reject_inline_multisign(&tx.multisign)?;
         if needs_attachment(&tx.public_key, &tx.signature, &None) {
             expected.push(attachment_key_for_payment(tx, chain_id, genesis));
+        } else if !single_sig_present(&tx.public_key, &tx.signature) {
+            return Err(DrcMultisignAttachmentError::MissingAttachment);
+        }
+    }
+
+    for tx in &block.drc_ticket_creates {
+        reject_inline_multisign(&tx.multisign)?;
+        if needs_attachment(&tx.public_key, &tx.signature, &None) {
+            expected.push(attachment_key_for_ticket_create(tx, chain_id, genesis));
         } else if !single_sig_present(&tx.public_key, &tx.signature) {
             return Err(DrcMultisignAttachmentError::MissingAttachment);
         }
@@ -379,6 +403,11 @@ fn owner_for_key(
     for tx in &block.drc_payments {
         if attachment_key_for_payment(tx, chain_id, genesis) == key {
             return Ok(tx.from);
+        }
+    }
+    for tx in &block.drc_ticket_creates {
+        if attachment_key_for_ticket_create(tx, chain_id, genesis) == key {
+            return Ok(tx.owner);
         }
     }
     Err(DrcMultisignAttachmentError::OrphanAttachment)
@@ -480,6 +509,18 @@ pub fn merge_drc_multisign_attachments(
             continue;
         }
         let key = attachment_key_for_payment(tx, chain_id, genesis);
+        tx.multisign = Some(
+            map.get(&key)
+                .cloned()
+                .ok_or(DrcMultisignAttachmentError::MissingAttachment)?,
+        );
+    }
+
+    for tx in &mut block.drc_ticket_creates {
+        if !needs_attachment(&tx.public_key, &tx.signature, &None) {
+            continue;
+        }
+        let key = attachment_key_for_ticket_create(tx, chain_id, genesis);
         tx.multisign = Some(
             map.get(&key)
                 .cloned()

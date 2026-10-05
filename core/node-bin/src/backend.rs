@@ -19,22 +19,27 @@ use agora_rpc::{
 use agora_state_machine::{
     apply_account_transfer, apply_drc_account_policy, apply_drc_deposit_preauth,
     apply_drc_payment_at_blue_score, apply_drc_regular_key, apply_drc_signer_list,
-    apply_ovl_execution, apply_signed_stake_tx, build_snapshot, canonical_community_root,
-    governance_treasury_root, list_grants as list_canonical_grants,
+    apply_drc_ticket_create, apply_ovl_execution, apply_signed_stake_tx, build_snapshot,
+    canonical_community_root, governance_treasury_root, list_grants as list_canonical_grants,
     list_hubs as list_canonical_hubs, list_missions as list_canonical_missions,
     list_passport_attestations, load_canonical_community_summary, load_canonical_governance_policy,
     load_drc_account_policy, load_drc_deposit_preauth, load_drc_payment_by_invoice,
     load_drc_payment_receipt, load_epoch, load_known_drc_account_keys,
     load_known_drc_account_policy, load_known_drc_account_signer_summary,
     load_known_drc_deposit_authorization, load_protocol_treasuries, load_reward_pool,
-    load_validator, lookup_tx_location, meta_keys, outpoint_key, validate_mempool_tx_with_auth,
-    AccountJournal, ColumnFamily, StakingParams, StateStore, TxAuthContext, WriteBatch,
+    load_validator, lookup_drc_ticket_point, lookup_tx_location, meta_keys, outpoint_key,
+    plan_drc_mempool_reservation, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily,
+    DrcMempoolReservation, DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext,
+    WriteBatch,
 };
 use agora_types::{
     AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAccountPolicy,
     DrcAccountPolicyTx, DrcDepositPreauthTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
-    TxOut,
+    DrcSignerListTx, DrcTicketCreateTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
+    SignedStakeTx, Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
+    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -57,6 +62,30 @@ fn parse_stake_asset(asset: &str) -> Result<NativeAssetId, RpcError> {
             "staking asset must be OVL or DRC, got {other}"
         ))),
     }
+}
+
+fn assert_drc_mempool_slot(
+    pool: &Mempool,
+    owner: &Address,
+    reservation: DrcMempoolReservation,
+) -> Result<(), RpcError> {
+    match reservation {
+        DrcMempoolReservation::AccountNonce => {
+            if pool.account_reserved(NativeAssetId::DRC, owner) {
+                return Err(RpcError::Rejected(
+                    "DRC account already has a pending nonce".into(),
+                ));
+            }
+        }
+        DrcMempoolReservation::Ticket { sequence } => {
+            if pool.ticket_consumer_reserved(owner, sequence) {
+                return Err(RpcError::Rejected(format!(
+                    "DRC ticket {sequence} already has a pending consumer"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// UTXO + network-bound signature + mempool reservation checks, then admit.
@@ -92,7 +121,18 @@ pub(crate) fn admit_account_transfer(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-    if pool.account_reserved(tx.asset, &tx.from) {
+    if tx.asset == NativeAssetId::DRC {
+        let reservation = plan_drc_mempool_reservation(
+            store,
+            &tx.from,
+            tx.version,
+            ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
+        .map_err(|error| RpcError::Rejected(error.to_string()))?;
+        assert_drc_mempool_slot(&pool, &tx.from, reservation)?;
+    } else if pool.account_reserved(tx.asset, &tx.from) {
         return Err(RpcError::Rejected(
             "account already has a pending nonce".into(),
         ));
@@ -122,7 +162,18 @@ pub(crate) fn admit_stake_tx(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-    if pool.account_reserved(tx.asset, &tx.actor) {
+    if tx.asset == NativeAssetId::DRC {
+        let reservation = plan_drc_mempool_reservation(
+            store,
+            &tx.actor,
+            tx.version,
+            STAKE_TX_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
+        .map_err(|error| RpcError::Rejected(error.to_string()))?;
+        assert_drc_mempool_slot(&pool, &tx.actor, reservation)?;
+    } else if pool.account_reserved(tx.asset, &tx.actor) {
         return Err(RpcError::Rejected(
             "account already has a pending nonce".into(),
         ));
@@ -173,11 +224,16 @@ pub(crate) fn admit_drc_payment(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-    if pool.account_reserved(NativeAssetId::DRC, &tx.from) {
-        return Err(RpcError::Rejected(
-            "DRC account already has a pending nonce".into(),
-        ));
-    }
+    let reservation = plan_drc_mempool_reservation(
+        store,
+        &tx.from,
+        tx.version,
+        DRC_PAYMENT_TICKET_VERSION,
+        tx.nonce,
+        tx.account_sequence,
+    )
+    .map_err(|error| RpcError::Rejected(error.to_string()))?;
+    assert_drc_mempool_slot(&pool, &tx.from, reservation)?;
     if tx.fee.as_base_units() < min_relay_fee() {
         return Err(RpcError::Rejected(format!(
             "fee too low: {} < min relay {}",
@@ -220,11 +276,16 @@ pub(crate) fn admit_drc_account_policy(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-    if pool.account_reserved(NativeAssetId::DRC, &tx.account) {
-        return Err(RpcError::Rejected(
-            "DRC account already has a pending nonce".into(),
-        ));
-    }
+    let reservation = plan_drc_mempool_reservation(
+        store,
+        &tx.account,
+        tx.version,
+        DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
+        tx.nonce,
+        tx.account_sequence,
+    )
+    .map_err(|error| RpcError::Rejected(error.to_string()))?;
+    assert_drc_mempool_slot(&pool, &tx.account, reservation)?;
     if tx.fee.as_base_units() < min_relay_fee() {
         return Err(RpcError::Rejected(format!(
             "fee too low: {} < min relay {}",
@@ -250,11 +311,16 @@ pub(crate) fn admit_drc_deposit_preauth(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-    if pool.account_reserved(NativeAssetId::DRC, &tx.owner) {
-        return Err(RpcError::Rejected(
-            "DRC account already has a pending nonce".into(),
-        ));
-    }
+    let reservation = plan_drc_mempool_reservation(
+        store,
+        &tx.owner,
+        tx.version,
+        DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+        tx.nonce,
+        tx.account_sequence,
+    )
+    .map_err(|error| RpcError::Rejected(error.to_string()))?;
+    assert_drc_mempool_slot(&pool, &tx.owner, reservation)?;
     if tx.fee.as_base_units() < min_relay_fee() {
         return Err(RpcError::Rejected(format!(
             "fee too low: {} < min relay {}",
@@ -280,11 +346,16 @@ pub(crate) fn admit_drc_regular_key(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-    if pool.account_reserved(NativeAssetId::DRC, &tx.owner) {
-        return Err(RpcError::Rejected(
-            "DRC account already has a pending nonce".into(),
-        ));
-    }
+    let reservation = plan_drc_mempool_reservation(
+        store,
+        &tx.owner,
+        tx.version,
+        DRC_REGULAR_KEY_TICKET_TX_VERSION,
+        tx.nonce,
+        tx.account_sequence,
+    )
+    .map_err(|error| RpcError::Rejected(error.to_string()))?;
+    assert_drc_mempool_slot(&pool, &tx.owner, reservation)?;
     if tx.fee.as_base_units() < min_relay_fee() {
         return Err(RpcError::Rejected(format!(
             "fee too low: {} < min relay {}",
@@ -309,11 +380,16 @@ pub(crate) fn admit_drc_signer_list(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-    if pool.account_reserved(NativeAssetId::DRC, &tx.owner) {
-        return Err(RpcError::Rejected(
-            "DRC account already has a pending nonce".into(),
-        ));
-    }
+    let reservation = plan_drc_mempool_reservation(
+        store,
+        &tx.owner,
+        tx.version,
+        DRC_SIGNER_LIST_TICKET_TX_VERSION,
+        tx.nonce,
+        tx.account_sequence,
+    )
+    .map_err(|error| RpcError::Rejected(error.to_string()))?;
+    assert_drc_mempool_slot(&pool, &tx.owner, reservation)?;
     if tx.fee.as_base_units() < min_relay_fee() {
         return Err(RpcError::Rejected(format!(
             "fee too low: {} < min relay {}",
@@ -326,6 +402,46 @@ pub(crate) fn admit_drc_signer_list(
     apply_drc_signer_list(store, &tx, auth, &mut batch, &mut journal)
         .map_err(|error| RpcError::Rejected(format!("DRC signer list: {error}")))?;
     pool.admit_drc_signer_list(tx)
+        .map_err(|error| RpcError::Rejected(error.to_string()))
+}
+
+pub(crate) fn admit_drc_ticket_create(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    tx: DrcTicketCreateTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    tx.validate_structure()
+        .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if pool.account_reserved(NativeAssetId::DRC, &tx.owner) {
+        return Err(RpcError::Rejected(
+            "DRC account already has a pending nonce".into(),
+        ));
+    }
+    let ticket_sequence = tx
+        .nonce
+        .checked_add(1)
+        .ok_or_else(|| RpcError::Rejected("DRC ticket sequence overflow".into()))?;
+    if pool.ticket_consumer_reserved(&tx.owner, ticket_sequence) {
+        return Err(RpcError::Rejected(format!(
+            "DRC ticket {ticket_sequence} already reserved"
+        )));
+    }
+    if tx.fee.as_base_units() < min_relay_fee() {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {} < min relay {}",
+            tx.fee.as_base_units(),
+            min_relay_fee()
+        )));
+    }
+    let mut batch = WriteBatch::new();
+    let mut journal = AccountJournal::default();
+    apply_drc_ticket_create(store, &tx, auth, &mut batch, &mut journal)
+        .map_err(|error| RpcError::Rejected(format!("DRC ticket create: {error}")))?;
+    pool.admit_drc_ticket_create(tx)
         .map_err(|error| RpcError::Rejected(error.to_string()))
 }
 
@@ -705,6 +821,33 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_drc_ticket_create(&mut self, tx: DrcTicketCreateTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_drc_ticket_create(&self.store, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcTicketCreate(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn get_drc_ticket(&self, owner: &Address, ticket_sequence: u64) -> Result<Value, RpcError> {
+        let status = lookup_drc_ticket_point(&self.store, owner, ticket_sequence)
+            .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+        Ok(match status {
+            DrcTicketPointStatus::Live => json!({
+                "owner": owner.to_bech32(),
+                "ticket_sequence": ticket_sequence,
+                "status": "live",
+            }),
+            DrcTicketPointStatus::Unknown => json!({
+                "owner": owner.to_bech32(),
+                "ticket_sequence": ticket_sequence,
+                "status": "unknown",
+            }),
+        })
+    }
+
     fn get_drc_account_policy(
         &self,
         account: &Address,
@@ -825,6 +968,7 @@ impl RpcBackend for NodeBackend {
             drc_deposit_preauths,
             drc_regular_keys,
             drc_signer_lists,
+            drc_ticket_creates,
         ) = {
             let pool = self
                 .mempool
@@ -843,6 +987,7 @@ impl RpcBackend for NodeBackend {
                 pool.select_drc_deposit_preauths(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_regular_keys(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_signer_lists(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_ticket_creates(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         chain
@@ -858,6 +1003,7 @@ impl RpcBackend for NodeBackend {
                     drc_deposit_preauths: &drc_deposit_preauths,
                     drc_regular_keys: &drc_regular_keys,
                     drc_signer_lists: &drc_signer_lists,
+                    drc_ticket_creates: &drc_ticket_creates,
                     ..BlockTemplateLanes::default()
                 },
             )
@@ -1311,9 +1457,9 @@ mod tests {
     use agora_crypto::{
         derive_bip44, seed_from_mnemonic, sign_account_transfer_bound,
         sign_drc_account_policy_bound, sign_drc_deposit_preauth_bound, sign_drc_payment_bound,
-        sign_ovl_execution_bound, sign_transaction_bound, Bip44Path,
+        sign_ovl_execution_bound, sign_transaction_bound, Bip44Path, KeyPair,
     };
-    use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder};
+    use agora_state_machine::{credit_account_into, ColumnFamily, GenesisBuilder, WriteBatch};
     use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
     use borsh::BorshDeserialize;
 
@@ -2131,6 +2277,68 @@ mod tests {
         match err {
             RpcError::Rejected(msg) => assert!(msg.contains("mainnet")),
             other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn drc_ticket_create_admit_and_block_eviction_release_reservations() {
+        use agora_crypto::sign_drc_ticket_create_bound;
+        use agora_state_machine::TxAuthContext;
+        use agora_types::{BlockHeader, DrcTicketCreateTx, NativeAssetId};
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let kp = KeyPair::from_secret_bytes(&[0x44; 32]).unwrap();
+        let owner = kp.address();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &owner,
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "dev".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let mut create = DrcTicketCreateTx::unsigned(owner, Amount::from_base_units(1), 0);
+        sign_drc_ticket_create_bound(&mut create, &kp, &auth.chain_id, &auth.genesis).unwrap();
+        let id = admit_drc_ticket_create(
+            store.as_ref(),
+            &mempool,
+            create.clone(),
+            &auth,
+        )
+        .unwrap();
+        {
+            let pool = mempool.lock().unwrap();
+            assert!(pool.account_reserved(NativeAssetId::DRC, &owner));
+            assert!(pool.ticket_consumer_reserved(&owner, 1));
+        }
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 1,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.drc_ticket_creates.push(create);
+        block.header.tx_root = block.compute_body_root();
+        {
+            let mut pool = mempool.lock().unwrap();
+            pool.evict_for_block(&block);
+            assert!(!pool.contains(&id));
+            assert!(!pool.account_reserved(NativeAssetId::DRC, &owner));
+            assert!(!pool.ticket_consumer_reserved(&owner, 1));
         }
     }
 }

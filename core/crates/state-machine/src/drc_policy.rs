@@ -102,21 +102,33 @@ pub fn apply_drc_account_policy(
         ));
     }
     let mut account = load_account(store, NativeAssetId::DRC, &tx.account)?;
-    if account.nonce != tx.nonce {
-        return Err(StateError::InvalidTx(format!(
-            "bad DRC account-policy nonce: got {} expected {}",
-            tx.nonce, account.nonce
-        )));
-    }
+    use crate::drc_ticket::{begin_drc_account_sequence, finish_drc_account_sequence};
+    use agora_types::{resolve_drc_account_sequence, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION};
+
+    let sequence_ctx = if tx.version >= DRC_ACCOUNT_POLICY_TICKET_TX_VERSION {
+        let selector = resolve_drc_account_sequence(
+            tx.version,
+            DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+        Some(begin_drc_account_sequence(store, &tx.account, selector)?)
+    } else {
+        if account.nonce != tx.nonce {
+            return Err(StateError::InvalidTx(format!(
+                "bad DRC account-policy nonce: got {} expected {}",
+                tx.nonce, account.nonce
+            )));
+        }
+        None
+    };
+
     if account.balance < tx.fee.as_base_units() {
         return Err(StateError::InvalidTx(
             "insufficient DRC account-policy balance".into(),
         ));
     }
-    let next_nonce = account
-        .nonce
-        .checked_add(1)
-        .ok_or_else(|| StateError::InvalidTx("DRC account-policy nonce overflow".into()))?;
     let mut policy = load_drc_account_policy(store, &tx.account)?;
     if let Some(require_destination_tag) = tx.action.destination_tag_requirement() {
         policy.require_destination_tag = require_destination_tag;
@@ -138,7 +150,20 @@ pub fn apply_drc_account_policy(
         .before
         .push((NativeAssetId::DRC, tx.account, account.clone()));
     account.balance -= tx.fee.as_base_units();
-    account.nonce = next_nonce;
+    if let Some(ctx) = sequence_ctx {
+        finish_drc_account_sequence(
+            batch,
+            &tx.account,
+            &mut account,
+            ctx.consumption,
+            &ctx.tickets_before,
+        )?;
+    } else {
+        account.nonce = account
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| StateError::InvalidTx("DRC account-policy nonce overflow".into()))?;
+    }
     put_account_into(batch, NativeAssetId::DRC, &tx.account, &account)?;
     if policy.require_destination_tag || policy.deposit_auth_required || policy.master_key_disabled
     {

@@ -6,16 +6,20 @@ use thiserror::Error;
 use ts_rs::TS;
 
 use crate::drc_multisign::{read_multisign_trailer, write_multisign_trailer, DrcMultisignAuth};
+use crate::drc_sequence::DrcAccountSequenceSelector;
 use crate::{Address, Amount, Hash};
 
 /// First address-only DRC deposit-preauthorization envelope.
 pub const DRC_DEPOSIT_PREAUTH_TX_VERSION: u32 = 1;
+/// Ticket-aware deposit-preauthorization operations bind an explicit sequence selector.
+pub const DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION: u32 = 2;
 /// First persisted address-only DRC deposit-preauthorization record.
 pub const DRC_DEPOSIT_PREAUTH_STATE_VERSION: u32 = 1;
 /// Explicit operation type bound by every deposit-preauthorization signature.
 pub const DRC_DEPOSIT_PREAUTH_TX_TYPE: &[u8] = b"drc_deposit_preauth";
 /// Domain separator for network-bound deposit-preauthorization signatures.
 pub const DRC_DEPOSIT_PREAUTH_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-deposit-preauth-v1";
+pub const DRC_DEPOSIT_PREAUTH_V2_SIGNING_DOMAIN: &[u8] = b"agora-trident-drc-deposit-preauth-v2";
 
 /// Recipient-selected action for one source account.
 #[derive(
@@ -54,6 +58,8 @@ pub struct DrcDepositPreauthTx {
     pub fee: Amount,
     /// Shared DRC nonce used by transfers, stake ops, policies, preauths, and payments.
     pub nonce: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_sequence: Option<DrcAccountSequenceSelector>,
     pub public_key: Vec<u8>,
     pub signature: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -62,8 +68,17 @@ pub struct DrcDepositPreauthTx {
 
 impl DrcDepositPreauthTx {
     pub fn validate_structure(&self) -> Result<(), DrcDepositPreauthError> {
-        if self.version != DRC_DEPOSIT_PREAUTH_TX_VERSION {
+        if self.version != DRC_DEPOSIT_PREAUTH_TX_VERSION
+            && self.version != DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION
+        {
             return Err(DrcDepositPreauthError::UnsupportedVersion(self.version));
+        }
+        if self.version == DRC_DEPOSIT_PREAUTH_TX_VERSION
+            && self
+                .account_sequence
+                .is_some_and(|s| s.kind == crate::drc_sequence::DrcAccountSequence::Ticket)
+        {
+            return Err(DrcDepositPreauthError::TicketSelectorOnLegacyVersion);
         }
         if self.owner == Address::ZERO {
             return Err(DrcDepositPreauthError::ZeroOwner);
@@ -78,6 +93,24 @@ impl DrcDepositPreauthTx {
     }
 
     pub fn signing_bytes_bound(&self, chain_id: &str, genesis: &Hash) -> Vec<u8> {
+        if self.version >= DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION {
+            let sequence = self
+                .account_sequence
+                .expect("deposit-preauth v2 requires account_sequence");
+            return borsh::to_vec(&(
+                DRC_DEPOSIT_PREAUTH_V2_SIGNING_DOMAIN,
+                chain_id,
+                genesis.as_bytes(),
+                DRC_DEPOSIT_PREAUTH_TX_TYPE,
+                self.version,
+                self.owner,
+                self.action,
+                self.authorized_source,
+                self.fee,
+                sequence,
+            ))
+            .expect("borsh serialize DRC deposit-preauthorization v2 body");
+        }
         borsh::to_vec(&(
             DRC_DEPOSIT_PREAUTH_SIGNING_DOMAIN,
             chain_id,
@@ -115,6 +148,7 @@ impl DrcDepositPreauthTx {
             public_key: Vec::new(),
             signature: Vec::new(),
             multisign: None,
+            account_sequence: None,
         }
     }
 
@@ -151,7 +185,16 @@ impl BorshSerialize for DrcDepositPreauthTx {
         BorshSerialize::serialize(&self.action, writer)?;
         BorshSerialize::serialize(&self.authorized_source, writer)?;
         BorshSerialize::serialize(&self.fee, writer)?;
-        BorshSerialize::serialize(&self.nonce, writer)?;
+        if self.version >= DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION {
+            BorshSerialize::serialize(
+                &self
+                    .account_sequence
+                    .expect("deposit-preauth v2 missing account_sequence"),
+                writer,
+            )?;
+        } else {
+            BorshSerialize::serialize(&self.nonce, writer)?;
+        }
         BorshSerialize::serialize(&self.public_key, writer)?;
         BorshSerialize::serialize(&self.signature, writer)?;
         write_multisign_trailer(&self.multisign, writer)
@@ -160,13 +203,27 @@ impl BorshSerialize for DrcDepositPreauthTx {
 
 impl BorshDeserialize for DrcDepositPreauthTx {
     fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let version = u32::deserialize_reader(reader)?;
+        let owner = Address::deserialize_reader(reader)?;
+        let action = DrcDepositPreauthAction::deserialize_reader(reader)?;
+        let authorized_source = Address::deserialize_reader(reader)?;
+        let fee = Amount::deserialize_reader(reader)?;
+        let (nonce, account_sequence) = if version >= DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION {
+            (
+                0,
+                Some(DrcAccountSequenceSelector::deserialize_reader(reader)?),
+            )
+        } else {
+            (u64::deserialize_reader(reader)?, None)
+        };
         Ok(Self {
-            version: u32::deserialize_reader(reader)?,
-            owner: Address::deserialize_reader(reader)?,
-            action: DrcDepositPreauthAction::deserialize_reader(reader)?,
-            authorized_source: Address::deserialize_reader(reader)?,
-            fee: Amount::deserialize_reader(reader)?,
-            nonce: u64::deserialize_reader(reader)?,
+            version,
+            owner,
+            action,
+            authorized_source,
+            fee,
+            nonce,
+            account_sequence,
             public_key: Vec::<u8>::deserialize_reader(reader)?,
             signature: Vec::<u8>::deserialize_reader(reader)?,
             multisign: read_multisign_trailer(reader)?,
@@ -225,6 +282,8 @@ pub enum DrcDepositPreauthError {
     ZeroAuthorizedSource,
     #[error("DRC accounts cannot preauthorize themselves")]
     SelfAuthorization,
+    #[error("ticket sequence selector requires a ticket-capable operation version")]
+    TicketSelectorOnLegacyVersion,
 }
 
 #[cfg(test)]
@@ -270,7 +329,7 @@ mod tests {
                 ..valid.clone()
             },
             DrcDepositPreauthTx {
-                version: DRC_DEPOSIT_PREAUTH_TX_VERSION + 1,
+                version: DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION + 1,
                 ..valid.clone()
             },
             DrcDepositPreauthTx {

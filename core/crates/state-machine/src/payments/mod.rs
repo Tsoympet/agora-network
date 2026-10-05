@@ -221,10 +221,10 @@ pub(crate) fn apply_drc_payment_with_blue_score(
         return Err(StateError::InvalidTx("zero DRC payment".into()));
     }
     verify_drc_payment_operation(store, tx, auth)?;
-    if tx.version == DRC_PAYMENT_VERSION {
+    if tx.version >= DRC_PAYMENT_VERSION {
         let score = application_blue_score.ok_or_else(|| {
             StateError::InvalidTx(
-                "DRC payment v4 requires a consensus application blue score".into(),
+                "DRC payment v4+ requires a consensus application blue score".into(),
             )
         })?;
         if let Some(cutoff) = tx.last_valid_blue_score {
@@ -276,12 +276,28 @@ pub(crate) fn apply_drc_payment_with_blue_score(
     } else {
         Some(load_account(store, NativeAssetId::DRC, &tx.to)?)
     };
-    if from.nonce != tx.nonce {
-        return Err(StateError::InvalidTx(format!(
-            "bad DRC payment nonce: got {} expected {}",
-            tx.nonce, from.nonce
-        )));
-    }
+
+    use crate::drc_ticket::{begin_drc_account_sequence, finish_drc_account_sequence};
+    use agora_types::{resolve_drc_account_sequence, DRC_PAYMENT_TICKET_VERSION};
+    let sequence_ctx = if tx.version >= DRC_PAYMENT_TICKET_VERSION {
+        let selector = resolve_drc_account_sequence(
+            tx.version,
+            DRC_PAYMENT_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+        Some(begin_drc_account_sequence(store, &tx.from, selector)?)
+    } else {
+        if from.nonce != tx.nonce {
+            return Err(StateError::InvalidTx(format!(
+                "bad DRC payment nonce: got {} expected {}",
+                tx.nonce, from.nonce
+            )));
+        }
+        None
+    };
+
     let debit = tx
         .amount
         .as_base_units()
@@ -301,10 +317,6 @@ pub(crate) fn apply_drc_payment_with_blue_score(
                 .ok_or_else(|| StateError::InvalidTx("DRC payment recipient overflow".into()))
         })
         .transpose()?;
-    let next_nonce = from
-        .nonce
-        .checked_add(1)
-        .ok_or_else(|| StateError::InvalidTx("DRC payment nonce overflow".into()))?;
     let next_sender_balance = if tx.from == tx.to {
         // XRPL DepositAuth treats self-payments as authorized. Exact native DRC
         // self-payment has a fee-only net effect, but still requires the sender
@@ -333,7 +345,20 @@ pub(crate) fn apply_drc_payment_with_blue_score(
             .push((NativeAssetId::DRC, tx.to, recipient.clone()));
     }
     from.balance = next_sender_balance;
-    from.nonce = next_nonce;
+    if let Some(ctx) = sequence_ctx {
+        finish_drc_account_sequence(
+            batch,
+            &tx.from,
+            &mut from,
+            ctx.consumption,
+            &ctx.tickets_before,
+        )?;
+    } else {
+        from.nonce = from
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| StateError::InvalidTx("DRC payment nonce overflow".into()))?;
+    }
     put_account_into(batch, NativeAssetId::DRC, &tx.from, &from)?;
     if let (Some(recipient), Some(balance)) = (to.as_mut(), recipient_balance) {
         recipient.balance = balance;
@@ -818,7 +843,7 @@ mod tests {
             Hash::ZERO,
             0,
         );
-        unsupported.version = agora_types::DRC_PAYMENT_VERSION + 1;
+        unsupported.version = agora_types::DRC_PAYMENT_TICKET_VERSION + 1;
 
         let mut legacy_with_source = DrcPaymentTx::unsigned(
             agora_types::Address([1; 20]),

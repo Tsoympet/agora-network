@@ -9,11 +9,10 @@ mod tests {
     };
     use agora_types::{
         materialize_drc_multisign_attachments, validate_drc_multisign_attachment_lane,
-        AccountTransfer, Amount, Block, BlockHeader, DrcAccountPolicyTx,
-        DrcDepositPreauthTx, DrcMultisignAuth, DrcMultisignEntry, DrcMultisignOperationKind,
-        DrcPaymentTx, DrcRegularKeyTx, DrcSignerListEntry, DrcSignerListTx,
-        Hash, NativeAssetId, SignedStakeTx, Transaction, TxOut,
-        DRC_MULTISIGN_AUTH_VERSION,
+        AccountTransfer, Amount, Block, BlockHeader, DrcAccountPolicyTx, DrcDepositPreauthTx,
+        DrcMultisignAuth, DrcMultisignEntry, DrcMultisignOperationKind, DrcPaymentTx,
+        DrcRegularKeyTx, DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId, SignedStakeTx,
+        Transaction, TxOut, DRC_MULTISIGN_AUTH_VERSION,
     };
     use borsh::BorshDeserialize;
 
