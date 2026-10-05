@@ -15,7 +15,7 @@ OVL remains the only Trident execution and contracts domain.
 
 ## Payment envelope
 
-`DrcPaymentTx` has four explicit consensus encodings:
+`DrcPaymentTx` has five explicit consensus encodings:
 
 - frozen v1 binds the sender, recipient, amount, explicit DRC fee, destination
   tag, merchant invoice ID, account nonce, chain ID, and genesis hash
@@ -25,6 +25,8 @@ OVL remains the only Trident execution and contracts domain.
   under a third signing domain
 - v4 preserves v3 semantics and adds an optional signed
   `last_valid_blue_score` under a fourth signing domain
+- v5 replaces the ordinary nonce field with an explicit nonce-or-Ticket
+  selector under a fifth signing domain
 
 All versions use secp256k1. V1–v3 bytes and signing preimages remain unchanged;
 v1 carrying an in-memory source tag fails closed. V2 Borsh encodes
@@ -183,9 +185,9 @@ This is not XRPL parity:
   fee-result behavior are not reproduced
 - Agora rejects invalid operations without charging a fee; it does not emulate
   XRPL transaction-result classes
-- no partial payments, paths, checks, escrow, payment channels, trust lines,
-  issued currencies, DEX/AMM, NFTs, credentials, Hooks, EVM, or contracts are
-  introduced
+- this direct-payment lane has no partial payments, paths, DEX/AMM, NFTs,
+  credentials, Hooks, EVM, or contracts; separate typed modules now implement
+  bounded escrow, Checks, payment channels, trust lines, and issued currencies
 - DRC remains the native contract-free payment lane; OVL remains the sole
   execution/contracts domain
 
@@ -348,7 +350,8 @@ Pinned against `rippled` 2.5.0 `SetRegularKey` / `RegularKey` semantics with
 explicit deviations:
 
 - secp256k1 only; no Ed25519 or XRPL wire compatibility
-- master-key disable remains excluded (no-lockout invariant)
+- master-key disable is implemented as the separately versioned account-policy
+  transition documented below; frozen regular-key bytes do not encode it
 - master cannot be installed as its own regular key; zero keys are rejected
 - the current regular key may rotate or clear itself; the master can always recover
 - Agora uses address-derived identity plus an explicit 33-byte pubkey binding on set
@@ -365,7 +368,8 @@ fail before mutation.
 
 Pinned `rippled` 2.5.0 `SignerListSet` / `MultiSign` baseline with explicit deviations:
 
-- secp256k1 only; no Ed25519, ticket/credential paths, or XRPL result classes
+- secp256k1 only; ticket-aware operation versions use Agora's explicit
+  nonce-or-Ticket selector; no credential paths or XRPL result classes
 - one bounded list per account; no master-key disable in this slice
 - master and regular-key single signatures remain valid recovery paths
 - multisign uses domain `agora-trident-drc-multisign-participant-v1` binding
@@ -464,4 +468,6 @@ DRC account, or `unknown` when absent. Malformed inputs return `-32602`.
 ## Remaining deferred capabilities
 
 Credential-based `DepositPreauth`, recurring pull payments, and cross-asset
-routing remain out of scope for the native DRC payment lane.
+routing remain out of scope for the native DRC payment lane. The complete
+implemented/missing/excluded matrix and dependency order are maintained in
+[`drc-xrpl-capability-profile.md`](drc-xrpl-capability-profile.md).
