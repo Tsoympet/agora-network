@@ -175,8 +175,7 @@ mod deposit_auth_claims {
 #[cfg(test)]
 mod conservation {
     use crate::drc_payment_channel_test_harness::support::{
-        apply_channel_block, auth, coinbase, create_live_channel, fund, key,
-        spendable_plus_locked,
+        apply_channel_block, auth, coinbase, create_live_channel, fund, key, spendable_plus_locked,
     };
     use crate::StateStore;
 

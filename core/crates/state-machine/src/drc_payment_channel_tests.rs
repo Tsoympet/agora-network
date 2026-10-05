@@ -169,7 +169,10 @@ mod tests {
         apply_channel_block(&store, block, 3, &ctx);
         let owner_after_schedule =
             load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
-        assert_eq!(owner_after_schedule.balance, owner_before_schedule.balance - 1);
+        assert_eq!(
+            owner_after_schedule.balance,
+            owner_before_schedule.balance - 1
+        );
 
         let finalize = signed_close(
             &owner,

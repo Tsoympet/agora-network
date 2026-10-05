@@ -344,7 +344,9 @@ fn finalize_channel(
             owner.balance = owner
                 .balance
                 .checked_add(remainder.as_base_units())
-                .ok_or_else(|| StateError::InvalidTx("payment channel remainder overflow".into()))?;
+                .ok_or_else(|| {
+                    StateError::InvalidTx("payment channel remainder overflow".into())
+                })?;
             put_account_into(batch, NativeAssetId::DRC, &live.owner, owner)?;
         } else {
             let mut owner = load_account(store, NativeAssetId::DRC, &live.owner)?;
@@ -354,7 +356,9 @@ fn finalize_channel(
             owner.balance = owner
                 .balance
                 .checked_add(remainder.as_base_units())
-                .ok_or_else(|| StateError::InvalidTx("payment channel remainder overflow".into()))?;
+                .ok_or_else(|| {
+                    StateError::InvalidTx("payment channel remainder overflow".into())
+                })?;
             put_account_into(batch, NativeAssetId::DRC, &live.owner, &owner)?;
         }
     }
