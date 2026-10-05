@@ -8,7 +8,7 @@ Contract-free issuer liabilities in the DRC payment domain. Not native DRC, not 
 
 | rippled concept | Agora slice (this phase) | Excluded |
 |-----------------|--------------------------|----------|
-| `TrustSet` (bilateral limit/balance) | Holder-signed `DrcTrustLineSetTx`: positive limit creates/updates; limit zero deletes only at zero balance | Rippling, transfer rate/quality, default ripple, deep-freeze/clawback |
+| `TrustSet` (bilateral limit/balance) | Holder-signed `DrcTrustLineSetTx`: positive limit creates/updates; limit zero deletes only at zero balance | Rippling, transfer rate/quality, default ripple |
 | Issued currency `Amount` | Fixed-width `IssuedCurrencyCode` + `IssuedAmount` (u64 units); `IssuedAssetId { issuer, currency }` | Locale/string normalization in consensus; IOU paths |
 | `Payment` (issued) | Exact `DrcIssuedTransferTx`: issuer→holder issue, holder→issuer redeem, holder→holder transfer | Partial payments, paths, conversion, offers/DEX/AMM |
 | Checks/escrow/channels for IOU | — | All issued-value use of those lanes |
@@ -53,17 +53,10 @@ Contract-free issuer liabilities in the DRC payment domain. Not native DRC, not 
 
 **Mempool reservations (public):** one pending `TrustLineSet` per `(holder, asset)`; pending create/delete blocks dependent transfers; pending issue/redeem serializes issuer liability mutation; pending balance deltas enforce recipient limits and sender balances; canonical meta-key reservations (`trust/drc/line/…`, `trust/drc/liability/…`) are inspectable in tests; release on block inclusion, eviction, and reorg. After canonical state changes, pending issued transfers are revalidated and dropped when overlay fails.
 
-**Reorg:** explicit resubmit of evicted mempool txs; duplicate resubmit rejected; chain tip reorg restores line, liability, receipt, and native fee state.
+**Reorg:** explicit resubmit of evicted mempool txs; duplicate resubmit rejected; chain tip reorg restores line, liability, control/transfer receipts, and native fee state.
 
 **`agora_getDrcTrustLine` schema:** `status` (`live`|`unknown`), `limit`, `balance` (issued units as decimal strings), `holder`, `issuer`, `currency` — balance is not a separate RPC method.
 
-## Versions (v20 mesh)
-
-- P2P fingerprint `TRIDENT_PROTOCOL_VERSION` **20**; fail-closed when peer fingerprint mismatches.
-- Block body **v16** when trust-line lanes are non-empty.
-- State transition documents: `agora-trident-state-v18` includes issued-liability root.
-- TS bindings: regenerate via `cargo test -p agora-types export_shared_types -- --nocapture`; expect zero diff under `core/crates/types/bindings`.
-
 ## Deferred
 
-Rippling, transfer rates, paths, partial pay, DEX/AMM, IOU checks/escrow/channels, freeze/clawback, credentials, NFTs, XRPL wire/API parity.
+Rippling, transfer rates, paths, partial pay, DEX/AMM, issued-value checks/escrow/channels, credentials, NFTs, and XRPL wire/API parity. Issuer authorization, freeze/deep-freeze, and clawback are the bounded controls documented in [`drc-issued-controls.md`](drc-issued-controls.md), not full XRPL parity.

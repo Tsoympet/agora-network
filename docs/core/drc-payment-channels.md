@@ -56,7 +56,9 @@ Pending create blocks fund/claim/close for the same `channel_id`. One pending mu
 
 ## Public network integration (Experimental)
 
-- **P2P protocol fingerprint:** `TRIDENT_PROTOCOL_VERSION = 19` (payment channel gossip + block lanes v15).
+- **P2P protocol fingerprint:** payment channels entered at v19 (body v15);
+  the current aggregate fingerprint is v21 after trust-line and issued-control
+  lanes.
 - **Mempool / RPC admission:** dry-run virtual apply, nonce/Ticket reservation, fail-closed while create pending, one pending mutator per live channel; reservations released on reject, eviction, and block inclusion.
 - **Reorg / resubmission:** virtual reorg restores canonical channel, ticket, and account snapshots from journals; included txs are **not** auto-reinserted into the mempool — operators must **explicitly resubmit** once canonical state allows (duplicate resubmit remains fail-closed).
 - **Dependency policy:** pending create → fund/claim/close rejected publicly; duplicate channel mutation rejected; malformed off-ledger claims never templated.

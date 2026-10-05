@@ -249,9 +249,11 @@ preauthorization, and payment statuses. Account, policy, preauthorization, and
 payment metadata are journaled for reorg restoration and included in the
 Trident state root.
 `agora_submitDrcPayment` admits signed payments into mempool/gossip/template
-flow. Trident protocol v10, transaction-signing v5, state-transition
-`agora-trident-state-v11`, state-root v8, and body-root v8 isolate payment-v4
-expiry from older peers. This raises the Experimental datadir schema to v14; an
+flow. Payment-v4 expiry entered at Trident protocol v10,
+transaction-signing v5, state-transition `agora-trident-state-v11`,
+state-root v8, and body-root v8. The current aggregate protocol/state
+fingerprint is v21 / `agora-trident-state-v19`; those later lanes do not
+reinterpret payment-v4. This raised the Experimental datadir schema to v14; an
 older Experimental datadir must be replayed/reindexed (or recreated). Frozen
 payment-v1/v2/v3, policy-v1, outbox-v1/v2/v3, receipt-v1/v2, body-v1–v7, and
 historical acceptance/journal bytes remain readable and unchanged.
