@@ -19,7 +19,10 @@ pub mod support {
 
     use crate::accounts::{credit_account_into, load_account};
     use crate::apply::{apply_block_batched_with_auth_at_blue_score, TxAuthContext};
-    use crate::drc_payment_channel::{drc_payment_channel_root, load_drc_payment_channel_live};
+    use crate::drc_payment_channel::{
+        drc_payment_channel_root, load_drc_payment_channel_live, payment_channel_owner_index_key,
+    };
+    use crate::state_root::compose_trident_state_root;
     use crate::store::WriteBatch;
     use crate::StateStore;
 
@@ -76,6 +79,29 @@ pub mod support {
         block
     }
 
+    pub fn signed_create_simple(
+        owner: &KeyPair,
+        claim_key: &KeyPair,
+        destination: agora_types::Address,
+        amount: u64,
+        nonce: u64,
+        ctx: &TxAuthContext,
+    ) -> DrcPaymentChannelCreateTx {
+        signed_create(
+            owner,
+            claim_key,
+            destination,
+            amount,
+            nonce,
+            ctx,
+            Some(0),
+            None,
+            None,
+            5,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn signed_create(
         owner: &KeyPair,
         claim_key: &KeyPair,
@@ -83,6 +109,10 @@ pub mod support {
         amount: u64,
         nonce: u64,
         ctx: &TxAuthContext,
+        destination_tag: Option<u32>,
+        source_tag: Option<u32>,
+        cancel_after_blue_score: Option<u64>,
+        settle_delay_blue_scores: u64,
     ) -> DrcPaymentChannelCreateTx {
         let mut tx = DrcPaymentChannelCreateTx {
             version: DRC_PAYMENT_CHANNEL_CREATE_TX_VERSION,
@@ -91,11 +121,11 @@ pub mod support {
             amount: Amount::from_base_units(amount),
             fee: Amount::from_base_units(1),
             claim_public_key: claim_key.public_key_bytes().to_vec(),
-            settle_delay_blue_scores: 5,
-            destination_tag: Some(0),
-            source_tag: None,
+            settle_delay_blue_scores,
+            destination_tag,
+            source_tag,
             invoice_id: Hash::ZERO,
-            cancel_after_blue_score: None,
+            cancel_after_blue_score,
             nonce,
             account_sequence: None,
             public_key: Vec::new(),
@@ -111,13 +141,39 @@ pub mod support {
         mut block: Block,
         blue_score: u64,
         ctx: &TxAuthContext,
+    ) -> Hash {
+        block.header.tx_root = block.compute_body_root();
+        let result =
+            apply_block_batched_with_auth_at_blue_score(store, &block, 50, Some(ctx), blue_score)
+                .unwrap();
+        store.write_batch(result.batch).unwrap();
+        crate::store_acceptance(store, &block.id(), &result.acceptance).unwrap();
+        block.id()
+    }
+
+    pub fn apply_block_capture(
+        store: &StateStore,
+        mut block: Block,
+        blue_score: u64,
+        ctx: &TxAuthContext,
+    ) -> (
+        Hash,
+        crate::apply::UtxoJournal,
+        crate::BlockAcceptanceRecord,
     ) {
         block.header.tx_root = block.compute_body_root();
         let result =
             apply_block_batched_with_auth_at_blue_score(store, &block, 50, Some(ctx), blue_score)
                 .unwrap();
         store.write_batch(result.batch).unwrap();
-        crate::acceptance::store_acceptance(store, &block.id(), &result.acceptance).unwrap();
+        crate::store_acceptance(store, &block.id(), &result.acceptance).unwrap();
+        (block.id(), result.journal, result.acceptance)
+    }
+
+    pub fn revert_journal(store: &StateStore, journal: &crate::apply::UtxoJournal) {
+        store
+            .write_batch(crate::apply::revert_journal_batched(journal).unwrap())
+            .unwrap();
     }
 
     pub fn create_live_channel(
@@ -129,11 +185,27 @@ pub mod support {
         nonce: u64,
         ctx: &TxAuthContext,
     ) -> (Hash, DrcPaymentChannelCreateTx) {
-        let create = signed_create(owner, claim_key, dest.address(), amount, nonce, ctx);
+        create_live_channel_at_score(store, owner, claim_key, dest, amount, nonce, ctx, 1)
+    }
+
+    pub fn create_live_channel_at_score(
+        store: &StateStore,
+        owner: &KeyPair,
+        claim_key: &KeyPair,
+        dest: &KeyPair,
+        amount: u64,
+        _nonce: u64,
+        ctx: &TxAuthContext,
+        blue_score: u64,
+    ) -> (Hash, DrcPaymentChannelCreateTx) {
+        let nonce = load_account(store, NativeAssetId::DRC, &owner.address())
+            .unwrap()
+            .nonce;
+        let create = signed_create_simple(owner, claim_key, dest.address(), amount, nonce, ctx);
         let channel_id = create.channel_id();
         let mut block = coinbase(vec![Hash::ZERO], owner);
         block.drc_payment_channel_creates.push(create.clone());
-        apply_channel_block(store, block, 1, ctx);
+        apply_channel_block(store, block, blue_score, ctx);
         assert!(load_drc_payment_channel_live(store, &channel_id)
             .unwrap()
             .is_some());
@@ -222,5 +294,404 @@ pub mod support {
 
     pub fn channel_root(store: &StateStore) -> Hash {
         drc_payment_channel_root(store).unwrap()
+    }
+
+    pub fn count_live_channels(store: &StateStore, owner: &agora_types::Address) -> usize {
+        use crate::columns::ColumnFamily;
+        use borsh::BorshDeserialize;
+        let key = payment_channel_owner_index_key(owner);
+        let Some(bytes) = store.get_cf(ColumnFamily::Meta, &key).unwrap() else {
+            return 0;
+        };
+        #[derive(BorshDeserialize)]
+        struct Idx {
+            _v: u32,
+            _o: agora_types::Address,
+            live_ids: Vec<Hash>,
+        }
+        Idx::try_from_slice(&bytes)
+            .map(|i| i.live_ids.len())
+            .unwrap_or(0)
+    }
+
+    pub fn locked_channel_total(store: &StateStore, owner: &agora_types::Address) -> u64 {
+        use crate::columns::ColumnFamily;
+        use borsh::BorshDeserialize;
+        let key = payment_channel_owner_index_key(owner);
+        let Some(bytes) = store.get_cf(ColumnFamily::Meta, &key).unwrap() else {
+            return 0;
+        };
+        #[derive(BorshDeserialize)]
+        struct Idx {
+            _v: u32,
+            _o: agora_types::Address,
+            live_ids: Vec<Hash>,
+        }
+        let idx = Idx::try_from_slice(&bytes).unwrap();
+        idx.live_ids
+            .iter()
+            .map(|id| {
+                load_drc_payment_channel_live(store, id)
+                    .unwrap()
+                    .unwrap()
+                    .total_funded
+                    .as_base_units()
+                    - load_drc_payment_channel_live(store, id)
+                        .unwrap()
+                        .unwrap()
+                        .cumulative_claimed
+                        .as_base_units()
+            })
+            .sum()
+    }
+
+    pub struct ChannelSnapshot {
+        pub owner_balance: u64,
+        pub destination_balance: u64,
+        pub owner_nonce: u64,
+        pub channel_root: Hash,
+        pub state_root: Hash,
+        pub live_count: usize,
+    }
+
+    pub fn snapshot_channel_state(
+        store: &StateStore,
+        owner: &KeyPair,
+        destination: &KeyPair,
+    ) -> ChannelSnapshot {
+        ChannelSnapshot {
+            owner_balance: load_account(store, NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .balance,
+            destination_balance: load_account(store, NativeAssetId::DRC, &destination.address())
+                .unwrap()
+                .balance,
+            owner_nonce: load_account(store, NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .nonce,
+            channel_root: channel_root(store),
+            state_root: compose_trident_state_root(store, &TIP).unwrap(),
+            live_count: count_live_channels(store, &owner.address()),
+        }
+    }
+
+    pub fn assert_channel_snapshot_unchanged(
+        store: &StateStore,
+        owner: &KeyPair,
+        destination: &KeyPair,
+        before: &ChannelSnapshot,
+    ) {
+        let after = snapshot_channel_state(store, owner, destination);
+        assert_eq!(after.owner_balance, before.owner_balance);
+        assert_eq!(after.destination_balance, before.destination_balance);
+        assert_eq!(after.owner_nonce, before.owner_nonce);
+        assert_eq!(after.channel_root, before.channel_root);
+        assert_eq!(after.state_root, before.state_root);
+        assert_eq!(after.live_count, before.live_count);
+    }
+
+    pub fn reject_channel_apply_preserving_state(
+        store: &StateStore,
+        owner: &KeyPair,
+        destination: &KeyPair,
+        block: &Block,
+        ctx: &TxAuthContext,
+        before: &ChannelSnapshot,
+        blue_score: u64,
+    ) {
+        if agora_types::validate_drc_multisign_attachment_lane(block, &ctx.chain_id, &ctx.genesis)
+            .is_err()
+        {
+            assert_channel_snapshot_unchanged(store, owner, destination, before);
+            return;
+        }
+        assert!(apply_block_batched_with_auth_at_blue_score(
+            store,
+            block,
+            50,
+            Some(ctx),
+            blue_score
+        )
+        .is_err());
+        assert_channel_snapshot_unchanged(store, owner, destination, before);
+    }
+
+    pub fn spendable_plus_locked(
+        store: &StateStore,
+        owner: &KeyPair,
+        destination: &KeyPair,
+    ) -> u64 {
+        load_account(store, NativeAssetId::DRC, &owner.address())
+            .unwrap()
+            .balance
+            + load_account(store, NativeAssetId::DRC, &destination.address())
+                .unwrap()
+                .balance
+            + locked_channel_total(store, &owner.address())
+    }
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub mod multisign {
+    use agora_crypto::{sign_drc_multisign_participant_bound, sign_drc_signer_list_bound, KeyPair};
+    use agora_types::{
+        materialize_drc_multisign_attachments, Amount, Block, DrcMultisignAuth, DrcMultisignEntry,
+        DrcPaymentChannelCreateTx, DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId,
+        DRC_MULTISIGN_AUTH_VERSION, DRC_PAYMENT_CHANNEL_CREATE_TX_VERSION,
+    };
+
+    use super::support::{
+        coinbase, reject_channel_apply_preserving_state, signed_claim, signed_close, signed_fund,
+        ChannelSnapshot,
+    };
+    use crate::accounts::load_account;
+    use crate::apply::TxAuthContext;
+    use crate::drc_signer_list::apply_drc_signer_list;
+    use crate::store::WriteBatch;
+    use crate::{AccountJournal, StateStore};
+
+    pub fn install_signer_list(
+        store: &StateStore,
+        master: &KeyPair,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) {
+        let nonce = load_account(store, NativeAssetId::DRC, &master.address())
+            .unwrap()
+            .nonce;
+        install_signer_list_at_nonce(store, master, signers, ctx, nonce);
+    }
+
+    pub fn install_signer_list_at_nonce(
+        store: &StateStore,
+        master: &KeyPair,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+        nonce: u64,
+    ) {
+        let total: u16 = signers.iter().map(|(_, w)| w).sum();
+        let mut install = DrcSignerListTx::unsigned_set(
+            master.address(),
+            agora_types::canonical_sorted_entries(
+                &signers
+                    .iter()
+                    .map(|(kp, weight)| DrcSignerListEntry {
+                        signer: kp.address(),
+                        weight: *weight,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            u32::from(total),
+            Amount::ZERO,
+            nonce,
+        );
+        sign_drc_signer_list_bound(&mut install, master, &ctx.chain_id, &ctx.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        apply_drc_signer_list(store, &install, ctx, &mut batch, &mut journal).unwrap();
+        store.write_batch(batch).unwrap();
+    }
+
+    pub fn multisign_bundle(
+        owner: agora_types::Address,
+        signing_bytes: &[u8],
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> DrcMultisignAuth {
+        let mut entries = Vec::new();
+        for (kp, _) in signers {
+            let (signer, public_key, signature) = sign_drc_multisign_participant_bound(
+                owner,
+                signing_bytes,
+                kp,
+                &ctx.chain_id,
+                &ctx.genesis,
+            )
+            .unwrap();
+            entries.push(DrcMultisignEntry {
+                signer,
+                public_key,
+                signature,
+            });
+        }
+        entries.sort_by_key(|e| e.signer.0);
+        DrcMultisignAuth {
+            version: DRC_MULTISIGN_AUTH_VERSION,
+            signing_for: owner,
+            signatures: entries,
+        }
+    }
+
+    pub fn reject_preserving(
+        store: &StateStore,
+        owner: &KeyPair,
+        destination: &KeyPair,
+        block: &Block,
+        ctx: &TxAuthContext,
+        before: &ChannelSnapshot,
+        blue_score: u64,
+    ) {
+        reject_channel_apply_preserving_state(
+            store,
+            owner,
+            destination,
+            block,
+            ctx,
+            before,
+            blue_score,
+        );
+    }
+
+    pub fn base_multisign_create_block(
+        store: &StateStore,
+        master: &KeyPair,
+        claim_key: &KeyPair,
+        destination: &KeyPair,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        install_signer_list(store, master, signers, ctx);
+        let nonce = load_account(store, NativeAssetId::DRC, &master.address())
+            .unwrap()
+            .nonce;
+        let mut create = DrcPaymentChannelCreateTx {
+            version: DRC_PAYMENT_CHANNEL_CREATE_TX_VERSION,
+            owner: master.address(),
+            destination: destination.address(),
+            amount: Amount::from_base_units(10),
+            fee: Amount::from_base_units(1),
+            claim_public_key: claim_key.public_key_bytes().to_vec(),
+            settle_delay_blue_scores: 5,
+            destination_tag: Some(0),
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            cancel_after_blue_score: Some(100),
+            nonce,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+        };
+        create.public_key.clear();
+        create.signature.clear();
+        create.multisign = Some(multisign_bundle(
+            master.address(),
+            &create.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
+            signers,
+            ctx,
+        ));
+        let mut block = coinbase(vec![Hash::ZERO], master);
+        block.drc_payment_channel_creates.push(create);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block
+    }
+
+    pub fn multisign_fund_block(
+        store: &StateStore,
+        owner: &KeyPair,
+        channel_id: Hash,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        install_signer_list(store, owner, signers, ctx);
+        let nonce = load_account(store, NativeAssetId::DRC, &owner.address())
+            .unwrap()
+            .nonce;
+        let mut fund = signed_fund(owner, channel_id, 5, nonce, ctx);
+        fund.public_key.clear();
+        fund.signature.clear();
+        fund.multisign = Some(multisign_bundle(
+            owner.address(),
+            &fund.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
+            signers,
+            ctx,
+        ));
+        let mut block = coinbase(vec![Hash::ZERO], owner);
+        block.drc_payment_channel_funds.push(fund);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block
+    }
+
+    pub fn multisign_claim_block(
+        store: &StateStore,
+        destination: &KeyPair,
+        claim_key: &KeyPair,
+        channel_id: Hash,
+        cumulative: u64,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        install_signer_list(store, destination, signers, ctx);
+        let nonce = load_account(store, NativeAssetId::DRC, &destination.address())
+            .unwrap()
+            .nonce;
+        let mut claim = signed_claim(destination, claim_key, channel_id, cumulative, nonce, ctx);
+        claim.public_key.clear();
+        claim.signature.clear();
+        claim.multisign = Some(multisign_bundle(
+            destination.address(),
+            &claim.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
+            signers,
+            ctx,
+        ));
+        let mut block = coinbase(vec![Hash::ZERO], destination);
+        block.drc_payment_channel_claims.push(claim);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block
+    }
+
+    pub fn multisign_close_block(
+        store: &StateStore,
+        submitter: &KeyPair,
+        channel_id: Hash,
+        kind: agora_types::DrcPaymentChannelCloseKind,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        install_signer_list(store, submitter, signers, ctx);
+        let nonce = load_account(store, NativeAssetId::DRC, &submitter.address())
+            .unwrap()
+            .nonce;
+        let mut close = signed_close(submitter, channel_id, kind, nonce, ctx);
+        close.public_key.clear();
+        close.signature.clear();
+        close.multisign = Some(multisign_bundle(
+            submitter.address(),
+            &close.signing_bytes_bound(&ctx.chain_id, &ctx.genesis),
+            signers,
+            ctx,
+        ));
+        let mut block = coinbase(vec![Hash::ZERO], submitter);
+        block.drc_payment_channel_closes.push(close);
+        materialize_drc_multisign_attachments(&mut block, &ctx.chain_id, &ctx.genesis).unwrap();
+        block
+    }
+
+    pub fn base_multisign_fund_block(
+        store: &StateStore,
+        owner: &KeyPair,
+        channel_id: Hash,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        multisign_fund_block(store, owner, channel_id, signers, ctx)
+    }
+
+    pub fn base_multisign_close_block(
+        store: &StateStore,
+        submitter: &KeyPair,
+        channel_id: Hash,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        multisign_close_block(
+            store,
+            submitter,
+            channel_id,
+            agora_types::DrcPaymentChannelCloseKind::OwnerScheduleClose,
+            signers,
+            ctx,
+        )
     }
 }
