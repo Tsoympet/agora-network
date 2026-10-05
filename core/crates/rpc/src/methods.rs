@@ -53,6 +53,13 @@ pub enum RpcMethod {
     GetDrcTrustLine,
     GetDrcIssuerLiability,
     GetDrcIssuedTransferReceipt,
+    SubmitDrcIssuedAssetPolicySet,
+    SubmitDrcTrustLineIssuerControl,
+    SubmitDrcIssuedClawback,
+    GetDrcIssuedAssetPolicy,
+    GetDrcIssuedAssetPolicyReceipt,
+    GetDrcTrustLineIssuerControlReceipt,
+    GetDrcIssuedClawbackReceipt,
     GetBalance,
     GetUtxos,
     FundAddress,
@@ -138,6 +145,15 @@ impl RpcMethod {
             Self::GetDrcTrustLine => "agora_getDrcTrustLine",
             Self::GetDrcIssuerLiability => "agora_getDrcIssuerLiability",
             Self::GetDrcIssuedTransferReceipt => "agora_getDrcIssuedTransferReceipt",
+            Self::SubmitDrcIssuedAssetPolicySet => "agora_submitDrcIssuedAssetPolicySet",
+            Self::SubmitDrcTrustLineIssuerControl => "agora_submitDrcTrustLineIssuerControl",
+            Self::SubmitDrcIssuedClawback => "agora_submitDrcIssuedClawback",
+            Self::GetDrcIssuedAssetPolicy => "agora_getDrcIssuedAssetPolicy",
+            Self::GetDrcIssuedAssetPolicyReceipt => "agora_getDrcIssuedAssetPolicyReceipt",
+            Self::GetDrcTrustLineIssuerControlReceipt => {
+                "agora_getDrcTrustLineIssuerControlReceipt"
+            }
+            Self::GetDrcIssuedClawbackReceipt => "agora_getDrcIssuedClawbackReceipt",
             Self::GetBalance => "agora_getBalance",
             Self::GetUtxos => "agora_getUtxos",
             Self::FundAddress => "agora_fundAddress",
@@ -223,6 +239,15 @@ impl RpcMethod {
             "agora_getDrcTrustLine" => Some(Self::GetDrcTrustLine),
             "agora_getDrcIssuerLiability" => Some(Self::GetDrcIssuerLiability),
             "agora_getDrcIssuedTransferReceipt" => Some(Self::GetDrcIssuedTransferReceipt),
+            "agora_submitDrcIssuedAssetPolicySet" => Some(Self::SubmitDrcIssuedAssetPolicySet),
+            "agora_submitDrcTrustLineIssuerControl" => Some(Self::SubmitDrcTrustLineIssuerControl),
+            "agora_submitDrcIssuedClawback" => Some(Self::SubmitDrcIssuedClawback),
+            "agora_getDrcIssuedAssetPolicy" => Some(Self::GetDrcIssuedAssetPolicy),
+            "agora_getDrcIssuedAssetPolicyReceipt" => Some(Self::GetDrcIssuedAssetPolicyReceipt),
+            "agora_getDrcTrustLineIssuerControlReceipt" => {
+                Some(Self::GetDrcTrustLineIssuerControlReceipt)
+            }
+            "agora_getDrcIssuedClawbackReceipt" => Some(Self::GetDrcIssuedClawbackReceipt),
             "agora_getBalance" => Some(Self::GetBalance),
             "agora_getUtxos" => Some(Self::GetUtxos),
             "agora_fundAddress" => Some(Self::FundAddress),

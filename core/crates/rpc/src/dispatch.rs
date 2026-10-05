@@ -491,6 +491,64 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 self.backend
                     .get_drc_issued_transfer_receipt(&transfer_tx_id)
             }
+            RpcMethod::SubmitDrcIssuedAssetPolicySet => {
+                let raw = req
+                    .params
+                    .get("issued_asset_policy_set")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: agora_types::DrcIssuedAssetPolicySetTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_issued_asset_policy_set(tx)?;
+                Ok(json!({ "policy_set_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcTrustLineIssuerControl => {
+                let raw = req
+                    .params
+                    .get("trust_line_issuer_control")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: agora_types::DrcTrustLineIssuerControlTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_trust_line_issuer_control(tx)?;
+                Ok(json!({ "issuer_control_tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitDrcIssuedClawback => {
+                let raw = req
+                    .params
+                    .get("issued_clawback")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: agora_types::DrcIssuedClawbackTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_issued_clawback(tx)?;
+                Ok(json!({ "clawback_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcIssuedAssetPolicy => {
+                let asset = parse_issued_asset_id(&req.params)?;
+                self.backend.get_drc_issued_asset_policy(&asset)
+            }
+            RpcMethod::GetDrcIssuedAssetPolicyReceipt => {
+                let policy_set_tx_id = param_hash(&req.params, "policy_set_tx_id")?;
+                self.backend
+                    .get_drc_issued_asset_policy_receipt(&policy_set_tx_id)
+            }
+            RpcMethod::GetDrcTrustLineIssuerControlReceipt => {
+                let control_tx_id = param_hash(&req.params, "control_tx_id")?;
+                self.backend
+                    .get_drc_trust_line_issuer_control_receipt(&control_tx_id)
+            }
+            RpcMethod::GetDrcIssuedClawbackReceipt => {
+                let clawback_tx_id = param_hash(&req.params, "clawback_tx_id")?;
+                self.backend
+                    .get_drc_issued_clawback_receipt(&clawback_tx_id)
+            }
             RpcMethod::GetDrcAccountSignerList => {
                 let account = param_address(&req.params, "account")?;
                 match self.backend.get_drc_account_signer_list(&account)? {

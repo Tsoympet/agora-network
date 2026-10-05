@@ -287,6 +287,18 @@ pub fn asset_has_active_line_freeze(
 }
 
 /// On `require_auth` enable: persist every indexed line as v2 with `authorized = false` (no silent v1 bypass).
+/// Meta keys touched when persisting v2 unauthorized lines on `require_auth` enable (mempool reservation).
+pub fn require_auth_migration_meta_keys(
+    store: &StateStore,
+    asset: &IssuedAssetId,
+) -> Result<Vec<Vec<u8>>, StateError> {
+    let mut keys = Vec::new();
+    for holder in load_issuer_holders_index(store, &asset.issuer, &asset.currency)? {
+        keys.push(trust_line_key(&holder, asset));
+    }
+    Ok(keys)
+}
+
 pub fn upgrade_trust_lines_for_require_auth(
     store: &StateStore,
     asset: &IssuedAssetId,

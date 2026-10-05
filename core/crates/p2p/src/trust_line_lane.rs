@@ -174,6 +174,26 @@ impl Mempool {
             ));
         }
 
+        if self.asset_policy_mutation_reserved(&asset_key) {
+            return Err(P2pError::MempoolRejected(
+                "asset policy mutation pending".into(),
+            ));
+        }
+
+        if tx.sender != issuer && self.issuer_control_mutation_reserved(&tx.sender, &asset_key) {
+            return Err(P2pError::MempoolRejected(
+                "issuer control pending on sender line".into(),
+            ));
+        }
+        if tx.recipient != issuer
+            && tx.recipient != tx.sender
+            && self.issuer_control_mutation_reserved(&tx.recipient, &asset_key)
+        {
+            return Err(P2pError::MempoolRejected(
+                "issuer control pending on recipient line".into(),
+            ));
+        }
+
         let touches_liability = tx.sender == issuer || tx.recipient == issuer;
         if touches_liability
             && self

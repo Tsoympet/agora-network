@@ -200,6 +200,9 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_payment_channel_closes: &'a [agora_types::DrcPaymentChannelCloseTx],
     pub drc_trust_line_sets: &'a [agora_types::DrcTrustLineSetTx],
     pub drc_issued_transfers: &'a [agora_types::DrcIssuedTransferTx],
+    pub drc_issued_asset_policy_sets: &'a [agora_types::DrcIssuedAssetPolicySetTx],
+    pub drc_trust_line_issuer_controls: &'a [agora_types::DrcTrustLineIssuerControlTx],
+    pub drc_issued_clawbacks: &'a [agora_types::DrcIssuedClawbackTx],
 }
 
 impl ChainState {
@@ -576,9 +579,9 @@ impl ChainState {
             drc_payment_channel_closes: lanes.drc_payment_channel_closes.to_vec(),
             drc_trust_line_sets: lanes.drc_trust_line_sets.to_vec(),
             drc_issued_transfers: lanes.drc_issued_transfers.to_vec(),
-            drc_issued_asset_policy_sets: Vec::new(),
-            drc_trust_line_issuer_controls: Vec::new(),
-            drc_issued_clawbacks: Vec::new(),
+            drc_issued_asset_policy_sets: lanes.drc_issued_asset_policy_sets.to_vec(),
+            drc_trust_line_issuer_controls: lanes.drc_trust_line_issuer_controls.to_vec(),
+            drc_issued_clawbacks: lanes.drc_issued_clawbacks.to_vec(),
             drc_multisign_attachments: Vec::new(),
         };
         if let Some(ctx) = self.auth.as_ref() {

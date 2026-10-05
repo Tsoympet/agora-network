@@ -112,6 +112,45 @@ fn clawback_receipt_key(tx_id: &Hash) -> Vec<u8> {
     k
 }
 
+pub fn load_drc_issued_asset_policy_receipt(
+    store: &StateStore,
+    tx_id: &Hash,
+) -> Result<Option<DrcIssuedAssetPolicyReceipt>, StateError> {
+    let bytes = store.get_cf(ColumnFamily::Meta, &policy_receipt_key(tx_id))?;
+    bytes
+        .map(|b| {
+            DrcIssuedAssetPolicyReceipt::try_from_slice(&b)
+                .map_err(|e| StateError::Storage(e.to_string()))
+        })
+        .transpose()
+}
+
+pub fn load_drc_trust_line_issuer_control_receipt(
+    store: &StateStore,
+    tx_id: &Hash,
+) -> Result<Option<DrcTrustLineIssuerControlReceipt>, StateError> {
+    let bytes = store.get_cf(ColumnFamily::Meta, &control_receipt_key(tx_id))?;
+    bytes
+        .map(|b| {
+            DrcTrustLineIssuerControlReceipt::try_from_slice(&b)
+                .map_err(|e| StateError::Storage(e.to_string()))
+        })
+        .transpose()
+}
+
+pub fn load_drc_issued_clawback_receipt(
+    store: &StateStore,
+    tx_id: &Hash,
+) -> Result<Option<DrcIssuedClawbackReceipt>, StateError> {
+    let bytes = store.get_cf(ColumnFamily::Meta, &clawback_receipt_key(tx_id))?;
+    bytes
+        .map(|b| {
+            DrcIssuedClawbackReceipt::try_from_slice(&b)
+                .map_err(|e| StateError::Storage(e.to_string()))
+        })
+        .transpose()
+}
+
 pub fn issued_controls_meta_keys_for_policy(tx: &DrcIssuedAssetPolicySetTx) -> Vec<Vec<u8>> {
     vec![drc_issued_asset_policy_meta_key(&tx.asset_id())]
 }

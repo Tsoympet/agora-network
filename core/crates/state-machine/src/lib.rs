@@ -42,6 +42,8 @@ mod drc_issued_controls;
 #[cfg(test)]
 mod drc_issued_controls_hardening_tests;
 #[cfg(test)]
+mod drc_issued_controls_master_auth_matrix_tests;
+#[cfg(test)]
 mod drc_issued_controls_matrix_tests;
 #[cfg(test)]
 mod drc_issued_controls_multisign_adversary_matrix;
@@ -194,7 +196,9 @@ pub use drc_escrow::{
 pub use drc_issued_controls::{
     apply_drc_issued_asset_policy_set, apply_drc_issued_clawback,
     apply_drc_trust_line_issuer_control, issued_movement_allowed, load_drc_issued_asset_policy,
-    normalize_trust_line_live, IssuedMovementKind, DRC_ISSUED_CONTROLS_ROOT_DOMAIN,
+    load_drc_issued_asset_policy_receipt, load_drc_issued_clawback_receipt,
+    load_drc_trust_line_issuer_control_receipt, normalize_trust_line_live, IssuedMovementKind,
+    DRC_ISSUED_CONTROLS_ROOT_DOMAIN,
 };
 pub use drc_mempool::{
     drc_ticket_sequence_for_create_nonce, lookup_drc_ticket_point, plan_drc_mempool_reservation,
@@ -231,8 +235,8 @@ pub use drc_trust_line::{
     count_live_trust_lines_for_holder, drc_trust_line_root, issued_transfer_receipt_key,
     issuer_liability_key, load_drc_issued_transfer_receipt, load_drc_issuer_liability,
     load_drc_trust_line_live, lookup_drc_issuer_liability_point, lookup_drc_trust_line_point,
-    sum_holder_balances_for_asset, trust_line_key, trust_line_meta_keys,
-    DRC_TRUST_LINE_ROOT_DOMAIN,
+    require_auth_migration_meta_keys, sum_holder_balances_for_asset, trust_line_key,
+    trust_line_meta_keys, DRC_TRUST_LINE_ROOT_DOMAIN,
 };
 pub use error::StateError;
 pub use execution::{

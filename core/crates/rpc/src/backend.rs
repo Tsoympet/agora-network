@@ -240,6 +240,31 @@ pub trait RpcBackend: Send {
         asset: &agora_types::IssuedAssetId,
     ) -> Result<Value, RpcError>;
     fn get_drc_issued_transfer_receipt(&self, transfer_tx_id: &Hash) -> Result<Value, RpcError>;
+    fn submit_drc_issued_asset_policy_set(
+        &mut self,
+        tx: agora_types::DrcIssuedAssetPolicySetTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_trust_line_issuer_control(
+        &mut self,
+        tx: agora_types::DrcTrustLineIssuerControlTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_issued_clawback(
+        &mut self,
+        tx: agora_types::DrcIssuedClawbackTx,
+    ) -> Result<Hash, RpcError>;
+    fn get_drc_issued_asset_policy(
+        &self,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_issued_asset_policy_receipt(
+        &self,
+        policy_set_tx_id: &Hash,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_trust_line_issuer_control_receipt(
+        &self,
+        control_tx_id: &Hash,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_issued_clawback_receipt(&self, clawback_tx_id: &Hash) -> Result<Value, RpcError>;
     /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
     fn get_drc_account_policy(
         &self,
@@ -863,6 +888,67 @@ impl RpcBackend for InMemoryBackend {
     fn get_drc_issued_transfer_receipt(&self, transfer_tx_id: &Hash) -> Result<Value, RpcError> {
         Ok(json!({
             "transfer_tx_id": transfer_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn submit_drc_issued_asset_policy_set(
+        &mut self,
+        _tx: agora_types::DrcIssuedAssetPolicySetTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit issued asset policy".into(),
+        ))
+    }
+
+    fn submit_drc_trust_line_issuer_control(
+        &mut self,
+        _tx: agora_types::DrcTrustLineIssuerControlTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit issuer control".into(),
+        ))
+    }
+
+    fn submit_drc_issued_clawback(
+        &mut self,
+        _tx: agora_types::DrcIssuedClawbackTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit clawback".into(),
+        ))
+    }
+
+    fn get_drc_issued_asset_policy(
+        &self,
+        _asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError> {
+        Ok(json!({ "status": "unknown" }))
+    }
+
+    fn get_drc_issued_asset_policy_receipt(
+        &self,
+        policy_set_tx_id: &Hash,
+    ) -> Result<Value, RpcError> {
+        Ok(json!({
+            "policy_set_tx_id": policy_set_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_trust_line_issuer_control_receipt(
+        &self,
+        control_tx_id: &Hash,
+    ) -> Result<Value, RpcError> {
+        Ok(json!({
+            "control_tx_id": control_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_issued_clawback_receipt(&self, clawback_tx_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "clawback_tx_id": clawback_tx_id.to_hex(),
             "status": "unknown",
         }))
     }
