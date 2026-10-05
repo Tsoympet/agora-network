@@ -18,14 +18,14 @@ use agora_state_machine::{
     build_snapshot, canonical_community_root, governance_treasury_root,
     list_grants as list_canonical_grants, list_hubs as list_canonical_hubs,
     list_missions as list_canonical_missions, list_passport_attestations,
-    load_canonical_community_summary, load_canonical_governance_policy, load_epoch,
-    load_protocol_treasuries, load_reward_pool, load_validator, lookup_tx_location, meta_keys,
-    outpoint_key, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, StakingParams,
-    StateStore, TxAuthContext, WriteBatch,
+    load_canonical_community_summary, load_canonical_governance_policy, load_drc_payment_receipt,
+    load_epoch, load_protocol_treasuries, load_reward_pool, load_validator, lookup_tx_location,
+    meta_keys, outpoint_key, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily,
+    StakingParams, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcPaymentTx, Hash,
-    NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcPaymentReceipt,
+    DrcPaymentTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction, TxOut,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -505,6 +505,11 @@ impl RpcBackend for NodeBackend {
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
         }
         Ok(id)
+    }
+
+    fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError> {
+        load_drc_payment_receipt(self.store.as_ref(), payment_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))
     }
 
     fn get_balance(&self, address: &Address) -> Amount {
@@ -1250,10 +1255,85 @@ mod tests {
 
         let id = backend.submit_drc_payment(tx.clone()).unwrap();
         assert_eq!(id, tx.payment_id());
+        assert!(
+            backend.get_drc_payment(&id).unwrap().is_none(),
+            "pending mempool payments are intentionally not reported as settled"
+        );
         let template = backend.get_block_template().unwrap();
         assert_eq!(template.drc_payments, vec![tx]);
         assert_eq!(template.drc_payments[0].source_tag, Some(88));
         assert_eq!(template.header.tx_root, template.compute_body_root());
+    }
+
+    #[test]
+    fn drc_payment_query_reads_root_committed_receipt() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let merchant = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &alice.address(),
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+
+        let mut payment = DrcPaymentTx::unsigned_v2(
+            alice.address(),
+            merchant.address(),
+            Amount::from_base_units(100),
+            Amount::from_base_units(1),
+            77,
+            Some(88),
+            Hash([8; 32]),
+            0,
+        );
+        sign_drc_payment_bound(&mut payment, &alice, "agora-dev", &genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        let expected = apply_drc_payment(
+            store.as_ref(),
+            &payment,
+            &TxAuthContext {
+                chain_id: "agora-dev".into(),
+                genesis,
+                data_availability_network_fingerprint: None,
+            },
+            &mut batch,
+            &mut journal,
+        )
+        .unwrap();
+        store.write_batch(batch).unwrap();
+
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let backend = NodeBackend::new(
+            chain,
+            store,
+            Arc::new(Mutex::new(Mempool::new(64))),
+            backend_config(genesis),
+        );
+        assert_eq!(
+            backend
+                .get_drc_payment(&expected.payment_id)
+                .unwrap()
+                .unwrap(),
+            expected
+        );
+        assert!(backend.get_drc_payment(&Hash::ZERO).unwrap().is_none());
     }
 
     #[test]

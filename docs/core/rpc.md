@@ -16,6 +16,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_submitAccountTransfer` | Validate, reserve, and gossip a signed OVL/DRC account transfer |
 | `agora_submitOvlExecution` | Validate and gossip a signed intrinsic-gas OVL execution envelope |
 | `agora_submitDrcPayment` | Validate and gossip a versioned signed DRC payment with source/destination-tag and invoice routing |
+| `agora_getDrcPayment` | Read a canonical settled DRC exact-delivery receipt by payment ID (`settled` / `unknown`) |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
@@ -98,7 +99,7 @@ When unset, JSON-RPC stays open (safe with the default loopback bind). When set:
 | Always public | Token required |
 | --- | --- |
 | `GET /health` | `agora_submitTransaction` / `agora_submitBlock` |
-| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` | `agora_getBlockTemplate` / `agora_fundAddress` |
+| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` / `agora_getDrcPayment` | `agora_getBlockTemplate` / `agora_fundAddress` |
 | `agora_getMempool` / `agora_getNodeInfo` / `agora_estimateFee` | `agora_getBalance` / `agora_getUtxos` |
 | `agora_getConstitution` / `agora_getGovernance` | `agora_submitProposal` / `agora_castGovVote` / … |
 | `agora_listProposals` / `agora_getProposal` / `agora_listOffices` | `agora_depositProposal` / tally / execute / forum post |
@@ -114,6 +115,16 @@ Non-loopback `AGORA_RPC_BIND` (e.g. `0.0.0.0:8545`) refuses to start unless `AGO
 `agora_getTransaction` returns `{ tx_id, status, block_id, index, fee, confirmations, transaction }` — wallets should poll until `confirmed` (missing txs return `status: "unknown"`, not an RPC error). Confirmed locations are indexed in `cf_warm` (`tx/` ‖ tx_id → block_id ‖ index) on admit / genesis. `confirmations` is blue-score depth vs the best tip (`max_tip_blue − block_blue + 1`) on live nodes (tip parent-distance on the in-memory test backend).  
 `agora_getMempool` returns `{ count, transactions: [{ tx_id, fee, transaction }] }` ordered by fee desc then `tx_id` (default `limit` 128, max 10000).  
 `agora_getNodeInfo` returns `{ network, version, peer_id, connected_peers, tip_count, mempool_count, pow_algorithm, bits, archival, hot_window, allow_fund, miner_address, genesis_hash }` (`network` is `dev`/`testnet`/…; miner as Bech32m; `genesis_hash` hex Block 0).  
+
+`agora_getDrcPayment` accepts `{ "payment_id": "<64 hex>" }`, a one-element
+array, or a bare hex ID. A canonical root-committed receipt returns
+`{ payment_id, status: "settled", receipt }`; an absent receipt returns
+`{ payment_id, status: "unknown", receipt: null }`. Receipt v1 exposes only
+`result: "delivered_exact"` and equal base-unit `requested_amount` /
+`delivered_amount`, plus fee, sender/recipient, source/destination tags, and
+invoice ID. It excludes authorization bytes. Pending mempool state is
+intentionally not coupled into this durable lookup, and `settled` does not by
+itself assert checkpoint finality. Malformed IDs return `-32602`.
 
 `agora_getBlockTemplate` returns `{ "block": Block, "randomx_epoch": u64 }` (native serde hashes as byte arrays). The block has a coinbase paying `AGORA_MINER_ADDRESS` for **emission + Σ transfer fees** at the estimated next blue score, followed by up to 128 mempool transfers (fee-desc, then `tx_id`); `header.tx_root` commits to that body. `randomx_epoch` is the blue-score–anchored RandomX key epoch miners must use. `agora_submitBlock` rejects `tx_root` mismatches and evicts included/conflicting mempool txs. Mempool admission requires `fee ≥ AGORA_MIN_RELAY_FEE`; fees are paid to the miner via the coinbase (not burned).
 

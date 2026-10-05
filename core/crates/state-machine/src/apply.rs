@@ -64,7 +64,7 @@ pub struct UtxoJournal {
     pub account_before: Vec<(NativeAssetId, Address, AccountState)>,
     /// Meta key snapshots before Accepted stake ops (`None` = key absent).
     pub stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
-    /// DRC payment duplicate/invoice/outbox keys before Accepted payments.
+    /// DRC payment duplicate/invoice/outbox/receipt keys before Accepted payments.
     pub payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     /// DA commitment/index and operator replay keys before Accepted commitments.
     pub data_availability_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
@@ -672,7 +672,7 @@ fn apply_trident_lanes(
                     &lane,
                     &mut op_batch,
                     NativeAssetId::DRC,
-                    receipt.fee_paid,
+                    receipt.fee_paid.as_base_units(),
                 )?;
                 lane.write_batch(op_batch.clone())?;
                 batch.append(op_batch);
@@ -2135,7 +2135,7 @@ mod tests {
     #[test]
     fn drc_payment_accepts_emits_outbox_and_reverts() {
         use crate::accounts::{credit_account_into, load_account};
-        use crate::payments::{drc_payment_root, load_drc_outbox_event};
+        use crate::payments::{drc_payment_root, load_drc_outbox_event, load_drc_payment_receipt};
         use crate::staking::load_reward_pool;
         use agora_crypto::sign_drc_payment_bound;
         use agora_types::{DrcPaymentTx, NativeAssetId};
@@ -2224,6 +2224,13 @@ mod tests {
         let outbox = load_drc_outbox_event(&store, &payment_id).unwrap().unwrap();
         assert_eq!(outbox.source_tag, Some(84));
         assert_eq!(outbox.destination_tag, 42);
+        let receipt = load_drc_payment_receipt(&store, &payment_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(receipt.requested_amount, Amount::from_base_units(400));
+        assert_eq!(receipt.delivered_amount, receipt.requested_amount);
+        assert_eq!(receipt.source_tag, Some(84));
+        assert_eq!(receipt.destination_tag, 42);
         assert_ne!(drc_payment_root(&store).unwrap(), payment_root_before);
 
         store
@@ -2237,6 +2244,9 @@ mod tests {
         );
         assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 0);
         assert!(load_drc_outbox_event(&store, &payment_id)
+            .unwrap()
+            .is_none());
+        assert!(load_drc_payment_receipt(&store, &payment_id)
             .unwrap()
             .is_none());
         assert_eq!(drc_payment_root(&store).unwrap(), payment_root_before);

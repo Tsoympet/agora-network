@@ -48,10 +48,19 @@ Acceptance debits `amount + fee`, credits the recipient amount, sends the fee
 to the DRC validator reward pool, records duplicate/invoice indexes, and writes
 an immutable, payment-versioned `DrcPaymentOutboxEvent` that preserves both
 tags. Frozen v1 event bytes remain readable; v2 events use an explicit trailing
-extension. The outbox is deterministic consensus metadata for transport
-consumers; delivery state remains outside consensus. State-root computation
-uses a rolling, reorg-journaled payment commitment rather than rescanning the
-append-only outbox.
+extension. It also writes a versioned `DrcPaymentReceipt` under the canonical
+payment ID. Receipt v1 has exactly one result, `delivered_exact`, and records
+equal authenticated `requested_amount` and `delivered_amount` values. There is
+no partial result or delivered-amount input.
+
+The outbox is deterministic consensus metadata for transport consumers; network
+message delivery state remains outside consensus. The receipt and outbox event
+feed the versioned rolling payment commitment, while the derived payment-ID
+lookup key is written in the same atomic batch. Reorg journals restore all of
+these keys atomically. Receipt v1 has no variable-length fields (142 bytes
+without a source tag, 146 bytes with one), and only one receipt can occupy a
+unique payment-ID key; existing block-byte and mempool-count limits bound
+admission.
 
 ## BlockDAG integration
 
@@ -61,8 +70,29 @@ journaled for reorg restoration and included in the Trident state root.
 `agora_submitDrcPayment` admits signed payments into mempool/gossip/template
 flow. Body-root v4 did not need a format change: it commits ordered payment IDs,
 and each ID commits the versioned complete signed envelope. Trident protocol
-v6, transaction-signing v2, and state-transition
-`agora-trident-state-v7` isolate this activation from older peers.
+v7, transaction-signing v2, and state-transition
+`agora-trident-state-v8` isolate receipt-state activation from older peers.
+Receipt storage raises the Experimental datadir schema to v11; an older
+Experimental datadir must be replayed/reindexed (or recreated) to materialize
+receipts for payments settled before this activation. Frozen payment-v1 and
+outbox-v1 bytes are unchanged.
+
+## Settled payment query
+
+`agora_getDrcPayment` is a public read-only lookup by 32-byte hex
+`payment_id`:
+
+- a canonical receipt returns `status: "settled"` and the receipt fields,
+  including `result: "delivered_exact"`, both amounts, fee, both tags, routing
+  addresses, and invoice ID
+- a missing canonical receipt returns `status: "unknown"` and `receipt: null`
+- a malformed ID returns the existing JSON-RPC invalid-params error (`-32602`)
+
+The response excludes signatures and public keys. It reports only the
+root-committed canonical virtual settlement view. It does not inspect the
+process-local mempool, so pending submissions remain `unknown`; it also does
+not claim dual-PoS checkpoint finality. Finality remains independently
+queryable through the checkpoint RPCs.
 
 Escrow, recurring authorization, multisig accounts, cross-district paths, and
 merchant tag registries remain separate future transitions. Destination tags
@@ -75,6 +105,6 @@ module.
 
 ## Next bounded slice
 
-Add a delivered-amount receipt and payment query API for the existing fixed
-full-delivery transition. That slice must not introduce partial delivery,
-paths, issued assets, or execution.
+Add a recipient-scoped merchant invoice lookup over the existing unique
+invoice index. That slice should resolve an invoice to this settled receipt
+without adding partial delivery, paths, issued assets, escrow, or execution.
