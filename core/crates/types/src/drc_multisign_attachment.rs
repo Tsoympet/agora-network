@@ -8,10 +8,11 @@ use ts_rs::TS;
 use crate::{
     AccountTransfer, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
     DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
-    DrcIssuedTransferTx, DrcMultisignAuth, DrcMultisignError, DrcPaymentChannelClaimTx,
-    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, NativeAssetId,
-    SignedStakeTx,
+    DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcMultisignAuth,
+    DrcMultisignError, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
+    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash,
+    NativeAssetId, SignedStakeTx,
 };
 
 pub const DRC_MULTISIGN_ATTACHMENT_KEY_VERSION: u32 = 1;
@@ -58,6 +59,9 @@ pub enum DrcMultisignOperationKind {
     DrcPaymentChannelClose = 18,
     DrcTrustLineSet = 19,
     DrcIssuedTransfer = 20,
+    DrcIssuedAssetPolicySet = 21,
+    DrcTrustLineIssuerControl = 22,
+    DrcIssuedClawback = 23,
 }
 
 impl DrcMultisignOperationKind {
@@ -83,6 +87,9 @@ impl DrcMultisignOperationKind {
             Self::DrcPaymentChannelClose => "drc_payment_channel_close",
             Self::DrcTrustLineSet => "drc_trust_line_set",
             Self::DrcIssuedTransfer => "drc_issued_transfer",
+            Self::DrcIssuedAssetPolicySet => "drc_issued_asset_policy_set",
+            Self::DrcTrustLineIssuerControl => "drc_trust_line_issuer_control",
+            Self::DrcIssuedClawback => "drc_issued_clawback",
         }
     }
 }
@@ -400,6 +407,39 @@ pub fn attachment_key_for_issued_transfer(
 ) -> DrcMultisignAttachmentKey {
     drc_multisign_attachment_key(
         DrcMultisignOperationKind::DrcIssuedTransfer,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_issued_asset_policy_set(
+    tx: &DrcIssuedAssetPolicySetTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcIssuedAssetPolicySet,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_trust_line_issuer_control(
+    tx: &DrcTrustLineIssuerControlTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcTrustLineIssuerControl,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_issued_clawback(
+    tx: &DrcIssuedClawbackTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcIssuedClawback,
         &tx.signing_bytes_bound(chain_id, genesis),
     )
 }

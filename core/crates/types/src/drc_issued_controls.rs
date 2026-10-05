@@ -541,3 +541,30 @@ impl BorshDeserialize for DrcIssuedClawbackTx {
         })
     }
 }
+
+#[cfg(test)]
+mod native_asset_barrier_tests {
+    use super::*;
+    use crate::IssuedCurrencyCode;
+
+    #[test]
+    fn policy_set_rejects_native_colliding_currency_code() {
+        let mut code = [0u8; 20];
+        code[..3].copy_from_slice(b"TLT");
+        let currency = IssuedCurrencyCode(code);
+        assert!(currency.validate().is_err());
+        let tx = DrcIssuedAssetPolicySetTx {
+            version: DRC_ISSUED_ASSET_POLICY_SET_TX_VERSION,
+            issuer: Address([1u8; 20]),
+            currency,
+            action: DrcIssuedAssetPolicyAction::EnableGlobalFreeze,
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+        };
+        assert!(tx.validate_structure().is_err());
+    }
+}

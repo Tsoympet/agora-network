@@ -10,6 +10,8 @@ import type { DrcDepositPreauthTx } from "./DrcDepositPreauthTx";
 import type { DrcEscrowCancelTx } from "./DrcEscrowCancelTx";
 import type { DrcEscrowCreateTx } from "./DrcEscrowCreateTx";
 import type { DrcEscrowFinishTx } from "./DrcEscrowFinishTx";
+import type { DrcIssuedAssetPolicySetTx } from "./DrcIssuedAssetPolicySetTx";
+import type { DrcIssuedClawbackTx } from "./DrcIssuedClawbackTx";
 import type { DrcIssuedTransferTx } from "./DrcIssuedTransferTx";
 import type { DrcMultisignBlockAttachment } from "./DrcMultisignBlockAttachment";
 import type { DrcPaymentChannelClaimTx } from "./DrcPaymentChannelClaimTx";
@@ -20,6 +22,7 @@ import type { DrcPaymentTx } from "./DrcPaymentTx";
 import type { DrcRegularKeyTx } from "./DrcRegularKeyTx";
 import type { DrcSignerListTx } from "./DrcSignerListTx";
 import type { DrcTicketCreateTx } from "./DrcTicketCreateTx";
+import type { DrcTrustLineIssuerControlTx } from "./DrcTrustLineIssuerControlTx";
 import type { DrcTrustLineSetTx } from "./DrcTrustLineSetTx";
 import type { OvlExecutionTx } from "./OvlExecutionTx";
 import type { SignedStakeTx } from "./SignedStakeTx";
@@ -121,6 +124,18 @@ drc_trust_line_sets: Array<DrcTrustLineSetTx>,
  * Exact issued-value transfers (issue/redeem/holder transfer).
  */
 drc_issued_transfers: Array<DrcIssuedTransferTx>,
+/**
+ * Issuer-scoped asset policy (auth/freeze/clawback flags).
+ */
+drc_issued_asset_policy_sets: Array<DrcIssuedAssetPolicySetTx>,
+/**
+ * Issuer line authorize/freeze/deep-freeze controls.
+ */
+drc_trust_line_issuer_controls: Array<DrcTrustLineIssuerControlTx>,
+/**
+ * Issuer exact clawback from one holder line.
+ */
+drc_issued_clawbacks: Array<DrcIssuedClawbackTx>,
 /**
  * Detached, body-root-committed DRC multisign authorization (consensus lane).
  */

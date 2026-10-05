@@ -6,7 +6,7 @@ import type { DrcMultisignAuth } from "./DrcMultisignAuth";
 /**
  * Owner-signed creation of exactly one outstanding ticket (nonce-only; never consumes a ticket).
  */
-export type DrcTicketCreateTx = { version: number, owner: Address, fee: Amount, 
+export type DrcTicketCreateTx = { version: number, owner: Address, fee: Amount,
 /**
  * Ordinary shared DRC nonce at creation time (must equal current account nonce).
  */
