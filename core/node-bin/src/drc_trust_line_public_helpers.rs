@@ -3,9 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use agora_consensus::{LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher};
-use agora_crypto::{
-    sign_drc_issued_transfer_bound, sign_drc_trust_line_set_bound, KeyPair,
-};
+use agora_crypto::{sign_drc_issued_transfer_bound, sign_drc_trust_line_set_bound, KeyPair};
 use agora_p2p::Mempool;
 use agora_state_machine::{
     credit_account_into, load_drc_issuer_liability, load_drc_trust_line_live, GenesisBuilder,
@@ -18,9 +16,9 @@ use agora_types::{
 };
 
 use super::{NodeBackend, NodeBackendConfig};
-use agora_rpc::RpcBackend;
 use crate::admit::{BlockTemplateLanes, ChainState};
 use crate::storage_policy::StoragePolicy;
+use agora_rpc::RpcBackend;
 
 pub use super::drc_payment_channel_public_helpers::{
     account_reserved, backend_config, boot_chain, mine_template as mine_template_inner,
@@ -215,7 +213,11 @@ pub fn mempool_len(backend: &NodeBackend) -> usize {
     backend.test_mempool().lock().unwrap().len()
 }
 
-pub fn trust_line_mutation_reserved(backend: &NodeBackend, holder: &Address, ast: &IssuedAssetId) -> bool {
+pub fn trust_line_mutation_reserved(
+    backend: &NodeBackend,
+    holder: &Address,
+    ast: &IssuedAssetId,
+) -> bool {
     backend
         .test_mempool()
         .lock()
@@ -223,7 +225,11 @@ pub fn trust_line_mutation_reserved(backend: &NodeBackend, holder: &Address, ast
         .trust_line_mutation_reserved(holder, &ast.asset_key())
 }
 
-pub fn trust_line_meta_reserved(backend: &NodeBackend, holder: &Address, ast: &IssuedAssetId) -> bool {
+pub fn trust_line_meta_reserved(
+    backend: &NodeBackend,
+    holder: &Address,
+    ast: &IssuedAssetId,
+) -> bool {
     let key = drc_trust_line_live_meta_key(holder, ast);
     backend
         .test_mempool()
@@ -249,14 +255,7 @@ pub fn setup_live_line(
     limit: u64,
     holder_nonce: u64,
 ) {
-    let set = signed_trust_line_set(
-        holder,
-        issuer,
-        currency,
-        limit,
-        genesis,
-        holder_nonce,
-    );
+    let set = signed_trust_line_set(holder, issuer, currency, limit, genesis, holder_nonce);
     backend.submit_drc_trust_line_set(set).unwrap();
     mine_template(backend);
 }

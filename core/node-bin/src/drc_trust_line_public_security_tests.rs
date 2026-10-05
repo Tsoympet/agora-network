@@ -7,8 +7,8 @@ use agora_crypto::{
 use agora_rpc::RpcBackend;
 use agora_types::{
     Amount, DrcAccountPolicyTx, DrcAccountSequenceSelector, DrcDepositPreauthAction,
-    DrcDepositPreauthTx, Hash,
-    DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION, DRC_TRUST_LINE_SET_TICKET_VERSION,
+    DrcDepositPreauthTx, Hash, DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION,
+    DRC_TRUST_LINE_SET_TICKET_VERSION,
 };
 
 use super::drc_trust_line_public_helpers::{
@@ -50,14 +50,7 @@ fn public_admission_rejects_nonzero_invoice_and_clears_mempool() {
 #[test]
 fn public_admission_rejects_future_version_trust_line_set_ticket_selector() {
     let mut fx = funded_trust_line_fixture();
-    let mut tx = signed_trust_line_set(
-        &fx.holder,
-        &fx.issuer,
-        fx.cur_usd,
-        100,
-        fx.genesis,
-        0,
-    );
+    let mut tx = signed_trust_line_set(&fx.holder, &fx.issuer, fx.cur_usd, 100, fx.genesis, 0);
     tx.version = DRC_TRUST_LINE_SET_TICKET_VERSION + 1;
     tx.account_sequence = Some(DrcAccountSequenceSelector::ticket(2));
     assert!(fx.backend.submit_drc_trust_line_set(tx).is_err());
@@ -67,14 +60,7 @@ fn public_admission_rejects_future_version_trust_line_set_ticket_selector() {
 #[test]
 fn public_admission_selector_tamper_after_sign_rejected() {
     let mut fx = funded_trust_line_fixture();
-    let mut tx = signed_trust_line_set(
-        &fx.holder,
-        &fx.issuer,
-        fx.cur_usd,
-        500,
-        fx.genesis,
-        0,
-    );
+    let mut tx = signed_trust_line_set(&fx.holder, &fx.issuer, fx.cur_usd, 500, fx.genesis, 0);
     tx.nonce = tx.nonce.wrapping_add(1);
     assert!(fx.backend.submit_drc_trust_line_set(tx).is_err());
     assert_eq!(mempool_len(&fx.backend), 0);
@@ -110,7 +96,10 @@ fn public_admission_require_dest_tag_including_zero_tag() {
         fx.genesis,
         0,
     );
-    assert!(fx.backend.submit_drc_issued_transfer(no_tag.clone()).is_err());
+    assert!(fx
+        .backend
+        .submit_drc_issued_transfer(no_tag.clone())
+        .is_err());
     no_tag.destination_tag = Some(0);
     no_tag.public_key.clear();
     no_tag.signature.clear();
@@ -232,18 +221,19 @@ fn public_admission_deposit_auth_issue_holder_transfer_redeem() {
 #[test]
 fn public_admission_pending_line_set_reserves_meta_and_blocks_transfer() {
     let mut fx = funded_trust_line_fixture();
-    let set = signed_trust_line_set(
-        &fx.holder,
-        &fx.issuer,
-        fx.cur_usd,
-        100,
-        fx.genesis,
-        0,
-    );
+    let set = signed_trust_line_set(&fx.holder, &fx.issuer, fx.cur_usd, 100, fx.genesis, 0);
     fx.backend.submit_drc_trust_line_set(set).unwrap();
     let ast = asset(&fx.issuer, fx.cur_usd);
-    assert!(trust_line_mutation_reserved(&fx.backend, &fx.holder.address(), &ast));
-    assert!(trust_line_meta_reserved(&fx.backend, &fx.holder.address(), &ast));
+    assert!(trust_line_mutation_reserved(
+        &fx.backend,
+        &fx.holder.address(),
+        &ast
+    ));
+    assert!(trust_line_meta_reserved(
+        &fx.backend,
+        &fx.holder.address(),
+        &ast
+    ));
     assert!(fx
         .backend
         .submit_drc_issued_transfer(signed_issued_transfer(
@@ -257,7 +247,11 @@ fn public_admission_pending_line_set_reserves_meta_and_blocks_transfer() {
         ))
         .is_err());
     mine_template(&mut fx.backend);
-    assert!(!trust_line_mutation_reserved(&fx.backend, &fx.holder.address(), &ast));
+    assert!(!trust_line_mutation_reserved(
+        &fx.backend,
+        &fx.holder.address(),
+        &ast
+    ));
 }
 
 #[test]
@@ -352,14 +346,7 @@ fn public_admission_disabled_master_rejected_regular_key_succeeds() {
     fx.backend.submit_drc_account_policy(disable).unwrap();
     mine_template(&mut fx.backend);
 
-    let mut set = signed_trust_line_set(
-        &fx.holder,
-        &fx.issuer,
-        fx.cur_usd,
-        100,
-        fx.genesis,
-        2,
-    );
+    let mut set = signed_trust_line_set(&fx.holder, &fx.issuer, fx.cur_usd, 100, fx.genesis, 2);
     assert!(fx.backend.submit_drc_trust_line_set(set.clone()).is_err());
     sign_drc_trust_line_set_bound(&mut set, &regular, CHAIN, &fx.genesis).unwrap();
     assert!(fx.backend.submit_drc_trust_line_set(set).is_ok());
@@ -409,14 +396,7 @@ fn public_admission_multisign_missing_attachment_never_admitted() {
     use agora_types::{DrcMultisignAuth, DrcMultisignEntry, DRC_MULTISIGN_AUTH_VERSION};
 
     let mut fx = funded_trust_line_fixture();
-    let mut set = signed_trust_line_set(
-        &fx.holder,
-        &fx.issuer,
-        fx.cur_usd,
-        50,
-        fx.genesis,
-        0,
-    );
+    let mut set = signed_trust_line_set(&fx.holder, &fx.issuer, fx.cur_usd, 50, fx.genesis, 0);
     set.multisign = Some(DrcMultisignAuth {
         version: DRC_MULTISIGN_AUTH_VERSION,
         signing_for: fx.holder.address(),
@@ -446,7 +426,8 @@ fn public_admission_ticket_cross_owner_rejected() {
         100,
         0,
     );
-    let mut ticket = DrcTicketCreateTx::unsigned(fx.holder.address(), Amount::from_base_units(1), 1);
+    let mut ticket =
+        DrcTicketCreateTx::unsigned(fx.holder.address(), Amount::from_base_units(1), 1);
     sign_drc_ticket_create_bound(&mut ticket, &fx.holder, CHAIN, &fx.genesis).unwrap();
     fx.backend.submit_drc_ticket_create(ticket).unwrap();
     mine_template(&mut fx.backend);
@@ -471,14 +452,7 @@ fn public_admission_nonce_reservation_released_after_reject() {
     use super::drc_trust_line_public_helpers::account_reserved;
 
     let mut fx = funded_trust_line_fixture();
-    let mut set = signed_trust_line_set(
-        &fx.holder,
-        &fx.issuer,
-        fx.cur_usd,
-        100,
-        fx.genesis,
-        0,
-    );
+    let mut set = signed_trust_line_set(&fx.holder, &fx.issuer, fx.cur_usd, 100, fx.genesis, 0);
     set.fee = Amount::from_base_units(10_000_000);
     assert!(fx.backend.submit_drc_trust_line_set(set).is_err());
     assert!(!account_reserved(&fx.backend, &fx.holder.address()));

@@ -10,33 +10,42 @@ use agora_types::{
 
 use super::drc_trust_line_public_helpers::{
     account_reserved, assert_liability_equals_sum_balances,
-    assert_template_has_no_invalid_trust_line_lanes, asset, drc_balance, issuer_outstanding,
-    line_balance, mempool_len, mine_template, reorg_away_transfer_on_tip, reward_pool_balance,
-    setup_live_line, signed_issued_transfer, signed_trust_line_set, submit_lanes_at_parents,
-    ticket_consumer_reserved, trust_line_meta_reserved, trust_line_mutation_reserved,
-    virtual_tip, funded_trust_line_fixture, CHAIN,
+    assert_template_has_no_invalid_trust_line_lanes, asset, drc_balance, funded_trust_line_fixture,
+    issuer_outstanding, line_balance, mempool_len, mine_template, reorg_away_transfer_on_tip,
+    reward_pool_balance, setup_live_line, signed_issued_transfer, signed_trust_line_set,
+    submit_lanes_at_parents, ticket_consumer_reserved, trust_line_meta_reserved,
+    trust_line_mutation_reserved, virtual_tip, CHAIN,
 };
 use crate::admit::BlockTemplateLanes;
 
 #[test]
 fn nodebackend_trust_line_set_reservations_evict_on_block_inclusion() {
     let mut fx = funded_trust_line_fixture();
-    let set = signed_trust_line_set(
-        &fx.holder,
-        &fx.issuer,
-        fx.cur_usd,
-        500,
-        fx.genesis,
-        0,
-    );
+    let set = signed_trust_line_set(&fx.holder, &fx.issuer, fx.cur_usd, 500, fx.genesis, 0);
     fx.backend.submit_drc_trust_line_set(set).unwrap();
     let ast = asset(&fx.issuer, fx.cur_usd);
-    assert!(trust_line_mutation_reserved(&fx.backend, &fx.holder.address(), &ast));
-    assert!(trust_line_meta_reserved(&fx.backend, &fx.holder.address(), &ast));
+    assert!(trust_line_mutation_reserved(
+        &fx.backend,
+        &fx.holder.address(),
+        &ast
+    ));
+    assert!(trust_line_meta_reserved(
+        &fx.backend,
+        &fx.holder.address(),
+        &ast
+    ));
     assert!(account_reserved(&fx.backend, &fx.holder.address()));
     mine_template(&mut fx.backend);
-    assert!(!trust_line_mutation_reserved(&fx.backend, &fx.holder.address(), &ast));
-    assert!(!trust_line_meta_reserved(&fx.backend, &fx.holder.address(), &ast));
+    assert!(!trust_line_mutation_reserved(
+        &fx.backend,
+        &fx.holder.address(),
+        &ast
+    ));
+    assert!(!trust_line_meta_reserved(
+        &fx.backend,
+        &fx.holder.address(),
+        &ast
+    ));
     assert!(!account_reserved(&fx.backend, &fx.holder.address()));
 }
 
@@ -67,7 +76,10 @@ fn nodebackend_reorg_reverts_issue_restores_liability_and_resubmit_once() {
     let fund_tip = virtual_tip(&fx.backend);
     let empty_tip =
         reorg_away_transfer_on_tip(&mut fx.backend, fx.store.as_ref(), fund_tip, &issue);
-    assert_eq!(line_balance(fx.store.as_ref(), &fx.holder.address(), &ast), 0);
+    assert_eq!(
+        line_balance(fx.store.as_ref(), &fx.holder.address(), &ast),
+        0
+    );
     assert_eq!(issuer_outstanding(fx.store.as_ref(), &ast), 0);
     assert_eq!(reward_pool_balance(fx.store.as_ref()), pool0);
     assert_liability_equals_sum_balances(fx.store.as_ref(), &fx.issuer.address(), &fx.cur_usd);
@@ -107,7 +119,11 @@ fn nodebackend_stale_over_limit_transfer_rejected_valid_next_after_reorg() {
     );
     reorg_away_transfer_on_tip(&mut fx.backend, fx.store.as_ref(), fund_tip, &first);
     assert_eq!(
-        line_balance(fx.store.as_ref(), &fx.holder.address(), &asset(&fx.issuer, fx.cur_usd)),
+        line_balance(
+            fx.store.as_ref(),
+            &fx.holder.address(),
+            &asset(&fx.issuer, fx.cur_usd)
+        ),
         0
     );
 
@@ -123,7 +139,11 @@ fn nodebackend_stale_over_limit_transfer_rejected_valid_next_after_reorg() {
         90,
     );
     assert_eq!(
-        line_balance(fx.store.as_ref(), &fx.holder.address(), &asset(&fx.issuer, fx.cur_usd)),
+        line_balance(
+            fx.store.as_ref(),
+            &fx.holder.address(),
+            &asset(&fx.issuer, fx.cur_usd)
+        ),
         30
     );
 
@@ -166,7 +186,11 @@ fn nodebackend_stale_over_limit_transfer_rejected_valid_next_after_reorg() {
         91,
     );
     assert_eq!(
-        line_balance(fx.store.as_ref(), &fx.holder.address(), &asset(&fx.issuer, fx.cur_usd)),
+        line_balance(
+            fx.store.as_ref(),
+            &fx.holder.address(),
+            &asset(&fx.issuer, fx.cur_usd)
+        ),
         45
     );
 }
@@ -183,7 +207,8 @@ fn nodebackend_ticket_issue_reserves_consumer_until_inclusion() {
         200,
         0,
     );
-    let mut ticket = DrcTicketCreateTx::unsigned(fx.issuer.address(), Amount::from_base_units(1), 0);
+    let mut ticket =
+        DrcTicketCreateTx::unsigned(fx.issuer.address(), Amount::from_base_units(1), 0);
     sign_drc_ticket_create_bound(&mut ticket, &fx.issuer, CHAIN, &fx.genesis).unwrap();
     fx.backend.submit_drc_ticket_create(ticket).unwrap();
     mine_template(&mut fx.backend);
@@ -203,7 +228,9 @@ fn nodebackend_ticket_issue_reserves_consumer_until_inclusion() {
     agora_crypto::sign_drc_issued_transfer_bound(&mut issue, &fx.issuer, CHAIN, &fx.genesis)
         .unwrap();
     let issue_id = issue.issued_transfer_tx_id();
-    fx.backend.submit_drc_issued_transfer(issue.clone()).unwrap();
+    fx.backend
+        .submit_drc_issued_transfer(issue.clone())
+        .unwrap();
     assert!(ticket_consumer_reserved(
         &fx.backend,
         &fx.issuer.address(),
@@ -225,10 +252,17 @@ fn nodebackend_ticket_issue_reserves_consumer_until_inclusion() {
         &fx.issuer.address(),
         ticket_sequence
     ));
-    assert!(!fx.backend.test_mempool().lock().unwrap().contains(&issue_id));
-    assert!(load_drc_issued_transfer_receipt(fx.store.as_ref(), &issue_id)
+    assert!(!fx
+        .backend
+        .test_mempool()
+        .lock()
         .unwrap()
-        .is_some());
+        .contains(&issue_id));
+    assert!(
+        load_drc_issued_transfer_receipt(fx.store.as_ref(), &issue_id)
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[test]
@@ -255,14 +289,18 @@ fn nodebackend_reorg_receipt_unknown_until_reapplied() {
     let xfer_id = xfer.issued_transfer_tx_id();
     let fund_tip = virtual_tip(&fx.backend);
     reorg_away_transfer_on_tip(&mut fx.backend, fx.store.as_ref(), fund_tip, &xfer);
-    assert!(load_drc_issued_transfer_receipt(fx.store.as_ref(), &xfer_id)
-        .unwrap()
-        .is_none());
+    assert!(
+        load_drc_issued_transfer_receipt(fx.store.as_ref(), &xfer_id)
+            .unwrap()
+            .is_none()
+    );
     fx.backend.submit_drc_issued_transfer(xfer.clone()).unwrap();
     mine_template(&mut fx.backend);
-    assert!(load_drc_issued_transfer_receipt(fx.store.as_ref(), &xfer_id)
-        .unwrap()
-        .is_some());
+    assert!(
+        load_drc_issued_transfer_receipt(fx.store.as_ref(), &xfer_id)
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[test]

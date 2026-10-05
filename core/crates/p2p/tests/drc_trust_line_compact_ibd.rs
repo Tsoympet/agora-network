@@ -9,9 +9,8 @@ use agora_p2p::{
 use agora_state_machine::{credit_account_into, StateStore, WriteBatch};
 use agora_types::{
     materialize_drc_multisign_attachments, validate_drc_multisign_attachment_lane, Address, Amount,
-    Block, BlockHeader, DrcMultisignAuth, DrcMultisignEntry, DrcTrustLineSetTx, Hash,
-    IssuedAmount, IssuedCurrencyCode, NativeAssetId, DRC_MULTISIGN_AUTH_VERSION,
-    DRC_TRUST_LINE_SET_TX_VERSION,
+    Block, BlockHeader, DrcMultisignAuth, DrcMultisignEntry, DrcTrustLineSetTx, Hash, IssuedAmount,
+    IssuedCurrencyCode, NativeAssetId, DRC_MULTISIGN_AUTH_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
 };
 use tokio::time::timeout;
 

@@ -71,6 +71,12 @@ pub enum NetworkMessage {
     DrcTrustLineSet(agora_types::DrcTrustLineSetTx),
     /// Appended in Trident protocol v20; exact issued-value transfer.
     DrcIssuedTransfer(agora_types::DrcIssuedTransferTx),
+    /// Appended in Trident protocol v21; issued-asset policy set.
+    DrcIssuedAssetPolicySet(agora_types::DrcIssuedAssetPolicySetTx),
+    /// Appended in Trident protocol v21; trust line issuer control.
+    DrcTrustLineIssuerControl(agora_types::DrcTrustLineIssuerControlTx),
+    /// Appended in Trident protocol v21; issued clawback.
+    DrcIssuedClawback(agora_types::DrcIssuedClawbackTx),
 }
 
 impl NetworkMessage {
@@ -109,6 +115,9 @@ impl NetworkMessage {
             && block.drc_payment_channel_closes.is_empty()
             && block.drc_trust_line_sets.is_empty()
             && block.drc_issued_transfers.is_empty()
+            && block.drc_issued_asset_policy_sets.is_empty()
+            && block.drc_trust_line_issuer_controls.is_empty()
+            && block.drc_issued_clawbacks.is_empty()
             && block.drc_multisign_attachments.is_empty()
         {
             Self::CompactBlock {

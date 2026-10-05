@@ -9,9 +9,8 @@ use agora_types::{Amount, NativeAssetId};
 use serde_json::json;
 
 use super::drc_trust_line_public_helpers::{
-    assert_liability_equals_sum_balances, backend_config, boot_chain, drc_balance,
-    mine_template, reward_pool_balance, setup_live_line, signed_issued_transfer,
-    signed_trust_line_set,
+    assert_liability_equals_sum_balances, backend_config, boot_chain, drc_balance, mine_template,
+    reward_pool_balance, setup_live_line, signed_issued_transfer, signed_trust_line_set,
 };
 
 fn snapshot_native_totals(
@@ -136,12 +135,7 @@ fn public_invariant_two_assets_multi_holder_reorg_restart() {
     mine_template(&mut backend);
     backend
         .submit_drc_trust_line_set(signed_trust_line_set(
-            &holder,
-            &issuer,
-            cur_usd,
-            0,
-            genesis,
-            4,
+            &holder, &issuer, cur_usd, 0, genesis, 4,
         ))
         .unwrap();
     mine_template(&mut backend);

@@ -3222,11 +3222,14 @@ mod drc_payment_channel_reorg_reservation_tests;
 mod drc_payment_channel_rpc_integration_tests;
 
 #[cfg(test)]
-#[path = "drc_trust_line_rpc_integration_tests.rs"]
-mod drc_trust_line_rpc_integration_tests;
+#[path = "drc_payment_channel_template_tests.rs"]
+mod drc_payment_channel_template_tests;
 #[cfg(test)]
 #[path = "drc_trust_line_public_helpers.rs"]
 mod drc_trust_line_public_helpers;
+#[cfg(test)]
+#[path = "drc_trust_line_public_invariant_tests.rs"]
+mod drc_trust_line_public_invariant_tests;
 #[cfg(test)]
 #[path = "drc_trust_line_public_security_tests.rs"]
 mod drc_trust_line_public_security_tests;
@@ -3234,11 +3237,8 @@ mod drc_trust_line_public_security_tests;
 #[path = "drc_trust_line_reorg_reservation_tests.rs"]
 mod drc_trust_line_reorg_reservation_tests;
 #[cfg(test)]
+#[path = "drc_trust_line_rpc_integration_tests.rs"]
+mod drc_trust_line_rpc_integration_tests;
+#[cfg(test)]
 #[path = "drc_trust_line_template_tests.rs"]
 mod drc_trust_line_template_tests;
-#[cfg(test)]
-#[path = "drc_trust_line_public_invariant_tests.rs"]
-mod drc_trust_line_public_invariant_tests;
-#[cfg(test)]
-#[path = "drc_payment_channel_template_tests.rs"]
-mod drc_payment_channel_template_tests;

@@ -1363,6 +1363,15 @@ async fn main() {
                             }
                         }
                     }
+                    NetworkMessage::DrcIssuedAssetPolicySet(_)
+                    | NetworkMessage::DrcTrustLineIssuerControl(_)
+                    | NetworkMessage::DrcIssuedClawback(_) => {
+                        warn!(
+                            %peer,
+                            %topic,
+                            "DRC issued-control gossip received; public mempool admission not wired yet"
+                        );
+                    }
                     NetworkMessage::CheckpointAttestation(att) => {
                         let block = att.body.block_hash;
                         match chain.lock() {

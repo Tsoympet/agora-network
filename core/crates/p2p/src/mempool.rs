@@ -1785,6 +1785,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
@@ -1863,6 +1866,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
@@ -2681,6 +2687,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);

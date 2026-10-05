@@ -137,6 +137,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         }
     }
@@ -314,32 +317,36 @@ mod tests {
 
     fn trust_line_attachment_block(parent: Hash) -> Block {
         let mut block = empty_block(1, parent);
-        block.drc_trust_line_sets.push(agora_types::DrcTrustLineSetTx {
-            version: agora_types::DRC_TRUST_LINE_SET_TX_VERSION,
-            holder: agora_types::Address([2; 20]),
-            issuer: agora_types::Address([3; 20]),
-            currency: agora_types::IssuedCurrencyCode([0u8; 20]),
-            limit: agora_types::IssuedAmount::from_units(5),
-            fee: agora_types::Amount::from_base_units(1),
-            nonce: 0,
-            account_sequence: None,
-            public_key: vec![],
-            signature: vec![],
-            multisign: None,
-        });
-        block.drc_multisign_attachments.push(agora_types::DrcMultisignBlockAttachment {
-            version: agora_types::DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
-            key: agora_types::DrcMultisignAttachmentKey {
-                version: agora_types::DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
-                kind: agora_types::DrcMultisignOperationKind::DrcTrustLineSet,
-                signing_commitment: Hash([7; 32]),
-            },
-            auth: agora_types::DrcMultisignAuth {
-                version: agora_types::DRC_MULTISIGN_AUTH_VERSION,
-                signing_for: agora_types::Address([2; 20]),
-                signatures: vec![],
-            },
-        });
+        block
+            .drc_trust_line_sets
+            .push(agora_types::DrcTrustLineSetTx {
+                version: agora_types::DRC_TRUST_LINE_SET_TX_VERSION,
+                holder: agora_types::Address([2; 20]),
+                issuer: agora_types::Address([3; 20]),
+                currency: agora_types::IssuedCurrencyCode([0u8; 20]),
+                limit: agora_types::IssuedAmount::from_units(5),
+                fee: agora_types::Amount::from_base_units(1),
+                nonce: 0,
+                account_sequence: None,
+                public_key: vec![],
+                signature: vec![],
+                multisign: None,
+            });
+        block
+            .drc_multisign_attachments
+            .push(agora_types::DrcMultisignBlockAttachment {
+                version: agora_types::DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION,
+                key: agora_types::DrcMultisignAttachmentKey {
+                    version: agora_types::DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
+                    kind: agora_types::DrcMultisignOperationKind::DrcTrustLineSet,
+                    signing_commitment: Hash([7; 32]),
+                },
+                auth: agora_types::DrcMultisignAuth {
+                    version: agora_types::DRC_MULTISIGN_AUTH_VERSION,
+                    signing_for: agora_types::Address([2; 20]),
+                    signatures: vec![],
+                },
+            });
         block
     }
 

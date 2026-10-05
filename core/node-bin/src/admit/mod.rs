@@ -576,6 +576,9 @@ impl ChainState {
             drc_payment_channel_closes: lanes.drc_payment_channel_closes.to_vec(),
             drc_trust_line_sets: lanes.drc_trust_line_sets.to_vec(),
             drc_issued_transfers: lanes.drc_issued_transfers.to_vec(),
+            drc_issued_asset_policy_sets: Vec::new(),
+            drc_trust_line_issuer_controls: Vec::new(),
+            drc_issued_clawbacks: Vec::new(),
             drc_multisign_attachments: Vec::new(),
         };
         if let Some(ctx) = self.auth.as_ref() {

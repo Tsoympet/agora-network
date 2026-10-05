@@ -1156,6 +1156,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
@@ -1286,6 +1289,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
@@ -1335,6 +1341,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
@@ -1949,6 +1958,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2014,6 +2026,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2078,6 +2093,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2143,6 +2161,9 @@ mod tests {
             drc_payment_channel_closes: vec![],
             drc_trust_line_sets: vec![],
             drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
