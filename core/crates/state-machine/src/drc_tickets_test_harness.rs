@@ -121,6 +121,7 @@ pub mod support {
     }
 
     pub fn snapshot_ticket_state(store: &StateStore, owner: &KeyPair) -> TicketSnapshot {
+        crate::reindex_drc_ledger_objects(store).unwrap();
         TicketSnapshot {
             tickets: load_drc_account_tickets(store, &owner.address()).unwrap(),
             nonce: load_account(store, NativeAssetId::DRC, &owner.address())

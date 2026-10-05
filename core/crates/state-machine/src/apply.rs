@@ -4728,6 +4728,7 @@ mod tests {
         let mut journal = AccountJournal::default();
         apply_drc_deposit_preauth(&store, &dormant_grant, &auth, &mut batch, &mut journal).unwrap();
         store.write_batch(batch).unwrap();
+        crate::reindex_drc_ledger_objects(&store).unwrap();
 
         let mut enable = DrcAccountPolicyTx::set_deposit_auth_required(
             owner.address(),

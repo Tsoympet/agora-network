@@ -402,6 +402,11 @@ pub struct InMemoryBackend {
     drc_deposit_preauths: HashMap<(Address, Address), DrcDepositPreauthStatus>,
     /// Live `(owner, ticket_sequence)` pairs for `agora_getDrcTicket` RPC tests.
     drc_live_tickets: HashSet<(Address, u64)>,
+    /// Common live-object and accepted-operation indexes for dispatcher tests.
+    drc_objects: HashMap<Hash, DrcLedgerObjectDescriptor>,
+    drc_owner_objects: HashMap<Address, Vec<DrcLedgerObjectDescriptor>>,
+    drc_operations: HashMap<Hash, DrcAcceptedOperationReceipt>,
+    drc_transaction_operations: HashMap<Hash, Hash>,
     template_bits: u32,
     fund_nonce: u64,
     civic: Mutex<CivicSnapshot>,
@@ -421,6 +426,10 @@ impl Default for InMemoryBackend {
             drc_account_policies: HashMap::new(),
             drc_deposit_preauths: HashMap::new(),
             drc_live_tickets: HashSet::new(),
+            drc_objects: HashMap::new(),
+            drc_owner_objects: HashMap::new(),
+            drc_operations: HashMap::new(),
+            drc_transaction_operations: HashMap::new(),
             template_bits: 0,
             fund_nonce: 0,
             civic: Mutex::new(CivicSnapshot::genesis(10_000)),
@@ -479,6 +488,24 @@ impl InMemoryBackend {
 
     pub fn insert_drc_live_ticket(&mut self, owner: Address, ticket_sequence: u64) {
         self.drc_live_tickets.insert((owner, ticket_sequence));
+    }
+
+    pub fn insert_drc_object(&mut self, descriptor: DrcLedgerObjectDescriptor) {
+        let owner_objects = self.drc_owner_objects.entry(descriptor.owner).or_default();
+        owner_objects.retain(|existing| existing.object_id != descriptor.object_id);
+        owner_objects.push(descriptor.clone());
+        owner_objects.sort_by(|left, right| {
+            left.kind
+                .cmp(&right.kind)
+                .then(left.object_id.cmp(&right.object_id))
+        });
+        self.drc_objects.insert(descriptor.object_id, descriptor);
+    }
+
+    pub fn insert_drc_operation_receipt(&mut self, receipt: DrcAcceptedOperationReceipt) {
+        self.drc_transaction_operations
+            .insert(receipt.historical_transaction_id, receipt.operation_id);
+        self.drc_operations.insert(receipt.operation_id, receipt);
     }
 
     pub fn insert_drc_deposit_preauth(
@@ -976,38 +1003,61 @@ impl RpcBackend for InMemoryBackend {
 
     fn get_drc_object(
         &self,
-        _object_id: &Hash,
+        object_id: &Hash,
     ) -> Result<Option<DrcLedgerObjectDescriptor>, RpcError> {
-        Ok(None)
+        Ok(self.drc_objects.get(object_id).cloned())
     }
 
     fn get_drc_account_objects(
         &self,
         owner: &Address,
         kind: Option<DrcLedgerObjectKind>,
-        _limit: usize,
-        _cursor: Option<&str>,
+        limit: usize,
+        cursor: Option<&str>,
     ) -> Result<DrcLedgerObjectPage, RpcError> {
+        if cursor.is_some() {
+            return Err(RpcError::InvalidParams(
+                "in-memory DRC object fixture does not support cursors".into(),
+            ));
+        }
+        if !(1..=100).contains(&limit) {
+            return Err(RpcError::InvalidParams(
+                "DRC account-object limit must be 1..=100".into(),
+            ));
+        }
+        let objects = self
+            .drc_owner_objects
+            .get(owner)
+            .into_iter()
+            .flatten()
+            .filter(|descriptor| kind.is_none_or(|filter| descriptor.kind == filter))
+            .take(limit)
+            .cloned()
+            .collect();
         Ok(DrcLedgerObjectPage {
             owner: *owner,
             kind,
-            objects: Vec::new(),
+            objects,
             next_cursor: None,
         })
     }
 
     fn get_drc_operation(
         &self,
-        _operation_id: &Hash,
+        operation_id: &Hash,
     ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError> {
-        Ok(None)
+        Ok(self.drc_operations.get(operation_id).cloned())
     }
 
     fn get_drc_transaction(
         &self,
-        _transaction_id: &Hash,
+        transaction_id: &Hash,
     ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError> {
-        Ok(None)
+        Ok(self
+            .drc_transaction_operations
+            .get(transaction_id)
+            .and_then(|operation_id| self.drc_operations.get(operation_id))
+            .cloned())
     }
 
     fn get_drc_account_policy(

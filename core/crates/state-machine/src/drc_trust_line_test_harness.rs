@@ -157,6 +157,7 @@ pub mod support {
     }
 
     pub fn apply_block(store: &StateStore, block: Block, blue: u64, ctx: &TxAuthContext) {
+        crate::reindex_drc_ledger_objects(store).unwrap();
         let result =
             apply_block_batched_with_auth_at_blue_score(store, &block, 50, Some(ctx), blue)
                 .unwrap();
@@ -282,6 +283,7 @@ pub mod invariants {
         holders: &[&KeyPair],
         ticket_owners: &[&KeyPair],
     ) -> TrustLineInvariantSnap {
+        crate::reindex_drc_ledger_objects(store).unwrap();
         let ast = asset(issuer, cur);
         let mut native = std::collections::BTreeMap::new();
         let mut nonce_map = std::collections::BTreeMap::new();

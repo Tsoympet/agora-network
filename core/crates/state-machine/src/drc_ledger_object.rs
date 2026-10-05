@@ -1444,11 +1444,14 @@ mod tests {
     use crate::drc_escrow_test_harness::support::{
         apply_block_capture, auth, coinbase, fund, key, signed_create,
     };
-    use crate::supply::put_schema_version_into;
+    use crate::supply::{put_burned_supply_into, put_schema_version_into};
 
     fn ready_store() -> StateStore {
         let store = StateStore::open_in_memory();
         let mut batch = WriteBatch::new();
+        for asset in NativeAssetId::ALL {
+            put_burned_supply_into(&mut batch, asset, 0);
+        }
         put_schema_version_into(&mut batch, SCHEMA_VERSION);
         initialize_drc_ledger_index_into(&mut batch);
         store.write_batch(batch).unwrap();
@@ -1637,7 +1640,7 @@ mod tests {
         let object_id = DrcLedgerObjectKey::Escrow { escrow_id }.object_id();
         let mut block = coinbase(vec![Hash::ZERO], &owner);
         block.drc_escrow_creates.push(create);
-        let (_, journal, _) = apply_block_capture(&store, block.clone(), 1, &ctx);
+        let (block_id, journal, _) = apply_block_capture(&store, block.clone(), 1, &ctx);
         let root = drc_ledger_object_index_root(&store).unwrap();
 
         assert!(load_drc_ledger_object(&store, &object_id)
@@ -1655,7 +1658,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .canonical_block_id,
-            block.id()
+            block_id
         );
 
         store

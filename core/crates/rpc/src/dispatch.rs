@@ -561,7 +561,7 @@ impl<B: RpcBackend> RpcDispatcher<B> {
             RpcMethod::GetDrcAccountObjects => {
                 let owner = param_address(&req.params, "account")?;
                 let kind = optional_drc_object_kind(&req.params)?;
-                let limit = optional_limit(&req.params, 50)?;
+                let limit = optional_drc_object_limit(&req.params)?;
                 let cursor = optional_string(&req.params, "cursor")?;
                 serde_json::to_value(self.backend.get_drc_account_objects(
                     &owner,
@@ -936,6 +936,25 @@ fn optional_drc_object_kind(params: &Value) -> Result<Option<DrcLedgerObjectKind
         .ok_or_else(|| RpcError::InvalidParams(format!("unsupported DRC object kind `{value}`")))
 }
 
+fn optional_drc_object_limit(params: &Value) -> Result<usize, RpcError> {
+    let Some(value) = params.as_object().and_then(|object| object.get("limit")) else {
+        return Ok(50);
+    };
+    if value.is_null() {
+        return Ok(50);
+    }
+    let limit = value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|raw| raw.parse().ok()))
+        .ok_or_else(|| RpcError::InvalidParams("`limit` must be u64".into()))?;
+    if !(1..=100).contains(&limit) {
+        return Err(RpcError::InvalidParams(
+            "DRC account-object limit must be 1..=100".into(),
+        ));
+    }
+    Ok(limit as usize)
+}
+
 fn optional_string(params: &Value, key: &str) -> Result<Option<String>, RpcError> {
     let Some(value) = params.as_object().and_then(|object| object.get(key)) else {
         return Ok(None);
@@ -1247,9 +1266,122 @@ mod tests {
     use crate::backend::InMemoryBackend;
     use crate::methods::RpcMethod;
     use agora_types::{
-        AccountTransfer, Amount, Block, BlockHeader, DrcAccountPolicy, DrcAccountPolicyTx,
-        DrcPaymentTx, DrcTicketCreateTx, NativeAssetId, OvlExecutionTx, TxOut,
+        AccountTransfer, Amount, Block, BlockHeader, DrcAcceptedOperationReceipt, DrcAccountPolicy,
+        DrcAccountPolicyTx, DrcDepositPreauth, DrcLedgerObject, DrcLedgerObjectDescriptor,
+        DrcOperation, DrcPaymentTx, DrcTicketCreateTx, NativeAssetId, OvlExecutionTx, TxOut,
     };
+
+    #[test]
+    fn common_drc_object_and_operation_queries_are_typed_and_closed() {
+        let owner = Address([0x31; 20]);
+        let source = Address([0x32; 20]);
+        let descriptor = DrcLedgerObjectDescriptor::new(DrcLedgerObject::DepositPreauthorization(
+            DrcDepositPreauth::new(owner, source),
+        ));
+        let payment = DrcPaymentTx::unsigned(
+            source,
+            owner,
+            Amount::from_base_units(7),
+            Amount::from_base_units(1),
+            0,
+            Hash::ZERO,
+            0,
+        );
+        let receipt = DrcAcceptedOperationReceipt::new(
+            Hash([0x41; 32]),
+            Some(9),
+            DrcOperation::Payment(payment),
+            vec![descriptor.object_id],
+        );
+        let mut backend = InMemoryBackend::new();
+        backend.insert_drc_object(descriptor.clone());
+        backend.insert_drc_operation_receipt(receipt.clone());
+        let mut rpc = RpcDispatcher::new(backend);
+
+        let object = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getDrcObject".into(),
+            params: json!({ "object_id": descriptor.object_id.to_hex() }),
+        });
+        let object = object.result.unwrap();
+        assert_eq!(object["status"], "live");
+        assert_eq!(object["object"]["kind"], "deposit_preauthorization");
+
+        let account_objects = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getDrcAccountObjects".into(),
+            params: json!({
+                "account": owner.to_bech32(),
+                "kind": "deposit_preauthorization",
+                "limit": 1,
+            }),
+        });
+        let account_objects = account_objects.result.unwrap();
+        assert_eq!(account_objects["objects"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            account_objects["objects"][0]["object_id"],
+            serde_json::to_value(descriptor.object_id).unwrap()
+        );
+
+        let operation = rpc.handle(RpcRequest {
+            id: Some(json!(3)),
+            method: "agora_getDrcOperation".into(),
+            params: json!({ "operation_id": receipt.operation_id.to_hex() }),
+        });
+        assert_eq!(operation.result.unwrap()["status"], "accepted");
+
+        let transaction = rpc.handle(RpcRequest {
+            id: Some(json!(4)),
+            method: "agora_getDrcTransaction".into(),
+            params: json!({
+                "transaction_id": receipt.historical_transaction_id.to_hex()
+            }),
+        });
+        let transaction = transaction.result.unwrap();
+        assert_eq!(transaction["status"], "accepted");
+        assert_eq!(
+            transaction["receipt"]["operation_id"],
+            serde_json::to_value(receipt.operation_id).unwrap()
+        );
+
+        for kind in ["offer", "evm", "contract", "bytecode", "hook"] {
+            let rejected = rpc.handle(RpcRequest {
+                id: Some(json!(5)),
+                method: "agora_getDrcAccountObjects".into(),
+                params: json!({ "account": owner.to_hex(), "kind": kind }),
+            });
+            assert_eq!(rejected.error.unwrap().code, -32602, "{kind}");
+        }
+        for limit in [0, 101] {
+            let rejected = rpc.handle(RpcRequest {
+                id: Some(json!(6)),
+                method: "agora_getDrcAccountObjects".into(),
+                params: json!({ "account": owner.to_hex(), "limit": limit }),
+            });
+            assert_eq!(rejected.error.unwrap().code, -32602, "{limit}");
+        }
+        let malformed_cursor = rpc.handle(RpcRequest {
+            id: Some(json!(7)),
+            method: "agora_getDrcAccountObjects".into(),
+            params: json!({ "account": owner.to_hex(), "cursor": "not-a-cursor" }),
+        });
+        assert_eq!(malformed_cursor.error.unwrap().code, -32602);
+
+        for (method, key, value) in [
+            ("agora_getDrcObject", "object_id", "bad"),
+            ("agora_getDrcOperation", "operation_id", "bad"),
+            ("agora_getDrcTransaction", "transaction_id", "bad"),
+        ] {
+            let mut params = serde_json::Map::new();
+            params.insert(key.into(), json!(value));
+            let rejected = rpc.handle(RpcRequest {
+                id: Some(json!(8)),
+                method: method.into(),
+                params: Value::Object(params),
+            });
+            assert_eq!(rejected.error.unwrap().code, -32602, "{method}");
+        }
+    }
 
     #[test]
     fn rpc_fails_closed_on_drc_execution_shapes_and_keeps_ovl_route() {

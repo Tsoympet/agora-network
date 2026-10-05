@@ -433,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn active_schema_requires_counters_and_exact_version() {
+    fn active_schema_requires_counters_and_supported_version() {
         let store = StateStore::open_in_memory();
         let mut batch = WriteBatch::new();
         put_schema_version_into(&mut batch, DRC_FEE_BURN_SCHEMA_VERSION);
@@ -442,14 +442,14 @@ mod tests {
 
         let store = StateStore::open_in_memory();
         let mut batch = WriteBatch::new();
-        put_schema_version_into(&mut batch, DRC_FEE_BURN_SCHEMA_VERSION + 1);
+        put_schema_version_into(&mut batch, SCHEMA_VERSION + 1);
         put_issued_supply_into(&mut batch, NativeAssetId::DRC, 1);
         put_burned_supply_into(&mut batch, NativeAssetId::DRC, 0);
         store.write_batch(batch).unwrap();
         let mut burn = WriteBatch::new();
         assert!(matches!(
             burn_drc_fee_into(&store, &mut burn, 0),
-            Err(StateError::InvalidTx(message)) if message.contains("found 21")
+            Err(StateError::InvalidTx(message)) if message.contains("found 22")
         ));
     }
 }

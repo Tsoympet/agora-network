@@ -248,6 +248,7 @@ pub mod support {
         owner: &KeyPair,
         recipient: &KeyPair,
     ) -> EscrowSnapshot {
+        crate::reindex_drc_ledger_objects(store).unwrap();
         EscrowSnapshot {
             owner_balance: load_account(store, NativeAssetId::DRC, &owner.address())
                 .unwrap()

@@ -12,14 +12,16 @@ use agora_p2p::{
 };
 use agora_state_machine::{
     apply_block_batched_with_auth_at_blue_score, apply_drc_signer_list, credit_account_into,
-    put_burned_supply_into, put_issued_supply_into, put_schema_version_into, AccountJournal,
-    StateStore, TxAuthContext, WriteBatch, SCHEMA_VERSION,
+    drc_ledger_object_index_root, list_drc_account_objects, load_drc_operation,
+    load_drc_transaction, put_burned_supply_into, put_issued_supply_into, put_schema_version_into,
+    reindex_drc_ledger_objects, AccountJournal, StateStore, TxAuthContext, WriteBatch,
+    SCHEMA_VERSION,
 };
 use agora_types::{
     materialize_drc_multisign_attachments, validate_drc_multisign_attachment_lane, Amount, Block,
     BlockHeader, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcMultisignAuth,
-    DrcMultisignEntry, DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId, Transaction,
-    TxOut, DRC_ESCROW_CANCEL_TX_VERSION, DRC_ESCROW_CREATE_TX_VERSION,
+    DrcMultisignEntry, DrcOperation, DrcSignerListEntry, DrcSignerListTx, Hash, NativeAssetId,
+    Transaction, TxOut, DRC_ESCROW_CANCEL_TX_VERSION, DRC_ESCROW_CREATE_TX_VERSION,
     DRC_ESCROW_FINISH_TX_VERSION, DRC_MULTISIGN_AUTH_VERSION,
 };
 use tokio::time::timeout;
@@ -224,28 +226,32 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
     let owner = KeyPair::from_secret_bytes(&[11; 32]).unwrap();
     let recipient = KeyPair::from_secret_bytes(&[14; 32]).unwrap();
     let s1 = KeyPair::from_secret_bytes(&[13; 32]).unwrap();
-    let store = StateStore::open_in_memory();
+    let store_a = StateStore::open_in_memory();
+    let store_b = StateStore::open_in_memory();
     let ctx = TxAuthContext {
         chain_id: CHAIN.into(),
         genesis: GENESIS,
         data_availability_network_fingerprint: None,
     };
-    let mut funding = WriteBatch::new();
-    credit_account_into(
-        &mut funding,
-        &store,
-        NativeAssetId::DRC,
-        &owner.address(),
-        Amount::from_base_units(10_000),
-    )
-    .unwrap();
-    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 10_000);
-    for asset in NativeAssetId::ALL {
-        put_burned_supply_into(&mut funding, asset, 0);
+    for store in [&store_a, &store_b] {
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            store,
+            NativeAssetId::DRC,
+            &owner.address(),
+            Amount::from_base_units(10_000),
+        )
+        .unwrap();
+        put_issued_supply_into(&mut funding, NativeAssetId::DRC, 10_000);
+        for asset in NativeAssetId::ALL {
+            put_burned_supply_into(&mut funding, asset, 0);
+        }
+        put_schema_version_into(&mut funding, SCHEMA_VERSION);
+        store.write_batch(funding).unwrap();
+        install_signer_list(store, &owner, &s1, &ctx);
+        reindex_drc_ledger_objects(store).unwrap();
     }
-    put_schema_version_into(&mut funding, SCHEMA_VERSION);
-    store.write_batch(funding).unwrap();
-    install_signer_list(&store, &owner, &s1, &ctx);
 
     let mut create = escrow_create_tx(&owner, recipient.address(), 1);
     create.public_key.clear();
@@ -318,9 +324,31 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
     .expect("full block timeout");
 
     validate_drc_multisign_attachment_lane(&received, &ctx.chain_id, &ctx.genesis).unwrap();
-    let result =
-        apply_block_batched_with_auth_at_blue_score(&store, &received, 50, Some(&ctx), 1).unwrap();
-    store.write_batch(result.batch).unwrap();
+    let result_a =
+        apply_block_batched_with_auth_at_blue_score(&store_a, &received, 50, Some(&ctx), 1)
+            .unwrap();
+    store_a.write_batch(result_a.batch).unwrap();
+    let result_b =
+        apply_block_batched_with_auth_at_blue_score(&store_b, &block, 50, Some(&ctx), 1).unwrap();
+    store_b.write_batch(result_b.batch).unwrap();
+
+    assert_eq!(
+        drc_ledger_object_index_root(&store_a).unwrap(),
+        drc_ledger_object_index_root(&store_b).unwrap()
+    );
+    assert_eq!(
+        list_drc_account_objects(&store_a, owner.address(), None, 100, None).unwrap(),
+        list_drc_account_objects(&store_b, owner.address(), None, 100, None).unwrap()
+    );
+    let operation = DrcOperation::EscrowCreate(block.drc_escrow_creates[0].clone());
+    assert_eq!(
+        load_drc_operation(&store_a, &operation.operation_id()).unwrap(),
+        load_drc_operation(&store_b, &operation.operation_id()).unwrap()
+    );
+    assert_eq!(
+        load_drc_transaction(&store_a, &operation.historical_transaction_id()).unwrap(),
+        load_drc_transaction(&store_b, &operation.historical_transaction_id()).unwrap()
+    );
 
     let mut tampered = received;
     tampered.drc_multisign_attachments.clear();
