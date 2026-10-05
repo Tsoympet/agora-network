@@ -12,7 +12,8 @@ use agora_p2p::{
 };
 use agora_state_machine::{
     apply_block_batched_with_auth_at_blue_score, apply_drc_signer_list, credit_account_into,
-    AccountJournal, StateStore, TxAuthContext, WriteBatch,
+    put_burned_supply_into, put_issued_supply_into, put_schema_version_into, AccountJournal,
+    StateStore, TxAuthContext, WriteBatch, SCHEMA_VERSION,
 };
 use agora_types::{
     materialize_drc_multisign_attachments, validate_drc_multisign_attachment_lane, Amount, Block,
@@ -238,6 +239,11 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
         Amount::from_base_units(10_000),
     )
     .unwrap();
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 10_000);
+    for asset in NativeAssetId::ALL {
+        put_burned_supply_into(&mut funding, asset, 0);
+    }
+    put_schema_version_into(&mut funding, SCHEMA_VERSION);
     store.write_batch(funding).unwrap();
     install_signer_list(&store, &owner, &s1, &ctx);
 
