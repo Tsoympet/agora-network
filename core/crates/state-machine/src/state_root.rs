@@ -17,6 +17,7 @@ use crate::data_availability::data_availability_root;
 use crate::drc_check::drc_check_root;
 use crate::drc_deposit_preauth::drc_deposit_preauth_root;
 use crate::drc_escrow::drc_escrow_root;
+use crate::drc_payment_channel::drc_payment_channel_root;
 use crate::drc_policy::drc_account_policy_root;
 use crate::drc_regular_key::drc_regular_key_root;
 use crate::drc_signer_list::drc_signer_list_root;
@@ -28,7 +29,7 @@ use crate::staking::{build_snapshot, load_epoch};
 use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
 
 /// Domain tag for the composed state root (versioned).
-pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v12";
+pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v13";
 
 /// Deterministic UTXO-set commitment (sorted outpoint keys).
 pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
@@ -94,6 +95,9 @@ pub fn compose_trident_state_root(
     let drc_tickets = drc_ticket_root(store)?;
     let drc_escrow = drc_escrow_root(store)?;
     let drc_checks = drc_check_root(store)?;
+    let drc_payment_channels = drc_payment_channel_root(store)?;
+    let drc_check_paychan =
+        Hash::hash_borsh(&(b"drc-check-paychan-v1", drc_checks, drc_payment_channels));
     let drc_account_policies = drc_account_policy_root(store)?;
     let drc_deposit_preauths = drc_deposit_preauth_root(store)?;
     let drc_payments = drc_payment_root(store)?;
@@ -115,7 +119,7 @@ pub fn compose_trident_state_root(
         drc_signer_lists,
         drc_tickets,
         drc_escrow,
-        drc_checks,
+        drc_check_paychan,
         drc_account_policies,
         drc_deposit_preauths,
         drc_payments,

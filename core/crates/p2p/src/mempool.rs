@@ -1718,6 +1718,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
@@ -1790,6 +1794,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
@@ -2602,6 +2610,10 @@ mod tests {
             drc_check_creates: vec![create],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);

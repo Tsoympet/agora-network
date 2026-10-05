@@ -1014,6 +1014,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
@@ -1138,6 +1142,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
@@ -1181,6 +1189,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
@@ -1789,6 +1801,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -1848,6 +1864,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -1906,6 +1926,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -1965,6 +1989,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);

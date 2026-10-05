@@ -25,6 +25,12 @@ use crate::drc_escrow::{
     escrow_meta_keys_for_create, escrow_meta_keys_for_settlement, load_drc_escrow_live,
 };
 use crate::drc_master_key_recovery::assert_drc_recovery_invariant;
+use crate::drc_payment_channel::{
+    apply_drc_payment_channel_claim, apply_drc_payment_channel_close,
+    apply_drc_payment_channel_create, apply_drc_payment_channel_fund,
+    load_drc_payment_channel_live, payment_channel_meta_keys_for_create,
+    payment_channel_meta_keys_for_mutating,
+};
 use crate::drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys};
 use crate::drc_regular_key::{apply_drc_regular_key, drc_regular_key_meta_keys};
 use crate::drc_signer_list::{apply_drc_signer_list, drc_signer_list_meta_keys};
@@ -96,6 +102,7 @@ pub struct UtxoJournal {
     pub drc_escrow_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     /// DRC check live/settlement keys before Accepted check operations.
     pub drc_check_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    pub drc_payment_channel_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -259,10 +266,52 @@ struct UtxoJournalV6 {
     drc_policy_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
+/// Multi-lane journal before DRC payment channel metadata.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct UtxoJournalV12 {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+    fees: u64,
+    subsidy: u64,
+    coinbase_total: u64,
+    account_before: Vec<(NativeAssetId, Address, AccountState)>,
+    stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    data_availability_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_policy_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_deposit_preauth_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_regular_key_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_signer_list_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_ticket_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_escrow_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_check_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
 impl UtxoJournal {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(j) = Self::try_from_slice(bytes) {
             return Ok(j);
+        }
+        if let Ok(v12) = UtxoJournalV12::try_from_slice(bytes) {
+            return Ok(Self {
+                spent: v12.spent,
+                created: v12.created,
+                fees: v12.fees,
+                subsidy: v12.subsidy,
+                coinbase_total: v12.coinbase_total,
+                account_before: v12.account_before,
+                stake_meta_before: v12.stake_meta_before,
+                payment_meta_before: v12.payment_meta_before,
+                data_availability_meta_before: v12.data_availability_meta_before,
+                drc_policy_meta_before: v12.drc_policy_meta_before,
+                drc_deposit_preauth_meta_before: v12.drc_deposit_preauth_meta_before,
+                drc_regular_key_meta_before: v12.drc_regular_key_meta_before,
+                drc_signer_list_meta_before: v12.drc_signer_list_meta_before,
+                drc_ticket_meta_before: v12.drc_ticket_meta_before,
+                drc_escrow_meta_before: v12.drc_escrow_meta_before,
+                drc_check_meta_before: v12.drc_check_meta_before,
+                drc_payment_channel_meta_before: Vec::new(),
+            });
         }
         if let Ok(v11) = UtxoJournalV11::try_from_slice(bytes) {
             return Ok(Self {
@@ -282,6 +331,7 @@ impl UtxoJournal {
                 drc_ticket_meta_before: v11.drc_ticket_meta_before,
                 drc_escrow_meta_before: v11.drc_escrow_meta_before,
                 drc_check_meta_before: Vec::new(),
+                drc_payment_channel_meta_before: Vec::new(),
             });
         }
         if let Ok(v10) = UtxoJournalV10::try_from_slice(bytes) {
@@ -302,6 +352,7 @@ impl UtxoJournal {
                 drc_ticket_meta_before: v10.drc_ticket_meta_before,
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
+                drc_payment_channel_meta_before: Vec::new(),
             });
         }
         if let Ok(v9) = UtxoJournalV9::try_from_slice(bytes) {
@@ -322,6 +373,7 @@ impl UtxoJournal {
                 drc_ticket_meta_before: Vec::new(),
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
+                drc_payment_channel_meta_before: Vec::new(),
             });
         }
         if let Ok(v8) = UtxoJournalV8::try_from_slice(bytes) {
@@ -342,6 +394,7 @@ impl UtxoJournal {
                 drc_ticket_meta_before: Vec::new(),
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
+                drc_payment_channel_meta_before: Vec::new(),
             });
         }
         if let Ok(v7) = UtxoJournalV7::try_from_slice(bytes) {
@@ -362,6 +415,7 @@ impl UtxoJournal {
                 drc_ticket_meta_before: Vec::new(),
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
+                drc_payment_channel_meta_before: Vec::new(),
             });
         }
         if let Ok(v6) = UtxoJournalV6::try_from_slice(bytes) {
@@ -382,6 +436,7 @@ impl UtxoJournal {
                 drc_ticket_meta_before: Vec::new(),
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
+                drc_payment_channel_meta_before: Vec::new(),
             });
         }
         if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
@@ -402,6 +457,7 @@ impl UtxoJournal {
                 drc_ticket_meta_before: Vec::new(),
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
+                drc_payment_channel_meta_before: Vec::new(),
             });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
@@ -422,6 +478,7 @@ impl UtxoJournal {
                 drc_ticket_meta_before: Vec::new(),
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
+                drc_payment_channel_meta_before: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -442,6 +499,7 @@ impl UtxoJournal {
                 drc_ticket_meta_before: Vec::new(),
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
+                drc_payment_channel_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -462,6 +520,7 @@ impl UtxoJournal {
                 drc_ticket_meta_before: Vec::new(),
                 drc_escrow_meta_before: Vec::new(),
                 drc_check_meta_before: Vec::new(),
+                drc_payment_channel_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -483,6 +542,7 @@ impl UtxoJournal {
             drc_ticket_meta_before: Vec::new(),
             drc_escrow_meta_before: Vec::new(),
             drc_check_meta_before: Vec::new(),
+            drc_payment_channel_meta_before: Vec::new(),
         })
     }
 }
@@ -817,6 +877,10 @@ fn apply_block_batched_mode(
         drc_check_create_statuses,
         drc_check_cash_statuses,
         drc_check_cancel_statuses,
+        drc_payment_channel_create_statuses,
+        drc_payment_channel_fund_statuses,
+        drc_payment_channel_claim_statuses,
+        drc_payment_channel_close_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -855,6 +919,10 @@ fn apply_block_batched_mode(
             drc_check_create_statuses,
             drc_check_cash_statuses,
             drc_check_cancel_statuses,
+            drc_payment_channel_create_statuses,
+            drc_payment_channel_fund_statuses,
+            drc_payment_channel_claim_statuses,
+            drc_payment_channel_close_statuses,
             drc_policy_statuses,
             drc_deposit_preauth_statuses,
         },
@@ -948,6 +1016,10 @@ type TridentLaneAcceptances = (
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
 );
 
 /// Apply canonical Trident lanes and credit only Accepted fees to reward pools.
@@ -967,6 +1039,10 @@ fn apply_trident_lanes(
         && block.drc_check_creates.is_empty()
         && block.drc_check_cashes.is_empty()
         && block.drc_check_cancels.is_empty()
+        && block.drc_payment_channel_creates.is_empty()
+        && block.drc_payment_channel_funds.is_empty()
+        && block.drc_payment_channel_claims.is_empty()
+        && block.drc_payment_channel_closes.is_empty()
         && block.account_transfers.is_empty()
         && block.ovl_executions.is_empty()
         && block.drc_payments.is_empty()
@@ -994,6 +1070,10 @@ fn apply_trident_lanes(
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
         ));
     }
     if (!block.drc_ticket_creates.is_empty()
@@ -1003,6 +1083,10 @@ fn apply_trident_lanes(
         || !block.drc_check_creates.is_empty()
         || !block.drc_check_cashes.is_empty()
         || !block.drc_check_cancels.is_empty()
+        || !block.drc_payment_channel_creates.is_empty()
+        || !block.drc_payment_channel_funds.is_empty()
+        || !block.drc_payment_channel_claims.is_empty()
+        || !block.drc_payment_channel_closes.is_empty()
         || !block.stake_ops.is_empty()
         || !block.ovl_executions.is_empty()
         || !block.drc_payments.is_empty()
@@ -1013,7 +1097,7 @@ fn apply_trident_lanes(
         && auth.is_none()
     {
         return Err(StateError::InvalidTx(
-            "stake/execution/payment/policy/preauthorization/regular-key/signer-list/escrow/check ops require network-bound auth"
+            "stake/execution/payment/policy/preauthorization/regular-key/signer-list/escrow/check/payment-channel ops require network-bound auth"
                 .into(),
         ));
     }
@@ -1080,6 +1164,19 @@ fn apply_trident_lanes(
     let mut drc_check_create_statuses = Vec::with_capacity(block.drc_check_creates.len());
     let mut drc_check_cash_statuses = Vec::with_capacity(block.drc_check_cashes.len());
     let mut drc_check_cancel_statuses = Vec::with_capacity(block.drc_check_cancels.len());
+    let mut drc_payment_channel_create_statuses =
+        Vec::with_capacity(block.drc_payment_channel_creates.len());
+    let mut drc_payment_channel_fund_statuses =
+        Vec::with_capacity(block.drc_payment_channel_funds.len());
+    let mut drc_payment_channel_claim_statuses =
+        Vec::with_capacity(block.drc_payment_channel_claims.len());
+    let mut drc_payment_channel_close_statuses =
+        Vec::with_capacity(block.drc_payment_channel_closes.len());
+    let mut seen_payment_channel_create_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_payment_channel_fund_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_payment_channel_claim_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_payment_channel_close_ids: HashSet<Hash> = HashSet::new();
+    let mut settled_payment_channel_ids: HashSet<Hash> = HashSet::new();
     let mut seen_check_create_ids: HashSet<Hash> = HashSet::new();
     let mut seen_check_cash_ids: HashSet<Hash> = HashSet::new();
     let mut seen_check_cancel_ids: HashSet<Hash> = HashSet::new();
@@ -1810,6 +1907,254 @@ fn apply_trident_lanes(
         }
     }
 
+    let paychan_blue_score = if !block.drc_payment_channel_creates.is_empty()
+        || !block.drc_payment_channel_funds.is_empty()
+        || !block.drc_payment_channel_claims.is_empty()
+        || !block.drc_payment_channel_closes.is_empty()
+    {
+        Some(application_blue_score.ok_or_else(|| {
+            StateError::InvalidTx(
+                "DRC payment channel operations require a consensus application blue score".into(),
+            )
+        })?)
+    } else {
+        None
+    };
+
+    if let Some(paychan_blue_score) = paychan_blue_score {
+        for tx in &block.drc_payment_channel_creates {
+            let id = tx.channel_id();
+            let ctx = auth.expect("DRC payment channel auth checked above");
+            let meta_before = snapshot_meta_keys(&lane, &payment_channel_meta_keys_for_create(tx))?;
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.owner))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_payment_channel_create(
+                &lane,
+                tx,
+                ctx,
+                paychan_blue_score,
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(_) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_payment_channel_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_payment_channel_create_ids.insert(id);
+                    drc_payment_channel_create_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_payment_channel_create_ids.contains(&id) {
+                        drc_payment_channel_create_statuses
+                            .push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_payment_channel_create_statuses
+                            .push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        for tx in &block.drc_payment_channel_funds {
+            let id = tx.fund_tx_id();
+            if settled_payment_channel_ids.contains(&tx.channel_id) {
+                drc_payment_channel_fund_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let ctx = auth.expect("DRC payment channel auth checked above");
+            let live = load_drc_payment_channel_live(&lane, &tx.channel_id)?;
+            let meta_before = if let Some(ref live) = live {
+                snapshot_meta_keys(
+                    &lane,
+                    &payment_channel_meta_keys_for_mutating(&live.channel_id, &live.owner),
+                )?
+            } else {
+                Vec::new()
+            };
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.submitter))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_payment_channel_fund(
+                &lane,
+                tx,
+                ctx,
+                paychan_blue_score,
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(_) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_payment_channel_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_payment_channel_fund_ids.insert(id);
+                    drc_payment_channel_fund_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_payment_channel_fund_ids.contains(&id) {
+                        drc_payment_channel_fund_statuses
+                            .push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_payment_channel_fund_statuses.push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        for tx in &block.drc_payment_channel_claims {
+            let id = tx.claim_tx_id();
+            if settled_payment_channel_ids.contains(&tx.channel_id) {
+                drc_payment_channel_claim_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let ctx = auth.expect("DRC payment channel auth checked above");
+            let live = load_drc_payment_channel_live(&lane, &tx.channel_id)?;
+            let meta_before = if let Some(ref live) = live {
+                snapshot_meta_keys(
+                    &lane,
+                    &payment_channel_meta_keys_for_mutating(&live.channel_id, &live.owner),
+                )?
+            } else {
+                Vec::new()
+            };
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.submitter))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_payment_channel_claim(
+                &lane,
+                tx,
+                ctx,
+                paychan_blue_score,
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(_) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_payment_channel_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_payment_channel_claim_ids.insert(id);
+                    drc_payment_channel_claim_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_payment_channel_claim_ids.contains(&id) {
+                        drc_payment_channel_claim_statuses
+                            .push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_payment_channel_claim_statuses
+                            .push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        for tx in &block.drc_payment_channel_closes {
+            let id = tx.close_tx_id();
+            if settled_payment_channel_ids.contains(&tx.channel_id) {
+                drc_payment_channel_close_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let ctx = auth.expect("DRC payment channel auth checked above");
+            let live = load_drc_payment_channel_live(&lane, &tx.channel_id)?;
+            let meta_before = if let Some(ref live) = live {
+                snapshot_meta_keys(
+                    &lane,
+                    &payment_channel_meta_keys_for_mutating(&live.channel_id, &live.owner),
+                )?
+            } else {
+                Vec::new()
+            };
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.submitter))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_payment_channel_close(
+                &lane,
+                tx,
+                ctx,
+                paychan_blue_score,
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(maybe_receipt) => {
+                    if tx.fee.as_base_units() > 0 {
+                        let pool_snap =
+                            snapshot_meta_keys(&lane, &[reward_pool_meta_key(NativeAssetId::DRC)])?;
+                        journal.stake_meta_before.extend(pool_snap);
+                        credit_fee_share_to_reward_pool(
+                            &lane,
+                            &mut op_batch,
+                            NativeAssetId::DRC,
+                            tx.fee.as_base_units(),
+                        )?;
+                    }
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_payment_channel_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_payment_channel_close_ids.insert(id);
+                    if maybe_receipt.is_some() {
+                        settled_payment_channel_ids.insert(tx.channel_id);
+                    }
+                    drc_payment_channel_close_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_payment_channel_close_ids.contains(&id)
+                        || settled_payment_channel_ids.contains(&tx.channel_id)
+                    {
+                        drc_payment_channel_close_statuses
+                            .push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_payment_channel_close_statuses
+                            .push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
     if !block.data_commitments.is_empty() {
         let ctx = auth.expect("DA auth checked above");
         let fingerprint = ctx
@@ -1868,6 +2213,10 @@ fn apply_trident_lanes(
         drc_check_create_statuses,
         drc_check_cash_statuses,
         drc_check_cancel_statuses,
+        drc_payment_channel_create_statuses,
+        drc_payment_channel_fund_statuses,
+        drc_payment_channel_claim_statuses,
+        drc_payment_channel_close_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -2265,6 +2614,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
             None => batch.delete_cf(ColumnFamily::Meta, key),
         }
     }
+    for (key, prior) in journal.drc_payment_channel_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
     Ok(batch)
 }
@@ -2511,6 +2866,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
 
@@ -2713,6 +3072,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
@@ -2824,6 +3187,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
@@ -2902,6 +3269,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -2989,6 +3360,10 @@ mod tests {
                 drc_check_creates: vec![],
                 drc_check_cashes: vec![],
                 drc_check_cancels: vec![],
+                drc_payment_channel_creates: vec![],
+                drc_payment_channel_funds: vec![],
+                drc_payment_channel_claims: vec![],
+                drc_payment_channel_closes: vec![],
                 drc_multisign_attachments: vec![],
             },
             1,
@@ -3075,6 +3450,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
@@ -3179,6 +3558,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -3265,6 +3648,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         let mut block = block;
@@ -3365,6 +3752,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -3491,6 +3882,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -4128,6 +4523,10 @@ mod tests {
             drc_check_creates: vec![],
             drc_check_cashes: vec![],
             drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();

@@ -54,7 +54,7 @@ impl ColumnFamily {
 /// - `14` — signed DRC payment-v4 GHOSTDAG blue-score expiry metadata
 /// - `17` — DRC detached multisign attachments block lane
 /// - `18` — DRC master-key disable policy (no-lockout invariant)
-pub const SCHEMA_VERSION: u32 = 18;
+pub const SCHEMA_VERSION: u32 = 19;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {
