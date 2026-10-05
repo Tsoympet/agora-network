@@ -2,6 +2,7 @@
 import type { Address } from "./Address";
 import type { Amount } from "./Amount";
 import type { DrcAccountPolicyAction } from "./DrcAccountPolicyAction";
+import type { DrcMultisignAuth } from "./DrcMultisignAuth";
 
 /**
  * Signed DRC account-policy operation.
@@ -14,4 +15,4 @@ fee: Amount,
 /**
  * Shared DRC nonce used by transfers, stake ops, policies, preauths, and payments.
  */
-nonce: bigint, public_key: Array<number>, signature: Array<number>, };
+nonce: bigint, public_key: Array<number>, signature: Array<number>, multisign: DrcMultisignAuth | null, };

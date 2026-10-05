@@ -186,6 +186,7 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_account_policies: &'a [agora_types::DrcAccountPolicyTx],
     pub drc_deposit_preauths: &'a [agora_types::DrcDepositPreauthTx],
     pub drc_regular_keys: &'a [agora_types::DrcRegularKeyTx],
+    pub drc_signer_lists: &'a [agora_types::DrcSignerListTx],
 }
 
 impl ChainState {
@@ -548,7 +549,17 @@ impl ChainState {
             drc_account_policies: lanes.drc_account_policies.to_vec(),
             drc_deposit_preauths: lanes.drc_deposit_preauths.to_vec(),
             drc_regular_keys: lanes.drc_regular_keys.to_vec(),
+            drc_signer_lists: lanes.drc_signer_lists.to_vec(),
+            drc_multisign_attachments: Vec::new(),
         };
+        if let Some(ctx) = self.auth.as_ref() {
+            agora_types::materialize_drc_multisign_attachments(
+                &mut block,
+                &ctx.chain_id,
+                &ctx.genesis,
+            )
+            .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+        }
         block.header.tx_root = block.compute_body_root();
         Ok(block)
     }
@@ -1895,6 +1906,7 @@ impl ChainState {
                 drc_policy_meta_before: journal.drc_policy_meta_before,
                 drc_deposit_preauth_meta_before: journal.drc_deposit_preauth_meta_before,
                 drc_regular_key_meta_before: journal.drc_regular_key_meta_before,
+                drc_signer_list_meta_before: journal.drc_signer_list_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

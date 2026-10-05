@@ -9,8 +9,12 @@ mod asset;
 mod block;
 mod data_availability;
 mod drc_deposit_preauth;
+mod drc_multisign;
+mod drc_multisign_attachment;
+mod drc_multisign_lane;
 mod drc_policy;
 mod drc_regular_key;
+mod drc_signer_list;
 mod execution;
 mod finality;
 mod hash;
@@ -25,7 +29,10 @@ pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
 pub use account::{AccountTransfer, ACCOUNT_TX_SIGNING_DOMAIN};
 pub use amount::Amount;
 pub use asset::{AssetTxOut, NativeAmount, NativeAssetId};
-pub use block::{Block, BlockHeader, TRIDENT_BLOCK_BODY_DOMAIN, TRIDENT_BLOCK_BODY_VERSION};
+pub use block::{
+    Block, BlockHeader, TRIDENT_BLOCK_BODY_DOMAIN, TRIDENT_BLOCK_BODY_V11_DOMAIN,
+    TRIDENT_BLOCK_BODY_V11_VERSION, TRIDENT_BLOCK_BODY_VERSION,
+};
 pub use data_availability::{
     DataAvailabilityCommitment, DataCommitmentAuthorization, DataCommitmentError,
     DataCommitmentSource, DA_COMMITMENT_AUTHORIZATION_DOMAIN,
@@ -36,6 +43,24 @@ pub use drc_deposit_preauth::{
     DrcDepositPreauth, DrcDepositPreauthAction, DrcDepositPreauthError, DrcDepositPreauthTx,
     DRC_DEPOSIT_PREAUTH_SIGNING_DOMAIN, DRC_DEPOSIT_PREAUTH_STATE_VERSION,
     DRC_DEPOSIT_PREAUTH_TX_TYPE, DRC_DEPOSIT_PREAUTH_TX_VERSION,
+};
+pub use drc_multisign::{
+    read_multisign_trailer, validate_exclusive_authorization, write_multisign_trailer,
+    DrcMultisignAuth, DrcMultisignEntry, DrcMultisignError, DRC_MULTISIGN_AUTH_VERSION,
+    DRC_MULTISIGN_MAX_SIGNATURES, DRC_MULTISIGN_PARTICIPANT_DOMAIN, DRC_SIGNER_LIST_MAX_ENTRIES,
+    DRC_SIGNER_MAX_WEIGHT,
+};
+pub use drc_multisign_attachment::{
+    attachment_key_for_account_transfer, attachment_key_for_deposit_preauth,
+    attachment_key_for_payment, attachment_key_for_policy, attachment_key_for_regular_key,
+    attachment_key_for_signer_list, attachment_key_for_stake, drc_multisign_attachment_key,
+    drc_multisign_signing_commitment, DrcMultisignAttachmentError, DrcMultisignAttachmentKey,
+    DrcMultisignBlockAttachment, DrcMultisignOperationKind, DRC_MULTISIGN_ATTACHMENT_KEY_VERSION,
+    DRC_MULTISIGN_BLOCK_ATTACHMENT_VERSION, DRC_MULTISIGN_SIGNING_COMMITMENT_DOMAIN,
+};
+pub use drc_multisign_lane::{
+    drc_multisign_attachment_capacity, materialize_drc_multisign_attachments,
+    merge_drc_multisign_attachments, validate_drc_multisign_attachment_lane,
 };
 pub use drc_policy::{
     DrcAccountPolicy, DrcAccountPolicyAction, DrcAccountPolicyError, DrcAccountPolicyTx,
@@ -48,6 +73,12 @@ pub use drc_regular_key::{
     DrcAccountRegularKey, DrcRegularKeyAction, DrcRegularKeyError, DrcRegularKeyTx,
     DRC_REGULAR_KEY_SIGNING_DOMAIN, DRC_REGULAR_KEY_STATE_VERSION, DRC_REGULAR_KEY_TX_TYPE,
     DRC_REGULAR_KEY_TX_VERSION,
+};
+pub use drc_signer_list::{
+    canonical_sorted_entries, validate_signer_list_payload, DrcAccountSignerList,
+    DrcSignerListAction, DrcSignerListEntry, DrcSignerListError, DrcSignerListTx,
+    DRC_SIGNER_LIST_SIGNING_DOMAIN, DRC_SIGNER_LIST_STATE_VERSION, DRC_SIGNER_LIST_TX_TYPE,
+    DRC_SIGNER_LIST_TX_VERSION,
 };
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
@@ -149,6 +180,8 @@ mod tests {
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);

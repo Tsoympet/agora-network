@@ -1,16 +1,21 @@
-//! State-aware authorization for DRC account-bound operations (master + regular key).
+//! State-aware authorization for DRC account-bound operations (master, regular key, multisign).
 
-use agora_crypto::verify_bound_secp256k1;
+use agora_crypto::{
+    validate_drc_operation_authorization_fields, verify_bound_secp256k1,
+    verify_drc_multisign_against_list, verify_drc_signer_list_single_signature_bound,
+};
 use agora_types::{
-    AccountTransfer, Address, DrcAccountPolicyTx, DrcDepositPreauthTx, DrcPaymentTx,
-    DrcRegularKeyTx, NativeAssetId, SignedStakeTx,
+    validate_exclusive_authorization, AccountTransfer, Address, DrcAccountPolicyTx,
+    DrcDepositPreauthTx, DrcMultisignAuth, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    NativeAssetId, SignedStakeTx,
 };
 
 use crate::apply::TxAuthContext;
 use crate::drc_regular_key::load_drc_account_regular_key;
+use crate::drc_signer_list::load_drc_account_signer_list;
 use crate::{StateError, StateStore};
 
-/// Whether `signer` may act for `owner` on DRC account lanes.
+/// Whether `signer` may act for `owner` on DRC account lanes via master or regular key.
 pub fn authorize_drc_account_operator(
     store: &StateStore,
     owner: &Address,
@@ -33,19 +38,64 @@ pub fn authorize_drc_account_operator(
     }
 }
 
-fn authorize_after_bound_signature(
+#[allow(clippy::too_many_arguments)]
+fn verify_multisign_or_single(
     store: &StateStore,
     owner: &Address,
     public_key: &[u8],
     signature: &[u8],
-    signing_bytes: &[u8],
+    multisign: &Option<DrcMultisignAuth>,
+    operation_signing_bytes: &[u8],
+    auth: &TxAuthContext,
+    allow_current_signer_list: bool,
+    forbidden_new_list_entries: Option<&[agora_types::DrcSignerListEntry]>,
 ) -> Result<(), StateError> {
-    let signer = verify_bound_secp256k1(public_key, signature, signing_bytes)
+    let _ = allow_current_signer_list;
+    validate_exclusive_authorization(public_key, signature, multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if let Some(bundle) = multisign {
+        bundle
+            .validate_structure()
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+        if bundle.signing_for != *owner {
+            return Err(StateError::InvalidTx(
+                "multisign signing_for mismatch".into(),
+            ));
+        }
+        let Some(list) = load_drc_account_signer_list(store, owner)? else {
+            return Err(StateError::InvalidTx(
+                "multisign requires an installed signer list".into(),
+            ));
+        };
+        if let Some(new_entries) = forbidden_new_list_entries {
+            for entry in &bundle.signatures {
+                if new_entries.iter().any(|e| e.signer == entry.signer)
+                    && !list.entries.iter().any(|e| e.signer == entry.signer)
+                {
+                    return Err(StateError::InvalidTx(
+                        "new signer list cannot authorize its own installation".into(),
+                    ));
+                }
+            }
+        }
+        verify_drc_multisign_against_list(
+            bundle,
+            *owner,
+            operation_signing_bytes,
+            &auth.chain_id,
+            &auth.genesis,
+            &list.entries,
+            list.quorum,
+        )
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+        return Ok(());
+    }
+    let signer = verify_bound_secp256k1(public_key, signature, operation_signing_bytes)
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
     authorize_drc_account_operator(store, owner, &signer)
 }
 
-/// Verify payment envelope crypto + master/regular authorization.
+/// Verify payment envelope crypto + master/regular/multisign authorization.
 pub fn verify_drc_payment_operation(
     store: &StateStore,
     tx: &DrcPaymentTx,
@@ -53,12 +103,16 @@ pub fn verify_drc_payment_operation(
 ) -> Result<(), StateError> {
     tx.validate_envelope_version()
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
-    authorize_after_bound_signature(
+    verify_multisign_or_single(
         store,
         &tx.from,
         &tx.public_key,
         &tx.signature,
+        &tx.multisign,
         &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
     )
 }
 
@@ -69,12 +123,16 @@ pub fn verify_drc_account_policy_operation(
 ) -> Result<(), StateError> {
     tx.validate_version()
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
-    authorize_after_bound_signature(
+    verify_multisign_or_single(
         store,
         &tx.account,
         &tx.public_key,
         &tx.signature,
+        &tx.multisign,
         &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
     )
 }
 
@@ -85,16 +143,19 @@ pub fn verify_drc_deposit_preauth_operation(
 ) -> Result<(), StateError> {
     tx.validate_structure()
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
-    authorize_after_bound_signature(
+    verify_multisign_or_single(
         store,
         &tx.owner,
         &tx.public_key,
         &tx.signature,
+        &tx.multisign,
         &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
     )
 }
 
-/// Regular-key rotation may be signed by the master key or the currently installed regular key.
 pub fn verify_drc_regular_key_operation(
     store: &StateStore,
     tx: &DrcRegularKeyTx,
@@ -102,32 +163,58 @@ pub fn verify_drc_regular_key_operation(
 ) -> Result<(), StateError> {
     tx.validate_structure()
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
-    agora_crypto::verify_drc_regular_key_bound(tx, &auth.chain_id, &auth.genesis)
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
-    let signer = verify_bound_secp256k1(
+    if tx.multisign.is_none() {
+        agora_crypto::verify_drc_regular_key_bound(tx, &auth.chain_id, &auth.genesis)
+            .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    }
+    verify_multisign_or_single(
+        store,
+        &tx.owner,
         &tx.public_key,
         &tx.signature,
+        &tx.multisign,
         &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
     )
-    .map_err(|error| StateError::InvalidTx(error.to_string()))?;
-    if signer == tx.owner {
-        return Ok(());
-    }
-    let Some(regular_key) = load_drc_account_regular_key(store, &tx.owner)? else {
-        return Err(StateError::InvalidTx(
-            "regular-key operation requires master or installed regular key".into(),
-        ));
-    };
-    if signer == regular_key {
-        Ok(())
-    } else {
-        Err(StateError::InvalidTx(
-            "regular-key operation requires master or installed regular key".into(),
-        ))
-    }
 }
 
-/// DRC account transfers accept master or regular-key signatures; OVL remains master-only.
+pub fn verify_drc_signer_list_operation(
+    store: &StateStore,
+    tx: &DrcSignerListTx,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    tx.validate_structure()
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    validate_drc_operation_authorization_fields(&tx.public_key, &tx.signature, &tx.multisign)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    let signing_bytes = tx.signing_bytes_bound(&auth.chain_id, &auth.genesis);
+    let forbidden = match tx.action {
+        agora_types::DrcSignerListAction::Set => Some(tx.entries.as_slice()),
+        agora_types::DrcSignerListAction::Delete => None,
+    };
+    if tx.multisign.is_some() {
+        return verify_multisign_or_single(
+            store,
+            &tx.owner,
+            &tx.public_key,
+            &tx.signature,
+            &tx.multisign,
+            &signing_bytes,
+            auth,
+            true,
+            forbidden,
+        );
+    }
+    let signer = verify_drc_signer_list_single_signature_bound(tx, &auth.chain_id, &auth.genesis)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    authorize_drc_account_operator(store, &tx.owner, &signer)
+}
+
+/// DRC account transfers accept master, regular-key, or multisign signatures; OVL remains master-only.
 pub fn verify_drc_account_transfer_operation(
     store: &StateStore,
     tx: &AccountTransfer,
@@ -138,12 +225,16 @@ pub fn verify_drc_account_transfer_operation(
             .map_err(|error| StateError::InvalidTx(error.to_string()))?;
         return Ok(());
     }
-    authorize_after_bound_signature(
+    verify_multisign_or_single(
         store,
         &tx.from,
         &tx.public_key,
         &tx.signature,
+        &tx.multisign,
         &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
     )
 }
 
@@ -157,11 +248,15 @@ pub fn verify_drc_stake_operation(
             .map_err(|error| StateError::InvalidTx(error.to_string()))?;
         return Ok(());
     }
-    authorize_after_bound_signature(
+    verify_multisign_or_single(
         store,
         &tx.actor,
         &tx.public_key,
         &tx.signature,
+        &tx.multisign,
         &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
+        auth,
+        true,
+        None,
     )
 }

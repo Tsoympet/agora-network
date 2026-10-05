@@ -102,7 +102,7 @@ The canonical same-block lane order is:
 
 ```text
 account transfers → OVL executions → stake ops → DRC regular-key ops
-  → DRC policy ops → DRC deposit-preauthorization ops → DRC payments
+  → DRC signer-list ops → DRC policy ops → DRC deposit-preauthorization ops → DRC payments
   → data commitments
 ```
 
@@ -319,7 +319,7 @@ Policy and preauthorization reads and exact-delivery receipts describe the
 canonical state-machine virtual view. Acceptance/settlement does not assert PoW
 plus OVL/DRC checkpoint finality; finality remains independently queryable.
 
-Escrow, recurring authorization, multisig accounts, cross-district paths, and
+Escrow, recurring authorization, cross-district paths, and
 merchant tag registries remain separate future transitions. Destination tags
 are recipient-local routing metadata (as on XRPL), not globally owned names.
 Source tags are sender-local routing metadata and are not globally registered.
@@ -346,24 +346,75 @@ Pinned against `rippled` 2.5.0 `SetRegularKey` / `RegularKey` semantics with
 explicit deviations:
 
 - secp256k1 only; no Ed25519 or XRPL wire compatibility
-- master-key disable, signer lists, and multisig are excluded (no-lockout invariant)
+- master-key disable remains excluded (no-lockout invariant)
 - master cannot be installed as its own regular key; zero keys are rejected
 - the current regular key may rotate or clear itself; the master can always recover
 - Agora uses address-derived identity plus an explicit 33-byte pubkey binding on set
 - rejected operations charge no fee; there is no XRPL `tec` class emulation
 
+## Weighted secp256k1 signer lists and multisign (bounded)
+
+`DrcSignerListTx` v1 installs, replaces, or deletes one canonical ordered list per
+DRC account: `(signer address, weight)` entries sorted by signer, plus a non-zero
+quorum. At most **32** entries (`rippled` 2.5.0 `ExpandedSignerList` cap; not XRPL
+wire parity). Weights are `u16` (max 65535). The owner cannot appear on its own list.
+Empty lists, zero weights/quorum, duplicate signers, impossible quorum, and owner-as-signer
+fail before mutation.
+
+Pinned `rippled` 2.5.0 `SignerListSet` / `MultiSign` baseline with explicit deviations:
+
+- secp256k1 only; no Ed25519, ticket/credential paths, or XRPL result classes
+- one bounded list per account; no master-key disable in this slice
+- master and regular-key single signatures remain valid recovery paths
+- multisign uses domain `agora-trident-drc-multisign-participant-v1` binding
+  `signing_for`, chain ID, genesis, operation signing bytes, and version
+- consensus bodies carry detached authorization in `drc_multisign_attachments`
+  (Borsh lane, body-root v11); operation vec elements stay byte-stable (no inline
+  multisign in lane Borsh). Mempool/RPC JSON may hold `multisign` until template
+  materialization strips it into attachments keyed by
+  `(DrcMultisignOperationKind, signing_commitment)` where
+  `signing_commitment = Hash(domain, key_version, kind, signing_bytes_bound(...))`
+- attachments are strictly sorted by `(kind, signing_commitment)`, capped at one
+  per eligible in-scope DRC operation (≤32 auth entries per bundle); orphans,
+  duplicates, mixed inline+attachment, and wrong-kind/owner keys fail before mutation
+- exactly one of single-signature or multisign authorization; mixed envelopes fail closed
+- signer-list **Set** may be authorized by master, regular key, or multisign on the
+  **currently installed** list; signers that exist only on the **new** list cannot
+  authorize their own installation
+- extra valid listed signatures beyond quorum are allowed up to 32, processed in strict
+  signer order until quorum is met
+
+Multisign is an alternate authorization path for every DRC account operation already
+covered by regular-key auth: account transfers, stake ops, policy, deposit preauth,
+payments, regular-key rotation, and signer-list operations. OVL lanes remain master-only.
+
 Canonical same-block order:
 
 ```text
 account transfers → OVL executions → stake ops → DRC regular-key ops
-  → DRC policy ops → DRC deposit-preauthorization ops → DRC payments
+  → DRC signer-list ops → DRC policy ops → DRC deposit-preauthorization ops → DRC payments
+  → data commitments
 ```
+
+Signer-list state commits to `agora-drc-signer-list-root-v1` inside composed state root
+`agora-trident-state-root-v10`. Body commitment uses `agora-block-body-v10` when the
+signer-list lane is non-empty and `agora-block-body-v11` when
+`drc_multisign_attachments` is non-empty (attachment leaf IDs commit full auth bytes).
+Trident protocol v13, state transition `agora-trident-state-v14`, transaction signing
+`agora-trident-tx-v7`, and Experimental datadir schema v17 isolate this slice.
+Multisign is usable on mined blocks once template materialization and P2P full-body
+transport carry the attachment lane (Single-node prototype).
+
+`agora_submitDrcSignerList` admits a fully signed operation.
+`agora_getDrcAccountSignerList` returns `quorum`, `entry_count`, and `account_nonce`
+for a known account without enumerating signer identities. Malformed inputs return
+`-32602`.
 
 Regular-key state commits to `agora-drc-regular-key-root-v1` inside composed
 state root `agora-trident-state-root-v9`. Body commitment uses
 `agora-block-body-v9` when the lane is non-empty. Trident protocol v11,
 state transition `agora-trident-state-v12`, and Experimental datadir schema v15
-isolate this slice. Frozen payment/policy/preauth encodings remain readable.
+isolate the regular-key slice. Frozen payment/policy/preauth encodings remain readable.
 
 `agora_submitDrcRegularKey` admits a fully signed operation.
 `agora_getDrcAccountKeys` returns `regular_key` and `account_nonce` for a known
@@ -371,6 +422,6 @@ DRC account, or `unknown` when absent. Malformed inputs return `-32602`.
 
 ## Next bounded slice
 
-Master-key disable with signer-list recovery, credential-based `DepositPreauth`,
+Master-key disable with signer-list-only recovery, credential-based `DepositPreauth`,
 recurring pull payments, and cross-asset routing remain out of scope for the
 native DRC payment lane.

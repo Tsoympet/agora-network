@@ -7,6 +7,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::drc_multisign::{read_multisign_trailer, write_multisign_trailer, DrcMultisignAuth};
 use crate::{Address, Hash, NativeAssetId};
 
 /// Domain separator for stake transaction signatures.
@@ -36,9 +37,7 @@ impl StakeOpKind {
 }
 
 /// Network-bound signed stake transaction.
-#[derive(
-    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
-)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
 pub struct SignedStakeTx {
     pub version: u32,
     pub asset: NativeAssetId,
@@ -60,6 +59,8 @@ pub struct SignedStakeTx {
     pub nonce: u64,
     pub public_key: Vec<u8>,
     pub signature: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multisign: Option<DrcMultisignAuth>,
 }
 
 impl SignedStakeTx {
@@ -110,6 +111,7 @@ impl SignedStakeTx {
             nonce,
             public_key: Vec::new(),
             signature: Vec::new(),
+            multisign: None,
         }
     }
 
@@ -134,6 +136,7 @@ impl SignedStakeTx {
             nonce,
             public_key: Vec::new(),
             signature: Vec::new(),
+            multisign: None,
         }
     }
 
@@ -152,6 +155,7 @@ impl SignedStakeTx {
             nonce,
             public_key: Vec::new(),
             signature: Vec::new(),
+            multisign: None,
         }
     }
 
@@ -170,7 +174,48 @@ impl SignedStakeTx {
             nonce,
             public_key: Vec::new(),
             signature: Vec::new(),
+            multisign: None,
         }
+    }
+}
+
+impl BorshSerialize for SignedStakeTx {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> Result<(), borsh::io::Error> {
+        BorshSerialize::serialize(&self.version, writer)?;
+        BorshSerialize::serialize(&self.asset, writer)?;
+        BorshSerialize::serialize(&self.kind, writer)?;
+        BorshSerialize::serialize(&self.actor, writer)?;
+        BorshSerialize::serialize(&self.validator, writer)?;
+        BorshSerialize::serialize(&self.amount, writer)?;
+        BorshSerialize::serialize(&self.consensus_pubkey, writer)?;
+        BorshSerialize::serialize(&self.withdrawal, writer)?;
+        BorshSerialize::serialize(&self.commission_bps, writer)?;
+        BorshSerialize::serialize(&self.metadata_hash, writer)?;
+        BorshSerialize::serialize(&self.nonce, writer)?;
+        BorshSerialize::serialize(&self.public_key, writer)?;
+        BorshSerialize::serialize(&self.signature, writer)?;
+        write_multisign_trailer(&self.multisign, writer)
+    }
+}
+
+impl BorshDeserialize for SignedStakeTx {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        Ok(Self {
+            version: u32::deserialize_reader(reader)?,
+            asset: NativeAssetId::deserialize_reader(reader)?,
+            kind: StakeOpKind::deserialize_reader(reader)?,
+            actor: Address::deserialize_reader(reader)?,
+            validator: Address::deserialize_reader(reader)?,
+            amount: u64::deserialize_reader(reader)?,
+            consensus_pubkey: Vec::<u8>::deserialize_reader(reader)?,
+            withdrawal: Address::deserialize_reader(reader)?,
+            commission_bps: u16::deserialize_reader(reader)?,
+            metadata_hash: Hash::deserialize_reader(reader)?,
+            nonce: u64::deserialize_reader(reader)?,
+            public_key: Vec::<u8>::deserialize_reader(reader)?,
+            signature: Vec::<u8>::deserialize_reader(reader)?,
+            multisign: read_multisign_trailer(reader)?,
+        })
     }
 }
 

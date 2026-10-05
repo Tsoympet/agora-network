@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use agora_types::{
     AccountTransfer, Address, Block, DrcAccountPolicyTx, DrcDepositPreauthAction,
-    DrcDepositPreauthTx, DrcPaymentTx, DrcRegularKeyTx, Hash, NativeAssetId, OutPoint,
-    OvlExecutionTx, SignedStakeTx, Transaction,
+    DrcDepositPreauthTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash, NativeAssetId,
+    OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 
 use crate::P2pError;
@@ -29,6 +29,7 @@ pub struct Mempool {
     drc_policy_txs: HashMap<Hash, DrcAccountPolicyTx>,
     drc_deposit_preauth_txs: HashMap<Hash, DrcDepositPreauthTx>,
     drc_regular_key_txs: HashMap<Hash, DrcRegularKeyTx>,
+    drc_signer_list_txs: HashMap<Hash, DrcSignerListTx>,
     /// Payments admitted while canonical or pending DepositAuth is enabled.
     deposit_auth_required_payments: HashSet<Hash>,
     /// Payments whose source has a canonical dormant/active preauthorization.
@@ -51,6 +52,7 @@ impl Mempool {
             drc_policy_txs: HashMap::new(),
             drc_deposit_preauth_txs: HashMap::new(),
             drc_regular_key_txs: HashMap::new(),
+            drc_signer_list_txs: HashMap::new(),
             deposit_auth_required_payments: HashSet::new(),
             deposit_preauthorized_payments: HashSet::new(),
             reserved_accounts: HashSet::new(),
@@ -67,6 +69,7 @@ impl Mempool {
             + self.drc_policy_txs.len()
             + self.drc_deposit_preauth_txs.len()
             + self.drc_regular_key_txs.len()
+            + self.drc_signer_list_txs.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -82,6 +85,7 @@ impl Mempool {
             || self.drc_policy_txs.contains_key(tx_id)
             || self.drc_deposit_preauth_txs.contains_key(tx_id)
             || self.drc_regular_key_txs.contains_key(tx_id)
+            || self.drc_signer_list_txs.contains_key(tx_id)
     }
 
     /// Outpoints already claimed by mempool transactions.
@@ -402,6 +406,24 @@ impl Mempool {
         Ok(id)
     }
 
+    pub fn admit_drc_signer_list(&mut self, tx: DrcSignerListTx) -> Result<Hash, P2pError> {
+        let id = tx.signer_list_tx_id();
+        if self.drc_signer_list_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size {
+            return Err(P2pError::MempoolRejected("mempool full".into()));
+        }
+        let key = (NativeAssetId::DRC, tx.owner);
+        if !self.reserved_accounts.insert(key) {
+            return Err(P2pError::MempoolRejected(
+                "account already has a pending nonce".into(),
+            ));
+        }
+        self.drc_signer_list_txs.insert(id, tx);
+        Ok(id)
+    }
+
     pub fn admit_drc_deposit_preauth(&mut self, tx: DrcDepositPreauthTx) -> Result<Hash, P2pError> {
         let id = tx.preauth_tx_id();
         if self.drc_deposit_preauth_txs.contains_key(&id) {
@@ -608,6 +630,22 @@ impl Mempool {
                     a.regular_key_tx_id()
                         .as_bytes()
                         .cmp(b.regular_key_tx_id().as_bytes())
+                })
+        });
+        txs.truncate(max);
+        txs
+    }
+
+    pub fn select_drc_signer_lists(&self, max: usize) -> Vec<DrcSignerListTx> {
+        let mut txs: Vec<_> = self.drc_signer_list_txs.values().cloned().collect();
+        txs.sort_by(|a, b| {
+            b.fee
+                .as_base_units()
+                .cmp(&a.fee.as_base_units())
+                .then_with(|| {
+                    a.signer_list_tx_id()
+                        .as_bytes()
+                        .cmp(b.signer_list_tx_id().as_bytes())
                 })
         });
         txs.truncate(max);
@@ -989,6 +1027,8 @@ mod tests {
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -1052,6 +1092,8 @@ mod tests {
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));

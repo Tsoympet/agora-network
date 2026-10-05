@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use ts_rs::TS;
 
+use crate::drc_multisign::{read_multisign_trailer, write_multisign_trailer, DrcMultisignAuth};
 use crate::{Address, Amount, Hash};
 
 /// Frozen legacy payment envelope version.
@@ -54,6 +55,8 @@ pub struct DrcPaymentTx {
     pub last_valid_blue_score: Option<u64>,
     pub public_key: Vec<u8>,
     pub signature: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multisign: Option<DrcMultisignAuth>,
 }
 
 impl DrcPaymentTx {
@@ -195,6 +198,7 @@ impl DrcPaymentTx {
             last_valid_blue_score: None,
             public_key: Vec::new(),
             signature: Vec::new(),
+            multisign: None,
         }
     }
 
@@ -223,6 +227,7 @@ impl DrcPaymentTx {
             last_valid_blue_score: None,
             public_key: Vec::new(),
             signature: Vec::new(),
+            multisign: None,
         }
     }
 
@@ -251,6 +256,7 @@ impl DrcPaymentTx {
             last_valid_blue_score: None,
             public_key: Vec::new(),
             signature: Vec::new(),
+            multisign: None,
         }
     }
 
@@ -280,6 +286,7 @@ impl DrcPaymentTx {
             last_valid_blue_score,
             public_key: Vec::new(),
             signature: Vec::new(),
+            multisign: None,
         }
     }
 }
@@ -316,7 +323,8 @@ impl BorshSerialize for DrcPaymentTx {
             BorshSerialize::serialize(&self.last_valid_blue_score, writer)?;
         }
         BorshSerialize::serialize(&self.public_key, writer)?;
-        BorshSerialize::serialize(&self.signature, writer)
+        BorshSerialize::serialize(&self.signature, writer)?;
+        write_multisign_trailer(&self.multisign, writer)
     }
 }
 
@@ -358,6 +366,7 @@ impl BorshDeserialize for DrcPaymentTx {
             last_valid_blue_score,
             public_key: Vec::<u8>::deserialize_reader(reader)?,
             signature: Vec::<u8>::deserialize_reader(reader)?,
+            multisign: read_multisign_trailer(reader)?,
         })
     }
 }

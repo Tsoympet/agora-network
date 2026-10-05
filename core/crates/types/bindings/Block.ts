@@ -4,8 +4,10 @@ import type { BlockHeader } from "./BlockHeader";
 import type { DataCommitmentAuthorization } from "./DataCommitmentAuthorization";
 import type { DrcAccountPolicyTx } from "./DrcAccountPolicyTx";
 import type { DrcDepositPreauthTx } from "./DrcDepositPreauthTx";
+import type { DrcMultisignBlockAttachment } from "./DrcMultisignBlockAttachment";
 import type { DrcPaymentTx } from "./DrcPaymentTx";
 import type { DrcRegularKeyTx } from "./DrcRegularKeyTx";
+import type { DrcSignerListTx } from "./DrcSignerListTx";
 import type { OvlExecutionTx } from "./OvlExecutionTx";
 import type { SignedStakeTx } from "./SignedStakeTx";
 import type { Transaction } from "./Transaction";
@@ -49,4 +51,12 @@ drc_deposit_preauths: Array<DrcDepositPreauthTx>,
 /**
  * Owner-authorized DRC regular-key rotation operations.
  */
-drc_regular_keys: Array<DrcRegularKeyTx>, };
+drc_regular_keys: Array<DrcRegularKeyTx>,
+/**
+ * Owner-authorized DRC weighted signer-list operations.
+ */
+drc_signer_lists: Array<DrcSignerListTx>,
+/**
+ * Detached, body-root-committed DRC multisign authorization (consensus lane).
+ */
+drc_multisign_attachments: Array<DrcMultisignBlockAttachment>, };

@@ -1,6 +1,7 @@
 use agora_types::{
     AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcDepositPreauthTx,
-    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, Hash, OvlExecutionTx, Transaction,
+    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, Hash, OvlExecutionTx,
+    Transaction,
 };
 use serde_json::{json, Value};
 
@@ -235,6 +236,36 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                         "account": account.to_bech32(),
                         "status": "unknown",
                         "regular_key": null,
+                        "account_nonce": null,
+                    })),
+                }
+            }
+            RpcMethod::SubmitDrcSignerList => {
+                let raw = req
+                    .params
+                    .get("signer_list")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: DrcSignerListTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_signer_list(tx)?;
+                Ok(json!({ "signer_list_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcAccountSignerList => {
+                let account = param_address(&req.params, "account")?;
+                match self.backend.get_drc_account_signer_list(&account)? {
+                    Some((quorum, entry_count, nonce)) => Ok(json!({
+                        "account": account.to_bech32(),
+                        "status": "known",
+                        "quorum": quorum,
+                        "entry_count": entry_count,
+                        "account_nonce": nonce,
+                    })),
+                    None => Ok(json!({
+                        "account": account.to_bech32(),
+                        "status": "unknown",
+                        "quorum": null,
+                        "entry_count": null,
                         "account_nonce": null,
                     })),
                 }
@@ -832,6 +863,8 @@ mod tests {
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -947,6 +980,8 @@ mod tests {
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -981,6 +1016,8 @@ mod tests {
             drc_account_policies: vec![],
             drc_deposit_preauths: vec![],
             drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {

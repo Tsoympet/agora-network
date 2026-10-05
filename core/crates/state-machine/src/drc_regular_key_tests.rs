@@ -5,9 +5,7 @@ mod tests {
     use agora_crypto::{
         sign_drc_account_policy_bound, sign_drc_payment_bound, sign_drc_regular_key_bound, KeyPair,
     };
-    use agora_types::{
-        Amount, DrcPaymentTx, DrcRegularKeyTx, Hash, NativeAssetId,
-    };
+    use agora_types::{Amount, DrcPaymentTx, DrcRegularKeyTx, Hash, NativeAssetId};
 
     use crate::accounts::{credit_account_into, load_account};
     use crate::apply::TxAuthContext;
