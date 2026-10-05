@@ -65,9 +65,11 @@ pub use drc_multisign_lane::{
 pub use drc_policy::{
     DrcAccountPolicy, DrcAccountPolicyAction, DrcAccountPolicyError, DrcAccountPolicyTx,
     DRC_ACCOUNT_POLICY_LEGACY_STATE_VERSION, DRC_ACCOUNT_POLICY_LEGACY_TX_VERSION,
+    DRC_ACCOUNT_POLICY_MASTER_KEY_STATE_VERSION, DRC_ACCOUNT_POLICY_MASTER_KEY_TX_VERSION,
     DRC_ACCOUNT_POLICY_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_STATE_VERSION,
     DRC_ACCOUNT_POLICY_TX_TYPE, DRC_ACCOUNT_POLICY_TX_VERSION,
     DRC_ACCOUNT_POLICY_V1_SIGNING_DOMAIN, DRC_ACCOUNT_POLICY_V2_SIGNING_DOMAIN,
+    DRC_ACCOUNT_POLICY_V3_SIGNING_DOMAIN,
 };
 pub use drc_regular_key::{
     DrcAccountRegularKey, DrcRegularKeyAction, DrcRegularKeyError, DrcRegularKeyTx,
@@ -304,6 +306,7 @@ mod ts_export {
         )
         .expect("read DRC account-policy state binding");
         assert!(policy_state_binding.contains("deposit_auth_required: boolean"));
+        assert!(policy_state_binding.contains("master_key_disabled: boolean"));
         let preauth_binding = fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("bindings/DrcDepositPreauthTx.ts"),
         )

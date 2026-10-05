@@ -410,6 +410,45 @@ transport carry the attachment lane (Single-node prototype).
 for a known account without enumerating signer identities. Malformed inputs return
 `-32602`.
 
+### DRC master-key disable (rippled 2.5.0 subset, explicit deviations)
+
+Pinned baseline: rippled 2.5.0 `asfDisableMaster` / `lsfDisableMaster` intent — the
+owner master secp256k1 key stops authorizing DRC account operations while alternate
+recovery remains. **Not XRPL wire/API parity** (no `lsf`, Tickets, credentials, or
+`tec`-class semantics).
+
+Supported Agora subset:
+
+- DRC-scoped only; OVL/TLT authorization unchanged
+- policy v3 tx actions `set_master_key_disabled` / `clear_master_key_disabled` on the
+  existing signed `DrcAccountPolicyTx` lane (no privileged RPC)
+- **Enable:** owner **master key only** (no regular key, no multisign); requires a
+  live regular key **or** signer list in canonical state before mutation
+- **While disabled:** master single-signatures fail in the central DRC verifier for
+  transfers, stake, regular-key, signer-list, policy, DepositPreauth, and payments;
+  regular-key and signer-list multisign paths remain valid
+- **Clear:** valid regular key or current signer-list multisign; disabled master
+  cannot clear itself; master authorization resumes immediately after clear
+- **No-lockout:** while disabled, regular-key clear/replace and signer-list
+  delete/replace cannot remove the last alternate recovery path; same-block lane
+  order uses the copy-on-write overlay after each canonical mutation
+
+Body/state/protocol bumps: policy state v3 (`master_key_disabled`), tx/signing v3 domain
+for disable actions, Trident protocol **v14**, state transition **`agora-trident-state-v15`**,
+transaction signing **`agora-trident-tx-v8`**, datadir schema **18**. Maturity:
+Single-node prototype (consensus + RPC query; not XRPL parity).
+
+`agora_getDrcAccountPolicy` exposes `master_key_disabled` alongside existing flags.
+
+**Mempool / mining templates (bounded, fail-closed):** account-lane admission reserves the
+owner shared nonce but does **not** simulate same-block recovery mutations (regular-key,
+signer-list, enable/clear) against a prospective overlay. Template builders must apply
+candidate blocks against canonical state (or an explicit copy-on-write overlay identical to
+consensus lane order). A locally queued `set_master_key_disabled` is therefore **not**
+safe to pair in one template with recovery ops that only exist in sibling pool entries at
+the same nonce — block apply remains authoritative, and invalid pairings fail closed at
+apply rather than producing a body that would lock the account.
+
 Regular-key state commits to `agora-drc-regular-key-root-v1` inside composed
 state root `agora-trident-state-root-v9`. Body commitment uses
 `agora-block-body-v9` when the lane is non-empty. Trident protocol v11,

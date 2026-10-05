@@ -5,12 +5,13 @@ use agora_crypto::{
     verify_drc_multisign_against_list, verify_drc_signer_list_single_signature_bound,
 };
 use agora_types::{
-    validate_exclusive_authorization, AccountTransfer, Address, DrcAccountPolicyTx,
-    DrcDepositPreauthTx, DrcMultisignAuth, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
-    NativeAssetId, SignedStakeTx,
+    validate_exclusive_authorization, AccountTransfer, Address, DrcAccountPolicyAction,
+    DrcAccountPolicyTx, DrcDepositPreauthTx, DrcMultisignAuth, DrcPaymentTx, DrcRegularKeyTx,
+    DrcSignerListTx, NativeAssetId, SignedStakeTx,
 };
 
 use crate::apply::TxAuthContext;
+use crate::drc_master_key_recovery::{drc_master_key_disabled, has_alternate_recovery};
 use crate::drc_regular_key::load_drc_account_regular_key;
 use crate::drc_signer_list::load_drc_account_signer_list;
 use crate::{StateError, StateStore};
@@ -22,6 +23,11 @@ pub fn authorize_drc_account_operator(
     signer: &Address,
 ) -> Result<(), StateError> {
     if signer == owner {
+        if drc_master_key_disabled(store, owner)? {
+            return Err(StateError::InvalidTx(
+                "DRC master key is disabled for this account".into(),
+            ));
+        }
         return Ok(());
     }
     let Some(regular_key) = load_drc_account_regular_key(store, owner)? else {
@@ -92,6 +98,11 @@ fn verify_multisign_or_single(
     }
     let signer = verify_bound_secp256k1(public_key, signature, operation_signing_bytes)
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if signer == *owner && drc_master_key_disabled(store, owner)? {
+        return Err(StateError::InvalidTx(
+            "DRC master key is disabled for this account".into(),
+        ));
+    }
     authorize_drc_account_operator(store, owner, &signer)
 }
 
@@ -123,17 +134,77 @@ pub fn verify_drc_account_policy_operation(
 ) -> Result<(), StateError> {
     tx.validate_version()
         .map_err(|error| StateError::InvalidTx(error.to_string()))?;
-    verify_multisign_or_single(
-        store,
-        &tx.account,
-        &tx.public_key,
-        &tx.signature,
-        &tx.multisign,
-        &tx.signing_bytes_bound(&auth.chain_id, &auth.genesis),
-        auth,
-        true,
-        None,
-    )
+    let signing_bytes = tx.signing_bytes_bound(&auth.chain_id, &auth.genesis);
+    match tx.action {
+        DrcAccountPolicyAction::SetMasterKeyDisabled => {
+            validate_exclusive_authorization(&tx.public_key, &tx.signature, &tx.multisign)
+                .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+            if tx.multisign.is_some() {
+                return Err(StateError::InvalidTx(
+                    "master-key disable must be authorized by the owner master key".into(),
+                ));
+            }
+            let signer = verify_bound_secp256k1(&tx.public_key, &tx.signature, &signing_bytes)
+                .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+            if signer != tx.account {
+                return Err(StateError::InvalidTx(
+                    "master-key disable must be authorized by the owner master key".into(),
+                ));
+            }
+            if drc_master_key_disabled(store, &tx.account)? {
+                return Err(StateError::InvalidTx(
+                    "DRC master key is already disabled".into(),
+                ));
+            }
+            if !has_alternate_recovery(store, &tx.account)? {
+                return Err(StateError::InvalidTx(
+                    "master-key disable requires a live regular key or signer list".into(),
+                ));
+            }
+            Ok(())
+        }
+        DrcAccountPolicyAction::ClearMasterKeyDisabled => {
+            if !drc_master_key_disabled(store, &tx.account)? {
+                return Err(StateError::InvalidTx(
+                    "DRC master key is not disabled".into(),
+                ));
+            }
+            validate_exclusive_authorization(&tx.public_key, &tx.signature, &tx.multisign)
+                .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+            if let Some(bundle) = &tx.multisign {
+                return verify_multisign_or_single(
+                    store,
+                    &tx.account,
+                    &tx.public_key,
+                    &tx.signature,
+                    &Some(bundle.clone()),
+                    &signing_bytes,
+                    auth,
+                    true,
+                    None,
+                );
+            }
+            let signer = verify_bound_secp256k1(&tx.public_key, &tx.signature, &signing_bytes)
+                .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+            if signer == tx.account {
+                return Err(StateError::InvalidTx(
+                    "disabled DRC master key cannot clear master-key disable".into(),
+                ));
+            }
+            authorize_drc_account_operator(store, &tx.account, &signer)
+        }
+        _ => verify_multisign_or_single(
+            store,
+            &tx.account,
+            &tx.public_key,
+            &tx.signature,
+            &tx.multisign,
+            &signing_bytes,
+            auth,
+            true,
+            None,
+        ),
+    }
 }
 
 pub fn verify_drc_deposit_preauth_operation(
