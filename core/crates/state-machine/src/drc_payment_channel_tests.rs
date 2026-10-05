@@ -98,6 +98,99 @@ mod tests {
     }
 
     #[test]
+    fn claim_moves_locked_value_without_owner_liquid_debit() {
+        let store = StateStore::open_in_memory();
+        let ctx = auth();
+        let owner = key(30);
+        let dest = key(31);
+        let claim_key = key(57);
+        fund(&store, &owner, 500);
+        fund(&store, &dest, 10);
+        let (channel_id, _) = create_live_channel(&store, &owner, &claim_key, &dest, 100, 0, &ctx);
+        let owner_before = load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
+        let dest_before = load_account(&store, NativeAssetId::DRC, &dest.address()).unwrap();
+        let locked_before = load_drc_payment_channel_live(&store, &channel_id)
+            .unwrap()
+            .unwrap()
+            .locked_remainder()
+            .unwrap()
+            .as_base_units();
+
+        let claim = signed_claim(&dest, &claim_key, channel_id, 25, 0, &ctx);
+        let mut block = coinbase(vec![Hash::ZERO], &dest);
+        block.drc_payment_channel_claims.push(claim);
+        apply_channel_block(&store, block, 2, &ctx);
+
+        let owner_after = load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
+        let dest_after = load_account(&store, NativeAssetId::DRC, &dest.address()).unwrap();
+        let locked_after = load_drc_payment_channel_live(&store, &channel_id)
+            .unwrap()
+            .unwrap()
+            .locked_remainder()
+            .unwrap()
+            .as_base_units();
+
+        assert_eq!(owner_after.balance, owner_before.balance);
+        assert_eq!(dest_after.balance, dest_before.balance + 25 - 1);
+        assert_eq!(locked_after, locked_before - 25);
+        assert_eq!(
+            owner_after.balance + dest_after.balance + locked_after,
+            owner_before.balance + dest_before.balance + locked_before - 1,
+            "claim fee is the only spendable+locked loss"
+        );
+    }
+
+    #[test]
+    fn owner_finalize_preserves_close_fee_when_returning_remainder() {
+        let store = StateStore::open_in_memory();
+        let ctx = auth();
+        let owner = key(40);
+        let dest = key(41);
+        let claim_key = key(58);
+        fund(&store, &owner, 1_000);
+        fund(&store, &dest, 10);
+        let (channel_id, _) = create_live_channel(&store, &owner, &claim_key, &dest, 100, 0, &ctx);
+        let claim = signed_claim(&dest, &claim_key, channel_id, 25, 0, &ctx);
+        let mut block = coinbase(vec![Hash::ZERO], &dest);
+        block.drc_payment_channel_claims.push(claim);
+        apply_channel_block(&store, block, 2, &ctx);
+
+        let owner_before_schedule =
+            load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
+        let schedule = signed_close(
+            &owner,
+            channel_id,
+            DrcPaymentChannelCloseKind::OwnerScheduleClose,
+            1,
+            &ctx,
+        );
+        let mut block = coinbase(vec![Hash::ZERO], &owner);
+        block.drc_payment_channel_closes.push(schedule);
+        apply_channel_block(&store, block, 3, &ctx);
+        let owner_after_schedule =
+            load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
+        assert_eq!(owner_after_schedule.balance, owner_before_schedule.balance - 1);
+
+        let finalize = signed_close(
+            &owner,
+            channel_id,
+            DrcPaymentChannelCloseKind::Finalize,
+            2,
+            &ctx,
+        );
+        let mut block = coinbase(vec![Hash::ZERO], &owner);
+        block.drc_payment_channel_closes.push(finalize);
+        apply_channel_block(&store, block, 12, &ctx);
+        let owner_after_finalize =
+            load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
+        assert_eq!(
+            owner_after_finalize.balance,
+            owner_after_schedule.balance - 1 + 75,
+            "finalize debits close fee then returns locked remainder (100 - 25)"
+        );
+    }
+
+    #[test]
     fn destination_close_returns_remainder_once() {
         let store = StateStore::open_in_memory();
         let ctx = auth();

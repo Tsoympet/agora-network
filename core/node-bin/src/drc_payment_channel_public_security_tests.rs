@@ -604,8 +604,8 @@ fn public_exact_conservation_create_fund_two_claims_schedule_finalize() {
     );
     assert_eq!(
         drc_balance(fx.store.as_ref(), &owner) + drc_balance(fx.store.as_ref(), &dest),
-        owner0 + dest0 - 6 - 54,
-        "owner liquid debits on cumulative claims plus six lane fees; locked remainder returned on finalize"
+        owner0 + dest0 - 6,
+        "closed channel: owner+destination spendable differs from initial only by lane fees"
     );
 }
 

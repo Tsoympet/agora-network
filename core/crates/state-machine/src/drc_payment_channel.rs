@@ -17,7 +17,7 @@ use agora_types::{
 };
 use borsh::BorshDeserialize;
 
-use crate::accounts::{load_account, put_account_into, AccountJournal};
+use crate::accounts::{load_account, put_account_into, AccountJournal, AccountState};
 use crate::apply::TxAuthContext;
 use crate::columns::ColumnFamily;
 use crate::drc_account_auth::{
@@ -334,20 +334,29 @@ fn finalize_channel(
     live: &DrcPaymentChannelLive,
     application_blue_score: u64,
     settlement_tx_id: Hash,
+    owner_after_close_fee: Option<&mut AccountState>,
 ) -> Result<DrcPaymentChannelReceipt, StateError> {
     let remainder = live
         .locked_remainder()
         .map_err(|e| StateError::InvalidTx(e.to_string()))?;
-    let mut owner = load_account(store, NativeAssetId::DRC, &live.owner)?;
     if remainder.as_base_units() > 0 {
-        journal
-            .before
-            .push((NativeAssetId::DRC, live.owner, owner.clone()));
-        owner.balance = owner
-            .balance
-            .checked_add(remainder.as_base_units())
-            .ok_or_else(|| StateError::InvalidTx("payment channel remainder overflow".into()))?;
-        put_account_into(batch, NativeAssetId::DRC, &live.owner, &owner)?;
+        if let Some(owner) = owner_after_close_fee {
+            owner.balance = owner
+                .balance
+                .checked_add(remainder.as_base_units())
+                .ok_or_else(|| StateError::InvalidTx("payment channel remainder overflow".into()))?;
+            put_account_into(batch, NativeAssetId::DRC, &live.owner, owner)?;
+        } else {
+            let mut owner = load_account(store, NativeAssetId::DRC, &live.owner)?;
+            journal
+                .before
+                .push((NativeAssetId::DRC, live.owner, owner.clone()));
+            owner.balance = owner
+                .balance
+                .checked_add(remainder.as_base_units())
+                .ok_or_else(|| StateError::InvalidTx("payment channel remainder overflow".into()))?;
+            put_account_into(batch, NativeAssetId::DRC, &live.owner, &owner)?;
+        }
     }
 
     let mut live_ids = load_owner_index(store, &live.owner)?;
@@ -676,25 +685,14 @@ pub fn apply_drc_payment_channel_claim(
         ));
     }
 
-    let mut owner = load_account(store, NativeAssetId::DRC, &live.owner)?;
-    if owner.balance < delta {
-        return Err(StateError::InvalidTx(
-            "insufficient owner balance for payment channel claim delta".into(),
-        ));
-    }
-
     journal
         .before
         .push((NativeAssetId::DRC, tx.submitter, destination.clone()));
-    journal
-        .before
-        .push((NativeAssetId::DRC, live.owner, owner.clone()));
 
     destination.balance -= tx.fee.as_base_units();
     destination.balance = destination.balance.checked_add(delta).ok_or_else(|| {
         StateError::InvalidTx("payment channel claim destination overflow".into())
     })?;
-    owner.balance -= delta;
 
     if let Some(ctx) = sequence_ctx {
         finish_drc_account_sequence(
@@ -711,7 +709,6 @@ pub fn apply_drc_payment_channel_claim(
             .ok_or_else(|| StateError::InvalidTx("payment channel claim nonce overflow".into()))?;
     }
     put_account_into(batch, NativeAssetId::DRC, &tx.submitter, &destination)?;
-    put_account_into(batch, NativeAssetId::DRC, &live.owner, &owner)?;
 
     live.cumulative_claimed = tx.cumulative_authorized;
     put_live(batch, &live)?;
@@ -806,10 +803,9 @@ pub fn apply_drc_payment_channel_close(
             .checked_add(1)
             .ok_or_else(|| StateError::InvalidTx("payment channel close nonce overflow".into()))?;
     }
-    put_account_into(batch, NativeAssetId::DRC, &tx.submitter, &submitter)?;
-
     match tx.close_kind {
         DrcPaymentChannelCloseKind::OwnerScheduleClose => {
+            put_account_into(batch, NativeAssetId::DRC, &tx.submitter, &submitter)?;
             let finalize_at = payment_channel_owner_schedule_deadline(
                 application_blue_score,
                 live.settle_delay_blue_scores,
@@ -834,14 +830,18 @@ pub fn apply_drc_payment_channel_close(
             );
             Ok(None)
         }
-        DrcPaymentChannelCloseKind::DestinationClose => Ok(Some(finalize_channel(
-            store,
-            batch,
-            journal,
-            &live,
-            application_blue_score,
-            tx.close_tx_id(),
-        )?)),
+        DrcPaymentChannelCloseKind::DestinationClose => {
+            put_account_into(batch, NativeAssetId::DRC, &tx.submitter, &submitter)?;
+            Ok(Some(finalize_channel(
+                store,
+                batch,
+                journal,
+                &live,
+                application_blue_score,
+                tx.close_tx_id(),
+                None,
+            )?))
+        }
         DrcPaymentChannelCloseKind::Finalize => {
             if !payment_channel_finalize_allowed(
                 application_blue_score,
@@ -852,14 +852,22 @@ pub fn apply_drc_payment_channel_close(
                     "payment channel not yet finalizable at this blue score".into(),
                 ));
             }
-            Ok(Some(finalize_channel(
+            let owner_in_flight = if tx.submitter == live.owner {
+                Some(&mut submitter)
+            } else {
+                None
+            };
+            let receipt = finalize_channel(
                 store,
                 batch,
                 journal,
                 &live,
                 application_blue_score,
                 tx.close_tx_id(),
-            )?))
+                owner_in_flight,
+            )?;
+            put_account_into(batch, NativeAssetId::DRC, &tx.submitter, &submitter)?;
+            Ok(Some(receipt))
         }
     }
 }
