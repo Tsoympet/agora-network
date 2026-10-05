@@ -20,6 +20,7 @@ Issuer-scoped controls on **issued** `(issuer, currency)` liabilities only. **Na
 - Policy object is keyed by **`IssuedAssetId`**, not issuer account-wide lsf flags.
 - Authorization is **explicit per line** (`authorized` on live line v2); under `require_auth`, new lines start **unauthorized** until issuer `AuthorizeHolder`.
 - **`require_auth` and `clawback_enabled` enable only at zero outstanding liability.**
+- **On `EnableRequireAuth`, every indexed trust line for the asset is atomically persisted as live v2 with `authorized = false`** (no read-time v1 bypass after the policy op commits).
 - **`no_freeze` and `clawback_enabled` are irreversible** once set; clearing forbidden.
 - **`no_freeze` incompatible** with active `global_freeze`, any line freeze/deep-freeze, or `clawback_enabled`.
 - v1 live lines deserialize with deterministic defaults: `authorized = !require_auth`, freezes false (bytes unchanged on disk until rewritten as v2).

@@ -268,6 +268,44 @@ pub fn sum_holder_balances_for_asset(
     Ok(total)
 }
 
+/// Whether any indexed holder line for `asset` has line-level freeze flags set (on-disk or v1 defaults).
+pub fn asset_has_active_line_freeze(
+    store: &StateStore,
+    asset: &IssuedAssetId,
+    policy: &agora_types::DrcIssuedAssetPolicyLive,
+) -> Result<bool, StateError> {
+    for holder in load_issuer_holders_index(store, &asset.issuer, &asset.currency)? {
+        let Some(line) = load_drc_trust_line_live(store, &holder, asset)? else {
+            continue;
+        };
+        let line = crate::drc_issued_controls::normalize_trust_line_live(line, policy);
+        if line.line_frozen || line.line_deep_frozen {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// On `require_auth` enable: persist every indexed line as v2 with `authorized = false` (no silent v1 bypass).
+pub fn upgrade_trust_lines_for_require_auth(
+    store: &StateStore,
+    asset: &IssuedAssetId,
+    batch: &mut WriteBatch,
+) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>, StateError> {
+    let mut meta_before = Vec::new();
+    for holder in load_issuer_holders_index(store, &asset.issuer, &asset.currency)? {
+        let Some(mut line) = load_drc_trust_line_live(store, &holder, asset)? else {
+            continue;
+        };
+        let key = trust_line_key(&holder, asset);
+        meta_before.push((key.clone(), store.get_cf(ColumnFamily::Meta, &key)?));
+        line.version = agora_types::DRC_TRUST_LINE_LIVE_STATE_V2;
+        line.authorized = false;
+        put_live(batch, &line)?;
+    }
+    Ok(meta_before)
+}
+
 pub(crate) fn put_live(batch: &mut WriteBatch, live: &DrcTrustLineLive) -> Result<(), StateError> {
     live.validate()
         .map_err(|e| StateError::InvalidTx(e.to_string()))?;

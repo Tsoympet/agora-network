@@ -171,7 +171,7 @@ pub fn apply_drc_issued_asset_policy_set(
     let liability = load_drc_issuer_liability(store, &asset)?;
     let meta_key = drc_issued_asset_policy_meta_key(&asset);
     let prior = store.get_cf(ColumnFamily::Meta, &meta_key)?;
-    let meta_before = vec![(meta_key.clone(), prior)];
+    let mut meta_before = vec![(meta_key.clone(), prior)];
 
     let sequence_ctx = if tx.version >= DRC_ISSUED_ASSET_POLICY_SET_TICKET_VERSION {
         Some(begin_drc_account_sequence(
@@ -193,8 +193,6 @@ pub fn apply_drc_issued_asset_policy_set(
         None
     };
 
-    crate::drc_trust_line::debit_drc_fee(store, batch, journal, &tx.issuer, tx.fee, sequence_ctx)?;
-
     match tx.action {
         DrcIssuedAssetPolicyAction::EnableRequireAuth => {
             if liability.as_units() != 0 {
@@ -205,19 +203,16 @@ pub fn apply_drc_issued_asset_policy_set(
             if policy.require_auth {
                 return Err(StateError::InvalidTx("require_auth already enabled".into()));
             }
-            policy.require_auth = true;
         }
         DrcIssuedAssetPolicyAction::EnableGlobalFreeze => {
             if policy.no_freeze {
                 return Err(StateError::InvalidTx("no_freeze set".into()));
             }
-            policy.global_freeze = true;
         }
         DrcIssuedAssetPolicyAction::ClearGlobalFreeze => {
             if policy.no_freeze {
                 return Err(StateError::InvalidTx("no_freeze set".into()));
             }
-            policy.global_freeze = false;
         }
         DrcIssuedAssetPolicyAction::EnableNoFreeze => {
             if policy.no_freeze {
@@ -228,7 +223,11 @@ pub fn apply_drc_issued_asset_policy_set(
                     "no_freeze incompatible with active policy".into(),
                 ));
             }
-            policy.no_freeze = true;
+            if crate::drc_trust_line::asset_has_active_line_freeze(store, &asset, &policy)? {
+                return Err(StateError::InvalidTx(
+                    "no_freeze incompatible with line freeze".into(),
+                ));
+            }
         }
         DrcIssuedAssetPolicyAction::EnableClawback => {
             if liability.as_units() != 0 {
@@ -242,6 +241,28 @@ pub fn apply_drc_issued_asset_policy_set(
             if policy.clawback_enabled {
                 return Err(StateError::InvalidTx("clawback already enabled".into()));
             }
+        }
+    }
+
+    crate::drc_trust_line::debit_drc_fee(store, batch, journal, &tx.issuer, tx.fee, sequence_ctx)?;
+
+    match tx.action {
+        DrcIssuedAssetPolicyAction::EnableRequireAuth => {
+            meta_before.extend(crate::drc_trust_line::upgrade_trust_lines_for_require_auth(
+                store, &asset, batch,
+            )?);
+            policy.require_auth = true;
+        }
+        DrcIssuedAssetPolicyAction::EnableGlobalFreeze => {
+            policy.global_freeze = true;
+        }
+        DrcIssuedAssetPolicyAction::ClearGlobalFreeze => {
+            policy.global_freeze = false;
+        }
+        DrcIssuedAssetPolicyAction::EnableNoFreeze => {
+            policy.no_freeze = true;
+        }
+        DrcIssuedAssetPolicyAction::EnableClawback => {
             policy.clawback_enabled = true;
         }
     }
@@ -308,26 +329,21 @@ pub fn apply_drc_trust_line_issuer_control(
         None
     };
 
-    crate::drc_trust_line::debit_drc_fee(store, batch, journal, &tx.issuer, tx.fee, sequence_ctx)?;
-
     match tx.action {
         DrcTrustLineIssuerControlAction::AuthorizeHolder => {
             if line.authorized {
                 return Err(StateError::InvalidTx("already authorized".into()));
             }
-            line.authorized = true;
         }
         DrcTrustLineIssuerControlAction::SetLineFrozen(true) => {
             if policy.no_freeze || policy.global_freeze {
                 return Err(StateError::InvalidTx("freeze not allowed".into()));
             }
-            line.line_frozen = true;
         }
         DrcTrustLineIssuerControlAction::SetLineFrozen(false) => {
             if line.line_deep_frozen {
                 return Err(StateError::InvalidTx("clear deep freeze first".into()));
             }
-            line.line_frozen = false;
         }
         DrcTrustLineIssuerControlAction::SetLineDeepFrozen(true) => {
             if policy.no_freeze || policy.global_freeze {
@@ -336,6 +352,23 @@ pub fn apply_drc_trust_line_issuer_control(
             if !line.line_frozen {
                 return Err(StateError::InvalidTx("line must be frozen first".into()));
             }
+        }
+        DrcTrustLineIssuerControlAction::SetLineDeepFrozen(false) => {}
+    }
+
+    crate::drc_trust_line::debit_drc_fee(store, batch, journal, &tx.issuer, tx.fee, sequence_ctx)?;
+
+    match tx.action {
+        DrcTrustLineIssuerControlAction::AuthorizeHolder => {
+            line.authorized = true;
+        }
+        DrcTrustLineIssuerControlAction::SetLineFrozen(true) => {
+            line.line_frozen = true;
+        }
+        DrcTrustLineIssuerControlAction::SetLineFrozen(false) => {
+            line.line_frozen = false;
+        }
+        DrcTrustLineIssuerControlAction::SetLineDeepFrozen(true) => {
             line.line_deep_frozen = true;
         }
         DrcTrustLineIssuerControlAction::SetLineDeepFrozen(false) => {
@@ -389,9 +422,6 @@ pub fn apply_drc_issued_clawback(
     if !line.authorized {
         return Err(StateError::InvalidTx("line not authorized".into()));
     }
-    if tx.amount.as_units() > line.balance.as_units() {
-        return Err(StateError::InvalidTx("clawback exceeds balance".into()));
-    }
     let mut liability = load_drc_issuer_liability(store, &asset)?;
     let line_key = trust_line_key(&tx.holder, &asset);
     let liab_key = issuer_liability_key(&asset);
@@ -405,6 +435,15 @@ pub fn apply_drc_issued_clawback(
             store.get_cf(ColumnFamily::Meta, &liab_key)?,
         ),
     ];
+
+    if tx.amount.as_units() == 0 {
+        return Err(StateError::InvalidTx(
+            "clawback amount must be positive".into(),
+        ));
+    }
+    if tx.amount.as_units() > line.balance.as_units() {
+        return Err(StateError::InvalidTx("clawback exceeds balance".into()));
+    }
 
     let sequence_ctx = if tx.version >= DRC_ISSUED_CLAWBACK_TICKET_VERSION {
         Some(begin_drc_account_sequence(

@@ -1076,6 +1076,7 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("recipient requires destination tag")
                 || msg.contains("require_auth only at zero liability")
                 || msg.contains("clawback only at zero liability")
+                || msg.contains("no_freeze incompatible with line freeze")
                 || msg.contains("clawback not enabled")
                 || msg.contains("issued movement frozen")
                 || msg.contains("trust line not authorized")
