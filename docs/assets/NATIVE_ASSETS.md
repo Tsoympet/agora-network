@@ -42,6 +42,11 @@ No smart contract, RPC administrator, or ordinary transaction may mint TLT, OVL,
 | OVL | Account module | Execution gas; validator collateral; **one** balance definition |
 | DRC | Account module | Payments; validator collateral; not a stablecoin by default |
 
+OVL is the exclusive contract and programmable-execution domain. DRC may use
+typed native payment objects (including escrow or payment conditions), but it
+must not expose bytecode, generic call data, deploy operations, Hooks, or EVM
+execution. See [`../core/drc-payments.md`](../core/drc-payments.md).
+
 Cross-asset input/output mismatch → `Invalid`.
 
 ## Wallet / RPC amounts

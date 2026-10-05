@@ -61,6 +61,12 @@ Details: [`../consensus/HYBRID_POW_DUAL_POS.md`](../consensus/HYBRID_POW_DUAL_PO
 
 Rationale: preserve consensus-hardening on the TLT UTXO path (PRs #76–#81); align OVL execution and DRC payments with account semantics without maintaining two OVL balance definitions.
 
+DRC is contract-free. Typed payment conditions and ledger objects are allowed,
+but bytecode, generic call data, deploy operations, Hooks, EVM, and
+user-programmable execution are not. OVL exclusively owns contracts and
+programmable execution. See the pinned XRPL comparison and phased capability
+roadmap in [`../core/drc-payments.md`](../core/drc-payments.md).
+
 ---
 
 ## Transaction acceptance
@@ -152,6 +158,7 @@ PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.
 - [`../staking/OVL_STAKING.md`](../staking/OVL_STAKING.md)
 - [`../staking/DRC_STAKING.md`](../staking/DRC_STAKING.md)
 - [`../core/finality.md`](../core/finality.md)
+- [`../core/drc-payments.md`](../core/drc-payments.md)
 - [`../consensus/HYBRID_POW_DUAL_POS.md`](../consensus/HYBRID_POW_DUAL_POS.md)
 - [`../migration/OVL_DRC_TO_L1.md`](../migration/OVL_DRC_TO_L1.md)
 - [`../security/THREAT_MODEL.md`](../security/THREAT_MODEL.md)
