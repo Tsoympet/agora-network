@@ -18,6 +18,7 @@ mod drc_policy;
 mod drc_regular_key;
 mod drc_signer_list;
 mod drc_ticket;
+mod drc_trust_line;
 mod error;
 mod execution;
 mod keys;
@@ -63,6 +64,10 @@ pub use drc_signer_list::{
     sign_drc_signer_list_bound, verify_drc_signer_list_single_signature_bound,
 };
 pub use drc_ticket::{sign_drc_ticket_create_bound, verify_drc_ticket_create_bound};
+pub use drc_trust_line::{
+    sign_drc_issued_transfer_bound, sign_drc_trust_line_set_bound,
+    verify_drc_issued_transfer_bound, verify_drc_trust_line_set_bound,
+};
 pub use error::CryptoError;
 pub use execution::{sign_ovl_execution_bound, verify_ovl_execution_bound};
 pub use keys::{parse_compressed_public_key, KeyPair, PublicKeyBytes, SignatureBytes};

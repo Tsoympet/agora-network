@@ -20,6 +20,7 @@ mod drc_regular_key;
 mod drc_sequence;
 mod drc_signer_list;
 mod drc_ticket;
+mod drc_trust_line;
 mod execution;
 mod finality;
 mod hash;
@@ -42,7 +43,7 @@ pub use block::{
     TRIDENT_BLOCK_BODY_V11_VERSION, TRIDENT_BLOCK_BODY_V12_DOMAIN, TRIDENT_BLOCK_BODY_V12_VERSION,
     TRIDENT_BLOCK_BODY_V13_DOMAIN, TRIDENT_BLOCK_BODY_V13_VERSION, TRIDENT_BLOCK_BODY_V14_DOMAIN,
     TRIDENT_BLOCK_BODY_V14_VERSION, TRIDENT_BLOCK_BODY_V15_DOMAIN, TRIDENT_BLOCK_BODY_V15_VERSION,
-    TRIDENT_BLOCK_BODY_VERSION,
+    TRIDENT_BLOCK_BODY_V16_DOMAIN, TRIDENT_BLOCK_BODY_V16_VERSION, TRIDENT_BLOCK_BODY_VERSION,
 };
 pub use data_availability::{
     DataAvailabilityCommitment, DataCommitmentAuthorization, DataCommitmentError,
@@ -155,6 +156,17 @@ pub use drc_signer_list::{
 pub use drc_ticket::{
     DrcAccountTickets, DrcTicketCreateError, DrcTicketCreateTx, DRC_TICKET_CREATE_SIGNING_DOMAIN,
     DRC_TICKET_CREATE_TX_TYPE, DRC_TICKET_CREATE_TX_VERSION, DRC_TICKET_STATE_VERSION,
+};
+pub use drc_trust_line::{
+    DrcIssuedTransferReceipt, DrcIssuedTransferTx, DrcIssuerLiability, DrcTrustLineError,
+    DrcTrustLineLive, DrcTrustLineSetTx, IssuedAmount, IssuedAssetId, IssuedCurrencyCode,
+    IssuedCurrencyError, DRC_ISSUED_TRANSFER_RECEIPT_VERSION, DRC_ISSUED_TRANSFER_SIGNING_DOMAIN,
+    DRC_ISSUED_TRANSFER_TICKET_SIGNING_DOMAIN, DRC_ISSUER_LIABILITY_STATE_VERSION,
+    DRC_MAX_LIVE_TRUST_LINES_PER_HOLDER, DRC_MAX_TRUST_LINE_HOLDERS_PER_ISSUER,
+    DRC_TRUST_LINE_ISSUED_TRANSFER_TICKET_VERSION, DRC_TRUST_LINE_ISSUED_TRANSFER_TX_VERSION,
+    DRC_TRUST_LINE_LIVE_STATE_VERSION, DRC_TRUST_LINE_SET_SIGNING_DOMAIN,
+    DRC_TRUST_LINE_SET_TICKET_SIGNING_DOMAIN, DRC_TRUST_LINE_SET_TICKET_VERSION,
+    DRC_TRUST_LINE_SET_TX_VERSION,
 };
 pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
 pub use finality::{
@@ -272,6 +284,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         assert_eq!(block.id(), header.hash());
