@@ -1876,4 +1876,127 @@ mod tests {
         });
         assert_eq!(invoice.error.as_ref().unwrap().code, -32602);
     }
+
+    #[test]
+    fn get_drc_check_query_malformed_and_unknown() {
+        let mut backend = InMemoryBackend::new();
+        let genesis = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
+            data_commitments: vec![],
+            drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
+            drc_multisign_attachments: vec![],
+        };
+        backend.insert_block(genesis);
+        let mut rpc = RpcDispatcher::new(backend);
+        let bad = rpc.handle(RpcRequest {
+            id: Some(json!(96)),
+            method: "agora_getDrcCheck".into(),
+            params: json!({"check_id": "not-a-hash"}),
+        });
+        assert_eq!(bad.error.as_ref().unwrap().code, -32602);
+        let zero = rpc.handle(RpcRequest {
+            id: Some(json!(97)),
+            method: "agora_getDrcCheck".into(),
+            params: json!({"check_id": Hash::ZERO.to_hex()}),
+        });
+        assert_eq!(zero.error.as_ref().unwrap().code, -32602);
+        let unknown = rpc.handle(RpcRequest {
+            id: Some(json!(98)),
+            method: "agora_getDrcCheck".into(),
+            params: json!({"check_id": Hash([7; 32]).to_hex()}),
+        });
+        assert_eq!(unknown.result.unwrap()["status"], json!("unknown"));
+        let receipt = rpc.handle(RpcRequest {
+            id: Some(json!(99)),
+            method: "agora_getDrcCheckReceipt".into(),
+            params: json!({"check_id": Hash([8; 32]).to_hex()}),
+        });
+        assert_eq!(receipt.result.unwrap()["status"], json!("unknown"));
+    }
+
+    #[test]
+    fn submit_drc_check_malformed_structure_returns_invalid_params() {
+        let mut backend = InMemoryBackend::new();
+        let genesis = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
+            data_commitments: vec![],
+            drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
+            drc_multisign_attachments: vec![],
+        };
+        backend.insert_block(genesis);
+        let mut rpc = RpcDispatcher::new(backend);
+        let bad = rpc.handle(RpcRequest {
+            id: Some(json!(100)),
+            method: "agora_submitDrcCheckCreate".into(),
+            params: json!({"owner": "not-an-address"}),
+        });
+        assert_eq!(bad.error.as_ref().unwrap().code, -32602);
+        let bounds = rpc.handle(RpcRequest {
+            id: Some(json!(101)),
+            method: "agora_submitDrcCheckCreate".into(),
+            params: json!({
+                "version": 1,
+                "owner": agora_types::Address([1;20]).to_bech32(),
+                "destination": agora_types::Address([2;20]).to_bech32(),
+                "amount": "1",
+                "fee": "1",
+                "invoice_id": Hash([9;32]).to_hex(),
+                "expires_after_blue_score": 0,
+                "nonce": 0,
+                "public_key": "",
+                "signature": ""
+            }),
+        });
+        assert_eq!(bounds.error.as_ref().unwrap().code, -32602);
+        let bad_cash = rpc.handle(RpcRequest {
+            id: Some(json!(102)),
+            method: "agora_submitDrcCheckCash".into(),
+            params: json!({"check_id": "xy", "submitter": agora_types::Address([3;20]).to_bech32()}),
+        });
+        assert_eq!(bad_cash.error.as_ref().unwrap().code, -32602);
+    }
 }

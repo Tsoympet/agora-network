@@ -501,8 +501,8 @@ fn deserialize_optional_len<R: borsh::io::Read>(
 #[cfg(test)]
 mod tests {
     use crate::{
-        Address, Amount, DataAvailabilityCommitment, DrcAccountPolicyTx, DrcDepositPreauthTx,
-        DrcPaymentTx,
+        Address, Amount, DataAvailabilityCommitment, DrcAccountPolicyTx, DrcCheckCreateTx,
+        DrcDepositPreauthTx, DrcPaymentTx, DRC_CHECK_CREATE_TX_VERSION,
     };
 
     use super::*;
@@ -893,6 +893,54 @@ mod tests {
         assert_eq!(decoded.header, legacy.header);
         assert_eq!(decoded.drc_account_policies, vec![policy]);
         assert!(decoded.drc_deposit_preauths.is_empty());
+    }
+
+    #[test]
+    fn drc_check_lane_activates_body_root_v14_and_commits_operation_ids() {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        let legacy = block.compute_body_root();
+        block.drc_check_creates.push(DrcCheckCreateTx {
+            version: DRC_CHECK_CREATE_TX_VERSION,
+            owner: Address([1; 20]),
+            destination: Address([2; 20]),
+            amount: Amount::from_base_units(5),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash([3; 32]),
+            expires_after_blue_score: Some(100),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![],
+            signature: vec![],
+            multisign: None,
+        });
+        let create_id = block.drc_check_creates[0].check_id();
+        let v14_root = block.compute_body_root();
+        assert_eq!(
+            v14_root,
+            Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V14_DOMAIN,
+                TRIDENT_BLOCK_BODY_V14_VERSION,
+                legacy,
+                vec![create_id],
+                Vec::<Hash>::new(),
+                Vec::<Hash>::new(),
+            ))
+        );
+        assert_ne!(v14_root, legacy);
+        let bytes = borsh::to_vec(&block).unwrap();
+        assert_eq!(Block::try_from_slice(&bytes).unwrap(), block);
     }
 
     #[test]
