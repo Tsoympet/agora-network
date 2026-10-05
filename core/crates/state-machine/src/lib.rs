@@ -40,7 +40,19 @@ mod drc_escrow_test_harness;
 mod drc_escrow_tests;
 mod drc_issued_controls;
 #[cfg(test)]
+mod drc_issued_controls_hardening_tests;
+#[cfg(test)]
 mod drc_issued_controls_matrix_tests;
+#[cfg(test)]
+mod drc_issued_controls_multisign_adversary_matrix;
+#[cfg(test)]
+mod drc_issued_controls_policy_transition_tests;
+#[cfg(test)]
+mod drc_issued_controls_require_auth_migration_tests;
+#[cfg(test)]
+mod drc_issued_controls_sequence_auth_matrix_tests;
+#[cfg(test)]
+mod drc_issued_controls_test_harness;
 #[cfg(test)]
 mod drc_master_key_disable_hardening_tests;
 #[cfg(test)]
