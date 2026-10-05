@@ -7,7 +7,6 @@ mod shared {
 
     use crate::apply::apply_block_batched_with_auth_at_blue_score;
     use crate::drc_payment_channel_test_harness::support::{auth, coinbase, fund, key};
-    use crate::store::WriteBatch;
     use crate::StateStore;
 
     pub fn mint_ticket(store: &StateStore, owner: &agora_crypto::KeyPair) -> u64 {
@@ -76,12 +75,11 @@ mod ticket_matrix {
     use agora_crypto::{
         sign_drc_payment_channel_claim_bound, sign_drc_payment_channel_close_bound,
         sign_drc_payment_channel_create_bound, sign_drc_payment_channel_fund_bound,
-        sign_drc_ticket_create_bound,
     };
     use agora_types::{
         DrcAccountSequenceSelector, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseKind,
-        DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx,
-        DrcTicketCreateTx, Hash, DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION,
+        DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, Hash,
+        DRC_PAYMENT_CHANNEL_CLAIM_TICKET_VERSION,
         DRC_PAYMENT_CHANNEL_CLAIM_TX_VERSION, DRC_PAYMENT_CHANNEL_CLOSE_TICKET_VERSION,
         DRC_PAYMENT_CHANNEL_CLOSE_TX_VERSION, DRC_PAYMENT_CHANNEL_CREATE_TICKET_VERSION,
         DRC_PAYMENT_CHANNEL_CREATE_TX_VERSION, DRC_PAYMENT_CHANNEL_FUND_TICKET_VERSION,
@@ -95,9 +93,8 @@ mod ticket_matrix {
         apply_drc_payment_channel_create, apply_drc_payment_channel_fund,
     };
     use crate::drc_payment_channel_test_harness::support::{
-        apply_channel_block, auth, coinbase, create_live_channel, fund, key,
-        reject_channel_block_preserving_invariants, signed_claim, signed_close, signed_fund,
-        snapshot_channel_invariants,
+        apply_channel_block, auth, coinbase, create_live_channel, fund, key, signed_claim,
+        signed_close, signed_fund, snapshot_channel_invariants,
     };
     use crate::drc_ticket::load_drc_account_tickets;
     use crate::store::WriteBatch;

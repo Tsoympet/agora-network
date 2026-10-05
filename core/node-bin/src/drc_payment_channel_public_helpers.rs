@@ -96,7 +96,6 @@ pub struct FundedChannelFixture {
     pub owner: KeyPair,
     pub destination: KeyPair,
     pub claim_key: KeyPair,
-    pub miner: KeyPair,
 }
 
 pub fn funded_fixture() -> FundedChannelFixture {
@@ -137,7 +136,6 @@ pub fn funded_fixture() -> FundedChannelFixture {
         owner,
         destination,
         claim_key,
-        miner,
     }
 }
 
@@ -199,7 +197,7 @@ pub fn signed_claim(
     dest: &KeyPair,
     claim_key: &KeyPair,
     channel_id: Hash,
-    genesis: Hash,
+    _genesis: Hash,
     cumulative: u64,
     nonce: u64,
     chain_id: &str,

@@ -3072,9 +3072,6 @@ impl NodeBackend {
         &self.mempool
     }
 
-    pub(crate) fn test_store(&self) -> &Arc<StateStore> {
-        &self.store
-    }
 }
 
 #[cfg(test)]

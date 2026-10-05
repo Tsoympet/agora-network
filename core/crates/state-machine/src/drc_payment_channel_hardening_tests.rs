@@ -7,7 +7,6 @@ mod boundaries {
         DrcPaymentChannelCloseKind, DrcPaymentChannelError, Hash,
     };
 
-    use crate::accounts::load_account;
     use crate::drc_payment_channel::{
         load_drc_payment_channel_claim_event, load_drc_payment_channel_fund_event,
         load_drc_payment_channel_live, load_drc_payment_channel_schedule_event,
@@ -18,7 +17,6 @@ mod boundaries {
         snapshot_channel_state,
     };
     use crate::StateStore;
-    use agora_types::NativeAssetId;
 
     #[test]
     fn finalize_inclusive_at_scheduled_and_cancel_after_boundaries() {

@@ -542,7 +542,9 @@ fn public_exact_conservation_create_fund_two_claims_schedule_finalize() {
         locked_remainder(fx.store.as_ref(), &channel_id),
         locked_before - 30
     );
-    total = spendable_plus_locked(&fx.store, &owner, &dest, &channel_id);
+    let after_claim1 = spendable_plus_locked(&fx.store, &owner, &dest, &channel_id);
+    assert_conservation_after_fee(total, after_claim1, 1);
+    total = after_claim1;
 
     dest_before = drc_balance(fx.store.as_ref(), &dest);
     locked_before = locked_remainder(fx.store.as_ref(), &channel_id);
@@ -564,7 +566,9 @@ fn public_exact_conservation_create_fund_two_claims_schedule_finalize() {
         locked_remainder(fx.store.as_ref(), &channel_id),
         locked_before - 25
     );
-    total = spendable_plus_locked(&fx.store, &owner, &dest, &channel_id);
+    let after_claim2 = spendable_plus_locked(&fx.store, &owner, &dest, &channel_id);
+    assert_conservation_after_fee(total, after_claim2, 1);
+    total = after_claim2;
 
     fx.backend
         .submit_drc_payment_channel_close(signed_close(
@@ -576,7 +580,9 @@ fn public_exact_conservation_create_fund_two_claims_schedule_finalize() {
         ))
         .unwrap();
     mine_template(&mut fx.backend);
-    total = spendable_plus_locked(&fx.store, &owner, &dest, &channel_id);
+    let after_schedule = spendable_plus_locked(&fx.store, &owner, &dest, &channel_id);
+    assert_conservation_after_fee(total, after_schedule, 1);
+    total = after_schedule;
 
     for _ in 0..8 {
         mine_template(&mut fx.backend);
@@ -591,7 +597,8 @@ fn public_exact_conservation_create_fund_two_claims_schedule_finalize() {
         ))
         .unwrap();
     mine_template(&mut fx.backend);
-    let _after_finalize = spendable_plus_locked(&fx.store, &owner, &dest, &channel_id);
+    let after_finalize = spendable_plus_locked(&fx.store, &owner, &dest, &channel_id);
+    assert_conservation_after_fee(total, after_finalize, 1);
     assert!(
         load_drc_payment_channel_live(fx.store.as_ref(), &channel_id)
             .unwrap()

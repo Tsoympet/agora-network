@@ -14,7 +14,6 @@ mod dest_tag_and_invoice {
     };
     use crate::drc_payment_channel_test_harness::support::{
         apply_channel_block, auth, coinbase, fund, key, signed_close, signed_create,
-        signed_create_simple,
     };
     use crate::store::WriteBatch;
     use crate::{AccountJournal, StateStore};
@@ -175,14 +174,11 @@ mod deposit_auth_claims {
 
 #[cfg(test)]
 mod conservation {
-    use crate::accounts::load_account;
     use crate::drc_payment_channel_test_harness::support::{
-        apply_channel_block, auth, coinbase, create_live_channel, fund, key, signed_claim,
-        signed_close, spendable_plus_locked,
+        apply_channel_block, auth, coinbase, create_live_channel, fund, key,
+        spendable_plus_locked,
     };
     use crate::StateStore;
-    use agora_types::DrcPaymentChannelCloseKind;
-    use agora_types::NativeAssetId;
 
     #[test]
     fn create_and_fund_fees_reduce_aggregate_spendable_plus_locked() {

@@ -5,13 +5,10 @@ mod reorg_journal_transitions {
     use agora_types::{Hash, NativeAssetId, TransactionAcceptance};
 
     use crate::accounts::load_account;
-    use crate::drc_payment_channel::{
-        drc_payment_channel_root, load_drc_payment_channel_fund_event,
-        load_drc_payment_channel_live, load_drc_payment_channel_receipt,
-    };
+    use crate::drc_payment_channel::load_drc_payment_channel_fund_event;
     use crate::drc_payment_channel_test_harness::support::{
-        apply_block_capture, apply_channel_block, auth, channel_root, coinbase,
-        create_live_channel, fund, key, locked_channel_total, revert_journal, signed_fund,
+        apply_block_capture, auth, coinbase, create_live_channel, fund, key, locked_channel_total,
+        revert_journal, signed_fund,
     };
     use crate::state_root::compose_trident_state_root;
     use crate::StateStore;
