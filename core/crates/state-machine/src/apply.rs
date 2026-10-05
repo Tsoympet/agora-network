@@ -1358,7 +1358,7 @@ fn apply_trident_lanes(
                 apply_accepted_account_fee(
                     &lane,
                     &mut op_batch,
-                    &mut journal,
+                    journal,
                     NativeAssetId::DRC,
                     tx.fee.as_base_units(),
                 )?;
@@ -1413,7 +1413,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -1467,7 +1467,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -1524,7 +1524,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -1584,7 +1584,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -1638,7 +1638,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -1694,7 +1694,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -1735,7 +1735,7 @@ fn apply_trident_lanes(
                 apply_accepted_account_fee(
                     &lane,
                     &mut op_batch,
-                    &mut journal,
+                    journal,
                     tx.asset,
                     tx.fee.as_base_units(),
                 )?;
@@ -1769,7 +1769,7 @@ fn apply_trident_lanes(
                 apply_accepted_account_fee(
                     &lane,
                     &mut op_batch,
-                    &mut journal,
+                    journal,
                     NativeAssetId::OVL,
                     receipt.fee_paid,
                 )?;
@@ -1841,7 +1841,7 @@ fn apply_trident_lanes(
                 apply_accepted_account_fee(
                     &lane,
                     &mut op_batch,
-                    &mut journal,
+                    journal,
                     NativeAssetId::DRC,
                     tx.fee.as_base_units(),
                 )?;
@@ -1878,7 +1878,7 @@ fn apply_trident_lanes(
                 apply_accepted_account_fee(
                     &lane,
                     &mut op_batch,
-                    &mut journal,
+                    journal,
                     NativeAssetId::DRC,
                     tx.fee.as_base_units(),
                 )?;
@@ -1916,7 +1916,7 @@ fn apply_trident_lanes(
                 apply_accepted_account_fee(
                     &lane,
                     &mut op_batch,
-                    &mut journal,
+                    journal,
                     NativeAssetId::DRC,
                     tx.fee.as_base_units(),
                 )?;
@@ -1954,7 +1954,7 @@ fn apply_trident_lanes(
                 apply_accepted_account_fee(
                     &lane,
                     &mut op_batch,
-                    &mut journal,
+                    journal,
                     NativeAssetId::DRC,
                     tx.fee.as_base_units(),
                 )?;
@@ -1996,7 +1996,7 @@ fn apply_trident_lanes(
                 apply_accepted_account_fee(
                     &lane,
                     &mut op_batch,
-                    &mut journal,
+                    journal,
                     NativeAssetId::DRC,
                     receipt.fee_paid.as_base_units(),
                 )?;
@@ -2053,7 +2053,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -2109,7 +2109,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -2164,7 +2164,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -2227,7 +2227,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -2297,7 +2297,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -2347,7 +2347,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -2396,7 +2396,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -2454,7 +2454,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
@@ -2506,7 +2506,7 @@ fn apply_trident_lanes(
                     apply_accepted_account_fee(
                         &lane,
                         &mut op_batch,
-                        &mut journal,
+                        journal,
                         NativeAssetId::DRC,
                         tx.fee.as_base_units(),
                     )?;
