@@ -2,6 +2,8 @@
 //!
 //! Wires consensus, state, p2p, HTTP JSON-RPC, and PoW-gated block admission.
 
+#![cfg_attr(test, allow(clippy::all))]
+
 mod admit;
 mod backend;
 mod civic;

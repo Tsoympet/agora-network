@@ -1,5 +1,7 @@
 //! NodeBackend payment-channel reorg, reservation eviction, and post-accounting regression.
 
+#![allow(unused_assignments, unused_variables, unused_imports)]
+
 use agora_crypto::{sign_drc_payment_channel_fund_bound, sign_drc_ticket_create_bound, KeyPair};
 use agora_rpc::RpcBackend;
 use agora_state_machine::load_drc_payment_channel_live;

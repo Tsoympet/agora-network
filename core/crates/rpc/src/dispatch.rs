@@ -1113,6 +1113,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
@@ -1241,6 +1243,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
@@ -1288,6 +1292,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
@@ -1900,6 +1906,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -1963,6 +1971,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2025,6 +2035,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2088,6 +2100,8 @@ mod tests {
             drc_payment_channel_funds: vec![],
             drc_payment_channel_claims: vec![],
             drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2125,7 +2139,7 @@ mod tests {
 
     #[test]
     fn get_drc_payment_channel_query_malformed_and_unknown() {
-        let mut backend = InMemoryBackend::new();
+        let backend = InMemoryBackend::new();
         let mut rpc = RpcDispatcher::new(backend);
         let bad = rpc.handle(RpcRequest {
             id: Some(json!(103)),
