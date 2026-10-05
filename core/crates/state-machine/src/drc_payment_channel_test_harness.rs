@@ -349,9 +349,80 @@ pub mod support {
         pub owner_balance: u64,
         pub destination_balance: u64,
         pub owner_nonce: u64,
+        pub destination_nonce: u64,
         pub channel_root: Hash,
         pub state_root: Hash,
         pub live_count: usize,
+    }
+
+    pub fn snapshot_channel_live_cumulative(store: &StateStore, channel_id: &Hash) -> u64 {
+        load_drc_payment_channel_live(store, channel_id)
+            .unwrap()
+            .map(|l| l.cumulative_claimed.as_base_units())
+            .unwrap_or(0)
+    }
+
+    pub struct ChannelInvariantSnapshot {
+        pub base: ChannelSnapshot,
+        pub owner_tickets: Vec<u64>,
+        pub destination_tickets: Vec<u64>,
+        pub live_cumulative: u64,
+    }
+
+    pub fn snapshot_channel_invariants(
+        store: &StateStore,
+        owner: &KeyPair,
+        destination: &KeyPair,
+        channel_id: &Hash,
+    ) -> ChannelInvariantSnapshot {
+        use crate::drc_ticket::load_drc_account_tickets;
+        ChannelInvariantSnapshot {
+            base: snapshot_channel_state(store, owner, destination),
+            owner_tickets: load_drc_account_tickets(store, &owner.address()).unwrap(),
+            destination_tickets: load_drc_account_tickets(store, &destination.address()).unwrap(),
+            live_cumulative: snapshot_channel_live_cumulative(store, channel_id),
+        }
+    }
+
+    pub fn assert_channel_invariants_unchanged(
+        store: &StateStore,
+        owner: &KeyPair,
+        destination: &KeyPair,
+        channel_id: &Hash,
+        before: &ChannelInvariantSnapshot,
+    ) {
+        assert_channel_snapshot_unchanged(store, owner, destination, &before.base);
+        let after = snapshot_channel_invariants(store, owner, destination, channel_id);
+        assert_eq!(after.owner_tickets, before.owner_tickets);
+        assert_eq!(after.destination_tickets, before.destination_tickets);
+        assert_eq!(after.live_cumulative, before.live_cumulative);
+    }
+
+    pub fn reject_channel_block_preserving_invariants(
+        store: &StateStore,
+        owner: &KeyPair,
+        destination: &KeyPair,
+        channel_id: &Hash,
+        block: &Block,
+        ctx: &TxAuthContext,
+        before: &ChannelInvariantSnapshot,
+        blue_score: u64,
+    ) {
+        if agora_types::validate_drc_multisign_attachment_lane(block, &ctx.chain_id, &ctx.genesis)
+            .is_err()
+        {
+            assert_channel_invariants_unchanged(store, owner, destination, channel_id, before);
+            return;
+        }
+        assert!(apply_block_batched_with_auth_at_blue_score(
+            store,
+            block,
+            50,
+            Some(ctx),
+            blue_score
+        )
+        .is_err());
+        assert_channel_invariants_unchanged(store, owner, destination, channel_id, before);
     }
 
     pub fn snapshot_channel_state(
@@ -367,6 +438,9 @@ pub mod support {
                 .unwrap()
                 .balance,
             owner_nonce: load_account(store, NativeAssetId::DRC, &owner.address())
+                .unwrap()
+                .nonce,
+            destination_nonce: load_account(store, NativeAssetId::DRC, &destination.address())
                 .unwrap()
                 .nonce,
             channel_root: channel_root(store),
@@ -385,6 +459,7 @@ pub mod support {
         assert_eq!(after.owner_balance, before.owner_balance);
         assert_eq!(after.destination_balance, before.destination_balance);
         assert_eq!(after.owner_nonce, before.owner_nonce);
+        assert_eq!(after.destination_nonce, before.destination_nonce);
         assert_eq!(after.channel_root, before.channel_root);
         assert_eq!(after.state_root, before.state_root);
         assert_eq!(after.live_count, before.live_count);
@@ -442,8 +517,9 @@ pub mod multisign {
     };
 
     use super::support::{
-        coinbase, reject_channel_apply_preserving_state, signed_claim, signed_close, signed_fund,
-        ChannelSnapshot,
+        coinbase, reject_channel_apply_preserving_state,
+        reject_channel_block_preserving_invariants, signed_claim, signed_close, signed_fund,
+        ChannelInvariantSnapshot, ChannelSnapshot,
     };
     use crate::accounts::load_account;
     use crate::apply::TxAuthContext;
@@ -521,6 +597,28 @@ pub mod multisign {
             signing_for: owner,
             signatures: entries,
         }
+    }
+
+    pub fn reject_preserving_invariants(
+        store: &StateStore,
+        owner: &KeyPair,
+        destination: &KeyPair,
+        channel_id: Hash,
+        block: &Block,
+        ctx: &TxAuthContext,
+        before: &ChannelInvariantSnapshot,
+        blue_score: u64,
+    ) {
+        reject_channel_block_preserving_invariants(
+            store,
+            owner,
+            destination,
+            &channel_id,
+            block,
+            ctx,
+            before,
+            blue_score,
+        );
     }
 
     pub fn reject_preserving(
@@ -690,6 +788,28 @@ pub mod multisign {
             submitter,
             channel_id,
             agora_types::DrcPaymentChannelCloseKind::OwnerScheduleClose,
+            signers,
+            ctx,
+        )
+    }
+
+    pub fn base_multisign_claim_block(
+        store: &StateStore,
+        owner: &KeyPair,
+        destination: &KeyPair,
+        claim_key: &KeyPair,
+        channel_id: Hash,
+        cumulative: u64,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) -> Block {
+        let _ = owner;
+        multisign_claim_block(
+            store,
+            destination,
+            claim_key,
+            channel_id,
+            cumulative,
             signers,
             ctx,
         )

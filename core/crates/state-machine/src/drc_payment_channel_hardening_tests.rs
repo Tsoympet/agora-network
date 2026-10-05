@@ -211,3 +211,303 @@ mod boundaries {
         assert_eq!(ev.cumulative_authorized, Amount::from_base_units(40));
     }
 }
+
+#[cfg(test)]
+mod claim_close_matrix {
+    use agora_crypto::sign_payment_channel_offledger_claim;
+    use agora_types::{
+        payment_channel_onchain_claim_allowed, Amount, DrcPaymentChannelCloseKind, Hash,
+    };
+
+    use crate::accounts::load_account;
+    use crate::drc_payment_channel::load_drc_payment_channel_receipt;
+    use crate::drc_payment_channel_test_harness::support::{
+        apply_channel_block, auth, coinbase, fund, key, reject_channel_apply_preserving_state,
+        signed_claim, signed_close, signed_create, snapshot_channel_invariants,
+        snapshot_channel_state,
+    };
+    use crate::StateStore;
+    use agora_types::NativeAssetId;
+
+    fn channel_with_cancel(
+        store: &StateStore,
+        cancel: u64,
+    ) -> (
+        agora_crypto::KeyPair,
+        agora_crypto::KeyPair,
+        agora_crypto::KeyPair,
+        Hash,
+    ) {
+        let ctx = auth();
+        let owner = key(30);
+        let dest = key(31);
+        let claim_key = key(32);
+        fund(store, &owner, 500);
+        fund(store, &dest, 20);
+        let nonce = load_account(store, NativeAssetId::DRC, &owner.address())
+            .unwrap()
+            .nonce;
+        let create = signed_create(
+            &owner,
+            &claim_key,
+            dest.address(),
+            100,
+            nonce,
+            &ctx,
+            Some(0),
+            None,
+            Some(cancel),
+            5,
+        );
+        let channel_id = create.channel_id();
+        let mut block = coinbase(vec![Hash::ZERO], &owner);
+        block.drc_payment_channel_creates.push(create);
+        apply_channel_block(store, block, 10, &ctx);
+        (owner, dest, claim_key, channel_id)
+    }
+
+    #[test]
+    fn claim_equal_lower_excess_and_replay_rejected() {
+        let store = StateStore::open_in_memory();
+        let ctx = auth();
+        let owner = key(40);
+        let dest = key(41);
+        let claim_key = key(42);
+        fund(&store, &owner, 500);
+        fund(&store, &dest, 20);
+        let (channel_id, _) =
+            crate::drc_payment_channel_test_harness::support::create_live_channel_at_score(
+                &store, &owner, &claim_key, &dest, 100, 0, &ctx, 1,
+            );
+        let n = load_account(&store, NativeAssetId::DRC, &dest.address())
+            .unwrap()
+            .nonce;
+        let claim40 = signed_claim(&dest, &claim_key, channel_id, 40, n, &ctx);
+        let mut block = coinbase(vec![Hash::ZERO], &dest);
+        block.drc_payment_channel_claims.push(claim40);
+        apply_channel_block(&store, block, 2, &ctx);
+        let before = snapshot_channel_state(&store, &owner, &dest);
+        for cumulative in [40u64, 30, 150] {
+            let mut block_fail = coinbase(vec![Hash::ZERO], &dest);
+            block_fail.drc_payment_channel_claims.push(signed_claim(
+                &dest,
+                &claim_key,
+                channel_id,
+                cumulative,
+                load_account(&store, NativeAssetId::DRC, &dest.address())
+                    .unwrap()
+                    .nonce,
+                &ctx,
+            ));
+            reject_channel_apply_preserving_state(
+                &store,
+                &owner,
+                &dest,
+                &block_fail,
+                &ctx,
+                &before,
+                3,
+            );
+        }
+        let replay = signed_claim(&dest, &claim_key, channel_id, 40, n, &ctx);
+        let mut block_replay = coinbase(vec![Hash::ZERO], &dest);
+        block_replay.drc_payment_channel_claims.push(replay);
+        reject_channel_apply_preserving_state(
+            &store,
+            &owner,
+            &dest,
+            &block_replay,
+            &ctx,
+            &before,
+            4,
+        );
+    }
+
+    #[test]
+    fn on_chain_claim_rejected_at_cancel_after_allowed_one_before() {
+        assert!(!payment_channel_onchain_claim_allowed(100, Some(100)));
+        assert!(payment_channel_onchain_claim_allowed(99, Some(100)));
+        let store = StateStore::open_in_memory();
+        let ctx = auth();
+        let (owner, dest, claim_key, channel_id) = channel_with_cancel(&store, 100);
+        let before = snapshot_channel_invariants(&store, &owner, &dest, &channel_id);
+        let n = load_account(&store, NativeAssetId::DRC, &dest.address())
+            .unwrap()
+            .nonce;
+        let mut block_at = coinbase(vec![Hash::ZERO], &dest);
+        block_at
+            .drc_payment_channel_claims
+            .push(signed_claim(&dest, &claim_key, channel_id, 25, n, &ctx));
+        reject_channel_apply_preserving_state(
+            &store,
+            &owner,
+            &dest,
+            &block_at,
+            &ctx,
+            &before.base,
+            100,
+        );
+        let mut block_before = coinbase(vec![Hash::ZERO], &dest);
+        block_before
+            .drc_payment_channel_claims
+            .push(signed_claim(&dest, &claim_key, channel_id, 25, n, &ctx));
+        apply_channel_block(&store, block_before, 99, &ctx);
+    }
+
+    #[test]
+    fn incremental_claims_during_settle_delay_and_destination_immediate_close() {
+        let store = StateStore::open_in_memory();
+        let ctx = auth();
+        let owner = key(50);
+        let dest = key(51);
+        let claim_key = key(52);
+        fund(&store, &owner, 500);
+        fund(&store, &dest, 20);
+        let (channel_id, _) =
+            crate::drc_payment_channel_test_harness::support::create_live_channel_at_score(
+                &store, &owner, &claim_key, &dest, 100, 0, &ctx, 1,
+            );
+        let mut block = coinbase(vec![Hash::ZERO], &owner);
+        block.drc_payment_channel_closes.push(signed_close(
+            &owner,
+            channel_id,
+            DrcPaymentChannelCloseKind::OwnerScheduleClose,
+            1,
+            &ctx,
+        ));
+        apply_channel_block(&store, block, 2, &ctx);
+        let n = load_account(&store, NativeAssetId::DRC, &dest.address())
+            .unwrap()
+            .nonce;
+        let mut block2 = coinbase(vec![Hash::ZERO], &dest);
+        block2
+            .drc_payment_channel_claims
+            .push(signed_claim(&dest, &claim_key, channel_id, 20, n, &ctx));
+        apply_channel_block(&store, block2, 3, &ctx);
+        let mut block3 = coinbase(vec![Hash::ZERO], &dest);
+        block3.drc_payment_channel_claims.push(signed_claim(
+            &dest,
+            &claim_key,
+            channel_id,
+            35,
+            load_account(&store, NativeAssetId::DRC, &dest.address())
+                .unwrap()
+                .nonce,
+            &ctx,
+        ));
+        apply_channel_block(&store, block3, 4, &ctx);
+
+        let (owner2, dest2, claim_key2, channel_id2) = channel_with_cancel(&store, 200);
+        fund(&store, &dest2, 5);
+        let dest_bal_before = load_account(&store, NativeAssetId::DRC, &dest2.address())
+            .unwrap()
+            .balance;
+        let owner_bal_before = load_account(&store, NativeAssetId::DRC, &owner2.address())
+            .unwrap()
+            .balance;
+        let root_before = crate::drc_payment_channel_test_harness::support::channel_root(&store);
+        let mut block4 = coinbase(vec![Hash::ZERO], &dest2);
+        block4.drc_payment_channel_closes.push(signed_close(
+            &dest2,
+            channel_id2,
+            DrcPaymentChannelCloseKind::DestinationClose,
+            load_account(&store, NativeAssetId::DRC, &dest2.address())
+                .unwrap()
+                .nonce,
+            &ctx,
+        ));
+        apply_channel_block(&store, block4, 20, &ctx);
+        assert!(load_drc_payment_channel_receipt(&store, &channel_id2)
+            .unwrap()
+            .is_some());
+        assert!(
+            load_account(&store, NativeAssetId::DRC, &owner2.address())
+                .unwrap()
+                .balance
+                > owner_bal_before
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &dest2.address())
+                .unwrap()
+                .balance,
+            dest_bal_before - 1
+        );
+        assert_ne!(
+            crate::drc_payment_channel_test_harness::support::channel_root(&store),
+            root_before
+        );
+        let _ = claim_key2;
+    }
+
+    #[test]
+    fn claim_fee_and_delta_update_destination_balance_atomically() {
+        let store = StateStore::open_in_memory();
+        let ctx = auth();
+        let owner = key(60);
+        let dest = key(61);
+        let claim_key = key(62);
+        fund(&store, &owner, 500);
+        fund(&store, &dest, 50);
+        let (channel_id, _) =
+            crate::drc_payment_channel_test_harness::support::create_live_channel_at_score(
+                &store, &owner, &claim_key, &dest, 100, 0, &ctx, 1,
+            );
+        let dest_before = load_account(&store, NativeAssetId::DRC, &dest.address()).unwrap();
+        let owner_before = load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
+        let cumulative = 45u64;
+        let delta = cumulative;
+        let fee = 1u64;
+        let mut block = coinbase(vec![Hash::ZERO], &dest);
+        block.drc_payment_channel_claims.push(signed_claim(
+            &dest,
+            &claim_key,
+            channel_id,
+            cumulative,
+            dest_before.nonce,
+            &ctx,
+        ));
+        apply_channel_block(&store, block, 2, &ctx);
+        let dest_after = load_account(&store, NativeAssetId::DRC, &dest.address()).unwrap();
+        let owner_after = load_account(&store, NativeAssetId::DRC, &owner.address()).unwrap();
+        assert_eq!(dest_after.balance, dest_before.balance + delta - fee);
+        assert_eq!(owner_after.balance, owner_before.balance - delta);
+    }
+
+    #[test]
+    fn bad_offledger_with_valid_on_chain_signature_rejected() {
+        let store = StateStore::open_in_memory();
+        let ctx = auth();
+        let (owner, dest, claim_key, channel_id) = channel_with_cancel(&store, 300);
+        let before = snapshot_channel_invariants(&store, &owner, &dest, &channel_id);
+        let bad = sign_payment_channel_offledger_claim(
+            &claim_key,
+            &ctx.chain_id,
+            &ctx.genesis,
+            &channel_id,
+            Amount::from_base_units(999),
+        )
+        .unwrap();
+        let mut claim = signed_claim(
+            &dest,
+            &claim_key,
+            channel_id,
+            50,
+            load_account(&store, NativeAssetId::DRC, &dest.address())
+                .unwrap()
+                .nonce,
+            &ctx,
+        );
+        claim.channel_claim_signature = bad.to_vec();
+        let mut block = coinbase(vec![Hash::ZERO], &dest);
+        block.drc_payment_channel_claims.push(claim);
+        reject_channel_apply_preserving_state(
+            &store,
+            &owner,
+            &dest,
+            &block,
+            &ctx,
+            &before.base,
+            50,
+        );
+    }
+}

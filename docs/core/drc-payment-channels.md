@@ -21,7 +21,7 @@ Deposit authorization: third-party **Payment** credits require `DepositPreauth`;
 | Create | Locks **positive** initial amount + owner fee/sequence; caps **32 live channels per owner** |
 | Channel ID | `Hash::hash_borsh(DrcPaymentChannelCreateTx)` |
 | Off-ledger claim | Domain-separated secp256k1: `OFFLEDGER_CLAIM_DOMAIN`, `chain_id`, `genesis`, **`channel_id`**, **cumulative authorized amount** (no mutable channel version; funding does not invalidate prior signatures) |
-| On-chain claim | **Destination** submitter; verifies off-ledger sig; **`previous_claimed < cumulative ≤ total_funded`**; pays **destination fee** before delta transfer |
+| On-chain claim | **Destination** submitter; verifies off-ledger sig; **`previous_claimed < cumulative ≤ total_funded`**; pays **destination fee** before delta transfer; **rejected at `blue_score >= cancel_after`** (strictly before cutoff only) |
 | Close | **Owner** `OwnerScheduleClose` sets finalize at `blue_score + settle_delay`; **destination** `DestinationClose` finalizes immediately; **owner or destination** `Finalize` at/after scheduled finalize or **`cancel_after`** (inclusive). **Bounded deviation:** rippled allows additional close flag combinations; Agora pins the three explicit `close_kind` values only. |
 | Invoice | **`invoice_id` must be zero** |
 | Destination tag | `Option<u32>`; **`Some(0)` valid**; RequireDestTag enforced at **create** |
@@ -42,7 +42,7 @@ After check lanes (v14): `drc_payment_channel_creates`, `drc_payment_channel_fun
 | --- | --- |
 | Fund after owner schedule close | **Allowed** — adds locked DRC; does not mutate claim key, destination, or `cancel_after_blue_score`; writes immutable fund event |
 | Claim during owner settle delay | **Allowed** — destination-only; off-ledger sig required; cumulative strictly increases |
-| Claim at/after `CancelAfter` | **Allowed** until channel finalized — finalize also allowed at inclusive `blue_score >= cancel_after` |
+| Claim at/after `CancelAfter` | **On-chain claim rejected** at `blue_score >= cancel_after`; **finalize** still allowed at inclusive `blue_score >= cancel_after` |
 | Repeat owner schedule | Each `OwnerScheduleClose` sets `close_finalizable_after = score + settle_delay` (resets delay from containing block) |
 | Destination immediate close | `DestinationClose` finalizes in same block; remainder returns owner once |
 | Who may `Finalize` | Owner or destination when `payment_channel_finalize_allowed` (inclusive `>=` scheduled finalize or cancel cutoff) |

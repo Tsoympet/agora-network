@@ -53,6 +53,8 @@ mod drc_payment_channel_hardening_tests;
 #[cfg(test)]
 mod drc_payment_channel_multisign_adversary_matrix;
 #[cfg(test)]
+mod drc_payment_channel_sequence_auth_matrix_tests;
+#[cfg(test)]
 mod drc_payment_channel_terminal_tests;
 #[cfg(test)]
 mod drc_payment_channel_test_harness;

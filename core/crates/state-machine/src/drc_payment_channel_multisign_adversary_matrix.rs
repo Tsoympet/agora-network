@@ -13,12 +13,14 @@ mod matrix {
     use crate::accounts::load_account;
     use crate::apply::TxAuthContext;
     use crate::drc_payment_channel_test_harness::multisign::{
-        self, base_multisign_close_block, base_multisign_create_block, base_multisign_fund_block,
-        install_signer_list, install_signer_list_at_nonce, multisign_claim_block,
-        multisign_close_block, multisign_fund_block, reject_preserving,
+        self, base_multisign_claim_block, base_multisign_close_block, base_multisign_create_block,
+        base_multisign_fund_block, install_signer_list, install_signer_list_at_nonce,
+        multisign_claim_block, multisign_close_block, multisign_fund_block, reject_preserving,
+        reject_preserving_invariants,
     };
     use crate::drc_payment_channel_test_harness::support::{
-        apply_channel_block, auth, create_live_channel, fund, key, snapshot_channel_state,
+        apply_channel_block, auth, create_live_channel, fund, key, snapshot_channel_invariants,
+        snapshot_channel_state,
     };
     use crate::StateStore;
     use agora_types::{Block, DrcPaymentChannelCloseKind, NativeAssetId};
@@ -72,6 +74,15 @@ mod matrix {
         block.drc_payment_channel_closes.clear();
     }
 
+    fn tamper_orphan_attachment_claim(
+        block: &mut Block,
+        _: &KeyPair,
+        _: &[(&KeyPair, u16)],
+        _: &TxAuthContext,
+    ) {
+        block.drc_payment_channel_claims.clear();
+    }
+
     fn tamper_wrong_kind_fund(
         block: &mut Block,
         _: &KeyPair,
@@ -90,6 +101,16 @@ mod matrix {
     ) {
         block.drc_multisign_attachments[0].key.kind =
             DrcMultisignOperationKind::DrcPaymentChannelClaim;
+    }
+
+    fn tamper_wrong_kind_claim(
+        block: &mut Block,
+        _: &KeyPair,
+        _: &[(&KeyPair, u16)],
+        _: &TxAuthContext,
+    ) {
+        block.drc_multisign_attachments[0].key.kind =
+            DrcMultisignOperationKind::DrcPaymentChannelFund;
     }
 
     fn tamper_wrong_kind_create(
@@ -126,6 +147,15 @@ mod matrix {
         _: &TxAuthContext,
     ) {
         block.drc_multisign_attachments[0].key.signing_commitment = Hash([0xdd; 32]);
+    }
+
+    fn tamper_wrong_signing_commitment_claim(
+        block: &mut Block,
+        _: &KeyPair,
+        _: &[(&KeyPair, u16)],
+        _: &TxAuthContext,
+    ) {
+        block.drc_multisign_attachments[0].key.signing_commitment = Hash([0xcc; 32]);
     }
 
     fn tamper_wrong_signing_for(
@@ -225,6 +255,16 @@ mod matrix {
         block.drc_payment_channel_closes[0].signature = vec![1; 64];
     }
 
+    fn tamper_mixed_single_and_multisign_claim(
+        block: &mut Block,
+        submitter: &KeyPair,
+        _: &[(&KeyPair, u16)],
+        _: &TxAuthContext,
+    ) {
+        block.drc_payment_channel_claims[0].public_key = submitter.public_key_bytes().to_vec();
+        block.drc_payment_channel_claims[0].signature = vec![1; 64];
+    }
+
     fn tamper_tampered_signature(
         block: &mut Block,
         _: &KeyPair,
@@ -306,6 +346,34 @@ mod matrix {
             submitter.address(),
             &signing,
             &[(&key(94), 1), (&key(95), 2)],
+            ctx,
+        );
+    }
+
+    fn tamper_below_quorum_claim(
+        block: &mut Block,
+        submitter: &KeyPair,
+        signers: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) {
+        let signing =
+            block.drc_payment_channel_claims[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+        block.drc_multisign_attachments[0].auth =
+            multisign::multisign_bundle(submitter.address(), &signing, &[signers[0]], ctx);
+    }
+
+    fn tamper_foreign_signer_claim(
+        block: &mut Block,
+        submitter: &KeyPair,
+        _: &[(&KeyPair, u16)],
+        ctx: &TxAuthContext,
+    ) {
+        let signing =
+            block.drc_payment_channel_claims[0].signing_bytes_bound(&ctx.chain_id, &ctx.genesis);
+        block.drc_multisign_attachments[0].auth = multisign::multisign_bundle(
+            submitter.address(),
+            &signing,
+            &[(&key(96), 1), (&key(97), 2)],
             ctx,
         );
     }
@@ -443,6 +511,72 @@ mod matrix {
         reject_preserving(&store, &master, &destination, &block, &ctx, &before, 50);
     }
 
+    macro_rules! claim_cases {
+        ($($name:ident => $tamper:expr,)*) => {
+            $(#[test]
+            fn $name() {
+                let store = StateStore::open_in_memory();
+                let master = key(50);
+                let destination = key(51);
+                let claim_k = key(65);
+                let s1 = key(52);
+                let s2 = key(53);
+                fund(&store, &master, 200_000);
+                fund(&store, &destination, 500);
+                let ctx = auth();
+                let (id, _) =
+                    create_live_channel(&store, &master, &claim_k, &destination, 20, 1, &ctx);
+                let signers: &[(&KeyPair, u16)] = &[(&s1, 1), (&s2, 2)];
+                let mut block =
+                    multisign_claim_block(&store, &destination, &claim_k, id, 8, signers, &ctx);
+                let before = snapshot_channel_invariants(&store, &master, &destination, &id);
+                let tamper: Tamper = $tamper;
+                tamper(&mut block, &destination, signers, &ctx);
+                reject_preserving_invariants(
+                    &store, &master, &destination, id, &block, &ctx, &before, 50,
+                );
+            })*
+        };
+    }
+
+    claim_cases! {
+        matrix_claim_rejects_missing_attachment => tamper_missing_attachment,
+        matrix_claim_rejects_duplicate_attachment => tamper_duplicate_attachment,
+        matrix_claim_rejects_orphan_attachment => tamper_orphan_attachment_claim,
+        matrix_claim_rejects_wrong_operation_kind => tamper_wrong_kind_claim,
+        matrix_claim_rejects_wrong_signing_commitment => tamper_wrong_signing_commitment_claim,
+        matrix_claim_rejects_wrong_signing_for => tamper_wrong_signing_for,
+        matrix_claim_rejects_noncanonical_attachment_order => tamper_noncanonical_attachment_order,
+        matrix_claim_rejects_unsorted_signer_entries => tamper_unsorted_signer_entries,
+        matrix_claim_rejects_oversized_auth_entries => tamper_oversized_auth_entries,
+        matrix_claim_rejects_oversized_attachment_lane => tamper_oversized_attachment_lane,
+        matrix_claim_rejects_mixed_single_and_multisign => tamper_mixed_single_and_multisign_claim,
+        matrix_claim_rejects_tampered_signature => tamper_tampered_signature,
+        matrix_claim_rejects_below_quorum => tamper_below_quorum_claim,
+        matrix_claim_rejects_foreign_signer => tamper_foreign_signer_claim,
+    }
+
+    #[test]
+    fn matrix_claim_rejects_stale_signer_list() {
+        let store = StateStore::open_in_memory();
+        let master = key(54);
+        let destination = key(55);
+        let claim_k = key(66);
+        let s1 = key(56);
+        fund(&store, &master, 200_000);
+        fund(&store, &destination, 500);
+        let ctx = auth();
+        let (id, _) = create_live_channel(&store, &master, &claim_k, &destination, 20, 1, &ctx);
+        install_signer_list(&store, &destination, &[(&s1, 1)], &ctx);
+        let block = multisign_claim_block(&store, &destination, &claim_k, id, 8, &[(&s1, 1)], &ctx);
+        let nonce = load_account(&store, NativeAssetId::DRC, &destination.address())
+            .unwrap()
+            .nonce;
+        install_signer_list_at_nonce(&store, &destination, &[(&key(57), 1)], &ctx, nonce);
+        let before = snapshot_channel_invariants(&store, &master, &destination, &id);
+        reject_preserving_invariants(&store, &master, &destination, id, &block, &ctx, &before, 50);
+    }
+
     macro_rules! close_cases {
         ($($name:ident => $tamper:expr,)*) => {
             $(#[test]
@@ -551,6 +685,36 @@ mod matrix {
         let decoded: Block = borsh::from_slice(&bytes).unwrap();
         assert_eq!(decoded.header.tx_root, root);
         apply_channel_block(&store, decoded, 2, &ctx);
+    }
+
+    #[test]
+    fn matrix_claim_positive_borsh_body_root_and_apply() {
+        let store = StateStore::open_in_memory();
+        let master = key(50);
+        let destination = key(51);
+        let claim_k = key(67);
+        let s1 = key(52);
+        fund(&store, &master, 50_000);
+        fund(&store, &destination, 500);
+        let ctx = auth();
+        let (id, _) = create_live_channel(&store, &master, &claim_k, &destination, 30, 1, &ctx);
+        let mut block = base_multisign_claim_block(
+            &store,
+            &master,
+            &destination,
+            &claim_k,
+            id,
+            10,
+            &[(&s1, 1)],
+            &ctx,
+        );
+        validate_drc_multisign_attachment_lane(&block, &ctx.chain_id, &ctx.genesis).unwrap();
+        let root = block.compute_body_root();
+        block.header.tx_root = root;
+        let bytes = borsh::to_vec(&block).unwrap();
+        let decoded: Block = borsh::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.header.tx_root, root);
+        apply_channel_block(&store, decoded, 3, &ctx);
     }
 
     #[test]
