@@ -88,7 +88,15 @@ mod drc_trust_line;
 #[cfg(test)]
 mod drc_trust_line_hardening_tests;
 #[cfg(test)]
+mod drc_trust_line_liability_matrix_tests;
+#[cfg(test)]
+mod drc_trust_line_master_auth_matrix_tests;
+#[cfg(test)]
 mod drc_trust_line_multisign_adversary_matrix;
+#[cfg(test)]
+mod drc_trust_line_policy_matrix_tests;
+#[cfg(test)]
+mod drc_trust_line_semantics_matrix_tests;
 #[cfg(test)]
 mod drc_trust_line_sequence_auth_matrix_tests;
 #[cfg(test)]
