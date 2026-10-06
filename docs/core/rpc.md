@@ -168,7 +168,7 @@ When unset, JSON-RPC stays open (safe with the default loopback bind). When set:
 | Always public | Token required |
 | --- | --- |
 | `GET /health` | `agora_submitTransaction` / `agora_submitBlock` |
-| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` / DRC payment, policy, and preauthorization reads | `agora_getBlockTemplate` / `agora_fundAddress` |
+| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` / `agora_getTltCovenant` / DRC family reads (payments through DEX offers, objects, receipts, channels, trust lines, issued controls) | `agora_getBlockTemplate` / `agora_fundAddress` |
 | `web3_clientVersion`, `net_*`, and `eth_*` reads | `eth_sendRawTransaction` |
 | `agora_getMempool` / `agora_getNodeInfo` / `agora_estimateFee` | `agora_getBalance` / `agora_getUtxos` |
 | `agora_getConstitution` / `agora_getGovernance` | `agora_submitProposal` / `agora_castGovVote` / … |
@@ -344,10 +344,10 @@ The live backend (`NodeBackend`) reads tips/blocks/UTXOs from `StateStore`, admi
 
 ## Light clients
 
-`apps/shared/light-client` provides `createLightClient` + `startTipSync` / `watchTransaction` (optional `minConfirmations`) plus wallet helpers (`getBalance`, `getAccountBalances`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) and query wrappers for TLT covenants and DRC DEX offers used by:
+`apps/shared/light-client` provides `createLightClient` + `startTipSync` / `watchTransaction` (optional `minConfirmations`) plus wallet helpers (`getBalance`, `getAccountBalances`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) and query wrappers for TLT covenants, DRC DEX/escrow/check/ticket/trust-line reads, and canonical `eth_chainId` / `eth_blockNumber` / `eth_getBalance` used by:
 
-- `apps/explorer` (live DAG + tx lookup + mempool + node status + pending watch)
-- `apps/desktop` (tip sync, UTXO lookup, signed send + confirmation poll)
+- `apps/explorer` (live DAG + tx lookup + protocol-lane reads + mempool + node status + pending watch)
+- `apps/desktop` (tip sync, UTXO lookup, native OVL/DRC balance display, signed send + confirmation poll)
 - `apps/mobile` (tip sync, UTXO lookup, signed send + confirmation poll)
 
 Default endpoint: `http://127.0.0.1:8545/rpc` (explorer/desktop may proxy `/rpc`).

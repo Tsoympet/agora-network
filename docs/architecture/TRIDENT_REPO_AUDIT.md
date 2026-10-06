@@ -80,14 +80,14 @@ gates wallet, mining, faucet, and submit paths.
 submits, mining template, faucet, civic write RPCs.
 
 **Wired and public:** DAG/block/tx/mempool/node/fee, TLT covenant
-lookup, DRC payment/policy/keys/object/operation reads, DEX offer
-reads, finality/validator/supply/treasury/registry, constitution
-board reads. Ethereum JSON-RPC reads are public; `eth_sendRawTransaction`
-requires a token.
+lookup, every implemented DRC `Get*` family method (payments through
+DEX offers, objects, receipts, channels, trust lines, issued controls),
+finality/validator/supply/treasury/registry, constitution board reads.
+Ethereum JSON-RPC reads are public; `eth_sendRawTransaction` requires a
+token.
 
-**Still token-gated among DRC Get\* family methods:** ticket, escrow,
-check, payment-channel, trust-line, and issued-control point queries.
-Those methods exist; light clients do not wrap all of them yet.
+Wallet-sensitive `agora_getBalance` / `agora_getAccountBalances` /
+`agora_getUtxos` stay token-gated.
 
 There is no `agora_submitDataCommitment`, `agora_getDataCommitment`,
 `agora_submitDrcExecution`, or generic `agora_submitExecution`.
@@ -98,9 +98,9 @@ There is no `agora_submitDataCommitment`, `agora_getDataCommitment`,
 
 | Surface | What it does | Honest gap |
 | --- | --- | --- |
-| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, Trident light-finality helper, DRC object/operation queries, native three-asset balance query, TLT covenant + DEX offer queries | Keys stay on device. No RandomX recompute. No typed DRC/OVL builders. No `eth_*` wrapper. No DA wrapper |
-| Desktop / mobile wallets | TLT UTXO send + `agora_getBalance` | UI still shows TLT spendable only |
-| Explorer | DAG, tx lookup, mempool, node, governance panel | No OVL/DRC account or DEX book UI |
+| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, canonical `eth_*` reads | Keys stay on device. No RandomX recompute. No typed DRC/OVL builders. No DA wrapper |
+| Desktop / mobile wallets | TLT UTXO send + native OVL/DRC balance display | No typed DRC payment/DEX or OVL execution builders |
+| Explorer | DAG, tx lookup, protocol-lane reads, mempool, node, governance panel | No DEX book order-entry UI |
 | `agora-layers` HTTP | Historical lab; loopback | Non-canonical; mixed unauthenticated mutations |
 
 Light clients stay light: they call JSON-RPC; they do not embed
@@ -168,14 +168,13 @@ These are real unfinished paths, not parity slogans:
 2. **OVL raw-EVM public mempool** — fingerprint has no raw-EVM topic;
    version 2 is rejected by the Agora-signed pool.
 3. **Compact-block multi-lane encoding** — full bodies for every
-   non-UTXO lane.
+   non-UTXO lane. `Block::requires_full_body_gossip` is the single
+   fail-closed gate so new lanes cannot silently enter UTXO compact ids.
 4. **Community consensus lanes** — registry is genesis + library only.
-5. **Wallet UX** — desktop/mobile still send TLT only; no typed DRC
-   payment/DEX or OVL execution builders.
-6. **Token-gated DRC Get\* leftovers** — escrow/check/channel/trust-line
-   queries still require `AGORA_RPC_TOKEN` while object/DEX reads do not.
-7. **Explorer** — no three-asset account or order-book panels.
-8. **Operator schema CLI** — replay/rebuild is documented, not shipped
+5. **Wallet construction UX** — desktop/mobile still send TLT UTXO only;
+   they now display native OVL/DRC balances. Typed DRC payment/DEX and
+   OVL execution builders remain unwired.
+6. **Operator schema CLI** — replay/rebuild is documented, not shipped
    as a first-class binary.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
@@ -190,7 +189,13 @@ This audit close-out adds:
 
 - `agora_getAccountBalances` — TLT UTXO sum plus native OVL/DRC
   account balance and nonce, without changing `agora_getBalance`.
-- Shared light-client wrappers for that method, `agora_getTltCovenant`,
-  and DRC DEX offer/account/book reads.
-- Public (no-token) access for those DEX offer reads so a light client
-  can query books the same way it queries DRC objects.
+- Shared light-client wrappers for that method, TLT covenants, DRC
+  DEX/escrow/check/ticket/trust-line reads, submit helpers, and
+  canonical `eth_chainId` / `eth_blockNumber` / `eth_getBalance`.
+- Public (no-token) access for every implemented DRC `Get*` family
+  method, including escrow, Checks, channels, trust lines, issued
+  controls, and DEX offer pages.
+- Explorer protocol-lane panel and desktop/mobile native OVL/DRC
+  balance display.
+- `Block::requires_full_body_gossip` so compact gossip cannot forget a
+  typed lane.

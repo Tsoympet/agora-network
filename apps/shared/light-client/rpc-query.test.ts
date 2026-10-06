@@ -30,6 +30,11 @@ try {
     book: { taker_gets: { native: true }, taker_pays: { native: false } },
     cursor: "c1",
   });
+  await client.getDrcEscrow("cc".repeat(32));
+  await client.getEthChainId();
+  await client.getEthBalance("0x" + "11".repeat(20));
+  await client.submitTltCovenant({ version: 2 });
+  await client.submitDrcOfferCreate({ version: 1 });
 
   assert.deepEqual(
     calls.map((call) => call.method),
@@ -39,6 +44,11 @@ try {
       "agora_getDrcOffer",
       "agora_getDrcAccountOffers",
       "agora_getDrcBookOffers",
+      "agora_getDrcEscrow",
+      "eth_chainId",
+      "eth_getBalance",
+      "agora_submitTltCovenant",
+      "agora_submitDrcOfferCreate",
     ],
   );
   assert.deepEqual(calls[0].params, { address: "agoradev1qqqq" });
@@ -52,6 +62,11 @@ try {
     (calls[4].params as { cursor?: string }).cursor,
     "c1",
   );
+  assert.deepEqual(calls[5].params, { escrow_id: "cc".repeat(32) });
+  assert.deepEqual(calls[6].params, []);
+  assert.deepEqual(calls[7].params, ["0x" + "11".repeat(20), "latest"]);
+  assert.deepEqual(calls[8].params, { covenant: { version: 2 } });
+  assert.deepEqual(calls[9].params, { offer_create: { version: 1 } });
   console.log("light-client query wrappers ok");
 } finally {
   globalThis.fetch = originalFetch;

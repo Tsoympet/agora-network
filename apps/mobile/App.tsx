@@ -32,6 +32,7 @@ import {
   startTipSync,
   walletNetworkFromNode,
   watchTransaction,
+  type LightAccountBalances,
   type LightNodeInfo,
   type LightTxLookup,
   type LightUtxo,
@@ -65,6 +66,8 @@ export default function App() {
   const [nodeInfo, setNodeInfo] = useState<LightNodeInfo | null>(null);
   const [address, setAddress] = useState("");
   const [balance, setBalance] = useState<number | null>(null);
+  const [accountBalances, setAccountBalances] =
+    useState<LightAccountBalances | null>(null);
   const [utxos, setUtxos] = useState<LightUtxo[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletBusy, setWalletBusy] = useState(false);
@@ -165,20 +168,24 @@ export default function App() {
       );
       setBalance(null);
       setUtxos([]);
+      setAccountBalances(null);
       return;
     }
     setWalletBusy(true);
     setWalletError(null);
     try {
-      const [bal, set] = await Promise.all([
+      const [bal, set, accounts] = await Promise.all([
         client.getBalance(resolved),
         client.getUtxos(resolved),
+        client.getAccountBalances(resolved),
       ]);
       setBalance(bal.balance);
       setUtxos(set.utxos);
+      setAccountBalances(accounts);
     } catch (err) {
       setBalance(null);
       setUtxos([]);
+      setAccountBalances(null);
       setWalletError(err instanceof Error ? err.message : "lookup failed");
     } finally {
       setWalletBusy(false);
@@ -486,8 +493,15 @@ export default function App() {
         {walletError ? <Text style={styles.error}>{walletError}</Text> : null}
         {balance !== null ? (
           <Text style={styles.meta}>
-            Balance {balance} base units · {utxos.length} UTXO
+            TLT {balance} base units · {utxos.length} UTXO
             {utxos.length === 1 ? "" : "s"}
+          </Text>
+        ) : null}
+        {accountBalances ? (
+          <Text style={styles.meta}>
+            OVL {String(accountBalances.ovl.balance)} n{accountBalances.ovl.nonce}
+            {" · "}
+            DRC {String(accountBalances.drc.balance)} n{accountBalances.drc.nonce}
           </Text>
         ) : null}
         <View style={styles.tipList}>
