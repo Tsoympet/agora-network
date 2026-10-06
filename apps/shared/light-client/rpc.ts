@@ -417,6 +417,9 @@ export type LightClient = {
   /** Submit a signed transaction JSON body (native serde / byte-array hashes). */
   submitTransaction: (tx: unknown) => Promise<SubmitTxResult>;
   submitTltCovenant: (tx: unknown) => Promise<{ tx_id: string }>;
+  submitAccountTransfer: (tx: unknown) => Promise<{ account_tx_id: string }>;
+  submitOvlExecution: (tx: unknown) => Promise<{ execution_tx_id: string }>;
+  submitDrcPayment: (tx: unknown) => Promise<{ payment_id: string }>;
   submitDataCommitment: (authorization: unknown) => Promise<{
     authorization_id: string;
   }>;
@@ -593,6 +596,16 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<SubmitTxResult>("agora_submitTransaction", { tx }),
     submitTltCovenant: (tx) =>
       call<{ tx_id: string }>("agora_submitTltCovenant", { covenant: tx }),
+    submitAccountTransfer: (tx) =>
+      call<{ account_tx_id: string }>("agora_submitAccountTransfer", {
+        account_transfer: tx,
+      }),
+    submitOvlExecution: (tx) =>
+      call<{ execution_tx_id: string }>("agora_submitOvlExecution", {
+        execution: tx,
+      }),
+    submitDrcPayment: (tx) =>
+      call<{ payment_id: string }>("agora_submitDrcPayment", { payment: tx }),
     submitDataCommitment: (authorization) =>
       call<{ authorization_id: string }>("agora_submitDataCommitment", {
         authorization,

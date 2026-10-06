@@ -28,9 +28,9 @@ import {
   addressHrpForNetwork,
   encodeAddress,
   parseAddress,
-} from "./address";
-import { selectTltCoins } from "./coinselect";
-import type { LightClient, LightUtxo } from "./rpc";
+} from "./address.ts";
+import { selectTltCoins } from "./coinselect.ts";
+import type { LightClient, LightUtxo } from "./rpc.ts";
 
 /** Provisional SLIP-0044 coin type — replace before mainnet freeze. */
 export const AGORA_COIN_TYPE = 8888;

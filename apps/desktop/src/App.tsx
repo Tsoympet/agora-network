@@ -13,6 +13,12 @@ import {
   parseAddress,
   persistSealedVault,
   sealVault,
+  sendAccountTransfer,
+  sendDrcOfferCancel,
+  sendDrcOfferCreate,
+  sendDrcPayment,
+  sendOvlExecution,
+  sendTltCovenant,
   sendTransfer,
   shortAddress,
   shortHash,
@@ -86,6 +92,19 @@ export function App() {
   const [toAddress, setToAddress] = useState("");
   const [amount, setAmount] = useState("1");
   const [fee, setFee] = useState("1");
+  const [sendLane, setSendLane] = useState<
+    | "tlt"
+    | "tlt-covenant"
+    | "ovl"
+    | "ovl-exec"
+    | "drc"
+    | "drc-offer"
+    | "drc-offer-cancel"
+  >("tlt");
+  const [offerIssuer, setOfferIssuer] = useState("");
+  const [offerCurrency, setOfferCurrency] = useState("USD");
+  const [offerGets, setOfferGets] = useState("1");
+  const [offerId, setOfferId] = useState("");
   const [sendBusy, setSendBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastTxId, setLastTxId] = useState<string | null>(null);
@@ -318,7 +337,7 @@ export function App() {
     }
     const amt = Number(amount);
     const feeN = Number(fee);
-    if (!Number.isFinite(amt) || amt <= 0) {
+    if (sendLane !== "drc-offer-cancel" && (!Number.isFinite(amt) || amt <= 0)) {
       setSendError("Amount must be a positive number");
       return;
     }
@@ -326,26 +345,99 @@ export function App() {
       setSendError("Fee must be ≥ 1 (min relay)");
       return;
     }
+    if (sendLane === "drc-offer" && (!Number.isFinite(Number(offerGets)) || Number(offerGets) <= 0)) {
+      setSendError("Offer gets amount must be a positive number");
+      return;
+    }
     setSendBusy(true);
     setSendError(null);
     setLastTxId(null);
     setTxLookup(null);
     try {
-      const { tx_id, built } = await sendTransfer(client, {
+      const common = {
         mnemonic,
-        toAddressHex: toAddress.trim(),
-        amount: Math.floor(amt),
-        fee: Math.floor(feeN),
         network: walletNetwork,
-      });
-      setLastTxId(tx_id);
-      setReceiveBech32(built.fromBech32);
-      setReceiveHex(built.from);
-      setAddress(built.fromBech32);
+        fee: Math.floor(feeN),
+      };
+      let id: string;
+      let fromBech32: string;
+      let fromHex: string;
+      if (sendLane === "tlt") {
+        const { tx_id, built } = await sendTransfer(client, {
+          ...common,
+          toAddressHex: toAddress.trim(),
+          amount: Math.floor(amt),
+        });
+        id = tx_id;
+        fromBech32 = built.fromBech32;
+        fromHex = built.from;
+      } else if (sendLane === "tlt-covenant") {
+        const { id: submitted, built } = await sendTltCovenant(client, {
+          ...common,
+          toAddress: toAddress.trim(),
+          amount: Math.floor(amt),
+        });
+        id = submitted;
+        fromBech32 = built.fromBech32;
+        fromHex = built.from;
+      } else if (sendLane === "ovl") {
+        const { id: submitted, built } = await sendAccountTransfer(client, {
+          ...common,
+          asset: "OVL",
+          toAddress: toAddress.trim(),
+          amount: Math.floor(amt),
+        });
+        id = submitted;
+        fromBech32 = built.fromBech32;
+        fromHex = built.from;
+      } else if (sendLane === "ovl-exec") {
+        const { id: submitted, built } = await sendOvlExecution(client, {
+          mnemonic,
+          network: walletNetwork,
+          toAddress: toAddress.trim(),
+          value: Math.floor(amt),
+          feePerGas: Math.floor(feeN),
+        });
+        id = submitted;
+        fromBech32 = built.fromBech32;
+        fromHex = built.from;
+      } else if (sendLane === "drc") {
+        const { id: submitted, built } = await sendDrcPayment(client, {
+          ...common,
+          toAddress: toAddress.trim(),
+          amount: Math.floor(amt),
+        });
+        id = submitted;
+        fromBech32 = built.fromBech32;
+        fromHex = built.from;
+      } else if (sendLane === "drc-offer") {
+        const { id: submitted, built } = await sendDrcOfferCreate(client, {
+          ...common,
+          takerPaysAmount: Math.floor(amt),
+          takerGetsAmount: Math.floor(Number(offerGets)),
+          issuer: offerIssuer.trim(),
+          currency: offerCurrency,
+        });
+        id = submitted;
+        fromBech32 = built.fromBech32;
+        fromHex = built.from;
+      } else {
+        const { id: submitted, built } = await sendDrcOfferCancel(client, {
+          ...common,
+          offerId: offerId.trim(),
+        });
+        id = submitted;
+        fromBech32 = built.fromBech32;
+        fromHex = built.from;
+      }
+      setLastTxId(id);
+      setReceiveBech32(fromBech32);
+      setReceiveHex(fromHex);
+      setAddress(fromBech32);
       const [bal, set, accounts] = await Promise.all([
-        client.getBalance(built.from),
-        client.getUtxos(built.from),
-        client.getAccountBalances(built.from),
+        client.getBalance(fromHex),
+        client.getUtxos(fromHex),
+        client.getAccountBalances(fromHex),
       ]);
       setBalance(bal.balance);
       setUtxos(set.utxos);
@@ -661,8 +753,8 @@ export function App() {
       >
         <p className="agora-eyebrow">Send</p>
         <p style={{ marginTop: "0.55rem", fontSize: "0.85rem", color: "var(--agora-ink-muted)" }}>
-          BIP-39 → m/44&apos;/8888&apos;/0&apos;/0/0. Password vault seals the mnemonic with
-          AES-256-GCM (localStorage). Fee to miner (min relay 1).
+          Device-local BIP-39 signing. TLT UTXO stays the default. Typed lanes submit
+          Agora-signed envelopes (not raw EVM). Keys never leave this device.
         </p>
         <form
           onSubmit={onSend}
@@ -767,19 +859,84 @@ export function App() {
               </span>
             ) : null}
           </div>
-          <input
-            value={toAddress}
-            onChange={(e) => setToAddress(e.target.value)}
-            placeholder={
-              networkReady
-                ? `to ${networkHrpHint(walletNetwork)} or 40-hex`
-                : "waiting for node network…"
+          <select
+            value={sendLane}
+            onChange={(e) =>
+              setSendLane(
+                e.target.value as
+                  | "tlt"
+                  | "tlt-covenant"
+                  | "ovl"
+                  | "ovl-exec"
+                  | "drc"
+                  | "drc-offer"
+                  | "drc-offer-cancel",
+              )
             }
-            aria-label="To address"
-            spellCheck={false}
-            disabled={!networkReady}
+            aria-label="Send lane"
             style={fieldStyle}
-          />
+          >
+            <option value="tlt">TLT UTXO</option>
+            <option value="tlt-covenant">TLT covenant P2PKH</option>
+            <option value="ovl">OVL account transfer</option>
+            <option value="ovl-exec">OVL execution v1</option>
+            <option value="drc">DRC payment v4</option>
+            <option value="drc-offer">DRC offer create</option>
+            <option value="drc-offer-cancel">DRC offer cancel</option>
+          </select>
+          {sendLane === "drc-offer-cancel" ? (
+            <input
+              value={offerId}
+              onChange={(e) => setOfferId(e.target.value)}
+              placeholder="offer id (64-hex)"
+              aria-label="Offer id"
+              spellCheck={false}
+              style={fieldStyle}
+            />
+          ) : (
+            <input
+              value={toAddress}
+              onChange={(e) => setToAddress(e.target.value)}
+              placeholder={
+                networkReady
+                  ? `to ${networkHrpHint(walletNetwork)} or 40-hex`
+                  : "waiting for node network…"
+              }
+              aria-label="To address"
+              spellCheck={false}
+              disabled={!networkReady}
+              style={fieldStyle}
+            />
+          )}
+          {sendLane === "drc-offer" ? (
+            <>
+              <input
+                value={offerIssuer}
+                onChange={(e) => setOfferIssuer(e.target.value)}
+                placeholder="issued-asset issuer"
+                aria-label="Offer issuer"
+                spellCheck={false}
+                style={fieldStyle}
+              />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                <input
+                  value={offerCurrency}
+                  onChange={(e) => setOfferCurrency(e.target.value)}
+                  placeholder="USD"
+                  aria-label="Issued currency"
+                  style={fieldStyle}
+                />
+                <input
+                  value={offerGets}
+                  onChange={(e) => setOfferGets(e.target.value)}
+                  placeholder="gets amount"
+                  aria-label="Offer gets amount"
+                  inputMode="numeric"
+                  style={fieldStyle}
+                />
+              </div>
+            </>
+          ) : null}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
             <input
               value={amount}

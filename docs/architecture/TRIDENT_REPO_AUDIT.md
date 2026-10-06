@@ -39,12 +39,12 @@ Independent quorums; no price-oracle mixing.
 | Lane | Consensus | Gossip | Mempool / template | RPC | Client |
 | --- | --- | --- | --- | --- | --- |
 | TLT UTXO + RandomX | Wired | `NetworkMessage::Transaction` / `Block` / compact | Wired | `agora_submitTransaction`, `agora_getBalance` (UTXO only), `agora_getUtxos` | Desktop / mobile send + explorer |
-| TLT covenants v2 | Wired (Experimental) | `NetworkMessage::TltCovenant` (appended after offer cancel) | Wired; compact falls back to full body | `agora_submitTltCovenant`, `agora_getTltCovenant` | Shared light-client query wrapper |
-| OVL account transfer | Wired | `AccountTransfer` | Wired | `agora_submitAccountTransfer` | No typed wallet builder |
-| OVL execution (intrinsic gas) | Wired | `OvlExecution` | Wired | `agora_submitOvlExecution` | No typed wallet builder |
+| TLT covenants v2 | Wired (Experimental) | `NetworkMessage::TltCovenant` (appended after offer cancel) | Wired; compact falls back to full body | `agora_submitTltCovenant`, `agora_getTltCovenant` | Shared builder + desktop/mobile P2PKH send |
+| OVL account transfer | Wired | `AccountTransfer` | Wired | `agora_submitAccountTransfer` | Shared builder + desktop/mobile send |
+| OVL execution (intrinsic gas) | Wired | `OvlExecution` | Wired | `agora_submitOvlExecution` | Shared v1 builder (empty calldata) + desktop/mobile send |
 | OVL-EVM-v1 (`revm` Shanghai) | Experimental, genesis-gated | **Not** on the Agora-signed gossip topic | Process-local pending inbox → local template only | Canonical `eth_*` / `net_*` / `web3_clientVersion`; `eth_sendRawTransaction` is local | No light-client `eth_*` wrapper |
-| DRC payments + XRPL-like objects | Wired (Experimental) | Typed envelopes through offer cancel | Wired; family reservations | Typed submit/get methods | Object/operation queries + DEX queries; native balance via `agora_getAccountBalances` |
-| DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared light-client query wrappers |
+| DRC payments + XRPL-like objects | Wired (Experimental) | Typed envelopes through offer cancel | Wired; family reservations | Typed submit/get methods | Shared v4 payment builder + desktop/mobile send |
+| DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared builders + desktop/mobile native-DRC-vs-issued send |
 | Dual-PoS finality / staking | Wired (Experimental) | `CheckpointAttestation`, `StakeTx` | Wired | Validator / pool / `agora_submitStakeTx` | Light-client reads exist |
 | Protocol treasuries / community registry | Genesis + library | No mutation gossip | No block lane | Read RPCs | Light-client reads exist |
 | DA commitments | Apply + journal | `NetworkMessage::DataCommitment` (v25) | Wired; template only when fingerprint is set | `agora_submitDataCommitment` / `agora_getDataCommitment` | Light-client query + submit wrappers |
@@ -97,8 +97,8 @@ There is no `agora_submitDrcExecution` or generic `agora_submitExecution`.
 
 | Surface | What it does | Honest gap |
 | --- | --- | --- |
-| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads | Keys stay on device. No RandomX recompute. No typed DRC/OVL builders |
-| Desktop / mobile wallets | TLT UTXO send + native OVL/DRC balance display | No typed DRC payment/DEX or OVL execution builders |
+| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders (DRC payment/offer, TLT covenant P2PKH, OVL transfer/execution v1), Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads | Keys stay on device. No RandomX recompute. No raw-EVM builder |
+| Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel | No DEX book browser. Offer create is native DRC vs one issued asset |
 | Explorer | DAG, tx lookup, protocol-lane reads, mempool, node, governance panel | No DEX book order-entry UI |
 | `agora-layers` HTTP | Historical lab; loopback | Non-canonical; mixed unauthenticated mutations |
 
@@ -174,12 +174,9 @@ These are real unfinished paths, not parity slogans:
    non-UTXO lane. `Block::requires_full_body_gossip` is the single
    fail-closed gate so new lanes cannot silently enter UTXO compact ids.
 3. **Community consensus lanes** — registry is genesis + library only.
-4. **Wallet construction UX** — desktop/mobile still send TLT UTXO only;
-   they now display native OVL/DRC balances. Typed DRC payment/DEX and
-   OVL execution builders remain unwired.
-5. **Operator schema CLI** — replay/rebuild is documented, not shipped
+4. **Operator schema CLI** — replay/rebuild is documented, not shipped
    as a first-class binary.
-6. **DA TLT inclusion-fee policy** — transport is wired; default boot
+5. **DA TLT inclusion-fee policy** — transport is wired; default boot
    stays fail-closed until a reviewed debit/sponsorship rule exists.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
@@ -208,3 +205,7 @@ This audit close-out adds:
   reservation, template selection when the DA fingerprint is set, and
   `agora_submitDataCommitment` / `agora_getDataCommitment` with honest
   pending/accepted/confirmed/finalized statuses.
+- Device-local typed-lane builders (`typed-lanes.ts`) for DRC payment v4,
+  DRC offer create/cancel, TLT covenant P2PKH, OVL account transfer, and
+  Agora-signed OVL execution v1. Desktop/mobile submit those envelopes
+  without embedding a node. Raw EVM is not built in the wallet.

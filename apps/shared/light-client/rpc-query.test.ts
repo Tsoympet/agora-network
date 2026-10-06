@@ -35,6 +35,9 @@ try {
   await client.getEthChainId();
   await client.getEthBalance("0x" + "11".repeat(20));
   await client.submitTltCovenant({ version: 2 });
+  await client.submitAccountTransfer({ version: 2 });
+  await client.submitOvlExecution({ version: 1 });
+  await client.submitDrcPayment({ version: 4 });
   await client.submitDataCommitment({ version: 1 });
   await client.submitDrcOfferCreate({ version: 1 });
 
@@ -51,6 +54,9 @@ try {
       "eth_chainId",
       "eth_getBalance",
       "agora_submitTltCovenant",
+      "agora_submitAccountTransfer",
+      "agora_submitOvlExecution",
+      "agora_submitDrcPayment",
       "agora_submitDataCommitment",
       "agora_submitDrcOfferCreate",
     ],
@@ -71,8 +77,11 @@ try {
   assert.deepEqual(calls[7].params, []);
   assert.deepEqual(calls[8].params, ["0x" + "11".repeat(20), "latest"]);
   assert.deepEqual(calls[9].params, { covenant: { version: 2 } });
-  assert.deepEqual(calls[10].params, { authorization: { version: 1 } });
-  assert.deepEqual(calls[11].params, { offer_create: { version: 1 } });
+  assert.deepEqual(calls[10].params, { account_transfer: { version: 2 } });
+  assert.deepEqual(calls[11].params, { execution: { version: 1 } });
+  assert.deepEqual(calls[12].params, { payment: { version: 4 } });
+  assert.deepEqual(calls[13].params, { authorization: { version: 1 } });
+  assert.deepEqual(calls[14].params, { offer_create: { version: 1 } });
   console.log("light-client query wrappers ok");
 } finally {
   globalThis.fetch = originalFetch;
