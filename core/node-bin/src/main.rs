@@ -9,6 +9,7 @@ mod backend;
 mod civic;
 mod genesis_cli;
 mod http;
+mod schema_cli;
 mod startup;
 mod storage_policy;
 
@@ -20,10 +21,10 @@ use std::time::Duration;
 use agora_consensus::PowAlgorithm;
 use agora_p2p::{
     dial_addr, drain_orphans_after, fetch_seeder_peers_best_effort, load_or_generate_identity,
-    merge_bootstrap_peers, reconstruct_compact_block, validate_header_chain, FetchReason,
-    GetHeadersRequest, Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage,
-    NetworkNode, OrphanPool, PeerId, PendingFetches, ReconstructError, SeederBook,
-    MAX_HEADERS_PER_RESPONSE,
+    merge_bootstrap_peers, reconstruct_compact_block, reconstruct_typed_compact,
+    validate_header_chain, FetchReason, GetHeadersRequest, Mempool, NetworkConfig, NetworkEvent,
+    NetworkHandle, NetworkMessage, NetworkNode, OrphanPool, PeerId, PendingFetches,
+    ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{
@@ -34,16 +35,16 @@ use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
-    admit_account_transfer, admit_drc_account_policy, admit_drc_check_cancel, admit_drc_check_cash,
-    admit_drc_check_create, admit_drc_deposit_preauth, admit_drc_escrow_cancel,
-    admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_issued_asset_policy_set,
-    admit_drc_issued_clawback, admit_drc_issued_transfer, admit_drc_offer_cancel,
-    admit_drc_offer_create, admit_drc_payment, admit_drc_payment_channel_claim,
-    admit_drc_payment_channel_close, admit_drc_payment_channel_create,
-    admit_drc_payment_channel_fund, admit_drc_regular_key, admit_drc_signer_list,
-    admit_drc_ticket_create, admit_drc_trust_line_issuer_control, admit_drc_trust_line_set,
-    admit_ovl_execution, admit_stake_tx, admit_tlt_covenant, admit_transaction, NodeBackend,
-    NodeBackendConfig,
+    admit_account_transfer, admit_data_commitment, admit_drc_account_policy,
+    admit_drc_check_cancel, admit_drc_check_cash, admit_drc_check_create,
+    admit_drc_deposit_preauth, admit_drc_escrow_cancel, admit_drc_escrow_create,
+    admit_drc_escrow_finish, admit_drc_issued_asset_policy_set, admit_drc_issued_clawback,
+    admit_drc_issued_transfer, admit_drc_offer_cancel, admit_drc_offer_create, admit_drc_payment,
+    admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
+    admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
+    admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_issuer_control,
+    admit_drc_trust_line_set, admit_ovl_execution, admit_ovl_raw_execution, admit_stake_tx,
+    admit_tlt_covenant, admit_transaction, NodeBackend, NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::startup::{p2p_identity_path, prepare_legacy_datadir};
@@ -460,16 +461,21 @@ fn process_headers_response(
 
 #[tokio::main]
 async fn main() {
-    let mut argv = std::env::args().skip(1);
-    if argv.next().as_deref() == Some("genesis") {
+    let mut argv = std::env::args().skip(1).peekable();
+    if argv.peek().map(String::as_str) == Some("genesis") {
+        argv.next();
         genesis_cli::run(argv);
+    }
+    if argv.peek().map(String::as_str) == Some("schema") {
+        argv.next();
+        schema_cli::run(argv);
     }
 
     tracing_subscriber::fmt::init();
 
     let chain_params = resolve_chain_params();
     let emission = chain_params.emission.clone();
-    let boot = resolve_boot_config(&chain_params);
+    let mut boot = resolve_boot_config(&chain_params);
     let pow_algo = boot.pow;
     let template_bits = boot.initial_bits;
 
@@ -551,6 +557,21 @@ async fn main() {
         "genesis ready"
     );
 
+    let da_lane_opt_in = matches!(
+        std::env::var("AGORA_ENABLE_DA_LANE")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    );
+    if da_lane_opt_in {
+        boot.data_availability_network_fingerprint = Some(net_fp);
+        info!(
+            fingerprint = %agora_p2p::fingerprint_topic_tag(&net_fp),
+            "DA commitment lane opt-in: mesh-bound, TLT inclusion fee still unspecified, Experimental"
+        );
+    }
+
     let chain = Arc::new(Mutex::new(
         ChainState::bootstrap_with(store.clone(), genesis_hash, boot.clone(), storage)
             .expect("chain bootstrap"),
@@ -621,6 +642,7 @@ async fn main() {
             genesis_hash,
         },
     );
+    let pending_evm = backend.pending_evm();
     let dispatcher = Arc::new(tokio::sync::Mutex::new(RpcDispatcher::new(backend)));
     let rate_limit_per_minute = std::env::var("AGORA_RPC_RATE_LIMIT")
         .ok()
@@ -668,7 +690,7 @@ async fn main() {
     let tx_auth = agora_state_machine::TxAuthContext {
         chain_id: chain_params.network.chain_id().into(),
         genesis: genesis_hash,
-        data_availability_network_fingerprint: None,
+        data_availability_network_fingerprint: boot.data_availability_network_fingerprint,
     };
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));
@@ -956,6 +978,113 @@ async fn main() {
                                     FetchReason::Announce,
                                 );
                             }
+                            Err(ReconstructError::UnsupportedLane(kind)) => {
+                                warn!(
+                                    %peer,
+                                    %topic,
+                                    kind,
+                                    hash = %hash.to_hex(),
+                                    "compact unsupported lane — requesting full block"
+                                );
+                                request_block_if_missing_with_reason(
+                                    &chain,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    hash,
+                                    FetchReason::Announce,
+                                );
+                            }
+                        }
+                    }
+                    NetworkMessage::TypedCompactBlock(body) => {
+                        let hash = body.header.hash();
+                        let have = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.has_block(&hash).ok())
+                            .unwrap_or(false);
+                        if have {
+                            pending.complete(&hash);
+                            continue;
+                        }
+                        let lookup = |kind: u8, sid: &[u8; 8]| {
+                            mempool
+                                .lock()
+                                .ok()
+                                .and_then(|pool| pool.clone_typed_lane_item(kind, sid))
+                        };
+                        match reconstruct_typed_compact(body, lookup) {
+                            Ok(block) => {
+                                pending.complete(&hash);
+                                if relay_drop_stale_parents(&chain, &block) {
+                                    let _ = topic;
+                                    continue;
+                                }
+                                handle_incoming_block(
+                                    BlockRelayContext {
+                                        chain: &chain,
+                                        mempool: &mempool,
+                                        store: orphan_store.as_ref(),
+                                        net: &net,
+                                    },
+                                    &mut orphans,
+                                    &mut pending,
+                                    peer,
+                                    block,
+                                );
+                                let _ = topic;
+                            }
+                            Err(ReconstructError::MissingShortIds(n)) => {
+                                info!(
+                                    %peer,
+                                    %topic,
+                                    missing = n,
+                                    hash = %hash.to_hex(),
+                                    "typed compact miss — requesting full block"
+                                );
+                                request_block_if_missing_with_reason(
+                                    &chain,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    hash,
+                                    FetchReason::Announce,
+                                );
+                            }
+                            Err(ReconstructError::TxRootMismatch) => {
+                                warn!(
+                                    %peer,
+                                    %topic,
+                                    hash = %hash.to_hex(),
+                                    "typed compact body root mismatch — requesting full block"
+                                );
+                                request_block_if_missing_with_reason(
+                                    &chain,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    hash,
+                                    FetchReason::Announce,
+                                );
+                            }
+                            Err(ReconstructError::UnsupportedLane(kind)) => {
+                                warn!(
+                                    %peer,
+                                    %topic,
+                                    kind,
+                                    hash = %hash.to_hex(),
+                                    "typed compact unsupported lane — requesting full block"
+                                );
+                                request_block_if_missing_with_reason(
+                                    &chain,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    hash,
+                                    FetchReason::Announce,
+                                );
+                            }
                         }
                     }
                     NetworkMessage::BlockAnnounce { hash } => {
@@ -1041,6 +1170,21 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "OVL execution gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::OvlRawExecution(tx) => {
+                        match admit_ovl_raw_execution(
+                            store.as_ref(),
+                            &mempool,
+                            pending_evm.as_ref(),
+                            tx,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, tx = %id.to_hex(), "OVL raw-EVM gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "OVL raw-EVM gossip rejected");
                             }
                         }
                     }
@@ -1458,6 +1602,21 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "TLT covenant gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DataCommitment(authorization) => {
+                        match admit_data_commitment(
+                            store.as_ref(),
+                            &mempool,
+                            authorization,
+                            &tx_auth,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, data_commitment = %id.to_hex(), "DA commitment gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DA commitment gossip rejected");
                             }
                         }
                     }

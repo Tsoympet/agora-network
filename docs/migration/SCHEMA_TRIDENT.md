@@ -1,6 +1,8 @@
 # Datadir schema migration (Trident)
 
-**Maturity:** Experimental (schema constants + library persistence). Full migrate/reindex CLI still pending.
+**Maturity:** Experimental (schema constants + library persistence + operator CLI).
+The CLI reports schema and runs supported library rebuilds. It does **not**
+freeze genesis or boot a public network.
 
 ## Versions
 
@@ -35,6 +37,9 @@ Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
 1. Never silently open a newer schema datadir with older code (or the reverse) on public networks.
 2. Provide explicit `migrate` / `reindex` / `verify-invariants` commands before public testnet.
+   `agora-node schema report|migrate|reindex --data PATH` ships those library rebuilds
+   (19→20 fee-burn, 20→21 ledger index with `--applied-order`, 21→22 marker, object reindex).
+   It does not freeze genesis.
 3. Trident public testnet prefers a **fresh genesis v3 datadir** over in-place upgrade from v2 economic state.
 4. Lab `agora-layers` balances use the snapshot/claim path in [`OVL_DRC_TO_L1.md`](OVL_DRC_TO_L1.md) — not ad-hoc SQL/scripts.
 

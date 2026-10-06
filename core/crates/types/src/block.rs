@@ -243,14 +243,20 @@ impl Block {
             || !self.tlt_covenants.is_empty()
     }
 
-    /// Compact gossip is UTXO-only. Any typed lane needs the full body until a
-    /// versioned short-id format can name lane kinds without ambiguity.
+    /// Compact gossip is UTXO-only unless a versioned typed compact names each
+    /// lane. Unknown lanes (today: detached multisign attachments) keep the
+    /// full-body fallback.
     pub fn requires_full_body_gossip(&self) -> bool {
         !self.account_transfers.is_empty()
             || !self.stake_ops.is_empty()
             || !self.ovl_executions.is_empty()
             || !self.drc_payments.is_empty()
             || self.has_post_v4_body_lanes()
+    }
+
+    /// Lanes that protocol-v27 typed compact cannot name from the mempool.
+    pub fn typed_compact_unnamed_lanes(&self) -> bool {
+        !self.drc_multisign_attachments.is_empty()
     }
 
     /// Compute a simple pairwise tx merkle root (duplicate last leaf when odd).

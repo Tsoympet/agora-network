@@ -391,7 +391,9 @@ impl NetworkNode {
             | NetworkMessage::DrcIssuedClawback(_)
             | NetworkMessage::DrcOfferCreate(_)
             | NetworkMessage::DrcOfferCancel(_)
-            | NetworkMessage::TltCovenant(_) => {
+            | NetworkMessage::TltCovenant(_)
+            | NetworkMessage::DataCommitment(_)
+            | NetworkMessage::OvlRawExecution(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {
@@ -400,6 +402,7 @@ impl NetworkNode {
             NetworkMessage::Block(_)
             | NetworkMessage::BlockAnnounce { .. }
             | NetworkMessage::CompactBlock { .. }
+            | NetworkMessage::TypedCompactBlock(_)
             | NetworkMessage::GetBlock { .. } => {
                 self.publish(self.topics.blocks(), message.encode())
             }

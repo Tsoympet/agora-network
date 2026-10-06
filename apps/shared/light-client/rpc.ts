@@ -62,6 +62,21 @@ export type LightTltCovenantLookup = {
   transaction: unknown | null;
 };
 
+export type LightDataCommitmentLookup = {
+  authorization_id: string;
+  status: string;
+  block_id: string | null;
+  index: number | null;
+  confirmations: number | null;
+  finalized: boolean;
+  pow_work_met: boolean;
+  acceptance: string | null;
+  lane_enabled: boolean;
+  canonical_l1?: boolean;
+  lab_record_da?: boolean;
+  authorization: unknown | null;
+};
+
 export type LightDrcOfferLookup = {
   offer_id?: string;
   status?: string;
@@ -368,6 +383,11 @@ export type LightClient = {
   getBalance: (address: string) => Promise<LightBalance>;
   getAccountBalances: (address: string) => Promise<LightAccountBalances>;
   getTltCovenant: (txId: string) => Promise<LightTltCovenantLookup>;
+  getDataCommitment: (args: {
+    authorization_id?: string;
+    source?: unknown;
+    sequence?: number;
+  }) => Promise<LightDataCommitmentLookup>;
   getDrcOffer: (offerId: string) => Promise<LightDrcOfferLookup>;
   getDrcAccountOffers: (args: {
     account: string;
@@ -397,6 +417,12 @@ export type LightClient = {
   /** Submit a signed transaction JSON body (native serde / byte-array hashes). */
   submitTransaction: (tx: unknown) => Promise<SubmitTxResult>;
   submitTltCovenant: (tx: unknown) => Promise<{ tx_id: string }>;
+  submitAccountTransfer: (tx: unknown) => Promise<{ account_tx_id: string }>;
+  submitOvlExecution: (tx: unknown) => Promise<{ execution_tx_id: string }>;
+  submitDrcPayment: (tx: unknown) => Promise<{ payment_id: string }>;
+  submitDataCommitment: (authorization: unknown) => Promise<{
+    authorization_id: string;
+  }>;
   submitDrcOfferCreate: (tx: unknown) => Promise<{
     offer_id: string;
     simulated_fill: boolean;
@@ -522,6 +548,14 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<LightAccountBalances>("agora_getAccountBalances", { address }),
     getTltCovenant: (txId: string) =>
       call<LightTltCovenantLookup>("agora_getTltCovenant", { tx_id: txId }),
+    getDataCommitment: (args) =>
+      call<LightDataCommitmentLookup>("agora_getDataCommitment", {
+        ...(args.authorization_id === undefined
+          ? {}
+          : { authorization_id: args.authorization_id }),
+        ...(args.source === undefined ? {} : { source: args.source }),
+        ...(args.sequence === undefined ? {} : { sequence: args.sequence }),
+      }),
     getDrcOffer: (offerId: string) =>
       call<LightDrcOfferLookup>("agora_getDrcOffer", { offer_id: offerId }),
     getDrcAccountOffers: (args) =>
@@ -562,6 +596,20 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<SubmitTxResult>("agora_submitTransaction", { tx }),
     submitTltCovenant: (tx) =>
       call<{ tx_id: string }>("agora_submitTltCovenant", { covenant: tx }),
+    submitAccountTransfer: (tx) =>
+      call<{ account_tx_id: string }>("agora_submitAccountTransfer", {
+        account_transfer: tx,
+      }),
+    submitOvlExecution: (tx) =>
+      call<{ execution_tx_id: string }>("agora_submitOvlExecution", {
+        execution: tx,
+      }),
+    submitDrcPayment: (tx) =>
+      call<{ payment_id: string }>("agora_submitDrcPayment", { payment: tx }),
+    submitDataCommitment: (authorization) =>
+      call<{ authorization_id: string }>("agora_submitDataCommitment", {
+        authorization,
+      }),
     submitDrcOfferCreate: (tx) =>
       call<{ offer_id: string; simulated_fill: boolean }>(
         "agora_submitDrcOfferCreate",

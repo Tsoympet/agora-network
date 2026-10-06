@@ -40,6 +40,12 @@ treasury funds; signed consensus disbursement remains a later phase.
 
 The registry stores records under `community/v1/*` and maintains an O(1)
 rolling root plus record counts. The root commits into the Trident state root.
-Registration functions are state-machine library APIs only—there is no
-unsigned mutation RPC or block lane yet. Existing forum/community RPC data
-remains local administrative state and is excluded.
+Registration functions (`register_hub_into`, passport, grant, mission) are
+state-machine library APIs only.
+
+A consensus mutation lane is **not** added here. There is no signed
+Hub/Grant/Mission envelope, no `NetworkMessage` discriminant, and no
+authorization policy that could admit those records without inventing a
+governance/treasury spend path. An unsigned RPC or genesis-only rewrite
+would be theater. Existing forum/community RPC data remains local
+administrative state and is excluded.

@@ -15,6 +15,9 @@ const TX_INCL_PREFIX: &[u8] = b"txi/";
 /// Covenant ids stay off `tx/` so a script spend cannot be treated as a v1 coinbase.
 const TXC_INDEX_PREFIX: &[u8] = b"txc/";
 const TXC_INCL_PREFIX: &[u8] = b"txci/";
+/// DA authorization ids stay off `tx/` so a commitment cannot be treated as a v1 spend.
+const TXDA_INDEX_PREFIX: &[u8] = b"txda/";
+const TXDA_INCL_PREFIX: &[u8] = b"txdai/";
 
 pub fn tx_index_key(tx_id: &Hash) -> Vec<u8> {
     let mut key = Vec::with_capacity(TX_INDEX_PREFIX.len() + 32);
@@ -80,6 +83,16 @@ pub fn index_block_transactions_into(batch: &mut WriteBatch, block: &Block) {
             &value,
         );
         batch.put_cf(ColumnFamily::Warm, &covenant_tx_index_key(&tx_id), &value);
+    }
+    for (index, authorization) in block.data_commitments.iter().enumerate() {
+        let id = authorization.authorization_id();
+        let value = encode_tx_location(&block_id, index as u32);
+        batch.put_cf(
+            ColumnFamily::Warm,
+            &data_commitment_inclusion_key(&id, &block_id),
+            &value,
+        );
+        batch.put_cf(ColumnFamily::Warm, &data_commitment_index_key(&id), &value);
     }
 }
 
@@ -162,6 +175,59 @@ pub fn list_covenant_tx_inclusions(
     let mut prefix = Vec::with_capacity(TXC_INCL_PREFIX.len() + 32);
     prefix.extend_from_slice(TXC_INCL_PREFIX);
     prefix.extend_from_slice(tx_id.as_bytes());
+    let pairs = store.scan_prefix(ColumnFamily::Warm, &prefix)?;
+    let mut out = Vec::new();
+    for (_k, v) in pairs {
+        if let Some(loc) = decode_tx_location(&v) {
+            out.push(loc);
+        }
+    }
+    Ok(out)
+}
+
+pub fn data_commitment_index_key(id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(TXDA_INDEX_PREFIX.len() + 32);
+    key.extend_from_slice(TXDA_INDEX_PREFIX);
+    key.extend_from_slice(id.as_bytes());
+    key
+}
+
+pub fn data_commitment_inclusion_key(id: &Hash, block_id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(TXDA_INCL_PREFIX.len() + 64);
+    key.extend_from_slice(TXDA_INCL_PREFIX);
+    key.extend_from_slice(id.as_bytes());
+    key.extend_from_slice(block_id.as_bytes());
+    key
+}
+
+pub fn set_primary_data_commitment_location(
+    batch: &mut WriteBatch,
+    id: &Hash,
+    block_id: &Hash,
+    index: u32,
+) {
+    let value = encode_tx_location(block_id, index);
+    batch.put_cf(ColumnFamily::Warm, &data_commitment_index_key(id), &value);
+}
+
+pub fn lookup_data_commitment_location(
+    store: &StateStore,
+    id: &Hash,
+) -> Result<Option<(Hash, u32)>, StateError> {
+    let key = data_commitment_index_key(id);
+    let Some(bytes) = store.get_cf(ColumnFamily::Warm, &key)? else {
+        return Ok(None);
+    };
+    Ok(decode_tx_location(&bytes))
+}
+
+pub fn list_data_commitment_inclusions(
+    store: &StateStore,
+    id: &Hash,
+) -> Result<Vec<(Hash, u32)>, StateError> {
+    let mut prefix = Vec::with_capacity(TXDA_INCL_PREFIX.len() + 32);
+    prefix.extend_from_slice(TXDA_INCL_PREFIX);
+    prefix.extend_from_slice(id.as_bytes());
     let pairs = store.scan_prefix(ColumnFamily::Warm, &prefix)?;
     let mut out = Vec::new();
     for (_k, v) in pairs {

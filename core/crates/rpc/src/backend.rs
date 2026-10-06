@@ -6,14 +6,14 @@ use agora_governance::{
     CivicSnapshot, ProposalKind, TopicCategory, VoteChoice,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, BlockHeader, DrcAcceptedOperationReceipt,
-    DrcAccountPolicy, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
-    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
-    DrcIssuedTransferTx, DrcLedgerObjectDescriptor, DrcLedgerObjectKind, DrcLedgerObjectPage,
-    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
-    DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
-    DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OutPoint, OvlExecutionTx, TltCovenantTx,
-    Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, BlockHeader, DataCommitmentAuthorization,
+    DataCommitmentSource, DrcAcceptedOperationReceipt, DrcAccountPolicy, DrcAccountPolicyTx,
+    DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx,
+    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedTransferTx, DrcLedgerObjectDescriptor,
+    DrcLedgerObjectKind, DrcLedgerObjectPage, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OutPoint,
+    OvlExecutionTx, TltCovenantTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -134,6 +134,56 @@ impl TltCovenantLookup {
             fee: None,
             confirmations: None,
             transaction: Some(tx),
+        }
+    }
+}
+
+/// Mempool / accepted / missing status for `agora_getDataCommitment`.
+///
+/// `finalized` is only true under the full TLT PoW ∧ ≥⅔ OVL ∧ ≥⅔ DRC predicate.
+/// Lab `recordDa` never maps onto these states.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataCommitmentLookup {
+    pub authorization_id: Hash,
+    pub status: String,
+    pub block_id: Option<Hash>,
+    pub index: Option<u32>,
+    pub confirmations: Option<u64>,
+    pub finalized: bool,
+    pub pow_work_met: bool,
+    pub acceptance: Option<String>,
+    pub lane_enabled: bool,
+    pub authorization: Option<DataCommitmentAuthorization>,
+}
+
+impl DataCommitmentLookup {
+    pub fn unknown(authorization_id: Hash, lane_enabled: bool) -> Self {
+        Self {
+            authorization_id,
+            status: "unknown".into(),
+            block_id: None,
+            index: None,
+            confirmations: None,
+            finalized: false,
+            pow_work_met: false,
+            acceptance: None,
+            lane_enabled,
+            authorization: None,
+        }
+    }
+
+    pub fn pending(authorization: DataCommitmentAuthorization, lane_enabled: bool) -> Self {
+        Self {
+            authorization_id: authorization.authorization_id(),
+            status: "pending".into(),
+            block_id: None,
+            index: None,
+            confirmations: None,
+            finalized: false,
+            pow_work_met: false,
+            acceptance: None,
+            lane_enabled,
+            authorization: Some(authorization),
         }
     }
 }
@@ -261,6 +311,16 @@ pub trait RpcBackend: Send {
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
     fn submit_tlt_covenant(&mut self, tx: TltCovenantTx) -> Result<Hash, RpcError>;
     fn get_tlt_covenant(&self, tx_id: &Hash) -> Result<TltCovenantLookup, RpcError>;
+    fn submit_data_commitment(
+        &mut self,
+        authorization: DataCommitmentAuthorization,
+    ) -> Result<Hash, RpcError>;
+    fn get_data_commitment(
+        &self,
+        authorization_id: Option<&Hash>,
+        source: Option<DataCommitmentSource>,
+        sequence: Option<u64>,
+    ) -> Result<DataCommitmentLookup, RpcError>;
     fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError>;
     fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError>;
     /// Ethereum JSON-RPC over the canonical OVL execution world.
@@ -503,10 +563,13 @@ pub struct InMemoryBackend {
     utxos: HashMap<OutPoint, TxOut>,
     mempool: HashMap<Hash, Transaction>,
     covenant_mempool: HashMap<Hash, TltCovenantTx>,
+    da_mempool: HashMap<Hash, DataCommitmentAuthorization>,
     /// `tx_id` → `(block_id, index)` for confirmed txs.
     tx_index: HashMap<Hash, (Hash, u32)>,
     /// Covenant lane index, separate from v1 `tx_index`.
     covenant_index: HashMap<Hash, (Hash, u32)>,
+    /// DA authorization index, separate from UTXO/covenant pointers.
+    da_index: HashMap<Hash, (Hash, u32)>,
     /// Canonical exact-delivery receipts keyed by signed payment id.
     drc_payment_receipts: HashMap<Hash, DrcPaymentReceipt>,
     /// Recipient-scoped invoice key → signed payment id, mirroring canonical storage.
@@ -538,8 +601,10 @@ impl Default for InMemoryBackend {
             utxos: HashMap::new(),
             mempool: HashMap::new(),
             covenant_mempool: HashMap::new(),
+            da_mempool: HashMap::new(),
             tx_index: HashMap::new(),
             covenant_index: HashMap::new(),
+            da_index: HashMap::new(),
             drc_payment_receipts: HashMap::new(),
             drc_payment_invoice_index: HashMap::new(),
             drc_account_policies: HashMap::new(),
@@ -661,6 +726,11 @@ impl InMemoryBackend {
             let tx_id = tx.tx_id();
             self.covenant_index.insert(tx_id, (id, index as u32));
             self.covenant_mempool.remove(&tx_id);
+        }
+        for (index, authorization) in block.data_commitments.iter().enumerate() {
+            let auth_id = authorization.authorization_id();
+            self.da_index.insert(auth_id, (id, index as u32));
+            self.da_mempool.remove(&auth_id);
         }
         self.blocks.insert(id, block);
     }
@@ -807,6 +877,78 @@ impl RpcBackend for InMemoryBackend {
             }
         }
         Ok(TltCovenantLookup::unknown(*tx_id))
+    }
+
+    fn submit_data_commitment(
+        &mut self,
+        authorization: DataCommitmentAuthorization,
+    ) -> Result<Hash, RpcError> {
+        authorization
+            .validate()
+            .map_err(|err| RpcError::Rejected(format!("invalid data commitment: {err}")))?;
+        if authorization.public_key.is_empty() || authorization.signature.is_empty() {
+            return Err(RpcError::Rejected(
+                "data commitment missing secp256k1 auth".into(),
+            ));
+        }
+        let id = authorization.authorization_id();
+        self.da_mempool.insert(id, authorization);
+        Ok(id)
+    }
+
+    fn get_data_commitment(
+        &self,
+        authorization_id: Option<&Hash>,
+        source: Option<DataCommitmentSource>,
+        sequence: Option<u64>,
+    ) -> Result<DataCommitmentLookup, RpcError> {
+        if let Some(id) = authorization_id {
+            if let Some(authorization) = self.da_mempool.get(id) {
+                return Ok(DataCommitmentLookup::pending(authorization.clone(), true));
+            }
+            if let Some((block_id, index)) = self.da_index.get(id).copied() {
+                if let Some(block) = self.blocks.get(&block_id) {
+                    if let Some(authorization) = block.data_commitments.get(index as usize) {
+                        let confirmations = self.tip_confirmations(&block_id);
+                        return Ok(DataCommitmentLookup {
+                            authorization_id: *id,
+                            status: if confirmations.is_some() {
+                                "confirmed".into()
+                            } else {
+                                "reverted".into()
+                            },
+                            block_id: Some(block_id),
+                            index: Some(index),
+                            confirmations,
+                            finalized: false,
+                            pow_work_met: confirmations.is_some(),
+                            acceptance: Some("Accepted".into()),
+                            lane_enabled: true,
+                            authorization: Some(authorization.clone()),
+                        });
+                    }
+                }
+            }
+            return Ok(DataCommitmentLookup::unknown(*id, true));
+        }
+        let Some(source) = source else {
+            return Err(RpcError::InvalidParams(
+                "authorization_id or source+sequence required".into(),
+            ));
+        };
+        let Some(sequence) = sequence else {
+            return Err(RpcError::InvalidParams(
+                "authorization_id or source+sequence required".into(),
+            ));
+        };
+        for authorization in self.da_mempool.values() {
+            if authorization.commitment.source == source
+                && authorization.commitment.sequence == sequence
+            {
+                return Ok(DataCommitmentLookup::pending(authorization.clone(), true));
+            }
+        }
+        Ok(DataCommitmentLookup::unknown(Hash::ZERO, true))
     }
 
     fn submit_account_transfer(&mut self, _tx: AccountTransfer) -> Result<Hash, RpcError> {

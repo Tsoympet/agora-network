@@ -509,6 +509,10 @@ impl ChainState {
         Ok(self.load_header(hash)?.is_some() || self.dag.contains(hash))
     }
 
+    pub fn auth_context(&self) -> Option<TxAuthContext> {
+        self.auth.clone()
+    }
+
     /// Parents of `block` that are not yet in the local DAG / store.
     pub fn missing_parents_of(&self, block: &Block) -> Vec<Hash> {
         block
@@ -1486,6 +1490,13 @@ impl ChainState {
                 for tx in &block.tlt_covenants {
                     self.repoint_primary_covenant(&mut tip_batch, &tx.tx_id(), &target)?;
                 }
+                for authorization in &block.data_commitments {
+                    self.repoint_primary_data_commitment(
+                        &mut tip_batch,
+                        &authorization.authorization_id(),
+                        &target,
+                    )?;
+                }
             }
         }
         for hash in &target[prefix..] {
@@ -1500,6 +1511,14 @@ impl ChainState {
                     agora_state_machine::set_primary_covenant_tx_location(
                         &mut tip_batch,
                         &tx.tx_id(),
+                        hash,
+                        index as u32,
+                    );
+                }
+                for (index, authorization) in block.data_commitments.iter().enumerate() {
+                    agora_state_machine::set_primary_data_commitment_location(
+                        &mut tip_batch,
+                        &authorization.authorization_id(),
                         hash,
                         index as u32,
                     );
@@ -1578,6 +1597,23 @@ impl ChainState {
         if let Some((block_id, index)) = inclusions.into_iter().find(|(b, _)| blue_set.contains(b))
         {
             agora_state_machine::set_primary_covenant_tx_location(batch, tx_id, &block_id, index);
+        }
+        Ok(())
+    }
+
+    fn repoint_primary_data_commitment(
+        &self,
+        batch: &mut WriteBatch,
+        id: &Hash,
+        virtual_blues: &[Hash],
+    ) -> Result<(), AdmitError> {
+        let inclusions =
+            agora_state_machine::list_data_commitment_inclusions(self.store.as_ref(), id)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        let blue_set: HashSet<Hash> = virtual_blues.iter().copied().collect();
+        if let Some((block_id, index)) = inclusions.into_iter().find(|(b, _)| blue_set.contains(b))
+        {
+            agora_state_machine::set_primary_data_commitment_location(batch, id, &block_id, index);
         }
         Ok(())
     }

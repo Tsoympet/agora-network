@@ -7,6 +7,7 @@ use agora_types::{
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::ibd::short_ids_for_block;
+use crate::typed_compact::TypedCompactBody;
 
 /// Wire envelopes for gossip payloads.
 #[allow(clippy::large_enum_variant)]
@@ -83,6 +84,12 @@ pub enum NetworkMessage {
     DrcOfferCancel(agora_types::DrcOfferCancelTx),
     /// Appended after offer gossip; TLT covenant spends on the transaction topic.
     TltCovenant(agora_types::TltCovenantTx),
+    /// Appended in Trident protocol v25; signed DA authorization on the tx topic.
+    DataCommitment(agora_types::DataCommitmentAuthorization),
+    /// Appended in Trident protocol v26; raw Ethereum bytes (version 2). Not Agora-signed.
+    OvlRawExecution(agora_types::OvlExecutionTx),
+    /// Appended in Trident protocol v27; named-lane compact body (not UTXO short ids).
+    TypedCompactBlock(TypedCompactBody),
 }
 
 impl NetworkMessage {
@@ -94,18 +101,21 @@ impl NetworkMessage {
         borsh::from_slice(bytes)
     }
 
-    /// Build compact gossip for UTXO-only blocks.
+    /// Build compact gossip.
     ///
-    /// Multi-lane blocks use the full body until a versioned compact format can
-    /// commit lane kinds without ambiguity.
+    /// UTXO-only blocks keep `CompactBlock`. Named typed lanes use
+    /// `TypedCompactBlock`. Lanes this version cannot name (detached
+    /// multisign attachments) still send the full body.
     pub fn compact_from_block(block: &Block) -> Self {
-        if block.requires_full_body_gossip() {
-            Self::Block(block.clone())
-        } else {
+        if !block.requires_full_body_gossip() {
             Self::CompactBlock {
                 header: block.header.clone(),
                 short_ids: short_ids_for_block(block),
             }
+        } else if let Some(body) = TypedCompactBody::from_block(block) {
+            Self::TypedCompactBlock(body)
+        } else {
+            Self::Block(block.clone())
         }
     }
 }
@@ -113,10 +123,23 @@ impl NetworkMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::typed_compact::TYPED_COMPACT_VERSION;
     use agora_types::{
         Address, Amount, DataAvailabilityCommitment, DataCommitmentAuthorization,
         DrcAccountPolicyTx, Hash,
     };
+
+    fn assert_typed_compact(block: &Block) {
+        match NetworkMessage::compact_from_block(block) {
+            NetworkMessage::TypedCompactBlock(body) => {
+                assert_eq!(body.version, TYPED_COMPACT_VERSION);
+                let msg = NetworkMessage::TypedCompactBlock(body);
+                assert_eq!(NetworkMessage::decode(&msg.encode()).unwrap(), msg);
+                assert_eq!(msg.encode()[0], 35);
+            }
+            other => panic!("expected typed compact, got {other:?}"),
+        }
+    }
 
     #[test]
     fn compact_and_get_block_roundtrip() {
@@ -184,8 +207,7 @@ mod tests {
             ));
         block.header.tx_root = block.compute_body_root();
 
-        let message = NetworkMessage::compact_from_block(&block);
-        assert_eq!(message, NetworkMessage::Block(block));
+        assert_typed_compact(&block);
     }
 
     #[test]
@@ -221,7 +243,7 @@ mod tests {
         block.header.tx_root = block.compute_body_root();
 
         let message = NetworkMessage::compact_from_block(&block);
-        assert_eq!(message, NetworkMessage::Block(block.clone()));
+        assert_typed_compact(&block);
         assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
     }
 
@@ -312,8 +334,7 @@ mod tests {
             multisign: None,
         });
         block.header.tx_root = block.compute_body_root();
-        let message = NetworkMessage::compact_from_block(&block);
-        assert_eq!(message, NetworkMessage::Block(block));
+        assert_typed_compact(&block);
     }
 
     #[test]
@@ -336,8 +357,7 @@ mod tests {
         );
         block.drc_ticket_creates.push(create);
         block.header.tx_root = block.compute_body_root();
-        let full = NetworkMessage::compact_from_block(&block);
-        assert_eq!(full, NetworkMessage::Block(block));
+        assert_typed_compact(&block);
     }
 
     #[test]
@@ -363,6 +383,30 @@ mod tests {
         assert_eq!(gossip.encode()[0], 32);
         assert_eq!(NetworkMessage::decode(&gossip.encode()).unwrap(), gossip);
 
+        let da = NetworkMessage::DataCommitment(DataCommitmentAuthorization::unsigned(
+            Address([7; 20]),
+            0,
+            DataAvailabilityCommitment::agora_layers_ovolos_batch(
+                "agora-ovolos-testnet-1".into(),
+                Hash([1; 32]),
+                Hash([2; 32]),
+                3,
+                Hash([4; 32]),
+                Hash([5; 32]),
+                Hash([6; 32]),
+                7,
+                8,
+            ),
+        ));
+        assert_eq!(da.encode()[0], 33);
+        assert_eq!(NetworkMessage::decode(&da.encode()).unwrap(), da);
+
+        let raw = NetworkMessage::OvlRawExecution(agora_types::OvlExecutionTx::raw_ethereum(vec![
+            0x02, 0xc0,
+        ]));
+        assert_eq!(raw.encode()[0], 34);
+        assert_eq!(NetworkMessage::decode(&raw.encode()).unwrap(), raw);
+
         let mut block = Block::utxo(
             BlockHeader {
                 version: 1,
@@ -376,8 +420,7 @@ mod tests {
         );
         block.tlt_covenants.push(tx);
         block.header.tx_root = block.compute_body_root();
-        let full = NetworkMessage::compact_from_block(&block);
-        assert_eq!(full, NetworkMessage::Block(block));
+        assert_typed_compact(&block);
     }
 
     #[test]
@@ -419,8 +462,7 @@ mod tests {
             multisign: None,
         });
         block.header.tx_root = block.compute_body_root();
-        let full = NetworkMessage::compact_from_block(&block);
-        assert_eq!(full, NetworkMessage::Block(block));
+        assert_typed_compact(&block);
         let empty = Block::utxo(
             BlockHeader {
                 version: 1,

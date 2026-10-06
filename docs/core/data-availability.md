@@ -1,8 +1,10 @@
 # Trident data-commitment consensus lane
 
-**Maturity:** Experimental. The consensus block/state lane exists, but live
-fee-policy activation, standalone submission, and public district endpoints do
-not.
+**Maturity:** Experimental. The consensus block/state lane, standalone gossip,
+mempool, template selection, and submit/get RPC exist. Default boot stays
+fail-closed until a reviewed TLT inclusion-fee policy (or
+`AGORA_ENABLE_DA_LANE=1`) supplies a DA network fingerprint. Live fee-policy
+activation and public district endpoints do not.
 
 ## Roadmap interpretation
 
@@ -30,8 +32,8 @@ availability by itself, or satisfy Trident finality.
 | Lab timer status | `finalizeDue` advances on the historical challenge timer without consulting L1 | Must never be called Trident finality |
 | L1 body | `Block.data_commitments` is appended after the v4 lanes and committed by body-root v5 | Existing UTXO/v2/v3/v4 roots remain unchanged when the DA lane is empty |
 | L1 state | Accepted authorizations, per-operator replay nonces, `(source, sequence)` indexes, acceptance status, state root, and revert snapshots are atomic | Exact signed retries are idempotent; conflicts follow Virtual blue order and reorg cleanly |
-| P2P/mempool/template | Full `Block` propagation carries the lane; compact blocks fall back to full bodies | No standalone DA gossip, mempool selection, or operator submission exists |
-| RPC | No submit/lookup method for data commitments; transaction confirmation lookup covers the TLT transaction index | No truthful live submission or confirmation tracking |
+| P2P/mempool/template | `NetworkMessage::DataCommitment` on the tx topic; mempool reserves `(source, sequence)` and operator nonce; templates include the lane only when the DA fingerprint is set; compact still uses full bodies | Default boot still fail-closes inclusion without a fingerprint |
+| RPC | `agora_submitDataCommitment` (token-gated) and public `agora_getDataCommitment` with pending/accepted/confirmed/finalized/conflict_lost/reverted | Submit rejects with the fee-policy message unless the fingerprint is set; get never maps lab `recordDa` to finality |
 | Layer checkpoint | Persists ledger/runtime snapshots, but not tracked batch commitments or local DA flags | A restarted process cannot reconstruct old submit intent; there is no durable L1 outbox, retry state, tx id, or confirmation state |
 | District HTTP surface | Mixed reads with mint/credit/payment mutations, no bearer auth, no rate limiter | It is forced to loopback and is not a public district API |
 | Trident boot | Genesis v3 live-state materialization and startup gate remain incomplete | No public Trident network target is available |
@@ -92,22 +94,35 @@ They entered the composed root at v7 and remain committed by the current
 and apply/revert with acceptance in the same `WriteBatch`, so reorg and crash
 recovery use the existing `pending_virtual` protocol.
 
-The DA lane entered at Trident protocol v10 / state transition v11. The current
-aggregate fingerprint is protocol v24 / `agora-trident-state-v22`; later bumps
-do not reinterpret the DA lane described here. Frozen pre-Trident/v2 constants
-remain unchanged.
-No standalone `NetworkMessage` variant was added: authenticated commitments
-travel only inside full blocks, preserving every existing wire-enum
-discriminant.
+The DA lane entered at Trident protocol v10 / state transition v11. Protocol
+v25 appends standalone `NetworkMessage::DataCommitment` gossip. The current
+aggregate fingerprint is protocol v27 / `agora-trident-state-v22` after typed
+compact gossip. Frozen pre-Trident/v2 constants remain unchanged.
+
+Authenticated commitments now travel on the transaction gossip topic as
+`NetworkMessage::DataCommitment` (Borsh discriminant 33, appended after
+`TltCovenant`). Full blocks still carry `Block.data_commitments`. Named
+typed compact (v27) carries DA short ids under their own lane kind; UTXO
+compact is not used. Detached multisign attachments still force a full body.
 
 ## Fail-closed fee and transport policy
 
 Architecture assigns DA bytes/state growth to TLT base-network fees, but no
 amount, sponsorship envelope, or debit rule is currently specified. This
 change does not invent one. `TxAuthContext` therefore requires an explicit DA
-network fingerprint and all current node boot/RPC contexts leave it absent.
+network fingerprint and default node boot/RPC contexts leave it absent.
 Any DA-bearing block on those paths fails with `data commitment lane disabled
 pending TLT base-fee policy`.
+
+`agora_submitDataCommitment` / gossip admission use the same fail-closed
+check. `agora_getDataCommitment` is a public read and reports `pending`,
+`accepted`, `confirmed` (work depth), `finalized` (TLT PoW ∧ ≥⅔ OVL ∧ ≥⅔ DRC),
+`conflict_lost`, `reverted`, or `unknown`. It never treats lab `recordDa` as
+L1 finality (`lab_record_da: false`).
+
+Operators may opt in with `AGORA_ENABLE_DA_LANE=1`, which binds the DA
+fingerprint to the node's live mesh fingerprint. That is Experimental: it
+does not create a TLT debit schedule.
 
 The 64-commitment and 1 MB block caps are consensus resource limits, not a fee
 schedule. Test-only/custom Trident contexts can activate the lane to prove
@@ -115,20 +130,15 @@ consensus and reorg behavior.
 
 ## Remaining activation work
 
-Before an operator submitter can be enabled:
+Transport is wired. Before default public boot can leave the fingerprint on:
 
 1. Specify and review a TLT base-fee/sponsorship rule, commit it in Trident
    genesis/consensus policy, and derive the DA activation context only from
-   that policy.
-2. Add standalone P2P message validation, bounded mempool admission, deterministic template
-   ordering, inclusion eviction, and restart behavior.
-3. Add an authenticated submit RPC plus a read RPC whose states distinguish pending,
-   accepted, confirmed by work depth, finalized by the full PoW + OVL quorum +
-   DRC quorum predicate, conflict-lost, and reverted.
-4. Add a durable `agora-layers` outbox that writes intent before submission,
-   retries exact payloads, records returned transaction ids, resumes after
+   that policy (instead of the operator opt-in).
+2. Add a durable `agora-layers` outbox that writes intent before submission,
+   retries exact payloads, records returned authorization ids, resumes after
    restart, and never converts timeout/confirmations into a finality claim.
-5. Only after accepted L1 provenance exists: add a separate bounded read-only
+3. Only after accepted L1 provenance exists: add a separate bounded read-only
    district service with explicit `canonical_l1: false` and `maturity:
    "Experimental"` fields, cursor pagination, response-size caps, rate limits,
    an explicit public-bind gate, and authentication policy. It must not route

@@ -9,6 +9,7 @@ export {
   type LightClientConfig,
   type LightCommunityRegistry,
   type LightConstitution,
+  type LightDataCommitmentLookup,
   type LightDrcOfferLookup,
   type LightDrcOfferPage,
   type LightFinality,
@@ -97,6 +98,22 @@ export {
   type BuiltTransfer,
   type WalletAccount,
 } from "./wallet";
+export {
+  buildSignedAccountTransfer,
+  buildSignedDrcOfferCancel,
+  buildSignedDrcOfferCreate,
+  buildSignedDrcPayment,
+  buildSignedOvlExecution,
+  buildSignedTltCovenant,
+  sendAccountTransfer,
+  sendDrcOfferCancel,
+  sendDrcOfferCreate,
+  sendDrcPayment,
+  sendOvlExecution,
+  sendTltCovenant,
+  type BuiltTypedEnvelope,
+  type NativeAssetTicker as TypedLaneAsset,
+} from "./typed-lanes";
 export {
   clearPersistedVault,
   DEFAULT_VAULT_STORAGE_KEY,

@@ -2,9 +2,10 @@
 //!
 //! Reads come from the canonical execution world. `eth_sendRawTransaction`
 //! validates a signed envelope and records it as pending. It does not commit
-//! consensus state and it does not publish on the Agora-signed mempool.
-//! Cross-node gossip of raw envelopes is PLANNED: version 2 is rejected by
-//! that mempool, and the existing fingerprint has no separate raw-EVM topic.
+//! consensus state and it does not enter the Agora-signed mempool. Version 2
+//! is gossiped as `NetworkMessage::OvlRawExecution` (protocol v26) on a
+//! separate raw pool. Authorization is the Ethereum secp256k1 signature
+//! inside the RLP bytes, not an Agora account signature.
 
 use std::collections::BTreeMap;
 

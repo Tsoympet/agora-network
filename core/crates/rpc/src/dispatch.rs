@@ -1,7 +1,8 @@
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx,
-    DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
-    DrcIssuedTransferTx, DrcLedgerObjectKind, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    AccountTransfer, Address, Amount, Block, DataCommitmentAuthorization, DataCommitmentSource,
+    DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx,
+    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedTransferTx,
+    DrcLedgerObjectKind, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OvlExecutionTx,
     TltCovenantTx, Transaction,
@@ -113,6 +114,28 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let tx_id = param_hash(&req.params, "tx_id")?;
                 let lookup = self.backend.get_tlt_covenant(&tx_id)?;
                 Ok(covenant_lookup_to_json(&lookup))
+            }
+            RpcMethod::SubmitDataCommitment => {
+                let raw = req
+                    .params
+                    .get("authorization")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let authorization: DataCommitmentAuthorization = serde_json::from_value(raw)
+                    .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+                let id = self.backend.submit_data_commitment(authorization)?;
+                Ok(json!({ "authorization_id": id.to_hex() }))
+            }
+            RpcMethod::GetDataCommitment => {
+                let authorization_id = optional_hash(&req.params, "authorization_id")?;
+                let source = optional_data_commitment_source(&req.params)?;
+                let sequence = optional_u64_opt(&req.params, "sequence")?;
+                let lookup = self.backend.get_data_commitment(
+                    authorization_id.as_ref(),
+                    source,
+                    sequence,
+                )?;
+                Ok(data_commitment_lookup_to_json(&lookup))
             }
             RpcMethod::SubmitAccountTransfer => {
                 let raw = req
@@ -938,6 +961,25 @@ fn covenant_lookup_to_json(lookup: &crate::backend::TltCovenantLookup) -> Value 
     })
 }
 
+fn data_commitment_lookup_to_json(lookup: &crate::backend::DataCommitmentLookup) -> Value {
+    json!({
+        "authorization_id": lookup.authorization_id.to_hex(),
+        "status": lookup.status,
+        "block_id": lookup.block_id.map(|h| h.to_hex()),
+        "index": lookup.index,
+        "confirmations": lookup.confirmations,
+        "finalized": lookup.finalized,
+        "pow_work_met": lookup.pow_work_met,
+        "acceptance": lookup.acceptance,
+        "lane_enabled": lookup.lane_enabled,
+        "canonical_l1": true,
+        "lab_record_da": false,
+        "authorization": lookup.authorization.as_ref().map(|authorization| {
+            serde_json::to_value(authorization).unwrap_or(Value::Null)
+        }),
+    })
+}
+
 fn tx_lookup_to_json(lookup: &crate::backend::TxLookup) -> Value {
     json!({
         "tx_id": lookup.tx_id.to_hex(),
@@ -1154,6 +1196,30 @@ fn block_param(params: &Value) -> Result<Value, RpcError> {
 fn param_hash(params: &Value, key: &str) -> Result<Hash, RpcError> {
     let v = single_or_named(params, key)?;
     parse_hash_value(&v, key)
+}
+
+fn optional_hash(params: &Value, key: &str) -> Result<Option<Hash>, RpcError> {
+    let Some(value) = params.as_object().and_then(|object| object.get(key)) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    parse_hash_value(value, key).map(Some)
+}
+
+fn optional_data_commitment_source(
+    params: &Value,
+) -> Result<Option<DataCommitmentSource>, RpcError> {
+    let Some(value) = params.as_object().and_then(|object| object.get("source")) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    serde_json::from_value(value.clone())
+        .map(Some)
+        .map_err(|err| RpcError::InvalidParams(format!("invalid DA source: {err}")))
 }
 
 fn parse_hash_value(v: &Value, key: &str) -> Result<Hash, RpcError> {
@@ -2748,5 +2814,51 @@ mod tests {
         assert_eq!(found["status"], "pending");
         assert_eq!(found["tx_id"], tx.tx_id().to_hex());
         assert!(RpcMethod::parse("agora_submitTltCovenant").is_some());
+    }
+
+    #[test]
+    fn submit_and_query_data_commitment() {
+        use agora_types::DataAvailabilityCommitment;
+
+        let authorization = DataCommitmentAuthorization::unsigned(
+            Address([7; 20]),
+            0,
+            DataAvailabilityCommitment::agora_layers_ovolos_batch(
+                "agora-ovolos-testnet-1".into(),
+                Hash([1; 32]),
+                Hash([2; 32]),
+                3,
+                Hash([4; 32]),
+                Hash([5; 32]),
+                Hash([6; 32]),
+                7,
+                8,
+            ),
+        );
+        let mut signed = authorization.clone();
+        signed.public_key = vec![1; 33];
+        signed.signature = vec![2; 64];
+        let mut rpc = RpcDispatcher::new(InMemoryBackend::new());
+        let submitted = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_submitDataCommitment".into(),
+            params: json!({ "authorization": signed }),
+        });
+        assert!(submitted.error.is_none(), "{submitted:?}");
+        let id = submitted.result.unwrap()["authorization_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let queried = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getDataCommitment".into(),
+            params: json!({ "authorization_id": id }),
+        });
+        let found = queried.result.unwrap();
+        assert_eq!(found["status"], "pending");
+        assert_eq!(found["lab_record_da"], false);
+        assert_eq!(found["finalized"], false);
+        assert!(RpcMethod::parse("agora_submitDataCommitment").is_some());
+        assert!(RpcMethod::parse("agora_getDataCommitment").is_some());
     }
 }

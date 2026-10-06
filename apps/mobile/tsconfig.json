@@ -5,6 +5,7 @@
     "jsx": "react-native",
     "strict": true,
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "noEmit": true,
     "types": ["react"]
