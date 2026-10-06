@@ -20,16 +20,17 @@ All arithmetic and recipient overflow checks occur before mutation. The
 transition returns a deterministic receipt and journals account/reward-pool
 state for BlockDAG reorgs.
 
-## Intentionally inactive
+## Version 1 stays the Agora-signed lane
 
-- `to == Address::ZERO` contract creation
-- non-empty call data / contract execution
-- persistent contract code or storage
-- `eth_call` compatibility
+Version 1 still rejects contract creation and non-empty call data. Its fee
+credits the OVL reward pool. Those requests fail validation instead of
+succeeding as no-ops.
 
-These requests fail consensus validation instead of being treated as successful
-no-ops. The legacy `agora-ovolos-rollup` `fund_caller`, compact unsigned
-encoding, OVL PoW, and second OVL ledger are not part of this L1 path.
+Version 2 carries raw Ethereum bytes and is specified in
+[`ovl-evm.md`](ovl-evm.md). It is dev-gated, it is not admitted to this
+mempool, and the parity status remains incomplete. The legacy
+`agora-ovolos-rollup` fixed funded caller, unsigned compact encoding, OVL PoW,
+and second OVL ledger are not part of either lane.
 
 ## Wire and acceptance
 

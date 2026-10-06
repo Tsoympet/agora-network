@@ -212,9 +212,14 @@ pub fn native_supply_root(store: &StateStore) -> Result<Hash, StateError> {
 
 /// Invariant: burned ≤ issued ≤ max for every native asset.
 pub fn verify_supply_invariants(store: &StateStore) -> Result<(), StateError> {
+    let schema = load_schema_version(store)?;
     for asset in NativeAssetId::ALL {
         let state = load_native_supply_state(store, asset)?;
-        if state.issued_supply > state.maximum_supply {
+        // Schema 22 leaves OVL uncapped. The historical maximum remains recorded
+        // and is not a live issuance ceiling. DRC and TLT caps stay enforced.
+        let historical_ovl_cap_is_live =
+            !(asset == NativeAssetId::OVL && crate::ovl_evm_state::ovl_evm_schema_active(schema));
+        if historical_ovl_cap_is_live && state.issued_supply > state.maximum_supply {
             return Err(StateError::SupplyCapExceeded);
         }
         let _ = Amount::from_base_units(state.net_supply);
@@ -449,7 +454,8 @@ mod tests {
         let mut burn = WriteBatch::new();
         assert!(matches!(
             burn_drc_fee_into(&store, &mut burn, 0),
-            Err(StateError::InvalidTx(message)) if message.contains("found 22")
+            Err(StateError::InvalidTx(message))
+                if message.contains(&format!("found {}", SCHEMA_VERSION + 1))
         ));
     }
 }

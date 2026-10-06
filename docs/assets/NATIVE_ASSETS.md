@@ -40,7 +40,7 @@ OVL, or DRC outside protocol-defined issuance.
 | Asset | Primary state | Notes |
 | --- | --- | --- |
 | TLT | UTXO set | Only mineable asset; coinbase + base fees |
-| OVL | Account module | Sole smart-contract/VM execution and gas domain; validator collateral; **one** balance definition |
+| OVL | Account module plus the schema-22 EVM world | Sole smart-contract/VM execution and gas domain; validator collateral; native OVL is not an ERC-20. Agora keys and Ethereum keys are different derivations |
 | DRC | Account module | Contract-free payments and typed settlement state; validator collateral; not a stablecoin by default |
 
 Cross-asset input/output mismatch → `Invalid`.

@@ -1,0 +1,21 @@
+[package]
+name = "agora-ovl-evm"
+publish = false
+description = "Pinned OVL-EVM-v1 Shanghai execution for Agora Trident"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+agora-types = { workspace = true }
+alloy-primitives = { version = "1.6", default-features = false, features = ["std", "rlp"] }
+alloy-rlp = "0.3"
+borsh = { workspace = true }
+hex = { workspace = true }
+k256 = { version = "0.13", features = ["ecdsa"] }
+revm = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }

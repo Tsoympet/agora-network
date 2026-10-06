@@ -16,10 +16,11 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Trident fingerprint domain + versions (distinct mesh from v2).
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
-/// v23 activates the root-committed DRC object/owner/accepted-operation index.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 23;
+/// v24 commits the schema-22 OVL wei quotient and the dev-gated OVL-EVM-v1 world.
+/// DRC object indexing from v23 stays in force.
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 24;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v9";
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v21";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v22";
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v2";
 
 /// Canonical network fingerprint hash (pre-Trident / genesis v2).
@@ -83,7 +84,7 @@ mod tests {
         assert_ne!(v2, t1);
         assert_eq!(
             t1.to_hex(),
-            "ae061ab5dad44d057ed311f9fd8c8622c28bab3177856adf91f6b4f5a4f2eed5"
+            "e890a8e2f209c8925415092943a1e44b65ace0848033deba11fc378386e59620"
         );
         let t2 = trident_network_fingerprint("agora-trident-testnet-2", &genesis, &policy);
         assert_ne!(t1, t2);
@@ -99,9 +100,9 @@ mod tests {
             TRIDENT_CONSENSUS_POLICY_VERSION,
         ));
         assert_ne!(t1, prior);
-        assert_eq!(TRIDENT_PROTOCOL_VERSION, 23);
+        assert_eq!(TRIDENT_PROTOCOL_VERSION, 24);
         assert_eq!(TRIDENT_TX_SIGNING_VERSION, "agora-trident-tx-v9");
-        assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v21");
+        assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v22");
     }
 
     #[test]

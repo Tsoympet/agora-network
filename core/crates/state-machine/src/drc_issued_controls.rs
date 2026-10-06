@@ -490,6 +490,7 @@ pub fn apply_drc_issued_clawback(
     if tx.amount.as_units() > line.balance.as_units() {
         return Err(StateError::InvalidTx("clawback exceeds balance".into()));
     }
+    crate::drc_offer::assert_issued_offer_reserve(store, &tx.holder, &asset, tx.amount.as_units())?;
 
     let sequence_ctx = if tx.version >= DRC_ISSUED_CLAWBACK_TICKET_VERSION {
         Some(begin_drc_account_sequence(

@@ -188,6 +188,25 @@ impl Transaction {
         Hash::hash_borsh(self)
     }
 
+    /// Live v1 transfers have no locktime on the wire. The implicit value is immediate.
+    pub const fn effective_lock_time(&self) -> u64 {
+        0
+    }
+
+    /// Live v1 inputs have no sequence on the wire. The implicit value is final.
+    pub fn effective_sequence(&self, index: usize) -> Option<u32> {
+        if index < self.inputs.len() {
+            Some(crate::tlt_script::TLT_SEQUENCE_FINAL)
+        } else {
+            None
+        }
+    }
+
+    /// v1 bytes cannot signal replace-by-fee. Implicit sequences are final.
+    pub const fn signals_replace_by_fee(&self) -> bool {
+        false
+    }
+
     pub fn unsigned(version: u32, inputs: Vec<TxIn>, outputs: Vec<TxOut>, nonce: u64) -> Self {
         Self {
             version,

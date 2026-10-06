@@ -83,6 +83,6 @@ semantics.
 
 - Trident protocol **v15**, tx signing **v9**, state transition **`agora-trident-state-v16`**, body **v12**  
 - `UtxoJournal` migration **v9** adds `drc_ticket_meta_before` for reorg rollback
-- Current aggregate protocol **v23** / state transition
-  **`agora-trident-state-v21`** adds the common object mirror and accepted
+- Current aggregate protocol **v24** / state transition
+  **`agora-trident-state-v22`** adds the common object mirror and accepted
   operation receipt without changing Ticket bytes.

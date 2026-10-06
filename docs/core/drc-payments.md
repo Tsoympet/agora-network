@@ -254,7 +254,7 @@ Trident state root.
 flow. Payment-v4 expiry entered at Trident protocol v10,
 transaction-signing v5, state-transition `agora-trident-state-v11`,
 state-root v8, and body-root v8. The current aggregate protocol/state
-fingerprint is v23 / `agora-trident-state-v21`; those later lanes do not
+fingerprint is v24 / `agora-trident-state-v22`; those later lanes do not
 reinterpret payment-v4. This raised the Experimental datadir schema to v14; an
 older Experimental datadir must be replayed/reindexed (or recreated). Frozen
 payment-v1/v2/v3, policy-v1, outbox-v1/v2/v3, receipt-v1/v2, body-v1–v7, and

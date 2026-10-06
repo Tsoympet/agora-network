@@ -6,13 +6,22 @@ use crate::{
     AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcCheckCancelTx,
     DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
     DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx,
-    DrcMultisignBlockAttachment, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash,
-    OvlExecutionTx, SignedStakeTx, Transaction,
+    DrcMultisignBlockAttachment, DrcOfferCancelTx, DrcOfferCreateTx, DrcPaymentChannelClaimTx,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
+    DrcTrustLineSetTx, Hash, OvlExecutionTx, SignedStakeTx, TltCovenantTx, Transaction,
 };
 
-/// Explicit version/domain for bodies carrying native DRC payment channel operations.
+/// Explicit version/domain for bodies carrying native DRC offer operations.
+pub const TRIDENT_BLOCK_BODY_V18_VERSION: u16 = 18;
+pub const TRIDENT_BLOCK_BODY_V18_DOMAIN: &[u8] = b"agora-block-body-v18";
+/// Combined trailing lane when TLT covenants are present (offers may also be).
+///
+/// Offer-only bodies keep the v18 wrap so DEX roots stay stable. Covenant bytes
+/// cannot share that wrap: both prototypes used the same trailing slot.
+pub const TRIDENT_BLOCK_BODY_V19_VERSION: u16 = 19;
+pub const TRIDENT_BLOCK_BODY_V19_DOMAIN: &[u8] = b"agora-block-body-v19";
+/// Explicit version/domain for bodies carrying issued-control operations.
 pub const TRIDENT_BLOCK_BODY_V17_VERSION: u16 = 17;
 pub const TRIDENT_BLOCK_BODY_V17_DOMAIN: &[u8] = b"agora-block-body-v17";
 pub const TRIDENT_BLOCK_BODY_V16_VERSION: u16 = 16;
@@ -154,6 +163,14 @@ pub struct Block {
     /// Detached, body-root-committed DRC multisign authorization (consensus lane).
     #[serde(default)]
     pub drc_multisign_attachments: Vec<DrcMultisignBlockAttachment>,
+    /// Native order-book offers. Empty lanes stay absent from frozen pre-v18 bytes.
+    #[serde(default)]
+    pub drc_offer_creates: Vec<DrcOfferCreateTx>,
+    #[serde(default)]
+    pub drc_offer_cancels: Vec<DrcOfferCancelTx>,
+    /// TLT covenant spends. Absent from the wire when empty so v1 block bytes stay frozen.
+    #[serde(default)]
+    pub tlt_covenants: Vec<TltCovenantTx>,
 }
 
 impl Block {
@@ -187,7 +204,10 @@ impl Block {
             drc_issued_asset_policy_sets: Vec::new(),
             drc_trust_line_issuer_controls: Vec::new(),
             drc_issued_clawbacks: Vec::new(),
+            drc_offer_creates: Vec::new(),
+            drc_offer_cancels: Vec::new(),
             drc_multisign_attachments: Vec::new(),
+            tlt_covenants: Vec::new(),
         }
     }
 
@@ -218,6 +238,19 @@ impl Block {
             || !self.drc_trust_line_issuer_controls.is_empty()
             || !self.drc_issued_clawbacks.is_empty()
             || !self.drc_multisign_attachments.is_empty()
+            || !self.drc_offer_creates.is_empty()
+            || !self.drc_offer_cancels.is_empty()
+            || !self.tlt_covenants.is_empty()
+    }
+
+    /// Compact gossip is UTXO-only. Any typed lane needs the full body until a
+    /// versioned short-id format can name lane kinds without ambiguity.
+    pub fn requires_full_body_gossip(&self) -> bool {
+        !self.account_transfers.is_empty()
+            || !self.stake_ops.is_empty()
+            || !self.ovl_executions.is_empty()
+            || !self.drc_payments.is_empty()
+            || self.has_post_v4_body_lanes()
     }
 
     /// Compute a simple pairwise tx merkle root (duplicate last leaf when odd).
@@ -252,7 +285,9 @@ impl Block {
     /// data commitments use v5; DRC account policies use v6; address-based DRC
     /// deposit preauthorizations use v7; payment-v4 expiry uses v8; regular keys use v9;
     /// signer lists use v10; detached multisign attachments use v11; ticket creates use v12;
-    /// native DRC escrow uses v13; native DRC checks use v14; native DRC payment channels use v15.
+    /// native DRC escrow uses v13; native DRC checks use v14; native DRC payment channels use v15;
+    /// trust lines use v16; issued controls use v17; native DRC offers use v18;
+    /// TLT covenants wrap v19 so they cannot collide with the offer v18 slot.
     pub fn compute_body_root(&self) -> Hash {
         let mut inner = self.compute_body_root_with_multisign_attachments();
         if !self.drc_ticket_creates.is_empty() {
@@ -404,6 +439,38 @@ impl Block {
                 policy_ids,
                 control_ids,
                 clawback_ids,
+            ));
+        }
+        if !self.drc_offer_creates.is_empty() || !self.drc_offer_cancels.is_empty() {
+            let create_ids: Vec<Hash> = self
+                .drc_offer_creates
+                .iter()
+                .map(DrcOfferCreateTx::offer_id)
+                .collect();
+            let cancel_ids: Vec<Hash> = self
+                .drc_offer_cancels
+                .iter()
+                .map(DrcOfferCancelTx::cancel_tx_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V18_DOMAIN,
+                TRIDENT_BLOCK_BODY_V18_VERSION,
+                inner,
+                create_ids,
+                cancel_ids,
+            ));
+        }
+        if !self.tlt_covenants.is_empty() {
+            let covenant_ids: Vec<Hash> = self
+                .tlt_covenants
+                .iter()
+                .map(TltCovenantTx::tx_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V19_DOMAIN,
+                TRIDENT_BLOCK_BODY_V19_VERSION,
+                inner,
+                covenant_ids,
             ));
         }
         inner
@@ -601,7 +668,9 @@ impl BorshSerialize for Block {
 
         // Frozen v2 bytes include the original account, stake, OVL, and DRC
         // lanes; later empty lanes must not extend that canonical encoding.
-        if !self.has_post_v4_body_lanes() {
+        // A covenant spend is the exception: the reader finds it after the
+        // post-v4 lanes, so those lanes are written (empty if unused).
+        if !self.has_post_v4_body_lanes() && self.tlt_covenants.is_empty() {
             return Ok(());
         }
 
@@ -626,7 +695,19 @@ impl BorshSerialize for Block {
         BorshSerialize::serialize(&self.drc_issued_asset_policy_sets, writer)?;
         BorshSerialize::serialize(&self.drc_trust_line_issuer_controls, writer)?;
         BorshSerialize::serialize(&self.drc_issued_clawbacks, writer)?;
-        BorshSerialize::serialize(&self.drc_multisign_attachments, writer)
+        BorshSerialize::serialize(&self.drc_multisign_attachments, writer)?;
+        if self.drc_offer_creates.is_empty()
+            && self.drc_offer_cancels.is_empty()
+            && self.tlt_covenants.is_empty()
+        {
+            return Ok(());
+        }
+        BorshSerialize::serialize(&self.drc_offer_creates, writer)?;
+        BorshSerialize::serialize(&self.drc_offer_cancels, writer)?;
+        if !self.tlt_covenants.is_empty() {
+            BorshSerialize::serialize(&self.tlt_covenants, writer)?;
+        }
+        Ok(())
     }
 }
 
@@ -661,6 +742,9 @@ impl BorshDeserialize for Block {
             drc_trust_line_issuer_controls: deserialize_trailing_vec(reader)?,
             drc_issued_clawbacks: deserialize_trailing_vec(reader)?,
             drc_multisign_attachments: deserialize_trailing_vec(reader)?,
+            drc_offer_creates: deserialize_trailing_vec(reader)?,
+            drc_offer_cancels: deserialize_trailing_vec(reader)?,
+            tlt_covenants: deserialize_trailing_vec(reader)?,
         })
     }
 }
@@ -1341,5 +1425,58 @@ mod tests {
         assert!(error
             .to_string()
             .contains("unknown field `drc_contract_calls`"));
+    }
+
+    #[test]
+    fn tlt_covenant_lane_wraps_body_root_v19_and_stays_off_empty_wire() {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        let empty_bytes = borsh::to_vec(&block).unwrap();
+        let frozen = frozen_v2_testnet_block();
+        assert_eq!(
+            hex::encode(borsh::to_vec(&frozen).unwrap()),
+            FROZEN_V2_BLOCK_BORSH_HEX
+        );
+        let legacy = block.compute_body_root();
+        block.tlt_covenants.push(TltCovenantTx {
+            version: crate::TLT_COVENANT_TX_VERSION,
+            inputs: vec![crate::TltCovenantInput {
+                previous_outpoint: crate::OutPoint {
+                    tx_id: Hash([9; 32]),
+                    index: 0,
+                },
+                sequence: crate::TLT_SEQUENCE_FINAL,
+                script_sig: vec![1],
+            }],
+            outputs: vec![crate::TltCovenantOutput {
+                value: Amount::from_base_units(1),
+                script_pubkey: vec![2],
+            }],
+            lock_time: 0,
+            nonce: 1,
+        });
+        assert_eq!(
+            block.compute_body_root(),
+            Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V19_DOMAIN,
+                TRIDENT_BLOCK_BODY_V19_VERSION,
+                legacy,
+                vec![block.tlt_covenants[0].tx_id()]
+            ))
+        );
+        let encoded = borsh::to_vec(&block).unwrap();
+        assert_ne!(encoded, empty_bytes);
+        let decoded: Block = borsh::from_slice(&encoded).unwrap();
+        assert_eq!(decoded.tlt_covenants.len(), 1);
+        assert!(decoded.drc_offer_creates.is_empty());
     }
 }

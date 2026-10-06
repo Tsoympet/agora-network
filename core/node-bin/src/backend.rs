@@ -1,5 +1,6 @@
 //! Live [`RpcBackend`] backed by chain admission + mempool.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,8 +14,8 @@ use agora_p2p::{
     Mempool, NetworkHandle, NetworkMessage, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT,
 };
 use agora_rpc::{
-    DrcDepositPreauthStatus, FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup,
-    UtxoEntry,
+    AccountBalances, DrcDepositPreauthStatus, FeeEstimate, MempoolEntry, NodeInfo, RpcBackend,
+    RpcError, TltCovenantLookup, TxLookup, UtxoEntry,
 };
 use agora_state_machine::{
     apply_account_transfer, apply_drc_account_policy, apply_drc_check_cancel, apply_drc_check_cash,
@@ -24,9 +25,9 @@ use agora_state_machine::{
     apply_signed_stake_tx, build_snapshot, canonical_community_root, governance_treasury_root,
     list_drc_account_objects, list_grants as list_canonical_grants,
     list_hubs as list_canonical_hubs, list_missions as list_canonical_missions,
-    list_passport_attestations, load_canonical_community_summary, load_canonical_governance_policy,
-    load_drc_account_policy, load_drc_check_receipt, load_drc_deposit_preauth,
-    load_drc_escrow_receipt, load_drc_issued_asset_policy_receipt,
+    list_passport_attestations, load_account, load_canonical_community_summary,
+    load_canonical_governance_policy, load_drc_account_policy, load_drc_check_receipt,
+    load_drc_deposit_preauth, load_drc_escrow_receipt, load_drc_issued_asset_policy_receipt,
     load_drc_issued_clawback_receipt, load_drc_issued_transfer_receipt, load_drc_ledger_object,
     load_drc_operation, load_drc_payment_by_invoice, load_drc_payment_channel_claim_event,
     load_drc_payment_channel_fund_event, load_drc_payment_channel_live,
@@ -35,25 +36,26 @@ use agora_state_machine::{
     load_drc_trust_line_live, load_epoch, load_known_drc_account_keys,
     load_known_drc_account_policy, load_known_drc_account_signer_summary,
     load_known_drc_deposit_authorization, load_native_supply_state, load_protocol_treasuries,
-    load_reward_pool, load_validator, lookup_drc_check_point, lookup_drc_escrow_point,
-    lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point, lookup_drc_ticket_point,
-    lookup_drc_trust_line_point, lookup_tx_location, meta_keys, outpoint_key,
-    plan_drc_mempool_reservation, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily,
-    DrcMempoolReservation, DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext,
-    WriteBatch,
+    load_reward_pool, load_validator, lookup_covenant_tx_location, lookup_drc_check_point,
+    lookup_drc_escrow_point, lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point,
+    lookup_drc_ticket_point, lookup_drc_trust_line_point, lookup_tx_location, meta_keys,
+    outpoint_key, plan_drc_mempool_reservation, validate_mempool_covenant,
+    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, DrcMempoolReservation,
+    DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAcceptedOperationReceipt,
-    DrcAccountPolicy, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
-    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
-    DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcLedgerObjectDescriptor,
-    DrcLedgerObjectKind, DrcLedgerObjectPage, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
-    DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
-    TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
-    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
-    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    sequence_signals_rbf, AccountTransfer, Address, Amount, Block, CheckpointAttestation,
+    DrcAcceptedOperationReceipt, DrcAccountPolicy, DrcAccountPolicyTx, DrcCheckCancelTx,
+    DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
+    DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx,
+    DrcLedgerObjectDescriptor, DrcLedgerObjectKind, DrcLedgerObjectPage, DrcPaymentChannelClaimTx,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx,
+    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
+    DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
+    SignedStakeTx, TltCovenantTx, Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
+    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -147,6 +149,71 @@ pub(crate) fn admit_transaction(
         .map_err(|e| RpcError::Rejected(e.to_string()))
 }
 
+/// Covenant lane admission. v1 wire and premine address locks are unchanged.
+pub(crate) fn admit_tlt_covenant(
+    store: &StateStore,
+    chain: &Mutex<ChainState>,
+    mempool: &Mutex<Mempool>,
+    tx: TltCovenantTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let (blue_score, median_time_secs) = {
+        let chain = chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?;
+        let blue_score = chain
+            .next_template_blue_score()
+            .map_err(|err| RpcError::Internal(err.to_string()))?;
+        let parents = chain
+            .select_template_parents()
+            .map_err(|err| RpcError::Internal(err.to_string()))?;
+        let median_time_secs = chain
+            .template_median_time_secs(&parents)
+            .map_err(|err| RpcError::Internal(err.to_string()))?;
+        (blue_score, median_time_secs)
+    };
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    // A replacement must be checked as if the conflicting reservations were free.
+    // `replace_covenant` still rejects v1 conflicts, missing signals, and low fees.
+    let mut spent = pool.reserved().clone();
+    let conflicts = tx
+        .inputs
+        .iter()
+        .any(|input| spent.contains(&input.previous_outpoint));
+    if conflicts {
+        if !tx
+            .inputs
+            .iter()
+            .any(|input| sequence_signals_rbf(input.sequence))
+        {
+            return Err(RpcError::Rejected(
+                "covenant conflicts with the mempool and does not signal replace-by-fee".into(),
+            ));
+        }
+        for input in &tx.inputs {
+            spent.remove(&input.previous_outpoint);
+        }
+    }
+    let fee =
+        validate_mempool_covenant(store, &tx, &spent, Some(auth), blue_score, median_time_secs)
+            .map_err(|err| RpcError::Rejected(format!("covenant: {err}")))?;
+    let min_fee = min_relay_fee();
+    if fee < min_fee {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {fee} < min relay {min_fee}"
+        )));
+    }
+    if conflicts {
+        return pool
+            .replace_covenant(tx, fee)
+            .map_err(|err| RpcError::Rejected(err.to_string()));
+    }
+    pool.admit_covenant(tx, fee)
+        .map_err(|err| RpcError::Rejected(err.to_string()))
+}
+
 /// Validate and reserve an OVL/DRC account transfer under the mempool lock.
 pub(crate) fn admit_account_transfer(
     store: &StateStore,
@@ -236,6 +303,11 @@ pub(crate) fn admit_ovl_execution(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if tx.version != agora_types::OVL_EXECUTION_VERSION {
+        return Err(RpcError::Rejected(
+            "raw EVM transactions are not admitted to the Agora-signed mempool".into(),
+        ));
+    }
     if pool.account_reserved(NativeAssetId::OVL, &tx.from) {
         return Err(RpcError::Rejected(
             "OVL account already has a pending nonce".into(),
@@ -746,8 +818,13 @@ mod trust_line_admit;
 pub(crate) use trust_line_admit::{
     admit_drc_issued_transfer, admit_drc_trust_line_set, revalidate_trust_line_mempool,
 };
+#[path = "drc_offer_admit.rs"]
+mod drc_offer_admit;
 #[path = "issued_controls_admit.rs"]
 mod issued_controls_admit;
+pub(crate) use drc_offer_admit::{
+    admit_drc_offer_cancel, admit_drc_offer_create, drc_offer_json, revalidate_drc_offer_mempool,
+};
 pub(crate) use issued_controls_admit::{
     admit_drc_issued_asset_policy_set, admit_drc_issued_clawback,
     admit_drc_trust_line_issuer_control, get_drc_issued_asset_policy_json,
@@ -772,6 +849,8 @@ pub struct NodeBackend {
     network: String,
     /// Block 0 id for this datadir.
     genesis_hash: Hash,
+    /// Process-local Ethereum pending inbox. Not part of the state root.
+    pending_evm: Mutex<BTreeMap<[u8; 32], agora_ovl_evm::PendingTx>>,
 }
 
 pub struct NodeBackendConfig {
@@ -801,6 +880,7 @@ impl NodeBackend {
             connected_peers: config.connected_peers,
             network: config.network,
             genesis_hash: config.genesis_hash,
+            pending_evm: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -891,6 +971,45 @@ impl NodeBackend {
         let out = f(&mut snap)?;
         save_civic(self.store.as_ref(), &snap)?;
         Ok(out)
+    }
+
+    fn eth_node_view(&self) -> agora_ovl_evm::EthNodeView {
+        agora_ovl_evm::EthNodeView {
+            listening: self.net.is_some(),
+            peer_count: u64::from(self.connected_peers.load(Ordering::Relaxed)),
+            // This node has no IBD cursor. `None` is Ethereum `false`, not a
+            // synthetic starting/current/highest triple.
+            syncing: None,
+            accept_raw_transactions: !self.network.eq_ignore_ascii_case("mainnet"),
+        }
+    }
+
+    /// Place process-local raw envelopes on this node's own template.
+    ///
+    /// They are not admitted to the Agora-signed mempool and are not published
+    /// as transactions. Public raw-EVM gossip remains PLANNED.
+    fn append_local_evm_executions(&self, executions: &mut Vec<OvlExecutionTx>) {
+        if self.network.eq_ignore_ascii_case("mainnet") {
+            return;
+        }
+        let Ok(world) = agora_state_machine::load_ovl_evm_world(&self.store) else {
+            return;
+        };
+        if !world.active {
+            return;
+        }
+        let Ok(pending) = self.pending_evm.lock() else {
+            return;
+        };
+        for tx in pending.values() {
+            if executions.len() >= DEFAULT_TEMPLATE_TX_LIMIT {
+                break;
+            }
+            if agora_ovl_evm::measure_shanghai_gas(&world, &tx.raw).is_err() {
+                continue;
+            }
+            executions.push(OvlExecutionTx::raw_ethereum(tx.raw.clone()));
+        }
     }
 }
 
@@ -1048,6 +1167,54 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_tlt_covenant(&mut self, tx: TltCovenantTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_tlt_covenant(&self.store, &self.chain, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            if let Err(err) = net.publish_message(NetworkMessage::TltCovenant(tx)) {
+                return Err(RpcError::Internal(err.to_string()));
+            }
+        }
+        Ok(id)
+    }
+
+    fn get_tlt_covenant(&self, tx_id: &Hash) -> Result<TltCovenantLookup, RpcError> {
+        {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            if let Some(tx) = pool.get_covenant(tx_id) {
+                return Ok(TltCovenantLookup::pending(tx.clone(), pool.fee_of(tx_id)));
+            }
+        }
+        let Some((block_id, index)) = lookup_covenant_tx_location(self.store.as_ref(), tx_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        else {
+            return Ok(TltCovenantLookup::unknown(*tx_id));
+        };
+        let Some(block) = self.get_block(&block_id) else {
+            return Ok(TltCovenantLookup::unknown(*tx_id));
+        };
+        let Some(tx) = block.tlt_covenants.get(index as usize) else {
+            return Ok(TltCovenantLookup::unknown(*tx_id));
+        };
+        match self
+            .chain
+            .lock()
+            .ok()
+            .and_then(|g| g.confirmations(&block_id))
+        {
+            Some(confirmations) => Ok(TltCovenantLookup::confirmed(
+                tx.clone(),
+                block_id,
+                index,
+                confirmations,
+            )),
+            None => Ok(TltCovenantLookup::orphaned(tx.clone(), block_id, index)),
+        }
+    }
+
     fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError> {
         let auth = self.tx_auth();
         let id = admit_account_transfer(&self.store, &self.mempool, tx.clone(), &auth)?;
@@ -1066,6 +1233,23 @@ impl RpcBackend for NodeBackend {
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
         }
         Ok(id)
+    }
+
+    fn ovl_ethereum_rpc(&mut self, method: &str, params: &Value) -> Result<Value, RpcError> {
+        let world = agora_state_machine::load_ovl_evm_world(&self.store)
+            .map_err(|err| RpcError::Internal(err.to_string()))?;
+        let mut pending = self
+            .pending_evm
+            .lock()
+            .map_err(|_| RpcError::Internal("OVL EVM pending lock poisoned".into()))?;
+        pending.retain(|hash, _| world.receipts.iter().all(|receipt| receipt.hash != *hash));
+        let view = self.eth_node_view();
+        agora_ovl_evm::dispatch_with_view(&world, &mut pending, &view, method, params).map_err(
+            |err| match err {
+                agora_ovl_evm::EvmError::MethodNotFound(method) => RpcError::MethodNotFound(method),
+                agora_ovl_evm::EvmError::Rejected(message) => RpcError::Rejected(message),
+            },
+        )
     }
 
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError> {
@@ -1689,6 +1873,105 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_drc_offer_create(
+        &mut self,
+        tx: agora_types::DrcOfferCreateTx,
+    ) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id = admit_drc_offer_create(&self.store, &self.mempool, tx.clone(), &auth, blue_score)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcOfferCreate(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn submit_drc_offer_cancel(
+        &mut self,
+        tx: agora_types::DrcOfferCancelTx,
+    ) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id = admit_drc_offer_cancel(&self.store, &self.mempool, tx.clone(), &auth, blue_score)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcOfferCancel(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn get_drc_offer(&self, offer_id: &Hash) -> Result<Value, RpcError> {
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .virtual_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        drc_offer_json(self.store.as_ref(), offer_id, blue_score)
+    }
+
+    fn get_drc_account_offers(
+        &self,
+        account: &agora_types::Address,
+        cursor: Option<agora_types::DrcOfferCursor>,
+        limit: Option<usize>,
+    ) -> Result<Value, RpcError> {
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .virtual_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let page = agora_state_machine::list_account_offers(
+            self.store.as_ref(),
+            account,
+            cursor,
+            limit.unwrap_or(agora_types::DRC_OFFER_PAGE_MAX),
+            blue_score,
+        )
+        .map_err(|error| RpcError::Rejected(error.to_string()))?;
+        serde_json::to_value(page).map_err(|error| RpcError::Internal(error.to_string()))
+    }
+
+    fn get_drc_book_offers(
+        &self,
+        book: &agora_types::DrcOfferBook,
+        cursor: Option<agora_types::DrcOfferBookCursor>,
+        limit: Option<usize>,
+    ) -> Result<Value, RpcError> {
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .virtual_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let page = agora_state_machine::list_book_offers(
+            self.store.as_ref(),
+            *book,
+            cursor,
+            limit.unwrap_or(agora_types::DRC_OFFER_PAGE_MAX),
+            blue_score,
+        )
+        .map_err(|error| RpcError::Rejected(error.to_string()))?;
+        let mut value =
+            serde_json::to_value(page).map_err(|error| RpcError::Internal(error.to_string()))?;
+        if let Some(object) = value.as_object_mut() {
+            object.insert("simulated_fill".into(), serde_json::Value::Bool(false));
+        }
+        Ok(value)
+    }
+
     fn get_drc_issued_asset_policy(
         &self,
         asset: &agora_types::IssuedAssetId,
@@ -1846,6 +2129,21 @@ impl RpcBackend for NodeBackend {
         self.utxo_balance(address).unwrap_or(Amount::ZERO)
     }
 
+    fn get_account_balances(&self, address: &Address) -> Result<AccountBalances, RpcError> {
+        let tlt = self.utxo_balance(address)?.as_base_units();
+        let ovl = load_account(self.store.as_ref(), NativeAssetId::OVL, address)
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let drc = load_account(self.store.as_ref(), NativeAssetId::DRC, address)
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        Ok(AccountBalances {
+            tlt,
+            ovl: ovl.balance,
+            ovl_nonce: ovl.nonce,
+            drc: drc.balance,
+            drc_nonce: drc.nonce,
+        })
+    }
+
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError> {
         self.list_utxos(address)
     }
@@ -1901,7 +2199,7 @@ impl RpcBackend for NodeBackend {
             transfers,
             account_transfers,
             stake_ops,
-            ovl_executions,
+            mut ovl_executions,
             drc_payments,
             drc_account_policies,
             drc_deposit_preauths,
@@ -1923,6 +2221,9 @@ impl RpcBackend for NodeBackend {
             drc_issued_asset_policy_sets,
             drc_trust_line_issuer_controls,
             drc_issued_clawbacks,
+            drc_offer_creates,
+            drc_offer_cancels,
+            tlt_covenants,
         ) = {
             let pool = self
                 .mempool
@@ -1957,8 +2258,12 @@ impl RpcBackend for NodeBackend {
                 pool.select_drc_issued_asset_policy_sets(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_trust_line_issuer_controls(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_issued_clawbacks(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_offer_creates(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_offer_cancels(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_covenants(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
+        self.append_local_evm_executions(&mut ovl_executions);
         chain
             .block_template_lanes(
                 self.miner_address,
@@ -1988,6 +2293,9 @@ impl RpcBackend for NodeBackend {
                     drc_issued_asset_policy_sets: &drc_issued_asset_policy_sets,
                     drc_trust_line_issuer_controls: &drc_trust_line_issuer_controls,
                     drc_issued_clawbacks: &drc_issued_clawbacks,
+                    drc_offer_creates: &drc_offer_creates,
+                    drc_offer_cancels: &drc_offer_cancels,
+                    tlt_covenants: &tlt_covenants,
                     ..BlockTemplateLanes::default()
                 },
             )
@@ -2045,6 +2353,17 @@ impl RpcBackend for NodeBackend {
             let auth = self.tx_auth();
             revalidate_trust_line_mempool(self.store.as_ref(), &mut pool);
             revalidate_issued_controls_mempool(self.store.as_ref(), &mut pool, &auth);
+            revalidate_drc_offer_mempool(self.store.as_ref(), &mut pool, &auth, virtual_blue_score);
+        }
+        if let Ok(mut pending) = self.pending_evm.lock() {
+            for tx in &block.ovl_executions {
+                if tx.version != agora_types::OVL_EXECUTION_RAW_EVM_VERSION {
+                    continue;
+                }
+                if let Ok(parsed) = agora_ovl_evm::parse_raw_transaction(&tx.data) {
+                    pending.remove(&parsed.hash);
+                }
+            }
         }
         if let Some(net) = &self.net {
             // Prefer compact + announce; peers inflate from mempool or issue GetBlock.
@@ -2675,6 +2994,269 @@ mod tests {
     }
 
     #[test]
+    fn public_ethereum_rpc_reads_stored_world_and_keeps_drc_and_tlt() {
+        use agora_rpc::{RpcDispatcher, RpcRequest};
+        use agora_state_machine::{load_account, load_ovl_evm_world, put_ovl_evm_world_into};
+        use agora_types::OvlWei;
+        use serde_json::json;
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let drc_addr = Address([4; 20]);
+        let tlt_addr = Address([5; 20]);
+        let tlt_out = TxOut {
+            value: Amount::from_base_units(40),
+            address: tlt_addr,
+        };
+        let mut utxo_key = vec![0x71; 32];
+        utxo_key.extend_from_slice(&0u32.to_le_bytes());
+        let utxo_val = borsh::to_vec(&tlt_out).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &drc_addr,
+            Amount::from_base_units(25),
+        )
+        .unwrap();
+        funding.put_cf(ColumnFamily::Utxo, &utxo_key, &utxo_val);
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mempool = Arc::new(Mutex::new(Mempool::new(8)));
+        let mut config = backend_config(genesis);
+        config.connected_peers = Arc::new(AtomicU32::new(4));
+        let backend = NodeBackend::new(chain, store.clone(), mempool, config);
+        let mut rpc = RpcDispatcher::new(backend);
+
+        let inactive = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "eth_chainId".into(),
+            params: json!([]),
+        });
+        assert_eq!(inactive.jsonrpc, "2.0");
+        assert!(inactive.result.is_none());
+        assert!(inactive.error.unwrap().message.contains("dev gate"));
+
+        let proof = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getProof", &json!([]))
+            .unwrap_err();
+        assert!(matches!(proof, RpcError::MethodNotFound(_)));
+
+        let key = agora_ovl_evm::dev_signing_key();
+        let caller = agora_ovl_evm::ethereum_address_from_signing_key(&key);
+        let caller_hex = format!("0x{}", hex_bytes(&caller));
+        let mut world = agora_ovl_evm::OvlEvmWorld::dev();
+        let funded = OvlWei::from_u128(10u128.pow(18));
+        world.fund(caller, funded).unwrap();
+        let mut activate = WriteBatch::new();
+        put_ovl_evm_world_into(&mut activate, &world);
+        store.write_batch(activate).unwrap();
+        let subroot = load_ovl_evm_world(&store).unwrap().execution_subroot();
+
+        let chain_id = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "eth_chainId".into(),
+            params: json!([]),
+        });
+        assert_eq!(chain_id.result.unwrap(), json!("0x12110"));
+        let balance = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getBalance", &json!([&caller_hex, "latest"]))
+            .unwrap();
+        assert_eq!(
+            balance,
+            json!(format!("0x{}", hex_bytes(&funded.to_be_bytes())))
+        );
+        let code = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getCode", &json!([&caller_hex, "0x0"]))
+            .unwrap();
+        assert_eq!(code, json!("0x"));
+        let storage = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getStorageAt", &json!([&caller_hex, "0x0", "latest"]))
+            .unwrap();
+        assert_eq!(storage, json!(format!("0x{}", "00".repeat(32))));
+        let nonce = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getTransactionCount", &json!([&caller_hex]))
+            .unwrap();
+        assert_eq!(nonce, json!("0x0"));
+        let call = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc(
+                "eth_call",
+                &json!([{ "from": &caller_hex, "to": "0x000000000000000000000000000000000000000a", "data": "0x" }]),
+            )
+            .unwrap();
+        assert_eq!(call, json!("0x"));
+        let gas = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc(
+                "eth_estimateGas",
+                &json!([{ "from": &caller_hex, "to": "0x000000000000000000000000000000000000000a" }]),
+            )
+            .unwrap();
+        assert_eq!(gas, json!("0x5208"));
+        assert_eq!(
+            rpc.backend_mut()
+                .ovl_ethereum_rpc("net_peerCount", &json!([]))
+                .unwrap(),
+            json!("0x4")
+        );
+        assert_eq!(
+            rpc.backend_mut()
+                .ovl_ethereum_rpc("net_listening", &json!([]))
+                .unwrap(),
+            json!(false)
+        );
+        assert_eq!(
+            rpc.backend_mut()
+                .ovl_ethereum_rpc("eth_syncing", &json!([]))
+                .unwrap(),
+            json!(false)
+        );
+        let version = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("web3_clientVersion", &json!([]))
+            .unwrap();
+        assert!(version.as_str().unwrap().contains("OVL-EVM-v1"));
+        let history = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_feeHistory", &json!([8, "latest", []]))
+            .unwrap();
+        assert_eq!(history["gasUsedRatio"].as_array().unwrap().len(), 1);
+        assert!(rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_call", &json!([{ "asset": "DRC" }]))
+            .unwrap_err()
+            .to_string()
+            .contains("DRC"));
+        assert!(rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getBalance", &json!([{ "asset": "TLT" }]))
+            .unwrap_err()
+            .to_string()
+            .contains("TLT"));
+        assert!(rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_sendRawTransaction", &json!(["0x03"]))
+            .unwrap_err()
+            .to_string()
+            .contains("blob"));
+        assert!(rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getBalance", &json!([&caller_hex, "0x5"]))
+            .unwrap_err()
+            .to_string()
+            .contains("historical"));
+        assert!(rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getBlockByNumber", &json!(["0x9", false]))
+            .unwrap()
+            .is_null());
+
+        let raw = agora_ovl_evm::sign_eip1559(
+            &key,
+            world.chain_id,
+            0,
+            0,
+            u128::from(world.block.base_fee),
+            21_000,
+            Some([0x44; 20]),
+            {
+                let mut value = [0u8; 32];
+                value[31] = 1;
+                value
+            },
+            &[],
+            &[],
+        );
+        let sent = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc(
+                "eth_sendRawTransaction",
+                &json!([format!("0x{}", hex_bytes(&raw))]),
+            )
+            .unwrap();
+        assert!(sent.as_str().unwrap().starts_with("0x"));
+        assert_eq!(
+            load_ovl_evm_world(&store).unwrap().execution_subroot(),
+            subroot
+        );
+        assert!(rpc
+            .backend()
+            .mempool
+            .lock()
+            .unwrap()
+            .select_ovl_executions(8)
+            .is_empty());
+        let template = rpc.backend().get_block_template().unwrap();
+        assert_eq!(template.ovl_executions.len(), 1);
+        assert_eq!(template.ovl_executions[0].version, 2);
+        assert_eq!(template.ovl_executions[0].data, raw);
+        assert_eq!(
+            rpc.backend_mut()
+                .ovl_ethereum_rpc(
+                    "eth_getBalance",
+                    &json!([format!("0x{}", hex_bytes(&drc_addr.0)), "latest"]),
+                )
+                .unwrap(),
+            json!(format!("0x{}", "00".repeat(32)))
+        );
+        assert_eq!(
+            rpc.backend_mut()
+                .ovl_ethereum_rpc(
+                    "eth_getBalance",
+                    &json!([format!("0x{}", hex_bytes(&tlt_addr.0)), "latest"]),
+                )
+                .unwrap(),
+            json!(format!("0x{}", "00".repeat(32)))
+        );
+        assert_eq!(
+            load_account(store.as_ref(), NativeAssetId::DRC, &drc_addr)
+                .unwrap()
+                .balance,
+            25
+        );
+        assert_eq!(
+            store
+                .get_cf(ColumnFamily::Utxo, &utxo_key)
+                .unwrap()
+                .unwrap(),
+            utxo_val
+        );
+
+        let mut mainnet_config = backend_config(genesis);
+        mainnet_config.network = "mainnet".into();
+        let mut mainnet = NodeBackend::new(
+            rpc.backend().chain.clone(),
+            rpc.backend().store.clone(),
+            Arc::new(Mutex::new(Mempool::new(4))),
+            mainnet_config,
+        );
+        let rejected = mainnet
+            .ovl_ethereum_rpc("eth_sendRawTransaction", &json!(["0x02c0"]))
+            .unwrap_err();
+        assert!(rejected.to_string().contains("dev and test"));
+    }
+
+    fn hex_bytes(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
     fn drc_payment_enters_template_lane() {
         let store = Arc::new(StateStore::open_in_memory());
         let mempool = Arc::new(Mutex::new(Mempool::new(64)));
@@ -2992,6 +3574,73 @@ mod tests {
         assert_ne!(id, genesis);
         assert!(backend.dag_tips().contains(&id));
         assert_eq!(backend.get_balance(&miner), reward);
+    }
+
+    #[test]
+    fn account_balance_rpc_reads_tlt_utxo_and_ovl_drc_accounts() {
+        use agora_rpc::{RpcDispatcher, RpcRequest};
+        use serde_json::json;
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let addr = Address([6; 20]);
+        let tlt_out = TxOut {
+            value: Amount::from_base_units(40),
+            address: addr,
+        };
+        let mut utxo_key = vec![0x71; 32];
+        utxo_key.extend_from_slice(&0u32.to_le_bytes());
+        let utxo_val = borsh::to_vec(&tlt_out).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::OVL,
+            &addr,
+            Amount::from_base_units(11),
+        )
+        .unwrap();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &addr,
+            Amount::from_base_units(25),
+        )
+        .unwrap();
+        funding.put_cf(ColumnFamily::Utxo, &utxo_key, &utxo_val);
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mempool = Arc::new(Mutex::new(Mempool::new(8)));
+        let backend = NodeBackend::new(chain, store, mempool, backend_config(genesis));
+        let mut rpc = RpcDispatcher::new(backend);
+
+        let tlt_only = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getBalance".into(),
+            params: json!({"address": addr.to_bech32()}),
+        });
+        assert_eq!(tlt_only.result.unwrap()["balance"], json!(40));
+
+        let accounts = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getAccountBalances".into(),
+            params: json!({"address": addr.to_bech32()}),
+        });
+        let accounts_res = accounts.result.unwrap();
+        assert_eq!(accounts_res["address"], json!(addr.to_bech32()));
+        assert_eq!(accounts_res["tlt"]["balance"], json!(40));
+        assert_eq!(accounts_res["ovl"], json!({"balance": 11, "nonce": 0}));
+        assert_eq!(accounts_res["drc"], json!({"balance": 25, "nonce": 0}));
     }
 
     #[test]
@@ -3438,6 +4087,173 @@ mod tests {
             .pending_escrow_create(&escrow_id));
         let unknown = backend.get_drc_escrow(&Hash([0xab; 32])).unwrap();
         assert_eq!(unknown["status"], json!("unknown"));
+    }
+
+    #[test]
+    fn tlt_covenant_submit_query_template_and_restart() {
+        use agora_consensus::EmissionSchedule;
+        use agora_crypto::sign_tlt_covenant_preimage;
+        use agora_rpc::TxStatus;
+        use agora_types::{
+            prove_tlt_tx_merkle, push_data, script_p2pkh, tlt_tx_merkle_root, verify_tlt_tx_merkle,
+            TltCovenantInput, TltCovenantOutput, TltCovenantTx, TLT_COVENANT_TX_VERSION,
+            TLT_SEQUENCE_FINAL,
+        };
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let to = derive_bip44(&seed, &Bip44Path::external(1))
+            .unwrap()
+            .address();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(from.address())
+            .ignite(&store)
+            .unwrap();
+        let genesis_block = {
+            let bytes = store
+                .get_cf(ColumnFamily::Hot, genesis.as_bytes())
+                .unwrap()
+                .unwrap();
+            Block::try_from_slice(&bytes).unwrap()
+        };
+        let premine = genesis_block.transactions[0].outputs[0]
+            .value
+            .as_base_units();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap_with(
+                store.clone(),
+                genesis,
+                crate::admit::ChainBootConfig {
+                    chain_id: "agora-dev".into(),
+                    ..crate::admit::ChainBootConfig::default()
+                },
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(
+            chain.clone(),
+            store.clone(),
+            mempool,
+            NodeBackendConfig {
+                miner_address: Address([1; 20]),
+                ..backend_config(genesis)
+            },
+        );
+
+        let mut cheap = TltCovenantTx {
+            version: TLT_COVENANT_TX_VERSION,
+            inputs: vec![TltCovenantInput {
+                previous_outpoint: OutPoint {
+                    tx_id: genesis_block.transactions[0].tx_id(),
+                    index: 0,
+                },
+                sequence: TLT_SEQUENCE_FINAL - 1,
+                script_sig: Vec::new(),
+            }],
+            outputs: vec![TltCovenantOutput {
+                value: Amount::from_base_units(premine),
+                script_pubkey: script_p2pkh(&to),
+            }],
+            lock_time: 0,
+            nonce: 1,
+        };
+        let cheap_preimage = cheap.sighash_preimage_bound("agora-dev", &genesis);
+        let cheap_sig = sign_tlt_covenant_preimage(&from, &cheap_preimage).unwrap();
+        let mut cheap_script = Vec::new();
+        push_data(&mut cheap_script, &cheap_sig).unwrap();
+        push_data(&mut cheap_script, &from.public_key_bytes()).unwrap();
+        cheap.inputs[0].script_sig = cheap_script;
+        assert!(backend.submit_tlt_covenant(cheap).is_err());
+
+        let fee = 1u64;
+        let mut tx = TltCovenantTx {
+            version: TLT_COVENANT_TX_VERSION,
+            inputs: vec![TltCovenantInput {
+                previous_outpoint: OutPoint {
+                    tx_id: genesis_block.transactions[0].tx_id(),
+                    index: 0,
+                },
+                sequence: TLT_SEQUENCE_FINAL - 1,
+                script_sig: Vec::new(),
+            }],
+            outputs: vec![TltCovenantOutput {
+                value: Amount::from_base_units(premine - fee),
+                script_pubkey: script_p2pkh(&to),
+            }],
+            lock_time: 0,
+            nonce: 2,
+        };
+        let preimage = tx.sighash_preimage_bound("agora-dev", &genesis);
+        let signature = sign_tlt_covenant_preimage(&from, &preimage).unwrap();
+        let mut script_sig = Vec::new();
+        push_data(&mut script_sig, &signature).unwrap();
+        push_data(&mut script_sig, &from.public_key_bytes()).unwrap();
+        tx.inputs[0].script_sig = script_sig;
+        let id = backend.submit_tlt_covenant(tx.clone()).unwrap();
+        assert_eq!(id, tx.tx_id());
+        let pending = backend.get_tlt_covenant(&id).unwrap();
+        assert_eq!(pending.status, TxStatus::Pending);
+        assert_eq!(pending.fee, Some(fee));
+
+        let mut replacement = tx.clone();
+        replacement.nonce = 3;
+        replacement.outputs[0].value = Amount::from_base_units(premine - 2);
+        replacement.inputs[0].script_sig.clear();
+        let replacement_preimage = replacement.sighash_preimage_bound("agora-dev", &genesis);
+        let replacement_sig = sign_tlt_covenant_preimage(&from, &replacement_preimage).unwrap();
+        let mut replacement_script = Vec::new();
+        push_data(&mut replacement_script, &replacement_sig).unwrap();
+        push_data(&mut replacement_script, &from.public_key_bytes()).unwrap();
+        replacement.inputs[0].script_sig = replacement_script;
+        let replaced = backend.submit_tlt_covenant(replacement.clone()).unwrap();
+        assert!(backend.get_tlt_covenant(&id).unwrap().transaction.is_none());
+        assert_eq!(
+            backend.get_tlt_covenant(&replaced).unwrap().status,
+            TxStatus::Pending
+        );
+
+        let mut template = backend.get_block_template().unwrap();
+        assert_eq!(template.tlt_covenants.len(), 1);
+        assert_eq!(template.tlt_covenants[0].tx_id(), replaced);
+        assert_eq!(
+            template.transactions[0].outputs[0].value.as_base_units(),
+            EmissionSchedule::default().initial_reward + 2
+        );
+        let leaves: Vec<_> = template.transactions.iter().map(|tx| tx.tx_id()).collect();
+        let merkle = tlt_tx_merkle_root(&leaves);
+        assert_eq!(merkle, Block::compute_tx_root(&template.transactions));
+        assert_ne!(template.header.tx_root, merkle);
+        let proof = prove_tlt_tx_merkle(&leaves, 0).unwrap();
+        assert!(verify_tlt_tx_merkle(&merkle, &proof));
+
+        template.header.nonce = 1;
+        let pow = RandomXPowHasher.pow_hash(&template.header);
+        agora_consensus::LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&template.header, &pow)
+            .unwrap();
+        let block_id = backend.submit_block(template.clone()).unwrap();
+        let confirmed = backend.get_tlt_covenant(&replaced).unwrap();
+        assert_eq!(confirmed.status, TxStatus::Confirmed);
+        assert_eq!(confirmed.block_id, Some(block_id));
+        assert_eq!(backend.get_balance(&to).as_base_units(), premine - 2);
+        assert!(backend.submit_tlt_covenant(replacement).is_err());
+
+        let restarted = ChainState::bootstrap_with(
+            store,
+            genesis,
+            crate::admit::ChainBootConfig {
+                chain_id: "agora-dev".into(),
+                ..crate::admit::ChainBootConfig::default()
+            },
+            crate::storage_policy::StoragePolicy::default(),
+        )
+        .unwrap();
+        let reloaded = restarted.load_block(&block_id).unwrap().unwrap();
+        assert_eq!(reloaded.tlt_covenants[0].tx_id(), replaced);
+        assert_eq!(reloaded.header.tx_root, template.header.tx_root);
     }
 }
 

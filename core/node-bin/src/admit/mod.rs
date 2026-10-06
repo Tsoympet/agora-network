@@ -31,15 +31,37 @@ use agora_state_machine::{
     lookup_tx_location, meta_keys, migrate_drc_fee_burn_schema,
     migrate_drc_ledger_object_index_schema_with_auth, revert_journal_batched,
     set_primary_tx_location, store_ghostdag_record, store_header, store_header_into,
-    sum_transfer_fees, utxo_diff_key, verify_drc_ledger_object_index, ColumnFamily, GhostdagRecord,
-    StateStore, TxAuthContext, WriteBatch, DRC_FEE_BURN_SCHEMA_VERSION,
-    DRC_LEDGER_INDEX_DATADIR_SCHEMA,
+    sum_transfer_fees, utxo_diff_key, validate_mempool_covenant, verify_drc_ledger_object_index,
+    ColumnFamily, GhostdagRecord, StateStore, TxAuthContext, WriteBatch,
+    DRC_FEE_BURN_SCHEMA_VERSION, DRC_LEDGER_INDEX_DATADIR_SCHEMA, SCHEMA_VERSION,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
 use tracing::{debug, warn};
 
 use crate::storage_policy::StoragePolicy;
+
+fn covenant_template_fees(
+    store: &StateStore,
+    txs: &[agora_types::TltCovenantTx],
+    auth: Option<&TxAuthContext>,
+    blue_score: u64,
+    median_time_secs: u64,
+) -> Result<u64, agora_state_machine::StateError> {
+    let mut total = 0u64;
+    let mut reserved = HashSet::new();
+    for tx in txs {
+        let fee =
+            validate_mempool_covenant(store, tx, &reserved, auth, blue_score, median_time_secs)?;
+        for input in &tx.inputs {
+            reserved.insert(input.previous_outpoint);
+        }
+        total = total.checked_add(fee).ok_or_else(|| {
+            agora_state_machine::StateError::InvalidTx("covenant fee overflow".into())
+        })?;
+    }
+    Ok(total)
+}
 
 #[derive(Debug, Error)]
 pub enum AdmitError {
@@ -206,6 +228,9 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_issued_asset_policy_sets: &'a [agora_types::DrcIssuedAssetPolicySetTx],
     pub drc_trust_line_issuer_controls: &'a [agora_types::DrcTrustLineIssuerControlTx],
     pub drc_issued_clawbacks: &'a [agora_types::DrcIssuedClawbackTx],
+    pub drc_offer_creates: &'a [agora_types::DrcOfferCreateTx],
+    pub drc_offer_cancels: &'a [agora_types::DrcOfferCancelTx],
+    pub tlt_covenants: &'a [agora_types::TltCovenantTx],
 }
 
 impl ChainState {
@@ -530,9 +555,24 @@ impl ChainState {
         let emission = self.clamp_emission(scheduled)?;
         let max_transfers = self.limits.max_block_transactions.saturating_sub(1);
         let included = &lanes.transfers[..lanes.transfers.len().min(max_transfers)];
+        let covenant_room = max_transfers.saturating_sub(included.len());
+        let included_covenants =
+            &lanes.tlt_covenants[..lanes.tlt_covenants.len().min(covenant_room)];
         // Fee total must match only the transfers that enter the block body.
-        let fees = sum_transfer_fees(self.store.as_ref(), included)
+        let transfer_fees = sum_transfer_fees(self.store.as_ref(), included)
             .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        let median_time_secs = self.template_median_time_secs(&parents)?;
+        let covenant_fees = covenant_template_fees(
+            self.store.as_ref(),
+            included_covenants,
+            self.auth.as_ref(),
+            blue_score,
+            median_time_secs,
+        )
+        .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        let fees = transfer_fees
+            .checked_add(covenant_fees)
+            .ok_or_else(|| AdmitError::Utxo("coinbase reward overflow".into()))?;
         let reward = emission
             .checked_add(fees)
             .ok_or_else(|| AdmitError::Utxo("coinbase reward overflow".into()))?;
@@ -587,7 +627,10 @@ impl ChainState {
             drc_issued_asset_policy_sets: lanes.drc_issued_asset_policy_sets.to_vec(),
             drc_trust_line_issuer_controls: lanes.drc_trust_line_issuer_controls.to_vec(),
             drc_issued_clawbacks: lanes.drc_issued_clawbacks.to_vec(),
+            drc_offer_creates: lanes.drc_offer_creates.to_vec(),
+            drc_offer_cancels: lanes.drc_offer_cancels.to_vec(),
             drc_multisign_attachments: Vec::new(),
+            tlt_covenants: included_covenants.to_vec(),
         };
         if let Some(ctx) = self.auth.as_ref() {
             agora_types::materialize_drc_multisign_attachments(
@@ -601,8 +644,26 @@ impl ChainState {
         Ok(block)
     }
 
+    /// Median parent header time in unix seconds.
+    ///
+    /// Covenant lock checks use this same parent median at apply time, so the
+    /// template fee budget does not accept a time lock the block would reject.
+    pub(crate) fn template_median_time_secs(&self, parents: &[Hash]) -> Result<u64, AdmitError> {
+        let mut times = Vec::new();
+        for parent in parents {
+            if let Some(header) = self.load_header(parent)? {
+                times.push(header.timestamp_ms / 1000);
+            }
+        }
+        if times.is_empty() {
+            return Ok(self.template_timestamp_ms(parents)? / 1000);
+        }
+        times.sort_unstable();
+        Ok(times[times.len() / 2])
+    }
+
     /// Template time: `max(local_now, max_parent_ts + 1, MTP + 1)`.
-    fn template_timestamp_ms(&self, parents: &[Hash]) -> Result<u64, AdmitError> {
+    pub(crate) fn template_timestamp_ms(&self, parents: &[Hash]) -> Result<u64, AdmitError> {
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -637,7 +698,7 @@ impl ChainState {
     ///
     /// The current virtual tip is always placed first when it is among the tips, so
     /// parent truncation under tip floods cannot drop the consensus tip.
-    fn select_template_parents(&self) -> Result<Vec<Hash>, AdmitError> {
+    pub(crate) fn select_template_parents(&self) -> Result<Vec<Hash>, AdmitError> {
         let mut tips = self.tips()?;
         tips.sort_by(|a, b| {
             let wa = self.ghostdag.blue_work(a).unwrap_or(0);
@@ -1040,9 +1101,13 @@ impl ChainState {
     }
 
     fn check_size_limits(&self, block: &Block) -> Result<(), AdmitError> {
-        if block.transactions.len() > self.limits.max_block_transactions {
+        let tx_count = block
+            .transactions
+            .len()
+            .saturating_add(block.tlt_covenants.len());
+        if tx_count > self.limits.max_block_transactions {
             return Err(AdmitError::TooManyTransactions {
-                got: block.transactions.len(),
+                got: tx_count,
                 max: self.limits.max_block_transactions,
             });
         }
@@ -1060,6 +1125,30 @@ impl ChainState {
             });
         }
         for (tx_index, tx) in block.transactions.iter().enumerate() {
+            if tx.inputs.len() > self.limits.max_tx_inputs {
+                return Err(AdmitError::TooManyTxInputs {
+                    tx_index,
+                    got: tx.inputs.len(),
+                    max: self.limits.max_tx_inputs,
+                });
+            }
+            if tx.outputs.len() > self.limits.max_tx_outputs {
+                return Err(AdmitError::TooManyTxOutputs {
+                    tx_index,
+                    got: tx.outputs.len(),
+                    max: self.limits.max_tx_outputs,
+                });
+            }
+            let tx_bytes = borsh::to_vec(tx).map_err(|e| AdmitError::Storage(e.to_string()))?;
+            if tx_bytes.len() > self.limits.max_tx_bytes {
+                return Err(AdmitError::TxTooLarge {
+                    tx_index,
+                    got: tx_bytes.len(),
+                    max: self.limits.max_tx_bytes,
+                });
+            }
+        }
+        for (tx_index, tx) in block.tlt_covenants.iter().enumerate() {
             if tx.inputs.len() > self.limits.max_tx_inputs {
                 return Err(AdmitError::TooManyTxInputs {
                     tx_index,
@@ -1155,23 +1244,36 @@ impl ChainState {
                 continue;
             }
             for input in &tx.inputs {
-                let op = input.previous_outpoint;
-                let Some(block_id) = self.coinbase_creator_of(&op)? else {
-                    continue;
-                };
-                if block_id == self.genesis {
-                    continue; // Premine spendable immediately.
-                }
-                let created_score = self.ghostdag.blue_score(&block_id).unwrap_or(0);
-                let required = created_score.saturating_add(self.limits.coinbase_maturity);
-                if next_score < required {
-                    return Err(AdmitError::ImmatureCoinbase(format!(
-                        "{}:{} created_blue={created_score} need={required} next={next_score}",
-                        op.tx_id.to_hex(),
-                        op.index
-                    )));
-                }
+                self.reject_immature_coinbase(input.previous_outpoint, next_score)?;
             }
+        }
+        for tx in &block.tlt_covenants {
+            for input in &tx.inputs {
+                self.reject_immature_coinbase(input.previous_outpoint, next_score)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn reject_immature_coinbase(
+        &self,
+        op: agora_types::OutPoint,
+        next_score: u64,
+    ) -> Result<(), AdmitError> {
+        let Some(block_id) = self.coinbase_creator_of(&op)? else {
+            return Ok(());
+        };
+        if block_id == self.genesis {
+            return Ok(());
+        }
+        let created_score = self.ghostdag.blue_score(&block_id).unwrap_or(0);
+        let required = created_score.saturating_add(self.limits.coinbase_maturity);
+        if next_score < required {
+            return Err(AdmitError::ImmatureCoinbase(format!(
+                "{}:{} created_blue={created_score} need={required} next={next_score}",
+                op.tx_id.to_hex(),
+                op.index
+            )));
         }
         Ok(())
     }
@@ -1381,6 +1483,9 @@ impl ChainState {
                 for tx in &block.transactions {
                     self.repoint_primary_tx(&mut tip_batch, &tx.tx_id(), &target)?;
                 }
+                for tx in &block.tlt_covenants {
+                    self.repoint_primary_covenant(&mut tip_batch, &tx.tx_id(), &target)?;
+                }
             }
         }
         for hash in &target[prefix..] {
@@ -1390,6 +1495,14 @@ impl ChainState {
             if let Some(block) = self.load_block(hash)? {
                 for (index, tx) in block.transactions.iter().enumerate() {
                     set_primary_tx_location(&mut tip_batch, &tx.tx_id(), hash, index as u32);
+                }
+                for (index, tx) in block.tlt_covenants.iter().enumerate() {
+                    agora_state_machine::set_primary_covenant_tx_location(
+                        &mut tip_batch,
+                        &tx.tx_id(),
+                        hash,
+                        index as u32,
+                    );
                 }
             }
         }
@@ -1448,6 +1561,23 @@ impl ChainState {
         if let Some((block_id, index)) = inclusions.into_iter().find(|(b, _)| blue_set.contains(b))
         {
             set_primary_tx_location(batch, tx_id, &block_id, index);
+        }
+        Ok(())
+    }
+
+    fn repoint_primary_covenant(
+        &self,
+        batch: &mut WriteBatch,
+        tx_id: &Hash,
+        virtual_blues: &[Hash],
+    ) -> Result<(), AdmitError> {
+        let inclusions =
+            agora_state_machine::list_covenant_tx_inclusions(self.store.as_ref(), tx_id)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        let blue_set: HashSet<Hash> = virtual_blues.iter().copied().collect();
+        if let Some((block_id, index)) = inclusions.into_iter().find(|(b, _)| blue_set.contains(b))
+        {
+            agora_state_machine::set_primary_covenant_tx_location(batch, tx_id, &block_id, index);
         }
         Ok(())
     }
@@ -1899,10 +2029,12 @@ impl ChainState {
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
             return Ok(());
         }
-        if schema == DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+        // Schema 22 commits the OVL-EVM world without replacing the schema-21
+        // ledger index, so every current datadir still has to verify it.
+        if (DRC_LEDGER_INDEX_DATADIR_SCHEMA..=SCHEMA_VERSION).contains(&schema) {
             verify_drc_ledger_object_index(self.store.as_ref())
                 .map_err(|e| AdmitError::Storage(e.to_string()))?;
-        } else if schema > DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+        } else if schema > SCHEMA_VERSION {
             return Err(AdmitError::Storage(format!(
                 "unsupported future datadir schema {schema}"
             )));
@@ -1989,6 +2121,9 @@ impl ChainState {
                 drc_payment_channel_meta_before: journal.drc_payment_channel_meta_before,
                 drc_trust_line_meta_before: journal.drc_trust_line_meta_before,
                 drc_ledger_index_meta_before: journal.drc_ledger_index_meta_before,
+                drc_offer_meta_before: journal.drc_offer_meta_before,
+                tlt_covenant_created: journal.tlt_covenant_created,
+                tlt_covenant_spent: journal.tlt_covenant_spent,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

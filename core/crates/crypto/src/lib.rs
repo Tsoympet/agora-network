@@ -13,6 +13,7 @@ mod drc_deposit_preauth;
 mod drc_escrow;
 mod drc_issued_controls;
 mod drc_multisign;
+mod drc_offer;
 mod drc_operation;
 mod drc_payment_channel;
 mod drc_policy;
@@ -27,6 +28,7 @@ mod mnemonic;
 mod passport;
 mod payment;
 mod stake;
+mod tlt_script;
 mod transaction;
 
 pub use account::{
@@ -56,6 +58,10 @@ pub use drc_multisign::{
     sign_drc_multisign_participant_bound, validate_drc_operation_authorization_fields,
     verify_drc_multisign_against_list,
 };
+pub use drc_offer::{
+    sign_drc_offer_cancel_bound, sign_drc_offer_create_bound, verify_drc_offer_cancel_bound,
+    verify_drc_offer_create_bound,
+};
 pub use drc_operation::verify_bound_secp256k1;
 pub use drc_payment_channel::{
     sign_drc_payment_channel_claim_bound, sign_drc_payment_channel_close_bound,
@@ -81,6 +87,9 @@ pub use mnemonic::{generate_mnemonic, seed_fingerprint, seed_from_mnemonic};
 pub use passport::{sign_passport_attestation_bound, verify_passport_attestation_bound};
 pub use payment::{sign_drc_payment_bound, verify_drc_payment_bound};
 pub use stake::{sign_stake_tx_bound, verify_stake_tx_bound};
+pub use tlt_script::{
+    sign_tlt_covenant_preimage, verify_tlt_covenant_input, verify_tlt_covenant_input_preimage,
+};
 pub use transaction::{
     sign_transaction, sign_transaction_bound, signature_from_slice, signer_address,
     verify_transaction, verify_transaction_bound,

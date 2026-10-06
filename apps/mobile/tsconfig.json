@@ -14,5 +14,6 @@
     "global.d.ts",
     "../shared/light-client/**/*.ts",
     "../shared/brand/tokens.ts"
-  ]
+  ],
+  "exclude": ["../shared/light-client/**/*.test.ts"]
 }

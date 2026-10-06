@@ -16,6 +16,7 @@ mod drc_ledger_object;
 mod drc_multisign;
 mod drc_multisign_attachment;
 mod drc_multisign_lane;
+mod drc_offer;
 mod drc_payment_channel;
 mod drc_policy;
 mod drc_regular_key;
@@ -27,9 +28,13 @@ mod execution;
 mod finality;
 mod hash;
 mod hrp;
+mod ovl_wei;
 mod passport;
 mod payment;
 mod stake;
+mod tlt_coinselect;
+mod tlt_merkle;
+mod tlt_script;
 mod transaction;
 mod treasury;
 mod trident_header;
@@ -119,7 +124,8 @@ pub use drc_multisign_attachment::{
     attachment_key_for_deposit_preauth, attachment_key_for_escrow_cancel,
     attachment_key_for_escrow_create, attachment_key_for_escrow_finish,
     attachment_key_for_issued_asset_policy_set, attachment_key_for_issued_clawback,
-    attachment_key_for_issued_transfer, attachment_key_for_payment,
+    attachment_key_for_issued_transfer, attachment_key_for_offer_cancel,
+    attachment_key_for_offer_create, attachment_key_for_payment,
     attachment_key_for_payment_channel_claim, attachment_key_for_payment_channel_close,
     attachment_key_for_payment_channel_create, attachment_key_for_payment_channel_fund,
     attachment_key_for_policy, attachment_key_for_regular_key, attachment_key_for_signer_list,
@@ -133,6 +139,19 @@ pub use drc_multisign_attachment::{
 pub use drc_multisign_lane::{
     drc_multisign_attachment_capacity, materialize_drc_multisign_attachments,
     merge_drc_multisign_attachments, validate_drc_multisign_attachment_lane,
+};
+pub use drc_offer::{
+    offer_fill_step, offer_quality_better, offers_cross, DrcBookAsset, DrcOfferBook,
+    DrcOfferBookCursor, DrcOfferBookPage, DrcOfferCancelOutcome, DrcOfferCancelReceipt,
+    DrcOfferCancelTx, DrcOfferCreateReceipt, DrcOfferCreateTx, DrcOfferCursor, DrcOfferError,
+    DrcOfferFillMode, DrcOfferLive, DrcOfferPage, DrcOfferTimeInForce, DrcOfferView,
+    DRC_MAX_LIVE_OFFERS_PER_ACCOUNT, DRC_MAX_OFFERS_PER_BOOK, DRC_MAX_OFFER_MATCHES_PER_BLOCK,
+    DRC_MAX_OFFER_MATCHES_PER_TX, DRC_OFFER_CANCEL_RECEIPT_VERSION,
+    DRC_OFFER_CANCEL_SIGNING_DOMAIN, DRC_OFFER_CANCEL_TICKET_SIGNING_DOMAIN,
+    DRC_OFFER_CANCEL_TICKET_VERSION, DRC_OFFER_CANCEL_TX_VERSION, DRC_OFFER_CREATE_RECEIPT_VERSION,
+    DRC_OFFER_CREATE_SIGNING_DOMAIN, DRC_OFFER_CREATE_TICKET_SIGNING_DOMAIN,
+    DRC_OFFER_CREATE_TICKET_VERSION, DRC_OFFER_CREATE_TX_VERSION, DRC_OFFER_LIVE_STATE_VERSION,
+    DRC_OFFER_PAGE_MAX,
 };
 pub use drc_payment_channel::{
     payment_channel_cancel_after_valid_at_create, payment_channel_claim_submitter_allowed,
@@ -201,7 +220,10 @@ pub use drc_trust_line::{
     DRC_TRUST_LINE_SET_SIGNING_DOMAIN, DRC_TRUST_LINE_SET_TICKET_SIGNING_DOMAIN,
     DRC_TRUST_LINE_SET_TICKET_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
 };
-pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
+pub use execution::{
+    OvlExecutionTx, OVL_EXECUTION_RAW_EVM_VERSION, OVL_EXECUTION_SIGNING_DOMAIN,
+    OVL_EXECUTION_VERSION,
+};
 pub use finality::{
     CheckpointAttestation, CheckpointBody, CheckpointState, FinalityCertificate,
     CHECKPOINT_ATTESTATION_DOMAIN,
@@ -210,6 +232,11 @@ pub use hash::Hash;
 pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
+};
+pub use ovl_wei::{
+    ovl_evm_chain_id_rejected, OvlFeeMarketParams, OvlWei, OVL_BASE_FEE_BURN_BPS,
+    OVL_EVM_DEV_CHAIN_ID, OVL_EVM_PROFILE, OVL_EVM_REVM_VERSION, OVL_EVM_SPEC_ID,
+    OVL_EVM_TESTNET_CHAIN_ID, OVL_LEGACY_DECIMALS, OVL_LEGACY_TO_WEI, OVL_WEI_DECIMALS,
 };
 pub use passport::{PassportAttestation, PassportCategory, PASSPORT_ATTESTATION_DOMAIN};
 pub use payment::{
@@ -224,6 +251,23 @@ pub use payment::{
 pub use stake::{
     SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN, STAKE_TX_SIGNING_DOMAIN_V2,
     STAKE_TX_TICKET_VERSION, STAKE_TX_VERSION,
+};
+pub use tlt_coinselect::{
+    select_tlt_coins, TltCoinSelectError, TltCoinSelection, TltSpendCoin,
+    TLT_COINSELECT_EXHAUSTIVE_CAP,
+};
+pub use tlt_merkle::{
+    prove_tlt_tx_merkle, tlt_tx_merkle_root, verify_tlt_tx_merkle, TltTxMerkleProof,
+};
+pub use tlt_script::{
+    covenant_locktime_satisfied, eval_covenant_input, eval_covenant_input_preimage,
+    eval_tlt_script, is_p2sh_script, p2pkh_address, push_data, script_htlc, script_multisig,
+    script_p2pkh, script_p2sh, sequence_signals_rbf, SigChecker, TltCovenantInput,
+    TltCovenantOutput, TltCovenantTx, TltOutputOrigin, TltScriptError, TltSpendContext,
+    TLT_COVENANT_TX_DOMAIN, TLT_COVENANT_TX_VERSION, TLT_CSV_TIME_STEP_SECS,
+    TLT_LOCKTIME_TIME_THRESHOLD, TLT_MAX_MULTISIG, TLT_MAX_OPS, TLT_MAX_PUSH, TLT_MAX_SCRIPT_LEN,
+    TLT_MAX_STACK, TLT_SEQUENCE_DISABLE_FLAG, TLT_SEQUENCE_FINAL, TLT_SEQUENCE_LOCK_MASK,
+    TLT_SEQUENCE_TIME_FLAG,
 };
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 pub use treasury::{TreasuryBalance, TreasuryId};
@@ -326,7 +370,10 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -363,6 +410,21 @@ mod ts_export {
         "DrcEscrowLive.ts",
         "DrcEscrowReceipt.ts",
         "DrcEscrowOutcome.ts",
+        "DrcBookAsset.ts",
+        "DrcOfferBook.ts",
+        "DrcOfferBookCursor.ts",
+        "DrcOfferBookPage.ts",
+        "DrcOfferCancelOutcome.ts",
+        "DrcOfferCancelReceipt.ts",
+        "DrcOfferCancelTx.ts",
+        "DrcOfferCreateReceipt.ts",
+        "DrcOfferCreateTx.ts",
+        "DrcOfferCursor.ts",
+        "DrcOfferFillMode.ts",
+        "DrcOfferLive.ts",
+        "DrcOfferPage.ts",
+        "DrcOfferTimeInForce.ts",
+        "DrcOfferView.ts",
         "DrcIssuedAssetPolicyAction.ts",
         "DrcIssuedAssetPolicyLive.ts",
         "DrcIssuedAssetPolicyReceipt.ts",
@@ -376,8 +438,13 @@ mod ts_export {
         "DrcTrustLineIssuerControlReceipt.ts",
         "DrcTrustLineIssuerControlTx.ts",
         "OvlExecutionTx.ts",
+        "OvlFeeMarketParams.ts",
+        "OvlWei.ts",
         "SignedStakeTx.ts",
         "Transaction.ts",
+        "TltCovenantInput.ts",
+        "TltCovenantOutput.ts",
+        "TltCovenantTx.ts",
     ];
 
     fn normalize_generated_bindings() {
@@ -405,6 +472,9 @@ mod ts_export {
         TxOut::export_all().expect("export TxOut");
         Transaction::export_all().expect("export Transaction");
         BlockHeader::export_all().expect("export BlockHeader");
+        TltCovenantInput::export_all().expect("export TltCovenantInput");
+        TltCovenantOutput::export_all().expect("export TltCovenantOutput");
+        TltCovenantTx::export_all().expect("export TltCovenantTx");
         Block::export_all().expect("export Block");
         NativeAssetId::export_all().expect("export NativeAssetId");
         NativeAmount::export_all().expect("export NativeAmount");
@@ -439,6 +509,21 @@ mod ts_export {
         DrcCheckLive::export_all().expect("export DrcCheckLive");
         DrcCheckReceipt::export_all().expect("export DrcCheckReceipt");
         DrcCheckOutcome::export_all().expect("export DrcCheckOutcome");
+        DrcBookAsset::export_all().expect("export DrcBookAsset");
+        DrcOfferBook::export_all().expect("export DrcOfferBook");
+        DrcOfferFillMode::export_all().expect("export DrcOfferFillMode");
+        DrcOfferTimeInForce::export_all().expect("export DrcOfferTimeInForce");
+        DrcOfferCancelOutcome::export_all().expect("export DrcOfferCancelOutcome");
+        DrcOfferCreateTx::export_all().expect("export DrcOfferCreateTx");
+        DrcOfferCancelTx::export_all().expect("export DrcOfferCancelTx");
+        DrcOfferLive::export_all().expect("export DrcOfferLive");
+        DrcOfferCreateReceipt::export_all().expect("export DrcOfferCreateReceipt");
+        DrcOfferCancelReceipt::export_all().expect("export DrcOfferCancelReceipt");
+        DrcOfferView::export_all().expect("export DrcOfferView");
+        DrcOfferCursor::export_all().expect("export DrcOfferCursor");
+        DrcOfferBookCursor::export_all().expect("export DrcOfferBookCursor");
+        DrcOfferPage::export_all().expect("export DrcOfferPage");
+        DrcOfferBookPage::export_all().expect("export DrcOfferBookPage");
         DrcPaymentChannelCreateTx::export_all().expect("export DrcPaymentChannelCreateTx");
         DrcPaymentChannelFundTx::export_all().expect("export DrcPaymentChannelFundTx");
         DrcPaymentChannelClaimTx::export_all().expect("export DrcPaymentChannelClaimTx");
@@ -452,6 +537,8 @@ mod ts_export {
         DrcPaymentChannelScheduleEvent::export_all()
             .expect("export DrcPaymentChannelScheduleEvent");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
+        OvlWei::export_all().expect("export OvlWei");
+        OvlFeeMarketParams::export_all().expect("export OvlFeeMarketParams");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");
         DrcPaymentResult::export_all().expect("export DrcPaymentResult");

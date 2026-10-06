@@ -8,7 +8,8 @@ import type { DrcCheckLive } from "./DrcCheckLive";
 import type { DrcDepositPreauth } from "./DrcDepositPreauth";
 import type { DrcEscrowLive } from "./DrcEscrowLive";
 import type { DrcIssuedAssetPolicyLive } from "./DrcIssuedAssetPolicyLive";
+import type { DrcOfferLive } from "./DrcOfferLive";
 import type { DrcPaymentChannelLive } from "./DrcPaymentChannelLive";
 import type { DrcTrustLineLive } from "./DrcTrustLineLive";
 
-export type DrcLedgerObject = { "type": "account_policy", "value": { account: Address, policy: DrcAccountPolicy, } } | { "type": "deposit_preauthorization", "value": DrcDepositPreauth } | { "type": "regular_key", "value": DrcAccountRegularKey } | { "type": "signer_list", "value": DrcAccountSignerList } | { "type": "ticket_set", "value": DrcAccountTickets } | { "type": "escrow", "value": DrcEscrowLive } | { "type": "check", "value": DrcCheckLive } | { "type": "payment_channel", "value": DrcPaymentChannelLive } | { "type": "trust_line", "value": DrcTrustLineLive } | { "type": "issued_asset_policy", "value": DrcIssuedAssetPolicyLive };
+export type DrcLedgerObject = { "type": "account_policy", "value": { account: Address, policy: DrcAccountPolicy, } } | { "type": "deposit_preauthorization", "value": DrcDepositPreauth } | { "type": "regular_key", "value": DrcAccountRegularKey } | { "type": "signer_list", "value": DrcAccountSignerList } | { "type": "ticket_set", "value": DrcAccountTickets } | { "type": "escrow", "value": DrcEscrowLive } | { "type": "check", "value": DrcCheckLive } | { "type": "payment_channel", "value": DrcPaymentChannelLive } | { "type": "trust_line", "value": DrcTrustLineLive } | { "type": "issued_asset_policy", "value": DrcIssuedAssetPolicyLive } | { "type": "offer", "value": DrcOfferLive };

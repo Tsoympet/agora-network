@@ -12,11 +12,11 @@ use crate::{
     DrcAccountSignerList, DrcAccountTickets, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
     DrcCheckLive, DrcDepositPreauth, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
     DrcEscrowFinishTx, DrcEscrowLive, DrcIssuedAssetPolicyLive, DrcIssuedAssetPolicySetTx,
-    DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcMultisignAuth, DrcPaymentChannelClaimTx,
-    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx,
-    DrcPaymentChannelLive, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
-    DrcTrustLineIssuerControlTx, DrcTrustLineLive, DrcTrustLineSetTx, Hash, IssuedAssetId,
-    SignedStakeTx,
+    DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcMultisignAuth, DrcOfferCancelTx, DrcOfferCreateTx,
+    DrcOfferLive, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
+    DrcPaymentChannelFundTx, DrcPaymentChannelLive, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineLive, DrcTrustLineSetTx, Hash,
+    IssuedAssetId, SignedStakeTx,
 };
 
 pub const DRC_LEDGER_OBJECT_DESCRIPTOR_VERSION: u32 = 1;
@@ -54,10 +54,11 @@ pub enum DrcLedgerObjectKind {
     PaymentChannel = 8,
     TrustLine = 9,
     IssuedAssetPolicy = 10,
+    Offer = 11,
 }
 
 impl DrcLedgerObjectKind {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::AccountPolicy,
         Self::DepositPreauthorization,
         Self::RegularKey,
@@ -68,6 +69,7 @@ impl DrcLedgerObjectKind {
         Self::PaymentChannel,
         Self::TrustLine,
         Self::IssuedAssetPolicy,
+        Self::Offer,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -82,6 +84,7 @@ impl DrcLedgerObjectKind {
             Self::PaymentChannel => "payment_channel",
             Self::TrustLine => "trust_line",
             Self::IssuedAssetPolicy => "issued_asset_policy",
+            Self::Offer => "offer",
         }
     }
 
@@ -146,6 +149,9 @@ pub enum DrcLedgerObjectKey {
     IssuedAssetPolicy {
         asset: IssuedAssetId,
     },
+    Offer {
+        offer_id: Hash,
+    },
 }
 
 impl DrcLedgerObjectKey {
@@ -161,6 +167,7 @@ impl DrcLedgerObjectKey {
             Self::PaymentChannel { .. } => DrcLedgerObjectKind::PaymentChannel,
             Self::TrustLine { .. } => DrcLedgerObjectKind::TrustLine,
             Self::IssuedAssetPolicy { .. } => DrcLedgerObjectKind::IssuedAssetPolicy,
+            Self::Offer { .. } => DrcLedgerObjectKind::Offer,
         }
     }
 
@@ -171,7 +178,10 @@ impl DrcLedgerObjectKey {
             | Self::RegularKey { owner }
             | Self::SignerList { owner }
             | Self::TicketSet { owner } => owner,
-            Self::Escrow { .. } | Self::Check { .. } | Self::PaymentChannel { .. } => {
+            Self::Escrow { .. }
+            | Self::Check { .. }
+            | Self::PaymentChannel { .. }
+            | Self::Offer { .. } => {
                 // These keys do not duplicate the owner. The descriptor validates
                 // the owner against the canonical live value.
                 Address::ZERO
@@ -205,6 +215,7 @@ pub enum DrcLedgerObject {
     PaymentChannel(DrcPaymentChannelLive),
     TrustLine(DrcTrustLineLive),
     IssuedAssetPolicy(DrcIssuedAssetPolicyLive),
+    Offer(DrcOfferLive),
 }
 
 impl DrcLedgerObject {
@@ -220,6 +231,7 @@ impl DrcLedgerObject {
             Self::PaymentChannel(_) => DrcLedgerObjectKind::PaymentChannel,
             Self::TrustLine(_) => DrcLedgerObjectKind::TrustLine,
             Self::IssuedAssetPolicy(_) => DrcLedgerObjectKind::IssuedAssetPolicy,
+            Self::Offer(_) => DrcLedgerObjectKind::Offer,
         }
     }
 
@@ -235,6 +247,7 @@ impl DrcLedgerObject {
             Self::PaymentChannel(value) => value.owner,
             Self::TrustLine(value) => value.holder,
             Self::IssuedAssetPolicy(value) => value.asset.issuer,
+            Self::Offer(value) => value.owner,
         }
     }
 
@@ -266,6 +279,9 @@ impl DrcLedgerObject {
             Self::IssuedAssetPolicy(value) => {
                 DrcLedgerObjectKey::IssuedAssetPolicy { asset: value.asset }
             }
+            Self::Offer(value) => DrcLedgerObjectKey::Offer {
+                offer_id: value.offer_id,
+            },
         }
     }
 }
@@ -349,6 +365,8 @@ pub enum DrcOperationKind {
     IssuedAssetPolicySet = 21,
     TrustLineIssuerControl = 22,
     IssuedClawback = 23,
+    OfferCreate = 24,
+    OfferCancel = 25,
 }
 
 #[derive(
@@ -380,6 +398,8 @@ pub enum DrcOperation {
     IssuedAssetPolicySet(DrcIssuedAssetPolicySetTx),
     TrustLineIssuerControl(DrcTrustLineIssuerControlTx),
     IssuedClawback(DrcIssuedClawbackTx),
+    OfferCreate(DrcOfferCreateTx),
+    OfferCancel(DrcOfferCancelTx),
 }
 
 impl DrcOperation {
@@ -408,6 +428,8 @@ impl DrcOperation {
             Self::IssuedAssetPolicySet(_) => DrcOperationKind::IssuedAssetPolicySet,
             Self::TrustLineIssuerControl(_) => DrcOperationKind::TrustLineIssuerControl,
             Self::IssuedClawback(_) => DrcOperationKind::IssuedClawback,
+            Self::OfferCreate(_) => DrcOperationKind::OfferCreate,
+            Self::OfferCancel(_) => DrcOperationKind::OfferCancel,
         }
     }
 
@@ -436,6 +458,8 @@ impl DrcOperation {
             Self::IssuedAssetPolicySet(value) => value.issuer,
             Self::TrustLineIssuerControl(value) => value.issuer,
             Self::IssuedClawback(value) => value.issuer,
+            Self::OfferCreate(value) => value.owner,
+            Self::OfferCancel(value) => value.submitter,
         }
     }
 
@@ -464,6 +488,8 @@ impl DrcOperation {
             Self::IssuedAssetPolicySet(value) => value.policy_set_tx_id(),
             Self::TrustLineIssuerControl(value) => value.issuer_control_tx_id(),
             Self::IssuedClawback(value) => value.clawback_tx_id(),
+            Self::OfferCreate(value) => value.offer_id(),
+            Self::OfferCancel(value) => value.cancel_tx_id(),
         }
     }
 
@@ -504,6 +530,8 @@ impl DrcOperation {
             Self::IssuedAssetPolicySet(value) => value.multisign.as_ref(),
             Self::TrustLineIssuerControl(value) => value.multisign.as_ref(),
             Self::IssuedClawback(value) => value.multisign.as_ref(),
+            Self::OfferCreate(value) => value.multisign.as_ref(),
+            Self::OfferCancel(value) => value.multisign.as_ref(),
         }
     }
 
@@ -532,6 +560,8 @@ impl DrcOperation {
             Self::IssuedAssetPolicySet(value) => value.multisign = auth,
             Self::TrustLineIssuerControl(value) => value.multisign = auth,
             Self::IssuedClawback(value) => value.multisign = auth,
+            Self::OfferCreate(value) => value.multisign = auth,
+            Self::OfferCancel(value) => value.multisign = auth,
         }
     }
 }
@@ -718,6 +748,12 @@ mod tests {
                 DrcLedgerObjectKey::IssuedAssetPolicy { asset },
                 "ce53f130a7d9249100e900fd42a36aae388e43a23c3cbf43e2d8cae29a5e3e87",
             ),
+            (
+                DrcLedgerObjectKey::Offer {
+                    offer_id: Hash([9; 32]),
+                },
+                "0630cbb335ed44d2ce9ee71c83a2b08e04e0faa15c457c4a39aed99f3530dad6",
+            ),
         ];
 
         let mut kinds = std::collections::BTreeSet::new();
@@ -737,7 +773,11 @@ mod tests {
             DrcLedgerObjectKind::parse("payment_channel"),
             Some(DrcLedgerObjectKind::PaymentChannel)
         );
-        for forbidden in ["offer", "evm", "contract", "bytecode", "hook"] {
+        assert_eq!(
+            DrcLedgerObjectKind::parse("offer"),
+            Some(DrcLedgerObjectKind::Offer)
+        );
+        for forbidden in ["evm", "contract", "bytecode", "hook"] {
             assert_eq!(DrcLedgerObjectKind::parse(forbidden), None);
         }
     }

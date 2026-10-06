@@ -65,6 +65,9 @@ mod drc_mempool;
 mod drc_multisig_tests;
 #[cfg(test)]
 mod drc_multisign_attachment_tests;
+mod drc_offer;
+#[cfg(test)]
+mod drc_offer_tests;
 mod drc_payment_channel;
 #[cfg(test)]
 mod drc_payment_channel_auth_cutoff_tranche_tests;
@@ -136,11 +139,15 @@ mod marks;
 mod monetary;
 mod network;
 mod orphans;
+mod ovl_evm_state;
 mod payments;
 mod staking;
 mod state_root;
 mod store;
 mod supply;
+mod tlt_covenant;
+#[cfg(test)]
+mod tlt_covenant_tests;
 mod trident_genesis;
 mod tx_index;
 mod utxo;
@@ -172,7 +179,7 @@ pub use block_zero::{
     TRIDENT_BLOCK_ZERO_STATE_VERSION, TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
     TRIDENT_DATADIR_IDENTITY_VERSION,
 };
-pub use columns::{meta_keys, ColumnFamily, SCHEMA_VERSION};
+pub use columns::{meta_keys, ColumnFamily, OVL_EVM_SCHEMA_VERSION, SCHEMA_VERSION};
 pub use community_state::{
     canonical_community_root, init_canonical_community_into, list_grants, list_hubs, list_missions,
     list_passport_attestations, load_canonical_community_summary, register_grant_into,
@@ -217,6 +224,12 @@ pub use drc_mempool::{
     drc_ticket_sequence_for_create_nonce, lookup_drc_ticket_point, plan_drc_mempool_reservation,
     DrcMempoolReservation, DrcTicketPointStatus,
 };
+pub use drc_offer::{
+    apply_drc_offer_cancel, apply_drc_offer_create, assert_issued_offer_reserve, drc_offer_root,
+    list_account_offers, list_book_offers, load_drc_offer_cancel_receipt,
+    load_drc_offer_create_receipt, load_drc_offer_live, load_issued_offer_reserve, offer_live_key,
+    DrcOfferApplyLimits, DRC_OFFER_ROOT_DOMAIN,
+};
 pub use drc_payment_channel::{
     apply_drc_payment_channel_claim, apply_drc_payment_channel_close,
     apply_drc_payment_channel_create, apply_drc_payment_channel_fund, drc_payment_channel_root,
@@ -253,8 +266,8 @@ pub use drc_trust_line::{
 };
 pub use error::StateError;
 pub use execution::{
-    apply_ovl_execution, execution_fee, OvlExecutionReceipt, OVL_EXECUTION_VERSION,
-    OVL_INTRINSIC_GAS,
+    apply_ovl_execution, apply_ovl_execution_with_block, execution_fee, OvlExecutionReceipt,
+    OvlSelectedOrder, OVL_EXECUTION_VERSION, OVL_INTRINSIC_GAS,
 };
 pub use finality_store::{
     certificate_key, load_attestation_index, load_certificate, load_finalized_blue_score,
@@ -283,6 +296,10 @@ pub use network::{
     TESTNET_GENESIS_HASH_HEX, TESTNET_GENESIS_TIMESTAMP_MS, TESTNET_PREMINE_ADDRESS_HEX,
 };
 pub use orphans::{delete_orphan, list_orphans, load_orphan, orphan_key, store_orphan};
+pub use ovl_evm_state::{
+    legacy_ovl_quotient_to_wei, load_ovl_evm_world, ovl_evm_state_commitment,
+    put_ovl_evm_world_into, OVL_EVM_WORLD_KEY,
+};
 pub use payments::{
     apply_drc_payment, apply_drc_payment_at_blue_score, drc_payment_root, list_drc_outbox,
     load_drc_outbox_event, load_drc_payment_by_invoice, load_drc_payment_receipt,
@@ -302,7 +319,8 @@ pub use staking::{
     ValidatorSetSnapshot, ValidatorStatus, MAX_VALIDATOR_COMMISSION_BPS,
 };
 pub use state_root::{
-    acceptance_root, compose_trident_state_root, finalized_tip_commitment, utxo_commitment,
+    acceptance_root, compose_trident_state_root, export_utxo_snapshot, finalized_tip_commitment,
+    utxo_commitment, utxo_entries_commitment, utxo_snapshot_binds, UtxoSetSnapshot,
     STATE_ROOT_DOMAIN,
 };
 pub use store::{StateStore, WriteBatch};
@@ -313,6 +331,7 @@ pub use supply::{
     put_burned_supply_into, put_issued_supply_into, put_max_supply_into, put_schema_version_into,
     verify_supply_invariants, NativeSupplyState, DRC_FEE_BURN_SCHEMA_VERSION,
 };
+pub use tlt_covenant::{load_covenant_utxo, validate_mempool_covenant, TltCovenantUtxoRecord};
 pub use trident_genesis::{
     TridentFinalityPolicy, TridentGenesisArtifact, TridentGenesisValidator,
     TridentRuntimeFinalityPolicy, TridentRuntimePolicy, TridentValidatorGenesis,
@@ -321,9 +340,10 @@ pub use trident_genesis::{
     TRIDENT_TX_SIGNING_VERSION,
 };
 pub use tx_index::{
-    decode_tx_location, encode_tx_location, index_block_transactions,
-    index_block_transactions_into, list_tx_inclusions, lookup_tx_location, set_primary_tx_location,
-    tx_inclusion_key, tx_index_key,
+    covenant_tx_inclusion_key, covenant_tx_index_key, decode_tx_location, encode_tx_location,
+    index_block_transactions, index_block_transactions_into, list_covenant_tx_inclusions,
+    list_tx_inclusions, lookup_covenant_tx_location, lookup_tx_location,
+    set_primary_covenant_tx_location, set_primary_tx_location, tx_inclusion_key, tx_index_key,
 };
 pub use utxo::{outpoint_key, outpoint_key_parts};
 pub use utxo_diff::{delete_utxo_journal, load_utxo_journal, store_utxo_journal, utxo_diff_key};

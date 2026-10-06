@@ -37,11 +37,12 @@ use crate::backend::{
     admit_account_transfer, admit_drc_account_policy, admit_drc_check_cancel, admit_drc_check_cash,
     admit_drc_check_create, admit_drc_deposit_preauth, admit_drc_escrow_cancel,
     admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_issued_asset_policy_set,
-    admit_drc_issued_clawback, admit_drc_issued_transfer, admit_drc_payment,
-    admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
-    admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
-    admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_issuer_control,
-    admit_drc_trust_line_set, admit_ovl_execution, admit_stake_tx, admit_transaction, NodeBackend,
+    admit_drc_issued_clawback, admit_drc_issued_transfer, admit_drc_offer_cancel,
+    admit_drc_offer_create, admit_drc_payment, admit_drc_payment_channel_claim,
+    admit_drc_payment_channel_close, admit_drc_payment_channel_create,
+    admit_drc_payment_channel_fund, admit_drc_regular_key, admit_drc_signer_list,
+    admit_drc_ticket_create, admit_drc_trust_line_issuer_control, admit_drc_trust_line_set,
+    admit_ovl_execution, admit_stake_tx, admit_tlt_covenant, admit_transaction, NodeBackend,
     NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
@@ -1405,6 +1406,58 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "DRC issuer control gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcOfferCreate(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_offer_create(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, offer = %id.to_hex(), "DRC offer create gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC offer create gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcOfferCancel(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_offer_cancel(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, offer_cancel = %id.to_hex(), "DRC offer cancel gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC offer cancel gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::TltCovenant(tx) => {
+                        match admit_tlt_covenant(store.as_ref(), &chain, &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, covenant = %id.to_hex(), "TLT covenant gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "TLT covenant gossip rejected");
                             }
                         }
                     }

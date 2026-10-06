@@ -1,6 +1,7 @@
 export {
   createLightClient,
   type FeeEstimate,
+  type LightAccountBalances,
   type LightAmount,
   type LightBalance,
   type LightBlock,
@@ -8,6 +9,8 @@ export {
   type LightClientConfig,
   type LightCommunityRegistry,
   type LightConstitution,
+  type LightDrcOfferLookup,
+  type LightDrcOfferPage,
   type LightFinality,
   type LightForumTopic,
   type LightGovernance,
@@ -16,6 +19,7 @@ export {
   type LightProposal,
   type LightProposalList,
   type LightProposalTally,
+  type LightTltCovenantLookup,
   type LightTx,
   type LightTxIn,
   type LightMempool,
@@ -59,6 +63,22 @@ export {
   walletNetworkFromNode,
   type AgoraNetworkId,
 } from "./network";
+export {
+  selectTltCoins,
+  TLT_COINSELECT_EXHAUSTIVE_CAP,
+  type TltSpendCoin,
+} from "./coinselect";
+export {
+  proveTltTxMerkle,
+  tltTxMerkleRoot,
+  verifyTltTxMerkle,
+  type TltTxMerkleProof,
+} from "./tltMerkle";
+export {
+  tridentLightState,
+  verifyTridentLight,
+  type TridentLightState,
+} from "./tridentLight";
 export {
   addressBech32FromMnemonic,
   addressFromMnemonic,
