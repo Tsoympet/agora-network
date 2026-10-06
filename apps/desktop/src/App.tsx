@@ -37,6 +37,7 @@ import {
   type TipSyncSnapshot,
   type WatchOnlyWallet,
 } from "../../shared/light-client";
+import { CommunityTrustPanel } from "./components/CommunityTrustPanel";
 import { FeatureSurfacesPanel } from "./components/FeatureSurfacesPanel";
 import { GovernancePanel } from "./components/GovernancePanel";
 import { LightClientPanel } from "./components/LightClientPanel";
@@ -1154,14 +1155,8 @@ export function App() {
           onNotifications={setNotifications}
         />
       ) : null}
-      {lane === "SETTINGS" ? (
-        <ArchitecturePanel
-          nodeUrl={rpcUrl}
-          unlocked={vaultUnlocked}
-          onLock={onLockVault}
-          timeoutMs={sessionTimeoutMs}
-          onTimeoutMs={setSessionTimeoutMs}
-        />
+      {show("COMMUNITY", "PASSPORT", "ASSEMBLY", "TREASURY", "SETTINGS") ? (
+        <CommunityTrustPanel subjectAddress={receiveBech32} community={community} />
       ) : null}
     </main>
     </div>

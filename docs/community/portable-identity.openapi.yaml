@@ -1,0 +1,354 @@
+openapi: 3.0.3
+info:
+  title: Agora community trust types
+  version: 0.1.0
+  description: |
+    Public types for local communities, proposal transparency, configurable
+    rewards, aggregate analytics, and portable identity.
+
+    Maturity: Scaffold.
+
+    Wallets build the portable identity bundle on the device. The schema
+    refuses private-key fields. A hosted identity service is not part of this
+    scaffold. Service trust labels travel with the bundle so a reader can see
+    what the device checked and what it assumed.
+  x-agora-maturity: Scaffold
+  x-agora-keys: device-local
+servers:
+  - url: https://community.example.invalid
+    description: |
+      Placeholder only. This scaffold does not ship a hosted identity service.
+      Do not send a vault, mnemonic, or private key to any community host.
+paths:
+  /portable-identity/export:
+    get:
+      summary: Device-local portable identity document
+      description: |
+        The wallet constructs this JSON locally. `contains_private_keys` is
+        false. `service_trust` lists headers, Merkle, state proofs, RPC,
+        indexer, community API, wallet, passport, governance, and confirmation.
+      responses:
+        "200":
+          description: Portable identity bundle
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortableIdentityBundle"
+components:
+  schemas:
+    LocalCommunity:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+        name:
+          type: string
+        country:
+          type: string
+          description: Free-text country. There is no protocol country enum.
+        region:
+          type: string
+        city:
+          type: string
+        languages:
+          type: array
+          items:
+            type: string
+        interests:
+          type: array
+          items:
+            type: string
+        specializations:
+          type: array
+          items:
+            type: string
+    ProposalTransparency:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - authority
+        - creator
+        - why
+        - what_changes
+        - expected_cost
+        - treasury_impact
+        - voting_period
+        - eligibility
+        - current_votes
+        - final_result
+        - implementation_status
+        - commit_links
+        - release_links
+      properties:
+        id:
+          type: string
+        authority:
+          type: string
+          enum: [on_chain, advisory]
+        badge:
+          type: string
+          enum: ["ON-CHAIN", "ADVISORY"]
+          description: Derived from authority. Callers do not store a second badge.
+        creator:
+          type: string
+        why:
+          type: string
+        what_changes:
+          type: string
+        expected_cost:
+          type: string
+        treasury_impact:
+          type: string
+        voting_period:
+          type: object
+          required: [start_slot, end_slot]
+          properties:
+            start_slot:
+              type: integer
+              minimum: 0
+            end_slot:
+              type: integer
+              minimum: 0
+        eligibility:
+          type: string
+        current_votes:
+          $ref: "#/components/schemas/VoteSnapshot"
+        final_result:
+          type: string
+          enum: [pending, passed, failed, expired, advisory_recorded]
+        implementation_status:
+          type: string
+          enum: [not_started, in_progress, shipped, wont_implement, not_applicable]
+        commit_links:
+          type: array
+          items:
+            type: string
+            format: uri
+        release_links:
+          type: array
+          items:
+            type: string
+            format: uri
+    VoteSnapshot:
+      type: object
+      additionalProperties: false
+      required: [yes, no, abstain, no_with_veto]
+      properties:
+        yes:
+          type: integer
+          minimum: 0
+        no:
+          type: integer
+          minimum: 0
+        abstain:
+          type: integer
+          minimum: 0
+        no_with_veto:
+          type: integer
+          minimum: 0
+    RewardDecision:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - label
+        - payable
+        - ui_blocked
+        - changes_tlt_emission
+        - supply_delta_base_units
+        - funding_note
+      properties:
+        kind:
+          type: string
+          enum:
+            - drc
+            - ovl
+            - tlt
+            - badge
+            - reputation
+            - certificate
+            - grant_eligibility
+            - program_access
+            - event_credential
+        label:
+          type: string
+        payable:
+          type: boolean
+        ui_blocked:
+          type: boolean
+          description: True when the offer must be disabled, including every TLT emission offer.
+        changes_tlt_emission:
+          type: boolean
+          enum: [false]
+        supply_delta_base_units:
+          type: string
+          enum: ["0"]
+          description: Decimal u64. This API does not issue coins.
+        funding_note:
+          type: string
+        block_reason:
+          type: string
+          nullable: true
+    PublicAnalyticsAggregates:
+      type: object
+      additionalProperties: false
+      description: Public totals only. Per-user fields are rejected.
+      required:
+        - active_users
+        - active_developers
+        - active_merchants
+        - missions
+        - grants
+        - bounties
+        - academy
+        - events
+        - governance
+        - drc_activity
+        - ovl_contracts
+        - tlt_activity
+        - nodes
+        - miners
+        - projects
+      properties:
+        active_users:
+          type: integer
+          minimum: 0
+        active_developers:
+          type: integer
+          minimum: 0
+        active_merchants:
+          type: integer
+          minimum: 0
+        missions:
+          type: integer
+          minimum: 0
+        grants:
+          type: integer
+          minimum: 0
+        bounties:
+          type: integer
+          minimum: 0
+        academy:
+          type: integer
+          minimum: 0
+        events:
+          type: integer
+          minimum: 0
+        governance:
+          type: integer
+          minimum: 0
+        drc_activity:
+          type: integer
+          minimum: 0
+        ovl_contracts:
+          type: integer
+          minimum: 0
+        tlt_activity:
+          type: integer
+          minimum: 0
+        nodes:
+          type: integer
+          minimum: 0
+        miners:
+          type: integer
+          minimum: 0
+        projects:
+          type: integer
+          minimum: 0
+    ServiceTrustLabel:
+      type: object
+      additionalProperties: false
+      required: [service, class, assumption]
+      properties:
+        service:
+          type: string
+        class:
+          type: string
+        assumption:
+          type: string
+          minLength: 1
+    PublicAttestationView:
+      type: object
+      additionalProperties: false
+      required:
+        - category
+        - issuer_label
+        - evidence_hash_hex
+        - service_trust_class
+        - service_trust_assumption
+      properties:
+        category:
+          type: string
+        issuer_label:
+          type: string
+        evidence_hash_hex:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        service_trust_class:
+          type: string
+          enum: [hub_signed_unchecked]
+        service_trust_assumption:
+          type: string
+          minLength: 1
+    PortableIdentityBundle:
+      type: object
+      additionalProperties: false
+      required:
+        - format
+        - contains_private_keys
+        - public_passport
+        - local_private_prefs
+        - service_trust
+      properties:
+        format:
+          type: string
+          enum: [agora-portable-identity-v1]
+        contains_private_keys:
+          type: boolean
+          enum: [false]
+        public_passport:
+          type: object
+          additionalProperties: false
+          required: [version, subject_address, attestations, note]
+          properties:
+            version:
+              type: string
+              enum: [agora-public-passport-v1]
+            subject_address:
+              type: string
+              nullable: true
+            attestations:
+              type: array
+              items:
+                $ref: "#/components/schemas/PublicAttestationView"
+            note:
+              type: string
+        local_private_prefs:
+          type: object
+          additionalProperties: false
+          description: Device preferences the user may copy. Keys are not in this object.
+          required: [version, language, region_query, interest_filters]
+          properties:
+            version:
+              type: string
+              enum: [agora-local-prefs-v1]
+            language:
+              type: string
+              nullable: true
+            region_query:
+              type: string
+              nullable: true
+            interest_filters:
+              type: array
+              items:
+                type: string
+        service_trust:
+          type: array
+          minItems: 10
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/ServiceTrustLabel"

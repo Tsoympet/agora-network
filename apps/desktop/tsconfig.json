@@ -10,6 +10,15 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "../shared/light-client/**/*.ts", "../shared/community/**/*.ts", "../shared/core/**/*.ts", "../shared/wallet/**/*.ts", "../shared/lightclient/**/*.ts", "../shared/drc/**/*.ts", "../shared/ovl/**/*.ts", "../shared/tlt/**/*.ts", "../shared/passport/**/*.ts", "../shared/missions/**/*.ts", "../shared/academy/**/*.ts", "../shared/grants/**/*.ts", "../shared/bounties/**/*.ts", "../shared/guilds/**/*.ts", "../shared/merchants/**/*.ts", "../shared/events/**/*.ts", "../shared/assembly/**/*.ts", "../shared/treasury/**/*.ts", "../shared/forum/**/*.ts", "../shared/notifications/**/*.ts", "../shared/explorer/**/*.ts", "../shared/security/**/*.ts", "../shared/settings/**/*.ts", "../shared/moduleMap.ts", "../shared/index.ts"],
-  "exclude": ["../shared/**/*.test.ts"]
+  "include": [
+    "src",
+    "../shared/light-client/**/*.ts",
+    "../shared/community/**/*.ts",
+    "../shared/community-trust/**/*.ts"
+  ],
+  "exclude": [
+    "../shared/light-client/**/*.test.ts",
+    "../shared/community/**/*.test.ts",
+    "../shared/community-trust/**/*.test.ts"
+  ]
 }

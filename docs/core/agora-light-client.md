@@ -215,3 +215,10 @@ Pairing adds these cases:
 - A node that matches the expected genesis can still lie about balances and
   about which spine is the network's. The genesis check stops a random chain.
   It does not stop a node that replays the real genesis and then forks.
+
+## Security model
+
+Headers, Merkle proofs, state proofs, RPC, indexers, the community API, the
+wallet, passport export, governance badges, and confirmation are listed in
+[`LIGHT_CLIENT_SECURITY_MODEL.md`](LIGHT_CLIENT_SECURITY_MODEL.md). The desktop
+and phone trust panels render that full list, including every assumption.

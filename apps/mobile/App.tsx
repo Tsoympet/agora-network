@@ -50,6 +50,7 @@ import {
   type TipSyncSnapshot,
   type WatchOnlyWallet,
 } from "../shared/light-client";
+import { CommunityTrustPanel } from "./CommunityTrustPanel";
 import { FeatureSurfacesPanel } from "./FeatureSurfacesPanel";
 import { LightClientPanel } from "./LightClientPanel";
 import { PairingPanel } from "./PairingPanel";
@@ -901,6 +902,9 @@ export default function App() {
         </>
         ) : null}
         {show("DRC") ? <DrcPayFlow client={community} /> : null}
+        {show("COMMUNITY", "PASSPORT", "ASSEMBLY", "TREASURY", "SETTINGS") ? (
+          <CommunityTrustPanel subjectAddress={receiveBech32} community={community} />
+        ) : null}
         {show(
           "HOME",
           "COMMUNITY",
