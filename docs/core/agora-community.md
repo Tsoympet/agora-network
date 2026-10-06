@@ -78,22 +78,29 @@ Assembly shows governance areas with eligibility labels. A passport with only
 Community reputation is not eligible for the OVL / EVM area. Civic RPC votes
 remain the existing administrative local flow and are labeled as such.
 
-Treasury rows prefer `agora_getProtocolTreasuries` when the node answers.
-Those balances are node-reported. They are not a header proof, and unsigned
-civic RPC still cannot spend them.
+Treasury rows come from `agora_getProtocolTreasuries` when the node answers.
+Those balances are a full-node read. They are not a header proof, not an
+infrastructure index, and unsigned civic RPC still cannot spend them. The
+community service does not fill in a balance when the node is quiet.
 
 ## API
 
-`apps/community-api` serves the same types as `apps/shared/community`:
+The HTTP host is `infrastructure/community-services`. Device packages do not
+import it. The plane split is
+[`AGORA_DATA_PLANE_SPLIT.md`](AGORA_DATA_PLANE_SPLIT.md).
 
 `/passport` `/passport/private` `/reputation` `/missions` `/grants`
 `/bounties` `/academy` `/events` `/merchants` `/guilds` `/proposals`
-`/treasury` `/contributions` plus `/hubs` `/forum` `/developers` `/ecosystem`
-and `POST /session`.
+`/contributions` plus `/hubs` `/forum` `/developers` `/ecosystem`
+`/search` `/moderation/reports` `/notifications/register`
+`/v1/indexer/status` and `POST /session`. There is no `/treasury` route.
 
-Without `VITE_AGORA_COMMUNITY_URL` or `EXPO_PUBLIC_AGORA_COMMUNITY_URL`, the
-clients use the local fixture bundle and label it community submitted, not
-confirmed. The dev server keeps sessions in memory and does not store seeds.
+Responses are infrastructure envelopes with `chainProof: false`. Without
+`VITE_AGORA_COMMUNITY_URL` or `EXPO_PUBLIC_AGORA_COMMUNITY_URL`, the clients
+keep the local community catalog and label it community submitted, not
+confirmed. They do not start a server. The dev host keeps sessions in memory
+and does not store seeds. Set `VITE_AGORA_INFRA_URL` on the explorer for the
+same origin.
 
 ## Still out of this slice
 

@@ -41,6 +41,7 @@ import {
   walletNetworkFromNode,
   watchTransaction,
   type LightNodeInfo,
+  type LightProtocolTreasuries,
   type LightTxLookup,
   type LightUtxo,
   type NativeBalances,
@@ -135,10 +136,27 @@ export default function App() {
   const [notifications, setNotifications] = useState(defaultNotificationPrefs);
   const [moreOpen, setMoreOpen] = useState(false);
   const community = useCommunityClient(env("EXPO_PUBLIC_AGORA_COMMUNITY_URL") || null);
+  const [chainTreasuries, setChainTreasuries] = useState<LightProtocolTreasuries | null>(null);
 
   useEffect(() => {
     if (!rpcHydrated) return;
     return startTipSync({ client, pollMs: POLL_MS, onUpdate: setSnap });
+  }, [client, rpcHydrated]);
+
+  useEffect(() => {
+    if (!rpcHydrated) return;
+    let cancelled = false;
+    void client
+      .getProtocolTreasuries()
+      .then((rows) => {
+        if (!cancelled) setChainTreasuries(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setChainTreasuries(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [client, rpcHydrated]);
 
   useEffect(() => {
@@ -923,6 +941,7 @@ export default function App() {
             address={receiveBech32 || address || null}
             notifications={notifications}
             onNotifications={setNotifications}
+            chainTreasuries={chainTreasuries}
           />
         ) : null}
       </ScrollView>

@@ -1,5 +1,10 @@
 import { presentCached, type OfflineView } from "./cache.ts";
 import { communityFixtures, demoPrivateProfile } from "./fixtures.ts";
+import {
+  createDeviceInfrastructureClient,
+  type DataPlane,
+  type InfrastructureFetch,
+} from "../data-plane/deviceClient.ts";
 import type {
   AcademyCatalog,
   Bounty,
@@ -40,50 +45,54 @@ export type CommunityClient = {
   forum: () => Promise<OfflineView<ForumPost[]>>;
   developers: () => Promise<OfflineView<DirectoryEntry[]>>;
   ecosystem: () => Promise<OfflineView<EcosystemSnapshot>>;
+  reportForum: (postId: string, reason: string) => Promise<OfflineView<{ dispatched: boolean }>>;
+  advanceMission: (id: string, to: string) => Promise<OfflineView<{ recorded: boolean }>>;
 };
 
-type FetchLike = (input: string, init?: { headers?: Record<string, string> }) => Promise<{
-  ok: boolean;
-  json: () => Promise<unknown>;
-}>;
-
-async function read<T>(
-  baseUrl: string | null,
-  path: string,
-  fetchImpl: FetchLike,
-  sessionToken: string | null,
-  fallback: T,
-): Promise<{ online: boolean; data: T }> {
-  if (!baseUrl) return { online: false, data: fallback };
-  try {
-    const headers: Record<string, string> = {};
-    if (sessionToken) headers.authorization = `Bearer ${sessionToken}`;
-    const response = await fetchImpl(`${baseUrl}${path}`, { headers });
-    if (!response.ok) return { online: false, data: fallback };
-    return { online: true, data: (await response.json()) as T };
-  } catch {
-    return { online: false, data: fallback };
+function serviceFor(path: string): string {
+  const pathname = path.split("?")[0] ?? path;
+  if (pathname === "/forum") return "forum";
+  if (pathname === "/grants" || pathname === "/missions" || pathname === "/missions/advance") {
+    return "grant-admin";
   }
+  if (pathname === "/events") return "event-service";
+  if (pathname === "/search") return "search";
+  if (pathname.startsWith("/moderation")) return "moderation";
+  if (pathname.startsWith("/notifications")) return "notification-dispatch";
+  if (pathname.startsWith("/v1/indexer")) return "indexer";
+  return "community";
 }
 
 export function createCommunityClient(options: {
   baseUrl?: string | null;
-  fetchImpl?: FetchLike;
+  fetchImpl?: InfrastructureFetch;
   sessionToken?: string | null;
   bundle?: CommunityBundle;
 }): CommunityClient {
   const bundle = options.bundle ?? communityFixtures();
-  const fetchImpl = options.fetchImpl ?? (globalThis.fetch as FetchLike);
-  const baseUrl = options.baseUrl?.replace(/\/$/, "") || null;
-  let lastOnline = baseUrl === null ? false : true;
+  const infra = createDeviceInfrastructureClient({
+    baseUrl: options.baseUrl,
+    fetchImpl: options.fetchImpl,
+  });
+  const baseUrl = infra.baseUrl;
+  let lastOnline = false;
 
-  function view<T>(online: boolean, data: T): OfflineView<T> {
+  function view<T>(plane: DataPlane, online: boolean, data: T, label?: string): OfflineView<T> {
     lastOnline = online && baseUrl !== null;
-    const shown = presentCached(lastOnline, data, !lastOnline);
-    if (!baseUrl) {
-      shown.label = "local fixture · community submitted · not confirmed";
-    }
+    const shown = presentCached(lastOnline, data, !lastOnline, plane);
+    if (label) shown.label = label;
+    else if (!baseUrl) shown.label = "local fixture · community submitted · not confirmed";
     return shown;
+  }
+
+  async function load<T>(plane: DataPlane, path: string, fallback: T, sessionToken: string | null): Promise<OfflineView<T>> {
+    if (!infra.configured) return view(plane, false, fallback);
+    try {
+      const data = await infra.facades.get<T>(serviceFor(path), path, sessionToken);
+      return view(plane, true, data);
+    } catch {
+      return view(plane, false, fallback);
+    }
   }
 
   return {
@@ -94,100 +103,139 @@ export function createCommunityClient(options: {
         bundle.passports.find((row) => !address || row.address === address) ??
         bundle.passports[0] ??
         null;
-      const result = await read<PublicPassport | null>(
-        baseUrl,
+      return load(
+        "infrastructure",
         `/passport${address ? `?address=${encodeURIComponent(address)}` : ""}`,
-        fetchImpl,
-        options.sessionToken ?? null,
         fallback,
+        options.sessionToken ?? null,
       );
-      return view(result.online, result.data);
     },
     async privateProfile(sessionToken) {
       if (!sessionToken) throw new Error("private profile requires a community session");
-      const result = await read<PrivatePassportProfile>(
-        baseUrl,
+      const result = await load<PrivatePassportProfile>(
+        "device",
         "/passport/private",
-        fetchImpl,
-        sessionToken,
         { ...demoPrivateProfile, storage: "local" },
+        sessionToken,
       );
-      result.data.consensus = false;
-      if (!result.online) result.data.storage = "local";
-      return result.data;
+      const profile = result.data ?? { ...demoPrivateProfile, storage: "local" as const };
+      profile.consensus = false;
+      if (!result.online) profile.storage = "local";
+      return profile;
     },
     async reputation(address) {
       const passport = bundle.passports.find((row) => row.address === address) ?? null;
-      const result = await read(
-        baseUrl,
+      return load(
+        "infrastructure",
         `/reputation?address=${encodeURIComponent(address)}`,
-        fetchImpl,
-        options.sessionToken ?? null,
         passport?.reputations ?? null,
+        options.sessionToken ?? null,
       );
-      return view(result.online, result.data);
     },
-    async missions() {
-      const result = await read(baseUrl, "/missions", fetchImpl, null, bundle.missions);
-      return view(result.online, result.data);
+    missions() {
+      return load("infrastructure", "/missions", bundle.missions, null);
     },
-    async grants() {
-      const result = await read(baseUrl, "/grants", fetchImpl, null, bundle.grants);
-      return view(result.online, result.data);
+    grants() {
+      return load("infrastructure", "/grants", bundle.grants, null);
     },
-    async bounties() {
-      const result = await read(baseUrl, "/bounties", fetchImpl, null, bundle.bounties);
-      return view(result.online, result.data);
+    bounties() {
+      return load("infrastructure", "/bounties", bundle.bounties, null);
     },
-    async academy() {
-      const result = await read(baseUrl, "/academy", fetchImpl, null, bundle.academy);
-      return view(result.online, result.data);
+    academy() {
+      return load("infrastructure", "/academy", bundle.academy, null);
     },
-    async events() {
-      const result = await read(baseUrl, "/events", fetchImpl, null, bundle.events);
-      return view(result.online, result.data);
+    events() {
+      return load("infrastructure", "/events", bundle.events, null);
     },
-    async merchants() {
-      const result = await read(baseUrl, "/merchants", fetchImpl, null, bundle.merchants);
-      return view(result.online, result.data);
+    merchants() {
+      return load("infrastructure", "/merchants", bundle.merchants, null);
     },
-    async guilds() {
-      const result = await read(baseUrl, "/guilds", fetchImpl, null, bundle.guilds);
-      return view(result.online, result.data);
+    guilds() {
+      return load("infrastructure", "/guilds", bundle.guilds, null);
     },
-    async proposals() {
-      const result = await read(baseUrl, "/proposals", fetchImpl, null, bundle.proposals);
-      return view(result.online, result.data);
+    proposals() {
+      return load("infrastructure", "/proposals", bundle.proposals, null);
     },
-    async treasury() {
-      const result = await read(baseUrl, "/treasury", fetchImpl, null, bundle.treasuries);
-      return view(result.online, result.data);
+    treasury() {
+      return Promise.resolve(view(
+        "on-chain",
+        false,
+        [] as CommunityTreasuryRow[],
+        "treasury balances come from a full node · this client does not invent them",
+      ));
     },
-    async contributions() {
-      const result = await read(baseUrl, "/contributions", fetchImpl, null, bundle.contributions);
-      return view(result.online, result.data);
+    contributions() {
+      return load("infrastructure", "/contributions", bundle.contributions, null);
     },
-    async hubs() {
-      const result = await read(baseUrl, "/hubs", fetchImpl, null, bundle.hubs);
-      return view(result.online, result.data);
+    hubs() {
+      return load("infrastructure", "/hubs", bundle.hubs, null);
     },
-    async forum() {
-      const result = await read(baseUrl, "/forum", fetchImpl, null, bundle.forum);
-      return view(result.online, result.data);
+    forum() {
+      return load("infrastructure", "/forum", bundle.forum, null);
     },
-    async developers() {
-      const result = await read(baseUrl, "/developers", fetchImpl, null, bundle.developers);
-      return view(result.online, result.data);
+    developers() {
+      return load("infrastructure", "/developers", bundle.developers, null);
     },
-    async ecosystem() {
-      const result = await read(baseUrl, "/ecosystem", fetchImpl, null, bundle.ecosystem);
-      return view(result.online, result.data);
+    ecosystem() {
+      return load("infrastructure", "/ecosystem", bundle.ecosystem, null);
+    },
+    async reportForum(postId, reason) {
+      if (!infra.configured) {
+        return view(
+          "infrastructure",
+          false,
+          { dispatched: false },
+          "moderation runs on infrastructure · this device did not dispatch a report",
+        );
+      }
+      try {
+        await infra.facades.moderation.report({ postId, reason });
+        return view(
+          "infrastructure",
+          true,
+          { dispatched: true },
+          "report accepted by the moderation service · not a consensus action",
+        );
+      } catch {
+        return view(
+          "infrastructure",
+          false,
+          { dispatched: false },
+          "moderation service unreachable · report not dispatched",
+        );
+      }
+    },
+    async advanceMission(id, to) {
+      if (!infra.configured) {
+        return view(
+          "infrastructure",
+          false,
+          { recorded: false },
+          "mission admin runs on infrastructure · this device did not record the transition",
+        );
+      }
+      try {
+        const recorded = await infra.facades.grants.advance({ id, to });
+        return view(
+          "infrastructure",
+          true,
+          recorded,
+          "mission service recorded the transition · not a consensus transaction",
+        );
+      } catch {
+        return view(
+          "infrastructure",
+          false,
+          { recorded: false },
+          "mission service unreachable · transition not recorded",
+        );
+      }
     },
   };
 }
 
 export function preferChainTreasuries(
-  community: CommunityTreasuryRow[],
+  _community: CommunityTreasuryRow[],
   chain:
     | {
         consensus_mutations_active?: boolean;
@@ -195,7 +243,8 @@ export function preferChainTreasuries(
       }
     | null,
 ): CommunityTreasuryRow[] {
-  if (!chain?.treasuries?.length) return community;
+  // Community fixtures are not treasury balances. Only a full-node read is shown.
+  if (!chain?.treasuries?.length) return [];
   return chain.treasuries.map((row) => {
     const balance =
       typeof row.balance === "string" || typeof row.balance === "number"
@@ -207,8 +256,8 @@ export function preferChainTreasuries(
       balance,
       source: "indexed",
       note: chain.consensus_mutations_active
-        ? "Node-reported canonical treasury. This light client did not prove the balance against a header."
-        : "Node-reported canonical treasury scaffold. Spend mutations are not active. Balance is not a light-client proof.",
+        ? "Full-node canonical treasury read. Not the infrastructure indexer and not a header proof."
+        : "Full-node treasury scaffold. Spend mutations are not active. Not the infrastructure indexer and not a header proof.",
     };
   });
 }

@@ -10,7 +10,8 @@ agora-network/
 │   ├── shared/brand/       # Agora_Brand_System.css, tokens, Nexus + marks
 │   ├── desktop/            # Tauri + RandomX Sidecar
 │   ├── mobile/             # React Native (Expo) Light Client
-│   └── explorer/           # Web-based BlockDAG Visualizer
+│   ├── explorer/           # Web-based BlockDAG Visualizer
+│   └── shared/data-plane/  # DataPlane labels and HTTP facades only
 ├── core/                   # Rust Consensus & State
 │   ├── crates/
 │   │   ├── types/          # Shared BlockDAG types + ts-rs bindings
@@ -35,7 +36,15 @@ agora-network/
 ├── infrastructure/         # External services
 │   ├── dns-seeder/         # Node discovery phonebook
 │   ├── stratum-pool/       # ASIC Mining aggregation
-│   └── testnet-faucet/     # Dev Liquidity
+│   ├── testnet-faucet/     # Dev Liquidity
+│   ├── indexer/            # Operator chain index (no invented balances)
+│   ├── forum-server/       # Operator forum posts
+│   ├── grant-admin/        # Grant and mission management
+│   ├── event-service/      # Community events
+│   ├── notification-dispatch/ # Push dispatch loop
+│   ├── search/             # Community document search
+│   ├── moderation/         # Report queue
+│   └── community-services/ # HTTP host for the services above
 ├── scripts/                # Launch & Build utilities
 ├── Cargo.toml              # Workspace definitions
 └── README.md
@@ -60,8 +69,9 @@ agora-network/
 | `core/crates/rpc` | `types`, node services | Mining loops, UI frameworks |
 | `core/crates/miner-sidecar` | `types`, `crypto`, `consensus` (RandomX hasher), `rpc` | Full state machine / RocksDB |
 | `core/node-bin` | all core crates | Client UI |
-| `apps/*` | RPC / generated TS types | Consensus or RocksDB logic |
-| `infrastructure/*` | public RPC / P2P APIs | Core crate internals |
+| `apps/*` | RPC / generated TS types / `shared/data-plane` HTTP facades | Consensus, RocksDB, indexer, forum-server, grant admin, event service, search, moderation, notification dispatch |
+| `apps/shared/data-plane` | feature labels and `fetch` | `node:http` and infrastructure implementations |
+| `infrastructure/*` | public RPC / P2P APIs / shared community types | Core crate internals, device UI |
 
 Programmable execution belongs exclusively to OVL. Canonical and historical
 DRC functionality must remain closed typed payment/state transitions; a

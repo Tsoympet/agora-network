@@ -1,3 +1,4 @@
+import type { DataPlane } from "../data-plane/planes.ts";
 import type { VerificationStatus } from "./verificationStatus";
 
 export type FeatureDomain = "network" | "tlt" | "drc" | "ovl";
@@ -13,11 +14,14 @@ export type FeatureCapability = {
   rpcMethod?: string;
   /** Static surfaces that never gain an RPC probe (local crypto only). */
   localOnly?: boolean;
+  /** Device, infrastructure, or on-chain owner. Full-node reads of canonical state are on-chain, not the indexer. */
+  plane: DataPlane;
 };
 
 export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   {
     id: "network.rpc",
+    plane: "device",
     domain: "network",
     title: "RPC endpoint",
     detail: "User-chosen JSON-RPC URL and optional bearer token.",
@@ -25,6 +29,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "network.genesis",
+    plane: "device",
     domain: "network",
     title: "Genesis binding",
     detail: "Wallet compares agora_getNodeInfo.genesis_hash to the paired genesis.",
@@ -33,6 +38,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "network.header_spine",
+    plane: "device",
     domain: "network",
     title: "Selected-parent header spine",
     detail: "Recomputed header hashes and ancestry to genesis.",
@@ -42,6 +48,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "network.finality_quorum",
+    plane: "device",
     domain: "network",
     title: "OVL / DRC finality quorums",
     detail: "Two-thirds stake math on checkpoint totals (not signature checks).",
@@ -51,6 +58,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "network.validator_set",
+    plane: "on-chain",
     domain: "network",
     title: "Validator sets",
     detail: "Independent OVL and DRC stake tables.",
@@ -59,6 +67,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "network.native_supply",
+    plane: "on-chain",
     domain: "network",
     title: "Native supply / fee burn",
     detail: "Issued, burned, and net supply per native asset.",
@@ -67,6 +76,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "tlt.receive",
+    plane: "device",
     domain: "tlt",
     title: "Receive address",
     detail: "BIP-44 m/44'/8888'/0'/0/0 Bech32m receive.",
@@ -75,6 +85,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "tlt.utxo_list",
+    plane: "on-chain",
     domain: "tlt",
     title: "UTXO list",
     detail: "Spendable outputs for an address.",
@@ -83,6 +94,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "tlt.send",
+    plane: "device",
     domain: "tlt",
     title: "Coin-selection send",
     detail: "Device signs; node admits via agora_submitTransaction.",
@@ -92,6 +104,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "tlt.fee_estimate",
+    plane: "on-chain",
     domain: "tlt",
     title: "Fee estimate",
     detail: "Suggested relay fee from the node.",
@@ -100,6 +113,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "tlt.history",
+    plane: "on-chain",
     domain: "tlt",
     title: "Transaction history",
     detail: "Point lookups for known tx ids (mempool + confirmed).",
@@ -108,6 +122,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "tlt.merkle",
+    plane: "device",
     domain: "tlt",
     title: "Merkle inclusion verify",
     detail: "agora_getTltInclusionProof recomputed on device.",
@@ -117,6 +132,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "tlt.covenant",
+    plane: "device",
     domain: "tlt",
     title: "Covenant / HTLC spends",
     detail: "Not exposed until block-accepted covenant lanes ship on this branch.",
@@ -124,6 +140,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.policy",
+    plane: "on-chain",
     domain: "drc",
     title: "Account policy",
     detail: "Destination tag, DepositAuth, master-key disable flags.",
@@ -132,6 +149,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.tags",
+    plane: "on-chain",
     domain: "drc",
     title: "Source / destination tags",
     detail: "Carried on payments and surfaced on receipts.",
@@ -140,6 +158,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.deposit_auth",
+    plane: "on-chain",
     domain: "drc",
     title: "DepositAuth preauth",
     detail: "Exact recipient/source grant lookup.",
@@ -148,6 +167,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.keys",
+    plane: "on-chain",
     domain: "drc",
     title: "Regular keys",
     detail: "Account key rotation state.",
@@ -156,6 +176,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.multisign",
+    plane: "on-chain",
     domain: "drc",
     title: "Signer list / multisign",
     detail: "Weighted authorization quorum.",
@@ -164,6 +185,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.tickets",
+    plane: "on-chain",
     domain: "drc",
     title: "Tickets",
     detail: "Sequence tickets and ticket-set objects.",
@@ -172,6 +194,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.escrow",
+    plane: "on-chain",
     domain: "drc",
     title: "Escrow",
     detail: "Live escrow and settlement receipts.",
@@ -180,6 +203,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.checks",
+    plane: "on-chain",
     domain: "drc",
     title: "Checks",
     detail: "Live checks and cash receipts.",
@@ -188,6 +212,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.channels",
+    plane: "on-chain",
     domain: "drc",
     title: "Payment channels",
     detail: "Channel point lookup and receipts.",
@@ -196,6 +221,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.trust_lines",
+    plane: "on-chain",
     domain: "drc",
     title: "Trust lines",
     detail: "Issued-asset holder lines.",
@@ -204,6 +230,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.issued_controls",
+    plane: "on-chain",
     domain: "drc",
     title: "Issued-asset freeze / clawback",
     detail: "Live policy and issuer controls.",
@@ -212,6 +239,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.owner_objects",
+    plane: "on-chain",
     domain: "drc",
     title: "Owner object pages",
     detail: "Bounded agora_getDrcAccountObjects pagination.",
@@ -220,6 +248,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "drc.spend",
+    plane: "device",
     domain: "drc",
     title: "Typed sign + submit",
     detail: "Device-built DRC envelopes; watch-only cannot sign.",
@@ -228,6 +257,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "ovl.transfer",
+    plane: "device",
     domain: "ovl",
     title: "Native OVL transfer",
     detail: "Signed agora_submitAccountTransfer for OVL.",
@@ -237,6 +267,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "ovl.balance",
+    plane: "on-chain",
     domain: "ovl",
     title: "Balance / nonce",
     detail: "agora_getNativeBalances account module.",
@@ -245,6 +276,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "ovl.staking",
+    plane: "on-chain",
     domain: "ovl",
     title: "Staking / validators",
     detail: "Validator set and reward pool reads.",
@@ -253,6 +285,7 @@ export const LIGHT_FEATURE_MATRIX: FeatureCapability[] = [
   },
   {
     id: "ovl.evm_deploy",
+    plane: "device",
     domain: "ovl",
     title: "EVM contract deploy",
     detail: "Not claimed on this wallet base (no fake eth_call surface).",

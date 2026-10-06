@@ -1,0 +1,15 @@
+export {
+  DATA_PLANES,
+  DATA_PLANE_FEATURES,
+  DEVICE_FORBIDDEN_IMPLEMENTATIONS,
+  InfrastructureResponseError,
+  InfrastructureUnconfigured,
+  createDeviceInfrastructureClient,
+  createInfrastructureFacades,
+  featureById,
+  planeLabel,
+  type DataPlane,
+  type FeatureDescriptor,
+  type InfrastructureFacades,
+  type InfrastructureFetch,
+} from "./deviceClient.ts";

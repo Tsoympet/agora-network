@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 
 import { memoryCacheStorage, notificationBody, presentCached, saveCache, loadCache, emptyCache } from "./cache.ts";
-import { createCommunityClient } from "./client.ts";
+import { createCommunityClient, preferChainTreasuries } from "./client.ts";
 import { communityFixtures, demoPassport, demoPrivateProfile, searchHubs } from "./fixtures.ts";
 import { proposalBadge, voteEligibility } from "./governance.ts";
 import { transitionMission } from "./missions.ts";
@@ -168,7 +168,8 @@ await saveCache(storage, cached);
 const loaded = await loadCache(storage, 6_000);
 assert.equal(loaded.passport?.username, "harbor-builder");
 assert.equal(loaded.privateProfile?.consensus, false);
-const offline = presentCached(false, loaded.passport, true);
+const offline = presentCached(false, loaded.passport, true, "device");
+assert.equal(offline.plane, "device");
 assert.equal(offline.confirmed, false);
 assert.match(offline.label, /not confirmed/);
 
@@ -180,7 +181,24 @@ const client = createCommunityClient({ baseUrl: null });
 const missions = await client.missions();
 assert.equal(missions.online, false);
 assert.equal(missions.confirmed, false);
+assert.equal(missions.plane, "infrastructure");
 assert.ok((missions.data?.length ?? 0) > 0);
+const treasury = await client.treasury();
+assert.deepEqual(treasury.data, []);
+assert.equal(treasury.plane, "on-chain");
+assert.equal(preferChainTreasuries(communityFixtures().treasuries, null).length, 0);
+const fromNode = preferChainTreasuries([], {
+  treasuries: [{ id: "drc_community", asset: "DRC", balance: 5 }],
+});
+assert.equal(fromNode[0]?.balance, "5");
+assert.match(fromNode[0]?.note ?? "", /Not the infrastructure indexer/);
+for (const proposal of communityFixtures().proposals) {
+  assert.equal(proposal.chainCommitment, null);
+}
+const report = await client.reportForum("post-welcome", "spam");
+assert.equal(report.data?.dispatched, false);
+const advanced = await client.advanceMission("mission-docs-review", "ACCEPTED");
+assert.equal(advanced.data?.recorded, false);
 await assert.rejects(() => client.privateProfile(null), /community session/);
 const profile = await client.privateProfile("ab".repeat(16));
 assert.equal(profile.consensus, false);
