@@ -7,7 +7,11 @@
     "icon": "./assets/icon.png",
     "scheme": "agora",
     "userInterfaceStyle": "dark",
-    "platforms": ["ios", "android", "web"],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "splash": {
       "image": "./assets/icon.png",
       "resizeMode": "contain",
@@ -28,7 +32,9 @@
         "backgroundColor": "#101218"
       },
       "package": "network.agora.mobile",
-      "permissions": ["INTERNET"]
+      "permissions": [
+        "INTERNET"
+      ]
     },
     "web": {
       "favicon": "./assets/icon.png"
@@ -42,7 +48,8 @@
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "extra": {
       "agoraBrand": {
