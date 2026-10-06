@@ -158,6 +158,17 @@ export {
   sendDrcTrustLineSet,
 } from "./typed-lanes-drc";
 export {
+  RAW_EVM_DEV_CHAIN_ID,
+  RAW_EVM_KEY_SPLIT,
+  RAW_EVM_TESTNET_CHAIN_ID,
+  ethereumAddressFromSecret,
+  sendRawEvmTransaction,
+  signAndSendEip1559RawTransaction,
+  signAndSendLegacyRawTransaction,
+  signEip1559RawTransaction,
+  signLegacyRawTransaction,
+} from "./raw-evm";
+export {
   clearPersistedVault,
   DEFAULT_VAULT_STORAGE_KEY,
   keyValueVault,

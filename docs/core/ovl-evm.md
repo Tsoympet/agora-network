@@ -107,6 +107,12 @@ gate returns an error. Backends with no execution world return method-not-found
 rather than a stand-in balance. HTTP reads stay public when `AGORA_RPC_TOKEN`
 is set. `eth_sendRawTransaction` requires the token.
 
+Device-local `apps/shared/light-client/raw-evm.ts` can sign those envelopes
+from an **explicit** 32-byte secp256k1 scalar the caller supplies. It is not
+the Agora BIP-44 vault: Agora addresses are SHA-256/Bech32m; EVM addresses
+are keccak of the uncompressed public key. Do not derive one from the other
+or mix a vault mnemonic into this helper.
+
 `eth_sendRawTransaction` validates a legacy, type-1, or type-2 envelope and
 stores it in a process-local inbox. It does not commit the world. A dev or
 test node whose gate is active may place inbox envelopes that pass the Shanghai

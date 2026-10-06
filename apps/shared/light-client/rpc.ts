@@ -413,6 +413,7 @@ export type LightClient = {
   getEthChainId: () => Promise<unknown>;
   getEthBlockNumber: () => Promise<unknown>;
   getEthBalance: (address: string, blockTag?: string) => Promise<unknown>;
+  sendRawEvmTransaction: (rawHex: string) => Promise<string>;
   getUtxos: (address: string) => Promise<LightUtxoSet>;
   /** Submit a signed transaction JSON body (native serde / byte-array hashes). */
   submitTransaction: (tx: unknown) => Promise<SubmitTxResult>;
@@ -612,6 +613,10 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getEthBlockNumber: () => call("eth_blockNumber", []),
     getEthBalance: (address, blockTag = "latest") =>
       call("eth_getBalance", [address, blockTag]),
+    sendRawEvmTransaction: (rawHex) => {
+      const hex = rawHex.startsWith("0x") || rawHex.startsWith("0X") ? rawHex : `0x${rawHex}`;
+      return call<string>("eth_sendRawTransaction", [hex]);
+    },
     getUtxos: (address: string) =>
       call<LightUtxoSet>("agora_getUtxos", { address }),
     submitTransaction: (tx: unknown) =>

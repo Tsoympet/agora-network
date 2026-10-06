@@ -43,7 +43,9 @@ Agora-signed DRC payments, native/issued offers, escrow, Checks, payment
 channels, tickets, regular key, signer list, deposit preauth, account policy,
 trust lines, issued controls, TLT P2PKH covenants, OVL account transfers, and
 OVL execution v1 (empty calldata). Keys stay on the device. Raw Ethereum
-envelopes are not built from the Agora mnemonic vault.
+envelopes are signed only by `raw-evm.ts` from an explicit secp256k1 key
+(never a vault mnemonic). Agora BIP-44 addresses and Ethereum keccak
+addresses are different 20-byte families.
 
 Addresses: Bech32m HRPs `agora` / `agoratest` / `agoradev` preferred; 40-char
 hex stays network-neutral. Pass the node network to `parseAddress(input, network)`

@@ -42,6 +42,7 @@ try {
   await client.submitDrcOfferCreate({ version: 1 });
   await client.submitDrcTicketCreate({ version: 1 });
   await client.submitDrcEscrowCreate({ version: 1 });
+  await client.sendRawEvmTransaction("02c0");
 
   assert.deepEqual(
     calls.map((call) => call.method),
@@ -63,6 +64,7 @@ try {
       "agora_submitDrcOfferCreate",
       "agora_submitDrcTicketCreate",
       "agora_submitDrcEscrowCreate",
+      "eth_sendRawTransaction",
     ],
   );
   assert.deepEqual(calls[0].params, { address: "agoradev1qqqq" });
@@ -88,6 +90,7 @@ try {
   assert.deepEqual(calls[14].params, { offer_create: { version: 1 } });
   assert.deepEqual(calls[15].params, { ticket_create: { version: 1 } });
   assert.deepEqual(calls[16].params, { escrow_create: { version: 1 } });
+  assert.deepEqual(calls[17].params, ["0x02c0"]);
   console.log("light-client query wrappers ok");
 } finally {
   globalThis.fetch = originalFetch;
