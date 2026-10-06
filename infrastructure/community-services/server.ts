@@ -5,6 +5,9 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { communityFixtures, demoPrivateProfile } from "../../apps/shared/community/fixtures.ts";
 import {
@@ -24,22 +27,36 @@ import { INDEXER_TRUST, createIndexer } from "../indexer/index.ts";
 import { MODERATION_TRUST, createModerationPipeline } from "../moderation/index.ts";
 import { NOTIFICATION_TRUST, createNotificationDispatcher } from "../notification-dispatch/index.ts";
 import { SEARCH_TRUST, createSearchIndex } from "../search/index.ts";
+import { openCommunityStore } from "./store.ts";
 
-const bundle = communityFixtures();
-const forum = createForumServer(bundle.forum);
-const grants = createGrantAdmin({ grants: bundle.grants, missions: bundle.missions });
-const events = createEventService(bundle.events);
-const search = createSearchIndex(
-  bundle.docs.map((doc) => ({ id: doc.id, title: doc.title, body: doc.body })),
-);
-const moderation = createModerationPipeline();
-const notifications = createNotificationDispatcher();
-const indexer = createIndexer({ upstreamRpc: process.env.AGORA_INDEXER_UPSTREAM_RPC ?? null });
-
-const challenges = new Map<string, SessionChallenge>();
-const sessions = new Map<string, CommunitySession>();
-const limiter = createRateLimiter(30, 60_000);
 const port = Number(process.env.AGORA_COMMUNITY_PORT ?? 8787);
+
+const SECRET_KEYS = new Set([
+  "mnemonic",
+  "seed",
+  "privatekey",
+  "secretkey",
+  "password",
+  "xprv",
+  "vault",
+]);
+
+function defaultStorePath(): string {
+  if (process.env.AGORA_COMMUNITY_STORE) return process.env.AGORA_COMMUNITY_STORE;
+  if (process.argv[1]?.endsWith("server.ts")) {
+    return fileURLToPath(new URL("./data/community-store.json", import.meta.url));
+  }
+  return join(tmpdir(), `agora-community-${process.pid}-${Date.now()}-${randomBytes(4).toString("hex")}.json`);
+}
+
+function rejectSecretKeys(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  for (const key of Object.keys(value as object)) {
+    if (SECRET_KEYS.has(key.toLowerCase())) {
+      throw new Error("community session cannot carry a seed");
+    }
+  }
+}
 
 const COMMUNITY_TRUST =
   "Operator-hosted community directory. Rows are community submitted unless a full node committed them. This host does not serve treasury balances.";
@@ -70,7 +87,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function bearer(req: IncomingMessage): CommunitySession | null {
+function bearer(req: IncomingMessage, sessions: Map<string, CommunitySession>): CommunitySession | null {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) return null;
   const token = header.slice("Bearer ".length).trim();
@@ -79,7 +96,7 @@ function bearer(req: IncomingMessage): CommunitySession | null {
   return exportCommunitySession(session);
 }
 
-function communityRoutes(): Record<string, unknown> {
+function communityRoutes(bundle: ReturnType<typeof communityFixtures>): Record<string, unknown> {
   return {
     "/passport": bundle.passports,
     "/reputation": bundle.passports.map((row) => ({
@@ -108,7 +125,30 @@ function hexToBytes(hex: string): Uint8Array {
   return out;
 }
 
-export function createCommunityInfrastructureServer() {
+export function createCommunityInfrastructureServer(options?: { storePath?: string }) {
+  const store = openCommunityStore(options?.storePath ?? defaultStorePath());
+  const bundle = store.data.bundle;
+  const forum = createForumServer(bundle.forum, {
+    onChange: () => store.replaceForum(forum.list()),
+  });
+  const grants = createGrantAdmin({
+    grants: bundle.grants,
+    missions: bundle.missions,
+    reviews: store.data.reviews,
+    onChange: () => store.replaceMissions(grants.missions(), grants.reviews()),
+  });
+  const events = createEventService(bundle.events);
+  const search = createSearchIndex(
+    bundle.docs.map((doc) => ({ id: doc.id, title: doc.title, body: doc.body })),
+  );
+  const moderation = createModerationPipeline();
+  const notifications = createNotificationDispatcher();
+  const indexer = createIndexer({ upstreamRpc: process.env.AGORA_INDEXER_UPSTREAM_RPC ?? null });
+  const challenges = new Map<string, SessionChallenge>();
+  const sessions = new Map<string, CommunitySession>();
+  const limiter = createRateLimiter(30, 60_000);
+  const routes = communityRoutes(bundle);
+
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const path = url.pathname;
@@ -135,6 +175,31 @@ export function createCommunityInfrastructureServer() {
       }
       if (req.method === "GET" && path === "/forum") {
         send(res, 200, envelope("forum", FORUM_TRUST, forum.list()));
+        return;
+      }
+      if (req.method === "POST" && path === "/forum/replies") {
+        const body = JSON.parse((await readBody(req)) || "{}") as {
+          postId?: string;
+          body?: string;
+          authorAddress?: string;
+          authorUsername?: string;
+        };
+        rejectSecretKeys(body);
+        if (!body.postId || !body.body || !body.authorAddress) {
+          send(res, 400, envelope("forum", FORUM_TRUST, null, "postId, body, and authorAddress required"));
+          return;
+        }
+        const reply = forum.reply({
+          postId: body.postId,
+          reply: {
+            id: `reply-${randomBytes(8).toString("hex")}`,
+            authorAddress: body.authorAddress,
+            authorUsername: body.authorUsername?.trim() || body.authorAddress,
+            body: body.body,
+            source: "community submitted",
+          },
+        });
+        send(res, 200, envelope("forum", FORUM_TRUST, reply));
         return;
       }
       if (req.method === "GET" && path === "/grants") {
@@ -208,6 +273,7 @@ export function createCommunityInfrastructureServer() {
           signature?: string;
           reputation?: number;
         };
+        rejectSecretKeys(body);
         if (!body.challenge || !body.publicKey || !body.signature) {
           send(res, 400, envelope("community", COMMUNITY_TRUST, null, "challenge, publicKey, and signature required"));
           return;
@@ -239,7 +305,7 @@ export function createCommunityInfrastructureServer() {
         return;
       }
       if (req.method === "GET" && path === "/passport/private") {
-        const session = bearer(req);
+        const session = bearer(req, sessions);
         if (!session) {
           send(res, 401, envelope("community", COMMUNITY_TRUST, null, "community session required"));
           return;
@@ -256,8 +322,8 @@ export function createCommunityInfrastructureServer() {
         send(res, 404, envelope("community", COMMUNITY_TRUST, null, "treasury balances are on-chain and are not served here"));
         return;
       }
-      if (req.method === "GET" && path in communityRoutes()) {
-        send(res, 200, envelope("community", COMMUNITY_TRUST, communityRoutes()[path]));
+      if (req.method === "GET" && path in routes) {
+        send(res, 200, envelope("community", COMMUNITY_TRUST, routes[path]));
         return;
       }
       send(res, 404, envelope("community", COMMUNITY_TRUST, null, "not found"));

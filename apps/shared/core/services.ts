@@ -1,9 +1,9 @@
 /**
  * Service boundaries for community features.
  * In-process adapters return no records. They must not invent payments,
- * votes, reputation, or merchant activity. The HTTP dev server in
- * apps/community-api is a separate adapter and can be stale or fictional
- * wherever its trust entry says it can lie.
+ * votes, reputation, or merchant activity. The HTTP host is
+ * infrastructure/community-services. It can be stale or fictional wherever
+ * its trust entry says it can lie. Device packages do not import it.
  */
 
 export type TrustBoundary = {

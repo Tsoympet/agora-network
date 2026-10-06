@@ -1,5 +1,7 @@
 export {
+  PUSH_TRANSPORT,
   defaultNotificationPrefs,
+  inboxNotice,
   loadCache,
   memoryCacheStorage,
   notificationBody,

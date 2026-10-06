@@ -99,6 +99,8 @@ export function createInfrastructureFacades(options: {
     post,
     forum: {
       list: () => get<unknown[]>("forum", "/forum"),
+      reply: (body: { postId: string; body: string; authorAddress: string; authorUsername?: string }) =>
+        post<{ id: string; body: string; source: string }>("forum", "/forum/replies", body),
     },
     grants: {
       list: () => get<unknown[]>("grant-admin", "/grants"),

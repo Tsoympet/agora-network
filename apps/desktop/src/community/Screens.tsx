@@ -1,10 +1,17 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  ACADEMY_CERTIFICATE,
+} from "../../../shared/academy";
+import { GRANT_DISBURSEMENT } from "../../../shared/grants";
+import { recordVote } from "../../../shared/assembly";
+import {
+  PUSH_TRANSPORT,
   advanceDrcPay,
   broadcastDrcPay,
   createCommunityClient,
   defaultNotificationPrefs,
   GOVERNANCE_AREAS,
+  inboxNotice,
   merchantForAddress,
   notificationBody,
   preferChainTreasuries,
@@ -12,18 +19,37 @@ import {
   recordLessonProgress,
   searchHubs,
   signDrcPayIntent,
+  signSessionChallenge,
   transitionMission,
   voteEligibility,
   parseAgoraQr,
   type CommunityClient,
+  type CommunitySession,
   type DataSource,
+  type DrcPayReceipt,
   type DrcPayStep,
+  type InAppNotice,
   type Mission,
   type NotificationPrefs,
   type OfflineView,
   type PublicPassport,
+  type WalletMode,
 } from "../../../shared/community";
-import type { LightProtocolTreasuries } from "../../../shared/light-client";
+import { submitInspectedDrcPayment } from "../../../shared/community/nodePay";
+import {
+  deriveAccount,
+  type LightClient,
+  type LightProtocolTreasuries,
+} from "../../../shared/light-client";
+
+export type CommunitySpendContext = {
+  mode: WalletMode;
+  mnemonic: string | null;
+  network: string | null;
+  genesisHash: string | null;
+  chainId: string | null;
+  light: LightClient | null;
+};
 
 const fieldStyle = {
   width: "100%",
@@ -73,14 +99,20 @@ export function useCommunityClient(baseUrl?: string | null): CommunityClient {
 export function PassportScreen({
   client,
   address,
+  spend,
 }: {
   client: CommunityClient;
   address: string | null;
+  spend: CommunitySpendContext;
 }) {
   const [view, setView] = useState<OfflineView<PublicPassport | null> | null>(null);
   const [email, setEmail] = useState("");
   const [language, setLanguage] = useState("en");
   const [privateNote, setPrivateNote] = useState("Private profile stays on this device.");
+  const [session, setSession] = useState<CommunitySession | null>(null);
+  const [sessionNote, setSessionNote] = useState(
+    "Sign the infrastructure challenge with the vault key. A pasted bearer token is not accepted.",
+  );
 
   useEffect(() => {
     void client.passport(address ?? undefined).then(setView);
@@ -145,15 +177,69 @@ export function PassportScreen({
         <button type="submit" style={btnStyle}>Save on device</button>
         <p className="agora-meta">{privateNote} <Source source="community submitted" /></p>
       </form>
+      <div className="agora-form">
+        <p className="agora-eyebrow">Community session</p>
+        <button
+          type="button"
+          style={btnStyle}
+          onClick={() => {
+            void (async () => {
+              if (spend.mode !== "signing" || !spend.mnemonic?.trim() || !spend.network) {
+                setSessionNote("Unlock a spend wallet on this device. Watch-only cannot sign, and a pasted token is refused.");
+                return;
+              }
+              try {
+                const account = deriveAccount(spend.mnemonic, 0, "", spend.network);
+                const challenge = await client.requestSessionChallenge(account.addressBech32);
+                const signature = await signSessionChallenge(account.secretKey, challenge);
+                const opened = await client.openSession({
+                  challenge,
+                  publicKey: bytesToHex(account.publicKey),
+                  signature,
+                });
+                setSession(opened);
+                const profile = await client.privateProfile(opened.token);
+                setSessionNote(
+                  `Session for ${opened.address} expires ${new Date(opened.expiresAt).toLocaleString()}. Private profile storage: ${profile.storage}. consensus: ${profile.consensus}.`,
+                );
+              } catch (err) {
+                setSession(null);
+                setSessionNote(err instanceof Error ? err.message : "session refused");
+              }
+            })();
+          }}
+        >
+          Sign session with vault key
+        </button>
+        <p className="agora-meta">
+          {sessionNote}
+          {session ? ` · scopes ${session.scopes.join(", ")}` : ""}
+        </p>
+      </div>
     </section>
   );
 }
 
-export function DrcPayScreen({ client }: { client: CommunityClient }) {
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export function DrcPayScreen({
+  client,
+  spend,
+}: {
+  client: CommunityClient;
+  spend: CommunitySpendContext;
+}) {
   const [raw, setRaw] = useState("");
   const [step, setStep] = useState<DrcPayStep>("scan");
-  const [note, setNote] = useState("Paste a versioned Agora QR. Camera capture is not part of this slice.");
-  const [mode, setMode] = useState<"signing" | "watch-only">("signing");
+  const [note, setNote] = useState("Paste a versioned Agora QR. The PC wallet has no camera. Inspect destination and amount before signing.");
+  const [fee, setFee] = useState("1");
+  const [nonce, setNonce] = useState("0");
+  const [receipt, setReceipt] = useState<DrcPayReceipt | null>(null);
+  const mode = spend.mode;
 
   function onInspect(event: FormEvent) {
     event.preventDefault();
@@ -195,12 +281,14 @@ export function DrcPayScreen({ client }: { client: CommunityClient }) {
         <div className="agora-grid">
           <p>Destination <span className="agora-mono">{preview.destination}</span> <Source source="community submitted" /></p>
           <p>Amount {preview.amount} DRC <Source source="community submitted" /></p>
+          <p>Wallet mode {mode}. {mode === "watch-only" ? "Watch-only cannot spend." : "The vault key signs. It is not pasted."}</p>
           <label>
-            Wallet mode{" "}
-            <select value={mode} onChange={(event) => setMode(event.target.value as "signing" | "watch-only")}>
-              <option value="signing">signing</option>
-              <option value="watch-only">watch-only</option>
-            </select>
+            Fee{" "}
+            <input value={fee} onChange={(event) => setFee(event.target.value)} aria-label="DRC fee" style={fieldStyle} />
+          </label>
+          <label>
+            Nonce{" "}
+            <input value={nonce} onChange={(event) => setNonce(event.target.value)} aria-label="DRC nonce" style={fieldStyle} />
           </label>
           <div className="agora-actions">
             {step === "inspect" ? (
@@ -251,8 +339,12 @@ export function DrcPayScreen({ client }: { client: CommunityClient }) {
                       },
                       confirmed: true,
                     });
+                    if (!/^[0-9]+$/.test(fee) || !/^[0-9]+$/.test(nonce)) {
+                      setNote("Fee and nonce must be integers before signing.");
+                      return;
+                    }
                     setStep(advanceDrcPay("confirm"));
-                    setNote("Signing wallet accepted the intent. The seed stayed in the vault. Consensus DRC bytes are not built here.");
+                    setNote(`Vault will sign ${preview.amount} DRC to ${preview.destination}, fee ${fee}, nonce ${nonce}.`);
                   } catch (err) {
                     setNote(err instanceof Error ? err.message : "sign refused");
                   }
@@ -266,14 +358,48 @@ export function DrcPayScreen({ client }: { client: CommunityClient }) {
                 type="button"
                 style={btnStyle}
                 onClick={() => {
-                  try {
-                    const receipt = broadcastDrcPay({ mode, preview, signed: true });
-                    setStep(advanceDrcPay("sign"));
-                    setStep(advanceDrcPay("broadcast"));
-                    setNote(receipt.note);
-                  } catch (err) {
-                    setNote(err instanceof Error ? err.message : "broadcast refused");
-                  }
+                  void (async () => {
+                    try {
+                      signDrcPayIntent({
+                        mode,
+                        preview,
+                        merchant: {
+                          listed: false,
+                          displayName: null,
+                          source: "community submitted",
+                          holdsMerchantKeys: false,
+                        },
+                        confirmed: true,
+                      });
+                      let next: DrcPayReceipt;
+                      if (
+                        mode === "signing" &&
+                        spend.mnemonic &&
+                        spend.light &&
+                        spend.network &&
+                        spend.genesisHash
+                      ) {
+                        next = await submitInspectedDrcPayment({
+                          mode,
+                          preview,
+                          mnemonic: spend.mnemonic,
+                          network: spend.network,
+                          genesisHex: spend.genesisHash,
+                          chainId: spend.chainId ?? "",
+                          client: spend.light,
+                          fee: BigInt(fee),
+                          nonce: BigInt(nonce),
+                        });
+                      } else {
+                        next = broadcastDrcPay({ mode, preview, signed: true });
+                      }
+                      setReceipt(next);
+                      setStep("receipt");
+                      setNote(`${next.note} confirmed: ${next.confirmed ? "node receipt" : "no"}.`);
+                    } catch (err) {
+                      setNote(err instanceof Error ? err.message : "broadcast refused");
+                    }
+                  })();
                 }}
               >
                 Broadcast
@@ -283,6 +409,12 @@ export function DrcPayScreen({ client }: { client: CommunityClient }) {
         </div>
       ) : null}
       <p className="agora-meta">{note}</p>
+      {receipt ? (
+        <p className="agora-meta">
+          Broadcast {receipt.broadcast} · confirmed {receipt.confirmed ? "yes, node receipt" : "no"}
+          {receipt.paymentId ? ` · ${receipt.paymentId}` : ""}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -294,6 +426,7 @@ export function CommunityScreens({
   chainTreasuries,
   notifications,
   onNotifications,
+  spend,
 }: {
   lane: string;
   client: CommunityClient;
@@ -301,6 +434,7 @@ export function CommunityScreens({
   chainTreasuries: LightProtocolTreasuries | null;
   notifications: NotificationPrefs;
   onNotifications: (next: NotificationPrefs) => void;
+  spend: CommunitySpendContext;
 }) {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [missionLabel, setMissionLabel] = useState("Loading missions…");
@@ -320,8 +454,8 @@ export function CommunityScreens({
     };
   }, [client]);
 
-  if (lane === "PASSPORT") return <PassportScreen client={client} address={address} />;
-  if (lane === "DRC") return <DrcPayScreen client={client} />;
+  if (lane === "PASSPORT") return <PassportScreen client={client} address={address} spend={spend} />;
+  if (lane === "DRC") return <DrcPayScreen client={client} spend={spend} />;
   if (lane === "SWAP") {
     return (
       <section className="agora-block">
@@ -381,6 +515,7 @@ export function CommunityScreens({
       chainTreasuries={chainTreasuries}
       notifications={notifications}
       onNotifications={onNotifications}
+      spend={spend}
     />
   );
 }
@@ -392,6 +527,7 @@ function ModuleScreen({
   chainTreasuries,
   notifications,
   onNotifications,
+  spend,
 }: {
   lane: string;
   client: CommunityClient;
@@ -399,11 +535,16 @@ function ModuleScreen({
   chainTreasuries: LightProtocolTreasuries | null;
   notifications: NotificationPrefs;
   onNotifications: (next: NotificationPrefs) => void;
+  spend: CommunitySpendContext;
 }) {
   const [label, setLabel] = useState("Loading…");
   const [body, setBody] = useState<string[]>([]);
   const [query, setQuery] = useState("");
-  const [progressNote, setProgressNote] = useState("Academy progress is stored on this device.");
+  const [progressNote, setProgressNote] = useState(
+    `Academy progress is stored on this device. Certificate: ${ACADEMY_CERTIFICATE.status}. ${ACADEMY_CERTIFICATE.reason}`,
+  );
+  const [inbox, setInbox] = useState<InAppNotice[]>([]);
+  const [voteNote, setVoteNote] = useState("Vote results stay PLANNED.");
 
   useEffect(() => {
     let cancelled = false;
@@ -439,7 +580,7 @@ function ModuleScreen({
         const view = await client.grants();
         if (cancelled) return;
         setLabel(view.label);
-        setBody((view.data ?? []).map((grant) => `${grant.title} · ${grant.asset} ${grant.total} · disburses ${grant.disbursesFunds}`));
+        setBody((view.data ?? []).map((grant) => `${grant.title} · ${grant.asset} ${grant.total} · disbursement ${GRANT_DISBURSEMENT} · disbursesFunds ${grant.disbursesFunds}`));
       } else if (lane === "BOUNTIES") {
         const view = await client.bounties();
         if (cancelled) return;
@@ -476,6 +617,7 @@ function ModuleScreen({
             const badge = proposalBadge(proposal);
             return `${badge.badge} · ${proposal.title} · ${badge.note}`;
           }),
+          "Vote results: PLANNED. This screen does not tally votes or submit a governance transaction.",
           "Civic RPC below is administrative local state, not on-chain governance.",
         ]);
       } else if (lane === "TREASURY") {
@@ -493,7 +635,8 @@ function ModuleScreen({
           `Grants ${notifications.grants ? "on" : "off"}`,
           `Merchants ${notifications.merchants ? "on" : "off"}`,
           `Amounts in push: ${notifications.includeAmounts ? "on" : "off"}`,
-          `Sample push: ${sample.body}`,
+          `Push transport: ${PUSH_TRANSPORT}. No APNs or FCM. In-app inbox is the delivery path.`,
+          `Sample inbox copy: ${sample.body}`,
         ]);
       } else if (lane === "OVL") {
         setLabel("OVL BUILD");
@@ -533,13 +676,31 @@ function ModuleScreen({
           style={btnStyle}
           onClick={() => {
             const next = recordLessonProgress([], "course-assets", "lesson-drc");
-            setProgressNote(`Local progress ${next[0]?.completedLessonIds.join(", ")}. Not an on-chain certificate.`);
+            setProgressNote(
+              `Local progress ${next[0]?.completedLessonIds.join(", ")}. Certificate ${ACADEMY_CERTIFICATE.status}. ${ACADEMY_CERTIFICATE.reason}`,
+            );
           }}
         >
           Mark DRC lesson read
         </button>
       ) : null}
-      {lane === "COMMUNITY" ? <ForumReports client={client} /> : null}
+      {lane === "COMMUNITY" ? <ForumReports client={client} address={address} /> : null}
+      {lane === "ASSEMBLY" ? (
+        <button
+          type="button"
+          style={btnStyle}
+          onClick={() => {
+            try {
+              recordVote();
+            } catch (err) {
+              setVoteNote(err instanceof Error ? err.message : "vote refused");
+            }
+          }}
+        >
+          Record vote
+        </button>
+      ) : null}
+      {lane === "ASSEMBLY" ? <p className="agora-meta">{voteNote}</p> : null}
       {body.length === 0 ? <Empty text="Nothing to show. This module is empty or still loading." /> : null}
       <ul className="agora-list">
         {body.map((line) => (
@@ -556,30 +717,85 @@ function ModuleScreen({
           Toggle mission notices
         </button>
       ) : null}
+      {lane === "SETTINGS" ? (
+        <button
+          type="button"
+          style={btnStyle}
+          onClick={() => {
+            const notice = inboxNotice("Assembly", "New advisory poll. Balance 10 DRC", Date.now());
+            setInbox((rows) => [...rows, notice]);
+          }}
+        >
+          Save notice to inbox
+        </button>
+      ) : null}
+      {lane === "SETTINGS"
+        ? inbox.map((notice) => (
+            <p key={notice.id} className="agora-meta">
+              Inbox · {notice.title}: {notice.body}
+            </p>
+          ))
+        : null}
     </section>
   );
 }
 
-function ForumReports({ client }: { client: CommunityClient }) {
-  const [note, setNote] = useState("Report stays a moderation hook. It does not change reputation.");
+function ForumReports({ client, address }: { client: CommunityClient; address: string | null }) {
+  const [note, setNote] = useState("Replies go to the infrastructure forum. This app does not host one.");
+  const [postId, setPostId] = useState("");
+  const [body, setBody] = useState("");
   return (
-    <button
-      type="button"
-      style={btnStyle}
-      onClick={() => {
-        void client.forum().then(async (view) => {
-          const postId = view.data?.[0]?.id;
-          if (!postId) {
-            setNote("No post to report.");
-            return;
-          }
-          const report = await client.reportForum(postId, "community report");
-          setNote(report.label);
-        });
+    <form
+      className="agora-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!address) {
+          setNote("Unlock or derive an address before replying. The device will not invent an author.");
+          return;
+        }
+        void client.replyToForum({
+          postId,
+          body,
+          authorAddress: address,
+        }).then((result) => setNote(result.label));
       }}
     >
-      Report first post · {note}
-    </button>
+      <input
+        value={postId}
+        onChange={(event) => setPostId(event.target.value)}
+        placeholder="post id"
+        aria-label="Forum post id"
+        style={fieldStyle}
+      />
+      <textarea
+        value={body}
+        onChange={(event) => setBody(event.target.value)}
+        placeholder="Reply"
+        aria-label="Forum reply"
+        rows={3}
+        style={fieldStyle}
+      />
+      <button type="submit" style={btnStyle}>Post reply</button>
+      <button
+        type="button"
+        style={btnStyle}
+        onClick={() => {
+          void client.forum().then(async (view) => {
+            const id = view.data?.[0]?.id;
+            if (!id) {
+              setNote("No post to report.");
+              return;
+            }
+            setPostId(id);
+            const report = await client.reportForum(id, "community report");
+            setNote(report.label);
+          });
+        }}
+      >
+        Report first post
+      </button>
+      <p className="agora-meta">{note}</p>
+    </form>
   );
 }
 

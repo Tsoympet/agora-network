@@ -201,6 +201,10 @@ Service-by-service boundaries live in `apps/shared/core/services.ts`.
 ## Implementation rule
 
 This client does not fabricate confirmations. Community reads from cache set
-`confirmed: false`. The community DRC pay path reports broadcast `unavailable`
-and `confirmed: false` instead of submitting a look-alike transaction. In-process
-service adapters return empty **PLANNED** lists.
+`confirmed: false`. The community pay screen signs a real `DrcPaymentTx` only
+when the node exposes `agora_submitDrcPayment`. A payment id without
+`agora_getDrcPayment` receipt stays unconfirmed. If that method is missing,
+broadcast stays `unavailable` and nothing is submitted. In-process service
+adapters return empty **PLANNED** lists. Grant disbursement, academy
+certificates, and governance tallies stay **PLANNED**. Push transport stays
+**PLANNED**; the in-app inbox strips amounts.

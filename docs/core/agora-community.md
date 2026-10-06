@@ -98,18 +98,21 @@ import it. The plane split is
 Responses are infrastructure envelopes with `chainProof: false`. Without
 `VITE_AGORA_COMMUNITY_URL` or `EXPO_PUBLIC_AGORA_COMMUNITY_URL`, the clients
 keep the local community catalog and label it community submitted, not
-confirmed. They do not start a server. The dev host keeps sessions in memory
-and does not store seeds. Set `VITE_AGORA_INFRA_URL` on the explorer for the
-same origin.
+confirmed. They do not start a server. The dev host keeps session tokens in
+memory and does not store seeds. Catalog rows, forum replies, and mission
+reviews are written to the JSON store documented in
+[`AGORA_DATA_PLANE_SPLIT.md`](AGORA_DATA_PLANE_SPLIT.md). That file is
+infrastructure trust. Set `VITE_AGORA_INFRA_URL` on the explorer for the
+same origin. `POST /forum/replies` is the reply composer. `POST /session`
+requires a vault signature and rejects a mnemonic.
 
 ## Still out of this slice
 
-- Camera QR capture.
-- Constructing and submitting a consensus `DrcPaymentTx` from the community pay screen (the light-client envelope builder exists separately and is not a confirmation).
-- Delivering phone push notifications.
-- A durable multi-user community service.
+- Phone push transport (APNs and FCM). The in-app inbox is the delivery path and stays amount-stripped. Push transport is **PLANNED**.
+- A multi-user community service with an operator other than the JSON file on this process. The file is infrastructure trust, not consensus.
 - Signed, block-replicated governance and treasury disbursement.
 - Issuing canonical passport attestations from the wallet.
+- Calling a DRC payment confirmed before `agora_getDrcPayment` returns a receipt. The pay screen can submit `agora_submitDrcPayment` when the node exposes it. A camera scan on the phone still requires Inspect before a signature.
 
 The architecture slice below does not replace the product modules in
 `apps/shared/community`. It adds stores, service boundaries, folder re-exports,
@@ -210,11 +213,13 @@ Community trails:
 ## 58. Implementation rule
 
 No mock confirmations, governance outcomes, reputation proofs, or merchant
-activity are added in this slice. Cache views keep `confirmed: false`. The
-community pay path keeps `broadcast: "unavailable"` and `confirmed: false`.
-In-process services return no records. Likes do not move reputation. A
-governance badge without a chain commitment stays advisory. Bounty payment,
-event attendance, guild join, academy certificates, and treasury spend stay
+activity are added. Cache views keep `confirmed: false`. The community pay
+path submits a real `DrcPaymentTx` only when `agora_submitDrcPayment` is on
+the node, and it stays unconfirmed until a node receipt exists. Without that
+method, broadcast stays `unavailable`. In-process services return no records.
+Likes do not move reputation. A governance badge without a chain commitment
+stays advisory. Bounty payment, event attendance, guild join, academy
+certificates, and treasury spend stay **PLANNED**. Push transport stays
 **PLANNED**.
 
 ## 59. Tests and security notes

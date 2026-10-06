@@ -4,11 +4,9 @@
 
 ## Purpose
 
-C1–C23 are the community implementation phases for this readiness slice. Each status is one of **IMPLEMENTED**, **IN DEVELOPMENT**, or **PLANNED**, judged from code and tests on `ed72a27` (`origin/cursor/agora-light-client-surfaces-cdcf`, PR #153). A status is IMPLEMENTED only when that phase's stated scope is present on this commit. Prototype scope is named in the evidence. Missing block admission, missing payouts, and missing screens stay IN DEVELOPMENT or PLANNED.
+C1–C23 are the community implementation phases for this readiness slice. Each status is one of **IMPLEMENTED**, **IN DEVELOPMENT**, or **PLANNED**, judged from code and tests on this commit. A status is IMPLEMENTED only when that phase's stated scope is present. Prototype scope is named in the evidence. Missing block admission, missing payouts, and missing certificates stay IN DEVELOPMENT or PLANNED.
 
-Inspected on `ed72a27` (`origin/cursor/agora-light-client-surfaces-cdcf`, PR #153). Remote branches `cursor/agora-community-architecture-cdcf`, `cursor/agora-community-trust-cdcf`, and `cursor/agora-community-ecosystem-cdcf` were absent. Uncommitted files in other worktrees are outside this base.
-
-Remote community architecture, trust, and ecosystem branches were not available to stack on. Local worktrees of those names pointed at the same commit, and one held uncommitted community client files. Those files are not on this commit, so their modules stay PLANNED here.
+This commit is the merge of the data-plane line, the architecture modules, and the docs slice. The banner in [`AGORA_COMMUNITY_DEFINITION_OF_DONE.md`](AGORA_COMMUNITY_DEFINITION_OF_DONE.md) stays incomplete.
 
 ## Status
 
@@ -17,26 +15,26 @@ Remote community architecture, trust, and ecosystem branches were not available 
 | C1 | Separate TLT, OVL, and DRC consensus domains | IMPLEMENTED |
 | C2 | Canonical community registry | IN DEVELOPMENT |
 | C3 | Passport attestations | IN DEVELOPMENT |
-| C4 | Reputation | PLANNED |
+| C4 | Reputation | IN DEVELOPMENT |
 | C5 | Assembly and civic ballots | IN DEVELOPMENT |
 | C6 | Missions | IN DEVELOPMENT |
-| C7 | Academy | PLANNED |
+| C7 | Academy | IN DEVELOPMENT |
 | C8 | Grants | IN DEVELOPMENT |
-| C9 | Bounties | PLANNED |
-| C10 | Guilds | PLANNED |
-| C11 | Merchant network | PLANNED |
-| C12 | Events | PLANNED |
+| C9 | Bounties | IN DEVELOPMENT |
+| C10 | Guilds | IN DEVELOPMENT |
+| C11 | Merchant network | IN DEVELOPMENT |
+| C12 | Events | IN DEVELOPMENT |
 | C13 | Hubs | IN DEVELOPMENT |
 | C14 | Protocol treasuries | IN DEVELOPMENT |
 | C15 | Shared light-client verifier | IMPLEMENTED |
 | C16 | Light-client security model | IN DEVELOPMENT |
 | C17 | Phone light client | IMPLEMENTED |
 | C18 | PC light client | IMPLEMENTED |
-| C19 | Privacy model | PLANNED |
-| C20 | Community API | PLANNED |
-| C21 | Community indexer | PLANNED |
+| C19 | Privacy model | IN DEVELOPMENT |
+| C20 | Community API | IMPLEMENTED |
+| C21 | Community indexer | IN DEVELOPMENT |
 | C22 | PC and phone pairing | IMPLEMENTED |
-| C23 | MY AGORA beginner home | PLANNED |
+| C23 | MY AGORA beginner home | IN DEVELOPMENT |
 
 ## Evidence
 
@@ -50,100 +48,100 @@ TLT remains a UTXO asset, OVL an account and execution asset, and DRC a contract
 
 ### C3 — IN DEVELOPMENT
 
-`PassportAttestation` is secp256k1-signed under `agora-passport-attestation-v1`, bound to chain id and genesis (`core/crates/crypto/src/passport.rs`). Issuers must be active hub coordinators, and issuer nonces are stored. Revocation, a wallet screen, and consensus admission are open.
+`PassportAttestation` is secp256k1-signed under `agora-passport-attestation-v1`, bound to chain id and genesis (`core/crates/crypto/src/passport.rs`). The wallet signs a community session challenge with the vault key. That session is not a canonical passport attestation. Revocation and consensus admission are open.
 
-### C4 — PLANNED
+### C4 — IN DEVELOPMENT
 
-[`docs/community/AGORA_PASSPORT.md`](../community/AGORA_PASSPORT.md) names contribution reputation and separates it from stake and token balances. This commit has no reputation score state and no badge transfer tests.
+Client reputation events ignore likes and reject badge transfer (`apps/shared/community/reputation.ts`). Scores shown in the passport screen come from the infrastructure catalog. They are not consensus state, and there is no consensus test that rejects buying a score.
 
 ### C5 — IN DEVELOPMENT
 
-`agora-governance` has chambers, proposal lifecycle, forum topics, and JSON-RPC. Desktop `GovernancePanel` and the explorer ballot section call that RPC. [`governance.md`](governance.md) classifies the engine as an administrative prototype: unsigned votes, caller-supplied balances, local Meta-CF persistence.
+Assembly shows governance areas, eligibility, and an advisory badge when no chain commitment exists. `recordVote` throws. Civic RPC votes remain the existing administrative local flow. Caller-supplied weight is not rejected by a consensus ballot.
 
 ### C6 — IN DEVELOPMENT
 
-`MissionRecord` enforces Open, Assigned, Completed, and Cancelled in `community_protocol.rs`. `register_mission_into` commits the record. Completion does not pay a treasury. There is no mission screen.
+`MissionRecord` enforces Open, Assigned, Completed, and Cancelled in `community_protocol.rs`. The infrastructure host can record the client state machine AVAILABLE through COMPLETED. Completion does not pay a treasury. The advance result sets `disbursesFunds: false`.
 
-### C7 — PLANNED
+### C7 — IN DEVELOPMENT
 
-Academy is a paragraph in [`docs/community/COMMUNITY_PROGRAMS.md`](../community/COMMUNITY_PROGRAMS.md). No course state and no client catalog exist on this commit.
+The infrastructure catalog serves courses and lessons. Lesson progress is stored on the device and labeled local. `ACADEMY_CERTIFICATE` is **PLANNED**. Progress is not an on-chain certificate.
 
 ### C8 — IN DEVELOPMENT
 
-`GrantRecord` binds one treasury, a beneficiary, a cap, and ordered milestone hashes. DRC Community grants require a cleared conflict-of-interest disclosure before registration. The released counter is record-keeping. It does not debit `TreasuryBalance`.
+`GrantRecord` binds one treasury, a beneficiary, a cap, and ordered milestone hashes. The released counter is record-keeping. The client constant `GRANT_DISBURSEMENT` is **PLANNED**. Milestone acceptance in the architecture module does not debit `TreasuryBalance`.
 
-### C9 — PLANNED
+### C9 — IN DEVELOPMENT
 
-Bounties and RFPs are named in [`docs/community/GRANTS_AND_MISSIONS.md`](../community/GRANTS_AND_MISSIONS.md). No bounty type or test exists on this commit.
+Bounty rows are in the infrastructure catalog. `markBountyPaid` throws and `BOUNTY_DIRECTORY` stays **PLANNED**. A listed bounty is not a payment.
 
-### C10 — PLANNED
+### C10 — IN DEVELOPMENT
 
-Builder Guild and Node Guild are named in `COMMUNITY_PROGRAMS.md`. No guild charter state exists on this commit.
+Guild charters are catalog rows. `joinGuild` returns **PLANNED** and `member: false`. The charter object does not hold a member spend key. Joining is not a consensus operation.
 
-### C11 — PLANNED
+### C11 — IN DEVELOPMENT
 
-[`docs/community/MERCHANT_NETWORK.md`](../community/MERCHANT_NETWORK.md) is a scaffold. DRC payment, escrow, check, and channel types exist on the L1 and as light-client envelope actions. A merchant directory, map, invoice product, and receiving-profile store do not.
+Merchant profiles store a DRC receiving address and `holdsMerchantKeys: false`. The pay screen verifies a listing and still shows destination and amount. A consensus merchant directory is open.
 
-### C12 — PLANNED
+### C12 — IN DEVELOPMENT
 
-Events are listed in `COMMUNITY_PROGRAMS.md`. No event record exists on this commit.
+Events are catalog rows. `claimAttendance` throws **PLANNED**. There is no signed attendance operation.
 
 ### C13 — IN DEVELOPMENT
 
-`HubRecord` validates identity, charter hash, coordinators, multisig, periods, and accreditation status. Active coordinators form the passport issuer index. Signed accreditation and revocation operations are still deferred, and there is no hub directory screen.
+`HubRecord` validates identity, charter hash, coordinators, multisig, periods, and accreditation status. The client can filter hubs by typed region. Signed accreditation and revocation operations are still deferred.
 
 ### C14 — IN DEVELOPMENT
 
-`TreasuryId` is TLT Security, OVL Builder, and DRC Community, with balances initialized in governance state. `ProposalKind::TreasurySpend` can pass the civic engine in tests. Execution does not move those canonical balances. See [`governance.md`](governance.md).
+Treasury rows come from `agora_getProtocolTreasuries` when the node answers. The community host has no `/treasury` route and does not fill a balance. `TreasurySpend` execution does not move canonical balances.
 
 ### C15 — IMPLEMENTED
 
-Scope: the single-node prototype verifier in `apps/shared/light-client`, with tests such as `agora-light.test.ts`, `featureMatrix.test.ts`, `tlt-bitcoin.test.ts`, and `pairing.test.ts`. The verifier does not re-execute RandomX or check validator signatures. That limit is C16.
+Scope: the single-node prototype verifier in `apps/shared/light-client`. The verifier does not re-execute RandomX or check validator signatures. That limit is C16.
 
 ### C16 — IN DEVELOPMENT
 
-The device checks header hashes, selected-parent links, genesis binding, TLT Merkle inclusion, body-root binding, and the two-thirds quorum arithmetic when stake fields are present. A dishonest but self-consistent node can still lie about the spine, balances, and stake totals. `docs/core/LIGHT_CLIENT_SECURITY_MODEL.md` is not in this tree. The node-wide note is [`docs/security/THREAT_MODEL.md`](../security/THREAT_MODEL.md).
+`docs/core/LIGHT_CLIENT_SECURITY_MODEL.md` lists the assumptions. The device checks header hashes, selected-parent links, genesis binding, TLT Merkle inclusion, and quorum arithmetic on supplied stake. A dishonest but self-consistent node can still lie about the spine, RandomX work, and validator signatures.
 
 ### C17 — IMPLEMENTED
 
-Scope: the Expo shell in `apps/mobile`, which imports the shared verifier, SecureStore vault, pairing, and capability panel. It is the same single-node prototype as C15.
+Scope: the Expo shell in `apps/mobile`, which imports the shared verifier, SecureStore vault, pairing, community screens, trust panel, architecture settings, and docs panel. It is the same single-node prototype as C15. Expo camera can fill the DRC QR field. Inspect still comes before signing.
 
 ### C18 — IMPLEMENTED
 
-Scope: the desktop shell in `apps/desktop` (Vite and Tauri), which imports the same verifier, `localStorage` vault, pairing, capability panel, and civic ballot panel.
+Scope: the desktop shell in `apps/desktop` (Vite and Tauri), which imports the same verifier, vault, pairing, community screens, trust panel, architecture settings, and docs panel. The PC wallet pastes a QR. It does not claim a camera.
 
-### C19 — PLANNED
+### C19 — IN DEVELOPMENT
 
-Public passport fields are the attestation struct. A private profile (email, language, notification preferences) with an authenticated store and tests that the fields stay out of consensus is not on this commit.
+Private profile fields stay off consensus (`consensus: false`). A community session can read `/passport/private`. The profile is not a tested absence proof inside consensus encodings, and the JSON store is operator-readable.
 
-### C20 — PLANNED
+### C20 — IMPLEMENTED
 
-No `apps/community-api` (or equivalent) is in this commit. A session-signed community HTTP service is future work. It must stay off the consensus RPC and must not accept seeds.
+Scope: the experimental single-process host in `infrastructure/community-services`. It authenticates `POST /session` with a wallet signature, rejects mnemonic fields, and does not accept a pasted bearer as the proof. Catalog, forum replies, and mission reviews persist in the JSON file. That file is infrastructure trust, not a multi-user production service and not consensus RPC.
 
-### C21 — PLANNED
+### C21 — IN DEVELOPMENT
 
-No community indexer is in this commit. Explorer panels call the node. Source labels in these documents are author labels, not an indexer's output.
+`infrastructure/indexer` proxies an upstream full node and otherwise returns no chain rows. `chainProof` stays false. It does not emit blockchain, community, indexer, and private labels, and there is no test that fails when a private field is labeled blockchain.
 
 ### C22 — IMPLEMENTED
 
-Scope: `apps/shared/light-client/pairing.ts`. Watch-only payloads carry public account data and omit the mnemonic. Restore payloads copy the BIP-39 phrase device to device after an explicit reveal. The phrase is not an RPC field. Loopback RPC URLs are left out of the watch payload.
+Scope: `apps/shared/light-client/pairing.ts`. Watch-only payloads carry public account data and omit the mnemonic. Restore payloads copy the BIP-39 phrase device to device after an explicit reveal. The phrase is not an RPC field.
 
-### C23 — PLANNED
+### C23 — IN DEVELOPMENT
 
-Desktop, phone, and explorer have wallet, capability, ballot, and DAG screens. None of them is a MY AGORA beginner home. The target layout is in [`AGORA_COMMUNITY_ARCHITECTURE.md`](AGORA_COMMUNITY_ARCHITECTURE.md). This slice adds a Docs / About index only.
+Settings on the PC and phone expose beginner and advanced copy: DRC PAYMENTS, OVL APPLICATIONS, TLT SECURITY/VALUE, and COMMUNITY PARTICIPATION. Those screens do not invent balances when RPC is down. They are not the default MY AGORA home.
 
 ## Data sources
 
 | Label | Role on this base |
 | --- | --- |
-| blockchain | C1, C2, C3, C6, C8, C13, and C14 touch L1 types or state-machine records. Only C1 is fully inside consensus admission today. |
-| community | C5 forum and ballots are local administrative state. C20 would be a community service. |
-| indexer | C21. Absent on this commit. |
-| private | C19 and the vault half of C17, C18, and C22. Keys stay on device. Profile storage is PLANNED. |
+| blockchain | C1 and the consensus types behind C2, C3, C6, C8, C13, and C14. Only C1 is fully inside consensus admission. |
+| community | C5 forum and ballots, C7 progress, C20's JSON host, and C4 scores shown from the catalog. |
+| indexer | C21. Present as a proxy. Not a label classifier. |
+| private | C19 and the vault half of C17, C18, and C22. Keys stay on device. |
 
 ## Trust boundary
 
-Phase status is a documentation claim about this commit. It is not a consensus vote and not a maturity promotion. IMPLEMENTED rows are still Single-node prototype or consensus code that this repo already shipped in earlier PRs. They are not a statement that the community ecosystem is finished. The checklist file carries the overall result.
+Phase status is a documentation claim about this commit. It is not a consensus vote and not a maturity promotion. IMPLEMENTED rows are still Single-node prototype or an experimental infrastructure host. They are not a statement that the community ecosystem is finished.
 
 ## Maturity
 
@@ -151,11 +149,11 @@ Scaffold. The phase list is a reading aid over code that is itself Scaffold, Exp
 
 ## Implemented
 
-The IMPLEMENTED rows are C1, C15, C17, C18, and C22, at the scopes in the evidence section.
+The IMPLEMENTED rows are C1, C15, C17, C18, C20, and C22, at the scopes in the evidence section.
 
 ## Planned
 
-The PLANNED rows are C4, C7, C9, C10, C11, C12, C19, C20, C21, and C23. IN DEVELOPMENT rows have partial code and stay open in the definition of done.
+No row is only a name with zero code. Rows that still cannot pay, certify, vote, or admit a block stay IN DEVELOPMENT. Push transport, academy certificates, grant disbursement, bounty payment, guild join, and event attendance stay **PLANNED** inside those rows.
 
 ## Related
 

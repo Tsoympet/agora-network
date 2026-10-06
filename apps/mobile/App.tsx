@@ -558,7 +558,18 @@ export default function App() {
           </View>
         ) : null}
         {show("HOME", "PASSPORT") ? (
-          <PassportCard client={community} address={receiveBech32 || address || null} />
+          <PassportCard
+            client={community}
+            address={receiveBech32 || address || null}
+            spend={{
+              mode: watchWallet || !mnemonic.trim() ? "watch-only" : "signing",
+              mnemonic: watchWallet ? null : mnemonic,
+              network: nodeInfo?.network ?? null,
+              genesisHash: nodeInfo?.genesis_hash ?? null,
+              chainId: nodeInfo?.chain_id ?? null,
+              light: client,
+            }}
+          />
         ) : null}
         {show("HOME", "ACTIVITY") ? (
         <>
@@ -922,7 +933,19 @@ export default function App() {
         ) : null}
         </>
         ) : null}
-        {show("DRC") ? <DrcPayFlow client={community} /> : null}
+        {show("DRC") ? (
+          <DrcPayFlow
+            client={community}
+            spend={{
+              mode: watchWallet || !mnemonic.trim() ? "watch-only" : "signing",
+              mnemonic: watchWallet ? null : mnemonic,
+              network: nodeInfo?.network ?? null,
+              genesisHash: nodeInfo?.genesis_hash ?? null,
+              chainId: nodeInfo?.chain_id ?? null,
+              light: client,
+            }}
+          />
+        ) : null}
         {show("COMMUNITY", "PASSPORT", "ASSEMBLY", "TREASURY", "SETTINGS") ? (
           <CommunityTrustPanel subjectAddress={receiveBech32} community={community} />
         ) : null}
@@ -950,6 +973,14 @@ export default function App() {
             notifications={notifications}
             onNotifications={setNotifications}
             chainTreasuries={chainTreasuries}
+            spend={{
+              mode: watchWallet || !mnemonic.trim() ? "watch-only" : "signing",
+              mnemonic: watchWallet ? null : mnemonic,
+              network: nodeInfo?.network ?? null,
+              genesisHash: nodeInfo?.genesis_hash ?? null,
+              chainId: nodeInfo?.chain_id ?? null,
+              light: client,
+            }}
           />
         ) : null}
         {lane === "SETTINGS" ? (

@@ -1156,6 +1156,14 @@ export function App() {
           chainTreasuries={chainTreasuries}
           notifications={notifications}
           onNotifications={setNotifications}
+          spend={{
+            mode: watchWallet || !mnemonic.trim() ? "watch-only" : "signing",
+            mnemonic: watchWallet ? null : mnemonic,
+            network: nodeInfo?.network ?? null,
+            genesisHash: nodeInfo?.genesis_hash ?? null,
+            chainId: nodeInfo?.chain_id ?? null,
+            light: client,
+          }}
         />
       ) : null}
       {show("COMMUNITY", "PASSPORT", "ASSEMBLY", "TREASURY", "SETTINGS") ? (

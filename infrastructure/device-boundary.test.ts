@@ -21,11 +21,7 @@ const DEVICE_ROOTS = [
   "apps/desktop",
   "apps/mobile",
   "apps/explorer",
-  "apps/shared/light-client",
-  "apps/shared/community",
-  "apps/shared/community-trust",
-  "apps/shared/data-plane",
-  "apps/shared/brand",
+  "apps/shared",
 ];
 
 function walk(dir: string, out: string[]) {

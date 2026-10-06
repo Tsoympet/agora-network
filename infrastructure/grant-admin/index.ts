@@ -22,28 +22,32 @@ const NEXT: Record<string, string> = {
 export function createGrantAdmin<TGrant, TMission extends { id: string; state: string }>(input: {
   grants: readonly TGrant[];
   missions: readonly TMission[];
+  reviews?: readonly { missionId: string; note: string }[];
+  onChange?: () => void;
 }) {
   const grants = [...input.grants];
   const missions = input.missions.map((mission) => ({ ...mission }));
-  const reviews: { missionId: string; note: string }[] = [];
+  const reviews = [...(input.reviews ?? [])];
   return {
     trust: GRANT_ADMIN_TRUST,
     grants: () => grants,
     missions: () => missions,
     reviews: () => reviews,
-    advance(id: string, to: string): { recorded: true } {
+    advance(id: string, to: string): { recorded: true; disbursesFunds: false } {
       const mission = missions.find((row) => row.id === id);
       if (!mission) throw new Error("unknown mission");
       if (NEXT[mission.state] !== to) {
         throw new Error(`illegal mission transition ${mission.state} → ${to}`);
       }
       mission.state = to;
-      return { recorded: true };
+      input.onChange?.();
+      return { recorded: true, disbursesFunds: false };
     },
-    review(missionId: string, note: string): { stored: true } {
+    review(missionId: string, note: string): { stored: true; disbursesFunds: false } {
       if (!missionId || !note.trim()) throw new Error("missionId and note required");
       reviews.push({ missionId, note });
-      return { stored: true };
+      input.onChange?.();
+      return { stored: true, disbursesFunds: false };
     },
   };
 }

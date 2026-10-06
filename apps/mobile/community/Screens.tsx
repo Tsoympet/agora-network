@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { agoraBrand } from "../../shared/brand/tokens";
-import type { LightProtocolTreasuries } from "../../shared/light-client";
+import { ACADEMY_CERTIFICATE } from "../../shared/academy";
+import { recordVote } from "../../shared/assembly";
+import { GRANT_DISBURSEMENT } from "../../shared/grants";
+import { deriveAccount, type LightClient, type LightProtocolTreasuries } from "../../shared/light-client";
+import { submitInspectedDrcPayment } from "../../shared/community/nodePay";
 import {
+  PUSH_TRANSPORT,
   advanceDrcPay,
   broadcastDrcPay,
   createCommunityClient,
   GOVERNANCE_AREAS,
+  inboxNotice,
   merchantForAddress,
   notificationBody,
   parseAgoraQr,
@@ -15,13 +22,33 @@ import {
   recordLessonProgress,
   searchHubs,
   signDrcPayIntent,
+  signSessionChallenge,
   transitionMission,
   voteEligibility,
   type CommunityClient,
+  type CommunitySession,
+  type DrcPayReceipt,
   type DrcPayStep,
+  type InAppNotice,
   type NotificationPrefs,
   type PublicPassport,
+  type WalletMode,
 } from "../../shared/community";
+
+export type CommunitySpendContext = {
+  mode: WalletMode;
+  mnemonic: string | null;
+  network: string | null;
+  genesisHash: string | null;
+  chainId: string | null;
+  light: LightClient | null;
+};
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 const styles = StyleSheet.create({
   block: { marginTop: 28 },
@@ -73,14 +100,18 @@ export function useCommunityClient(baseUrl?: string | null): CommunityClient {
 export function PassportCard({
   client,
   address,
+  spend,
 }: {
   client: CommunityClient;
   address: string | null;
+  spend: CommunitySpendContext;
 }) {
   const [passport, setPassport] = useState<PublicPassport | null>(null);
   const [label, setLabel] = useState("Loading passport…");
   const [email, setEmail] = useState("");
   const [note, setNote] = useState("Email stays on this device. consensus: false.");
+  const [session, setSession] = useState<CommunitySession | null>(null);
+  const [sessionNote, setSessionNote] = useState("Sign the challenge with the vault key. A pasted token is refused.");
 
   useEffect(() => {
     void client.passport(address ?? undefined).then((view) => {
@@ -128,18 +159,57 @@ export function PassportCard({
         <Text style={styles.btnLabel}>Save private profile</Text>
       </Pressable>
       <Text style={styles.meta}>{note}</Text>
+      <Pressable
+        style={styles.btn}
+        onPress={() => {
+          void (async () => {
+            if (spend.mode !== "signing" || !spend.mnemonic?.trim() || !spend.network) {
+              setSessionNote("Unlock a spend wallet. Watch-only cannot sign, and a pasted token is refused.");
+              return;
+            }
+            try {
+              const account = deriveAccount(spend.mnemonic, 0, "", spend.network);
+              const challenge = await client.requestSessionChallenge(account.addressBech32);
+              const signature = await signSessionChallenge(account.secretKey, challenge);
+              const opened = await client.openSession({
+                challenge,
+                publicKey: bytesToHex(account.publicKey),
+                signature,
+              });
+              setSession(opened);
+              const profile = await client.privateProfile(opened.token);
+              setSessionNote(
+                `Session ${opened.address}. storage ${profile.storage}. consensus ${profile.consensus}.`,
+              );
+            } catch (err) {
+              setSession(null);
+              setSessionNote(err instanceof Error ? err.message : "session refused");
+            }
+          })();
+        }}
+      >
+        <Text style={styles.btnLabel}>Sign session with vault key</Text>
+      </Pressable>
+      <Text style={styles.meta}>
+        {sessionNote}
+        {session ? ` · ${session.scopes.join(", ")}` : ""}
+      </Text>
     </View>
   );
 }
 
-export function DrcPayFlow({ client }: { client: CommunityClient }) {
+export function DrcPayFlow({ client, spend }: { client: CommunityClient; spend: CommunitySpendContext }) {
   const [raw, setRaw] = useState("");
   const [step, setStep] = useState<DrcPayStep>("scan");
-  const [note, setNote] = useState("Paste the QR. Scanning hardware is not in this build.");
-  const [watchOnly, setWatchOnly] = useState(false);
+  const [note, setNote] = useState("Paste a QR or scan one. Inspect destination and amount before signing.");
+  const [fee, setFee] = useState("1");
+  const [nonce, setNonce] = useState("0");
+  const [receipt, setReceipt] = useState<DrcPayReceipt | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
+  const mode = spend.mode;
   const parsed = parseAgoraQr(raw);
   const preview = parsed.ok ? parsed.preview : null;
-  const mode = watchOnly ? "watch-only" : "signing";
 
   return (
     <View style={styles.block}>
@@ -155,6 +225,37 @@ export function DrcPayFlow({ client }: { client: CommunityClient }) {
         multiline
         style={styles.input}
       />
+      <Pressable
+        style={styles.btn}
+        onPress={() => {
+          if (!permission?.granted) {
+            void requestPermission().then((result) => {
+              if (!result.granted) {
+                setNote("Camera permission denied. Paste the QR instead.");
+                setScanning(false);
+                return;
+              }
+              setScanning(true);
+            });
+            return;
+          }
+          setScanning(true);
+        }}
+      >
+        <Text style={styles.btnLabel}>Scan QR</Text>
+      </Pressable>
+      {scanning && permission?.granted ? (
+        <CameraView
+          style={{ height: 220, marginTop: 12 }}
+          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+          onBarcodeScanned={({ data }) => {
+            setScanning(false);
+            setRaw(data);
+            setStep("scan");
+            setNote("Camera read a code. Inspect destination and amount before signing.");
+          }}
+        />
+      ) : null}
       <Pressable
         style={styles.btn}
         onPress={() => {
@@ -183,9 +284,9 @@ export function DrcPayFlow({ client }: { client: CommunityClient }) {
             Amount {preview.amount} DRC
             <Source source="community submitted" />
           </Text>
-          <Pressable style={styles.btn} onPress={() => setWatchOnly((value) => !value)}>
-            <Text style={styles.btnLabel}>{watchOnly ? "Watch-only" : "Signing wallet"}</Text>
-          </Pressable>
+          <Text style={styles.line}>Wallet mode {mode}. {mode === "watch-only" ? "Watch-only cannot spend." : "The vault key signs."}</Text>
+          <TextInput value={fee} onChangeText={setFee} placeholder="fee" style={styles.input} />
+          <TextInput value={nonce} onChangeText={setNonce} placeholder="nonce" style={styles.input} />
           {step === "inspect" ? (
             <Pressable
               style={styles.btn}
@@ -231,8 +332,12 @@ export function DrcPayFlow({ client }: { client: CommunityClient }) {
                     },
                     confirmed: true,
                   });
+                  if (!/^[0-9]+$/.test(fee) || !/^[0-9]+$/.test(nonce)) {
+                    setNote("Fee and nonce must be integers before signing.");
+                    return;
+                  }
                   setStep(advanceDrcPay("confirm"));
-                  setNote("Signing wallet accepted the intent. The seed stayed in the vault. Consensus DRC bytes are not built here.");
+                  setNote(`Vault will sign ${preview.amount} DRC to ${preview.destination}, fee ${fee}, nonce ${nonce}.`);
                 } catch (err) {
                   setNote(err instanceof Error ? err.message : "sign refused");
                 }
@@ -245,13 +350,42 @@ export function DrcPayFlow({ client }: { client: CommunityClient }) {
             <Pressable
               style={styles.btn}
               onPress={() => {
-                try {
-                  const receipt = broadcastDrcPay({ mode, preview, signed: true });
-                  setStep("receipt");
-                  setNote(receipt.note);
-                } catch (err) {
-                  setNote(err instanceof Error ? err.message : "broadcast refused");
-                }
+                void (async () => {
+                  try {
+                    signDrcPayIntent({
+                      mode,
+                      preview,
+                      merchant: {
+                        listed: false,
+                        displayName: null,
+                        source: "community submitted",
+                        holdsMerchantKeys: false,
+                      },
+                      confirmed: true,
+                    });
+                    let next: DrcPayReceipt;
+                    if (mode === "signing" && spend.mnemonic && spend.light && spend.network && spend.genesisHash) {
+                      next = await submitInspectedDrcPayment({
+                        mode,
+                        preview,
+                        mnemonic: spend.mnemonic,
+                        network: spend.network,
+                        genesisHex: spend.genesisHash,
+                        chainId: spend.chainId ?? "",
+                        client: spend.light,
+                        fee: BigInt(fee),
+                        nonce: BigInt(nonce),
+                      });
+                    } else {
+                      next = broadcastDrcPay({ mode, preview, signed: true });
+                    }
+                    setReceipt(next);
+                    setStep("receipt");
+                    setNote(`${next.note} confirmed: ${next.confirmed ? "node receipt" : "no"}.`);
+                  } catch (err) {
+                    setNote(err instanceof Error ? err.message : "broadcast refused");
+                  }
+                })();
               }}
             >
               <Text style={styles.btnLabel}>Broadcast</Text>
@@ -260,6 +394,11 @@ export function DrcPayFlow({ client }: { client: CommunityClient }) {
         </View>
       ) : null}
       <Text style={styles.meta}>{note}</Text>
+      {receipt ? (
+        <Text style={styles.meta}>
+          Broadcast {receipt.broadcast} · confirmed {receipt.confirmed ? "yes, node receipt" : "no"}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -271,6 +410,7 @@ export function MobileModule({
   notifications,
   onNotifications,
   chainTreasuries = null,
+  spend,
 }: {
   lane: string;
   client: CommunityClient;
@@ -278,7 +418,12 @@ export function MobileModule({
   notifications: NotificationPrefs;
   onNotifications: (next: NotificationPrefs) => void;
   chainTreasuries?: LightProtocolTreasuries | null;
+  spend: CommunitySpendContext;
 }) {
+  const [replyBody, setReplyBody] = useState("");
+  const [replyNote, setReplyNote] = useState("Replies go to the infrastructure forum.");
+  const [inbox, setInbox] = useState<InAppNotice[]>([]);
+  const [voteNote, setVoteNote] = useState("Vote results stay PLANNED.");
   const [lines, setLines] = useState<string[]>([]);
   const [label, setLabel] = useState("Loading…");
   const [region, setRegion] = useState("");
@@ -313,12 +458,15 @@ export function MobileModule({
         const view = await client.academy();
         if (cancelled) return;
         setLabel(view.label);
-        setLines((view.data?.courses ?? []).map((course) => `${course.track} · ${course.title}`));
+        setLines([
+          `Certificate ${ACADEMY_CERTIFICATE.status}. ${ACADEMY_CERTIFICATE.reason}`,
+          ...(view.data?.courses ?? []).map((course) => `${course.track} · ${course.title}`),
+        ]);
       } else if (lane === "GRANTS") {
         const view = await client.grants();
         if (cancelled) return;
         setLabel(view.label);
-        setLines((view.data ?? []).map((grant) => `${grant.title} · funds move: ${grant.disbursesFunds}`));
+        setLines((view.data ?? []).map((grant) => `${grant.title} · disbursement ${GRANT_DISBURSEMENT} · disbursesFunds ${grant.disbursesFunds}`));
       } else if (lane === "GUILDS") {
         const view = await client.guilds();
         if (cancelled) return;
@@ -345,6 +493,7 @@ export function MobileModule({
             return `${area.label}: ${gate.label}`;
           }),
           ...(view.data ?? []).map((proposal) => `${proposalBadge(proposal).badge} · ${proposal.title}`),
+          "Vote results: PLANNED. This screen does not tally votes.",
         ]);
       } else if (lane === "TREASURY") {
         const view = await client.treasury();
@@ -357,7 +506,9 @@ export function MobileModule({
         setLabel("on device");
         setLines([
           `Mission notices ${notifications.missions ? "on" : "off"}`,
-          `Push sample: ${sample.body}`,
+          `Push transport: ${PUSH_TRANSPORT}. In-app inbox only.`,
+          `Inbox sample: ${sample.body}`,
+          `Wallet ${spend.mode}.`,
         ]);
       } else if (lane === "OVL") {
         setLabel("OVL BUILD");
@@ -394,6 +545,34 @@ export function MobileModule({
             placeholderTextColor={agoraBrand.colors.inkMuted}
             style={styles.input}
           />
+          <TextInput
+            value={replyBody}
+            onChangeText={setReplyBody}
+            placeholder="Forum reply"
+            placeholderTextColor={agoraBrand.colors.inkMuted}
+            style={styles.input}
+          />
+          <Pressable
+            style={styles.btn}
+            onPress={() => {
+              void client.forum().then(async (view) => {
+                const postId = view.data?.[0]?.id;
+                if (!postId || !address) {
+                  setReplyNote(address ? "No post to reply to." : "Derive an address before replying.");
+                  return;
+                }
+                const result = await client.replyToForum({
+                  postId,
+                  body: replyBody,
+                  authorAddress: address,
+                });
+                setReplyNote(result.label);
+              });
+            }}
+          >
+            <Text style={styles.btnLabel}>Post reply</Text>
+          </Pressable>
+          <Text style={styles.meta}>{replyNote}</Text>
           <Pressable
             style={styles.btn}
             onPress={() => {
@@ -440,7 +619,10 @@ export function MobileModule({
           style={styles.btn}
           onPress={() => {
             const progress = recordLessonProgress([], "course-assets", "lesson-drc");
-            setLines((current) => [...current, `Local lesson ${progress[0]?.completedLessonIds[0]}`]);
+            setLines((current) => [
+              ...current,
+              `Local lesson ${progress[0]?.completedLessonIds[0]}. Certificate ${ACADEMY_CERTIFICATE.status}.`,
+            ]);
           }}
         >
           <Text style={styles.btnLabel}>Save lesson on device</Text>
@@ -454,6 +636,34 @@ export function MobileModule({
           <Text style={styles.btnLabel}>Toggle mission notices</Text>
         </Pressable>
       ) : null}
+      {lane === "SETTINGS" ? (
+        <Pressable
+          style={styles.btn}
+          onPress={() => setInbox((rows) => [...rows, inboxNotice("Mission", "Update ready, payout 3 DRC", Date.now())])}
+        >
+          <Text style={styles.btnLabel}>Save notice to inbox</Text>
+        </Pressable>
+      ) : null}
+      {inbox.map((notice) => (
+        <Text key={notice.id} style={styles.meta}>
+          Inbox · {notice.title}: {notice.body}
+        </Text>
+      ))}
+      {lane === "ASSEMBLY" ? (
+        <Pressable
+          style={styles.btn}
+          onPress={() => {
+            try {
+              recordVote();
+            } catch (err) {
+              setVoteNote(err instanceof Error ? err.message : "vote refused");
+            }
+          }}
+        >
+          <Text style={styles.btnLabel}>Record vote</Text>
+        </Pressable>
+      ) : null}
+      {lane === "ASSEMBLY" ? <Text style={styles.meta}>{voteNote}</Text> : null}
       {lines.length === 0 ? <Text style={styles.meta}>Empty. Nothing confirmed.</Text> : null}
       {lines.map((line) => (
         <Text key={line} style={styles.line}>
