@@ -93,7 +93,7 @@ and apply/revert with acceptance in the same `WriteBatch`, so reorg and crash
 recovery use the existing `pending_virtual` protocol.
 
 The DA lane entered at Trident protocol v10 / state transition v11. The current
-aggregate fingerprint is protocol v23 / `agora-trident-state-v21`; later bumps
+aggregate fingerprint is protocol v24 / `agora-trident-state-v22`; later bumps
 do not reinterpret the DA lane described here. Frozen pre-Trident/v2 constants
 remain unchanged.
 No standalone `NetworkMessage` variant was added: authenticated commitments

@@ -8,6 +8,14 @@ use crate::{Address, Amount, Hash, NativeAssetId};
 
 /// Domain separator for network-bound OVL execution signatures.
 pub const OVL_EXECUTION_SIGNING_DOMAIN: &[u8] = b"agora-trident-ovl-execution-v1";
+/// Agora-signed EOA envelope. Non-empty calldata stays inactive on this version.
+pub const OVL_EXECUTION_VERSION: u32 = 1;
+/// Raw Ethereum transaction bytes carried inside the OVL lane.
+///
+/// Authorization is the Ethereum signature inside `data`. The Agora public key
+/// and signature are empty. This version is not admitted to the Agora-signed
+/// mempool; a block producer includes it only while the dev gate is active.
+pub const OVL_EXECUTION_RAW_EVM_VERSION: u32 = 2;
 
 /// Signed account-based OVL value transfer or execution request.
 ///
@@ -78,6 +86,22 @@ impl OvlExecutionTx {
             max_fee_per_gas,
             nonce,
             data,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+        }
+    }
+
+    /// Carry a signed raw Ethereum transaction. The bytes are RLP, not Borsh.
+    pub fn raw_ethereum(raw: Vec<u8>) -> Self {
+        Self {
+            version: OVL_EXECUTION_RAW_EVM_VERSION,
+            from: Address::ZERO,
+            to: Address::ZERO,
+            value: Amount::ZERO,
+            gas_limit: 0,
+            max_fee_per_gas: 0,
+            nonce: 0,
+            data: raw,
             public_key: Vec::new(),
             signature: Vec::new(),
         }

@@ -46,7 +46,8 @@ use crate::drc_trust_line::{
     apply_drc_issued_transfer, apply_drc_trust_line_set, issued_transfer_meta_keys,
     trust_line_set_meta_keys,
 };
-use crate::execution::apply_ovl_execution;
+use crate::execution::{apply_ovl_execution_with_block, OvlSelectedOrder};
+use crate::ovl_evm_state::OVL_EVM_WORLD_KEY;
 use crate::payments::{apply_drc_payment_with_blue_score, payment_meta_keys};
 use crate::staking::{
     apply_signed_stake_tx, credit_fee_share_to_reward_pool, reward_pool_meta_key,
@@ -1839,9 +1840,32 @@ fn apply_trident_lanes(
     for tx in &block.ovl_executions {
         let id = tx.tx_id();
         let ctx = auth.expect("execution auth checked above");
+        let world_before = if tx.version == agora_types::OVL_EXECUTION_RAW_EVM_VERSION {
+            snapshot_meta_keys(&lane, &[OVL_EVM_WORLD_KEY.to_vec()])?
+        } else {
+            Vec::new()
+        };
+        let selected = OvlSelectedOrder {
+            hash: block.id().0,
+            parent_hash: block
+                .header
+                .parents
+                .first()
+                .copied()
+                .unwrap_or(Hash::ZERO)
+                .0,
+            timestamp: block.header.timestamp_ms / 1000,
+        };
         let mut op_batch = WriteBatch::new();
         let mut acct_journal = AccountJournal::default();
-        match apply_ovl_execution(&lane, tx, ctx, &mut op_batch, &mut acct_journal) {
+        match apply_ovl_execution_with_block(
+            &lane,
+            tx,
+            ctx,
+            Some(&selected),
+            &mut op_batch,
+            &mut acct_journal,
+        ) {
             Ok(receipt) => {
                 apply_accepted_account_fee(
                     &lane,
@@ -1853,6 +1877,7 @@ fn apply_trident_lanes(
                 lane.write_batch(op_batch.clone())?;
                 batch.append(op_batch);
                 journal.account_before.extend(acct_journal.before);
+                journal.stake_meta_before.extend(world_before);
                 seen_execution_ids.insert(id);
                 execution_statuses.push(TransactionAcceptance::Accepted);
             }

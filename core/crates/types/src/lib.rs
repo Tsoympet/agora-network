@@ -27,6 +27,7 @@ mod execution;
 mod finality;
 mod hash;
 mod hrp;
+mod ovl_wei;
 mod passport;
 mod payment;
 mod stake;
@@ -204,7 +205,10 @@ pub use drc_trust_line::{
     DRC_TRUST_LINE_SET_SIGNING_DOMAIN, DRC_TRUST_LINE_SET_TICKET_SIGNING_DOMAIN,
     DRC_TRUST_LINE_SET_TICKET_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
 };
-pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
+pub use execution::{
+    OvlExecutionTx, OVL_EXECUTION_RAW_EVM_VERSION, OVL_EXECUTION_SIGNING_DOMAIN,
+    OVL_EXECUTION_VERSION,
+};
 pub use finality::{
     CheckpointAttestation, CheckpointBody, CheckpointState, FinalityCertificate,
     CHECKPOINT_ATTESTATION_DOMAIN,
@@ -213,6 +217,11 @@ pub use hash::Hash;
 pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
+};
+pub use ovl_wei::{
+    ovl_evm_chain_id_rejected, OvlFeeMarketParams, OvlWei, OVL_BASE_FEE_BURN_BPS,
+    OVL_EVM_DEV_CHAIN_ID, OVL_EVM_PROFILE, OVL_EVM_REVM_VERSION, OVL_EVM_SPEC_ID,
+    OVL_EVM_TESTNET_CHAIN_ID, OVL_LEGACY_DECIMALS, OVL_LEGACY_TO_WEI, OVL_WEI_DECIMALS,
 };
 pub use passport::{PassportAttestation, PassportCategory, PASSPORT_ATTESTATION_DOMAIN};
 pub use payment::{
@@ -395,6 +404,8 @@ mod ts_export {
         "DrcTrustLineIssuerControlReceipt.ts",
         "DrcTrustLineIssuerControlTx.ts",
         "OvlExecutionTx.ts",
+        "OvlFeeMarketParams.ts",
+        "OvlWei.ts",
         "SignedStakeTx.ts",
         "Transaction.ts",
     ];
@@ -471,6 +482,8 @@ mod ts_export {
         DrcPaymentChannelScheduleEvent::export_all()
             .expect("export DrcPaymentChannelScheduleEvent");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
+        OvlWei::export_all().expect("export OvlWei");
+        OvlFeeMarketParams::export_all().expect("export OvlFeeMarketParams");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");
         DrcPaymentResult::export_all().expect("export DrcPaymentResult");

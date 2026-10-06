@@ -55,7 +55,7 @@ Same-block order: **policy → line control → issued transfer / clawback**. Pe
 
 - Block body **v17** when issued-control lanes non-empty.
 - Issued controls entered P2P fingerprint **v21** / state transition **v19**.
-  The current aggregate fingerprint is v23 / `agora-trident-state-v21`; it
+  The current aggregate fingerprint is v24 / `agora-trident-state-v22`; it
   preserves the `drc-issued-controls-v1` root semantics.
 - Live issued-asset policies and holder trust lines are also mirrored in the
   common schema-21 object/owner index. Issuer liabilities and settled control
