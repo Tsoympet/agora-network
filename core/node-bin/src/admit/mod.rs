@@ -232,6 +232,7 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_offer_creates: &'a [agora_types::DrcOfferCreateTx],
     pub drc_offer_cancels: &'a [agora_types::DrcOfferCancelTx],
     pub tlt_covenants: &'a [agora_types::TltCovenantTx],
+    pub passport_attestations: &'a [agora_types::PassportAttestation],
 }
 
 impl ChainState {
@@ -636,6 +637,7 @@ impl ChainState {
             drc_offer_cancels: lanes.drc_offer_cancels.to_vec(),
             drc_multisign_attachments: Vec::new(),
             tlt_covenants: included_covenants.to_vec(),
+            passport_attestations: lanes.passport_attestations.to_vec(),
         };
         if let Some(ctx) = self.auth.as_ref() {
             agora_types::materialize_drc_multisign_attachments(
@@ -2161,6 +2163,7 @@ impl ChainState {
                 drc_offer_meta_before: journal.drc_offer_meta_before,
                 tlt_covenant_created: journal.tlt_covenant_created,
                 tlt_covenant_spent: journal.tlt_covenant_spent,
+                passport_meta_before: journal.passport_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

@@ -43,8 +43,9 @@ use crate::backend::{
     admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
     admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
     admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_issuer_control,
-    admit_drc_trust_line_set, admit_ovl_execution, admit_ovl_raw_execution, admit_stake_tx,
-    admit_tlt_covenant, admit_transaction, NodeBackend, NodeBackendConfig,
+    admit_drc_trust_line_set, admit_ovl_execution, admit_ovl_raw_execution,
+    admit_passport_attestation, admit_stake_tx, admit_tlt_covenant, admit_transaction, NodeBackend,
+    NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::startup::{p2p_identity_path, prepare_legacy_datadir};
@@ -1635,6 +1636,21 @@ async fn main() {
                             warn!(%peer, %topic, "DRC multisign attachment gossip dropped: mempool lock poisoned");
                         }
                     },
+                    NetworkMessage::PassportAttestation(attestation) => {
+                        match admit_passport_attestation(
+                            store.as_ref(),
+                            &mempool,
+                            attestation,
+                            &tx_auth,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, passport = %id.to_hex(), "passport attestation gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "passport attestation gossip rejected");
+                            }
+                        }
+                    }
                     NetworkMessage::DrcIssuedClawback(tx) => {
                         let blue_score = chain
                             .lock()

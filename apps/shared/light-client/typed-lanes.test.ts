@@ -190,6 +190,10 @@ import {
   encodeDrcTicketCreateBody,
   encodeDrcTrustLineSetBody,
 } from "./typed-lanes-drc.ts";
+import {
+  encodePassportAttestationBody,
+  PASSPORT_ATTESTATION_DOMAIN,
+} from "./typed-lanes-passport.ts";
 import { sha256 } from "@noble/hashes/sha256";
 
 function lock(name: string, got: Uint8Array, expected: string) {
@@ -436,6 +440,26 @@ lock(
     ),
   ),
   "d2a02cf60231a28a6d807b91089da97d09d595a6af4bfb76c78b9155aadd1d21",
+);
+lock(
+  "passport_attestation",
+  encodeBoundEnvelope(
+    PASSPORT_ATTESTATION_DOMAIN,
+    CHAIN,
+    GENESIS,
+    encodePassportAttestationBody({
+      version: 1,
+      issuer: addr(1),
+      subject: addr(2),
+      category: "Code",
+      evidenceHash: hash(3),
+      issuerPolicyHash: hash(4),
+      issuedEpoch: 5,
+      expiresEpoch: 10,
+      nonce: 7,
+    }),
+  ),
+  "1d00000061676f72612d70617373706f72742d6174746573746174696f6e2d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef010000000101010101010101010101010101010101010101020202020202020202020202020202020202020200030303030303030303030303030303030303030303030303030303030303030304040404040404040404040404040404040404040404040404040404040404040500000000000000010a000000000000000700000000000000",
 );
 
 console.log("typed-lane Borsh preimages match agora-types");

@@ -158,6 +158,15 @@ export {
   sendDrcTrustLineSet,
 } from "./typed-lanes-drc";
 export {
+  PASSPORT_ATTESTATION_DOMAIN,
+  PASSPORT_CATEGORIES,
+  buildSignedPassportAttestation,
+  encodePassportAttestationBody,
+  passportCategoryDiscriminant,
+  sendPassportAttestation,
+  type PassportCategoryName,
+} from "./typed-lanes-passport";
+export {
   RAW_EVM_DEV_CHAIN_ID,
   RAW_EVM_KEY_SPLIT,
   RAW_EVM_TESTNET_CHAIN_ID,

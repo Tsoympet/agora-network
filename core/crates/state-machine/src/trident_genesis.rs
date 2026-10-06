@@ -28,7 +28,7 @@ pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-pol
 /// inflate detached DRC multisign short ids. v27 named-lane compact, v26
 /// raw-EVM, v25 DA gossip, schema-22 OVL wei / OVL-EVM-v1, and DRC object
 /// indexing stay in force.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 28;
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 29;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v9";
 const UNFROZEN: &str = "UNFROZEN";
 

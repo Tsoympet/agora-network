@@ -23,27 +23,27 @@ use agora_state_machine::{
     apply_drc_escrow_create, apply_drc_escrow_finish, apply_drc_payment_at_blue_score,
     apply_drc_regular_key, apply_drc_signer_list, apply_drc_ticket_create, apply_ovl_execution,
     apply_signed_stake_tx, build_snapshot, canonical_community_root, governance_treasury_root,
-    list_drc_account_objects, list_grants as list_canonical_grants,
-    list_hubs as list_canonical_hubs, list_missions as list_canonical_missions,
-    list_passport_attestations, load_account, load_canonical_community_summary,
-    load_canonical_governance_policy, load_data_commitment, load_drc_account_policy,
-    load_drc_check_receipt, load_drc_deposit_preauth, load_drc_escrow_receipt,
-    load_drc_issued_asset_policy_receipt, load_drc_issued_clawback_receipt,
-    load_drc_issued_transfer_receipt, load_drc_ledger_object, load_drc_operation,
-    load_drc_payment_by_invoice, load_drc_payment_channel_claim_event,
+    issuer_is_active_hub_coordinator, list_drc_account_objects,
+    list_grants as list_canonical_grants, list_hubs as list_canonical_hubs,
+    list_missions as list_canonical_missions, list_passport_attestations, load_account,
+    load_canonical_community_summary, load_canonical_governance_policy, load_data_commitment,
+    load_drc_account_policy, load_drc_check_receipt, load_drc_deposit_preauth,
+    load_drc_escrow_receipt, load_drc_issued_asset_policy_receipt,
+    load_drc_issued_clawback_receipt, load_drc_issued_transfer_receipt, load_drc_ledger_object,
+    load_drc_operation, load_drc_payment_by_invoice, load_drc_payment_channel_claim_event,
     load_drc_payment_channel_fund_event, load_drc_payment_channel_live,
     load_drc_payment_channel_receipt, load_drc_payment_channel_schedule_event,
     load_drc_payment_receipt, load_drc_transaction, load_drc_trust_line_issuer_control_receipt,
     load_drc_trust_line_live, load_epoch, load_known_drc_account_keys,
     load_known_drc_account_policy, load_known_drc_account_signer_summary,
-    load_known_drc_deposit_authorization, load_native_supply_state, load_protocol_treasuries,
-    load_reward_pool, load_validator, lookup_covenant_tx_location, lookup_data_commitment_location,
-    lookup_drc_check_point, lookup_drc_escrow_point, lookup_drc_issuer_liability_point,
-    lookup_drc_payment_channel_point, lookup_drc_ticket_point, lookup_drc_trust_line_point,
-    lookup_tx_location, meta_keys, outpoint_key, plan_drc_mempool_reservation,
-    validate_mempool_covenant, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily,
-    DrcMempoolReservation, DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext,
-    WriteBatch,
+    load_known_drc_deposit_authorization, load_native_supply_state, load_passport_attestation,
+    load_passport_issuer_nonce, load_protocol_treasuries, load_reward_pool, load_validator,
+    lookup_covenant_tx_location, lookup_data_commitment_location, lookup_drc_check_point,
+    lookup_drc_escrow_point, lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point,
+    lookup_drc_ticket_point, lookup_drc_trust_line_point, lookup_tx_location, meta_keys,
+    outpoint_key, plan_drc_mempool_reservation, validate_mempool_covenant,
+    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, DrcMempoolReservation,
+    DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
     sequence_signals_rbf, AccountTransfer, Address, Amount, Block, CheckpointAttestation,
@@ -54,10 +54,11 @@ use agora_types::{
     DrcLedgerObjectKind, DrcLedgerObjectPage, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
-    DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, TltCovenantTx,
-    Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
-    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
-    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, PassportAttestation,
+    SignedStakeTx, TltCovenantTx, Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
+    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -286,6 +287,39 @@ pub(crate) fn admit_data_commitment(
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
     pool.admit_data_commitment(authorization)
+        .map_err(|err| RpcError::Rejected(err.to_string()))
+}
+
+pub(crate) fn admit_passport_attestation(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    attestation: PassportAttestation,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    agora_crypto::verify_passport_attestation_bound(&attestation, &auth.chain_id, &auth.genesis)
+        .map_err(|err| RpcError::Rejected(format!("invalid passport attestation: {err}")))?;
+    if load_passport_attestation(store, &attestation.attestation_id())
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+        .is_some()
+    {
+        return Ok(attestation.attestation_id());
+    }
+    if !issuer_is_active_hub_coordinator(store, &attestation.issuer)
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+    {
+        return Err(RpcError::Rejected(
+            "passport issuer is not an active canonical hub coordinator".into(),
+        ));
+    }
+    let expected = load_passport_issuer_nonce(store, &attestation.issuer)
+        .map_err(|err| RpcError::Internal(err.to_string()))?;
+    if attestation.nonce != expected {
+        return Err(RpcError::Rejected("passport issuer nonce mismatch".into()));
+    }
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    pool.admit_passport_attestation(attestation)
         .map_err(|err| RpcError::Rejected(err.to_string()))
 }
 
@@ -2589,6 +2623,7 @@ impl RpcBackend for NodeBackend {
             drc_offer_cancels,
             tlt_covenants,
             data_commitments,
+            passport_attestations,
         ) = {
             let pool = self
                 .mempool
@@ -2637,6 +2672,7 @@ impl RpcBackend for NodeBackend {
                 pool.select_drc_offer_cancels(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_covenants(DEFAULT_TEMPLATE_TX_LIMIT),
                 data_commitments,
+                pool.select_passport_attestations(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         self.append_local_evm_executions(&mut ovl_executions);
@@ -2673,6 +2709,7 @@ impl RpcBackend for NodeBackend {
                     drc_offer_cancels: &drc_offer_cancels,
                     tlt_covenants: &tlt_covenants,
                     data_commitments: &data_commitments,
+                    passport_attestations: &passport_attestations,
                 },
             )
             .map_err(|e| RpcError::Internal(e.to_string()))
@@ -2931,8 +2968,8 @@ impl RpcBackend for NodeBackend {
         let missions = list_canonical_missions(self.store.as_ref(), limit)
             .map_err(|e| RpcError::Internal(e.to_string()))?;
         Ok(json!({
-            "maturity": "Scaffold",
-            "consensus_mutations_active": false,
+            "maturity": "Experimental",
+            "consensus_mutations_active": true,
             "root": root.to_hex(),
             "counts": {
                 "hubs": summary.hub_count,
@@ -2944,6 +2981,61 @@ impl RpcBackend for NodeBackend {
             "passport_attestations": passports,
             "grants": grants,
             "missions": missions,
+        }))
+    }
+
+    fn submit_passport_attestation(
+        &mut self,
+        attestation: PassportAttestation,
+    ) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id =
+            admit_passport_attestation(&self.store, &self.mempool, attestation.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            if let Err(err) = net.publish_message(NetworkMessage::PassportAttestation(attestation))
+            {
+                return Err(RpcError::Internal(err.to_string()));
+            }
+        }
+        Ok(id)
+    }
+
+    fn get_passport_attestation(&self, attestation_id: &Hash) -> Result<Value, RpcError> {
+        {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            if let Some(attestation) = pool.get_passport_attestation(attestation_id) {
+                return Ok(json!({
+                    "attestation_id": attestation_id.to_hex(),
+                    "status": "pending",
+                    "attestation": attestation,
+                }));
+            }
+        }
+        match load_passport_attestation(self.store.as_ref(), attestation_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        {
+            Some(attestation) => Ok(json!({
+                "attestation_id": attestation_id.to_hex(),
+                "status": "accepted",
+                "attestation": attestation,
+            })),
+            None => Ok(json!({
+                "attestation_id": attestation_id.to_hex(),
+                "status": "unknown",
+                "attestation": null,
+            })),
+        }
+    }
+
+    fn get_passport_issuer_nonce(&self, issuer: &Address) -> Result<Value, RpcError> {
+        let nonce = load_passport_issuer_nonce(self.store.as_ref(), issuer)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "issuer": issuer.to_hex(),
+            "nonce": nonce,
         }))
     }
 
@@ -3267,8 +3359,8 @@ mod tests {
         );
 
         let value = backend.get_community_registry(10).unwrap();
-        assert_eq!(value["maturity"], "Scaffold");
-        assert_eq!(value["consensus_mutations_active"], false);
+        assert_eq!(value["maturity"], "Experimental");
+        assert_eq!(value["consensus_mutations_active"], true);
         assert_eq!(value["counts"]["hubs"], 0);
         assert_eq!(value["counts"]["passport_attestations"], 0);
         assert_eq!(value["counts"]["grants"], 0);

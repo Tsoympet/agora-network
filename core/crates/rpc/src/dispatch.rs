@@ -811,6 +811,24 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let limit = optional_limit(&req.params, 64)?;
                 self.backend.get_community_registry(limit)
             }
+            RpcMethod::SubmitPassportAttestation => {
+                let raw =
+                    req.params.get("attestation").cloned().ok_or_else(|| {
+                        RpcError::InvalidParams("missing attestation object".into())
+                    })?;
+                let attestation: agora_types::PassportAttestation = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_passport_attestation(attestation)?;
+                Ok(json!({ "attestation_id": id.to_hex() }))
+            }
+            RpcMethod::GetPassportAttestation => {
+                let id = param_hash(&req.params, "attestation_id")?;
+                self.backend.get_passport_attestation(&id)
+            }
+            RpcMethod::GetPassportIssuerNonce => {
+                let issuer = param_address(&req.params, "issuer")?;
+                self.backend.get_passport_issuer_nonce(&issuer)
+            }
             RpcMethod::SubmitStakeTx => {
                 let stake_tx = req
                     .params
@@ -1672,6 +1690,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -1838,6 +1857,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -1893,6 +1913,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {
@@ -2513,6 +2534,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2584,6 +2606,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2654,6 +2677,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2725,6 +2749,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);

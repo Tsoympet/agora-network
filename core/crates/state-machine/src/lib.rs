@@ -182,10 +182,12 @@ pub use block_zero::{
 };
 pub use columns::{meta_keys, ColumnFamily, OVL_EVM_SCHEMA_VERSION, SCHEMA_VERSION};
 pub use community_state::{
-    canonical_community_root, init_canonical_community_into, list_grants, list_hubs, list_missions,
-    list_passport_attestations, load_canonical_community_summary, register_grant_into,
-    register_hub_into, register_mission_into, register_passport_attestation_into,
-    CanonicalCommunitySummary, CANONICAL_COMMUNITY_VERSION,
+    canonical_community_root, community_summary_key, init_canonical_community_into,
+    issuer_is_active_hub_coordinator, list_grants, list_hubs, list_missions,
+    list_passport_attestations, load_canonical_community_summary, load_passport_attestation,
+    load_passport_issuer_nonce, passport_issuer_nonce_key, passport_record_key,
+    register_grant_into, register_hub_into, register_mission_into,
+    register_passport_attestation_into, CanonicalCommunitySummary, CANONICAL_COMMUNITY_VERSION,
 };
 pub use data_availability::{
     apply_data_commitment, data_availability_root, data_commitment_key, data_commitment_nonce_key,

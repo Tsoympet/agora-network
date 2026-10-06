@@ -57,7 +57,7 @@ use crate::staking::{
 use crate::store::WriteBatch;
 use crate::supply::{burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key};
 use crate::utxo::outpoint_key;
-use crate::{StateError, StateStore};
+use crate::{register_passport_attestation_into, StateError, StateStore};
 
 /// Result of applying one block's UTXO transition (journal + typed acceptance + batch).
 pub struct BlockApplyResult {
@@ -68,8 +68,9 @@ pub struct BlockApplyResult {
 
 /// Network domain for transaction signatures (`chain_id` + genesis).
 ///
-/// `data_availability_network_fingerprint` is `None` until a reviewed Trident
-/// TLT base-fee/inclusion policy activates the block-only DA lane.
+/// `data_availability_network_fingerprint` is bound on default Experimental
+/// boot. `None` rejects DA admission (signing-context error, not a fee
+/// placeholder). Accepted DA authorizations burn [`DA_INCLUSION_FEE_TLT`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TxAuthContext {
     pub chain_id: String,
@@ -126,6 +127,8 @@ pub struct UtxoJournal {
     pub tlt_covenant_created: Vec<OutPoint>,
     /// Script outputs spent by this block's covenant lane (revert restores them).
     pub tlt_covenant_spent: Vec<(OutPoint, crate::tlt_covenant::TltCovenantUtxoRecord)>,
+    /// Community passport keys before Accepted signed attestations.
+    pub passport_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Journal layout before the offer lane. Trailing offer snapshots must not be
@@ -179,6 +182,7 @@ impl BorshSerialize for UtxoJournal {
         BorshSerialize::serialize(&self.drc_offer_meta_before, writer)?;
         BorshSerialize::serialize(&self.tlt_covenant_created, writer)?;
         BorshSerialize::serialize(&self.tlt_covenant_spent, writer)?;
+        BorshSerialize::serialize(&self.passport_meta_before, writer)?;
         Ok(())
     }
 }
@@ -208,10 +212,14 @@ impl BorshDeserialize for UtxoJournal {
             drc_offer_meta_before: Vec::deserialize_reader(reader)?,
             tlt_covenant_created: Vec::new(),
             tlt_covenant_spent: Vec::new(),
+            passport_meta_before: Vec::new(),
         };
         if let Some(created) = read_optional_vec(reader)? {
             journal.tlt_covenant_created = created;
             journal.tlt_covenant_spent = Vec::deserialize_reader(reader)?;
+            if let Some(passports) = read_optional_vec(reader)? {
+                journal.passport_meta_before = passports;
+            }
         }
         Ok(journal)
     }
@@ -508,6 +516,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v14) = UtxoJournalV14Trust::try_from_slice(bytes) {
@@ -534,6 +543,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v13) = UtxoJournalV13Paychan::try_from_slice(bytes) {
@@ -560,6 +570,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v12) = UtxoJournalV12::try_from_slice(bytes) {
@@ -586,6 +597,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v11) = UtxoJournalV11::try_from_slice(bytes) {
@@ -612,6 +624,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v10) = UtxoJournalV10::try_from_slice(bytes) {
@@ -638,6 +651,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v9) = UtxoJournalV9::try_from_slice(bytes) {
@@ -664,6 +678,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v8) = UtxoJournalV8::try_from_slice(bytes) {
@@ -690,6 +705,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v7) = UtxoJournalV7::try_from_slice(bytes) {
@@ -716,6 +732,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v6) = UtxoJournalV6::try_from_slice(bytes) {
@@ -742,6 +759,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
@@ -768,6 +786,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
@@ -794,6 +813,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -820,6 +840,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -846,6 +867,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -873,6 +895,7 @@ impl UtxoJournal {
             drc_offer_meta_before: Vec::new(),
             tlt_covenant_created: Vec::new(),
             tlt_covenant_spent: Vec::new(),
+            passport_meta_before: Vec::new(),
         })
     }
 }
@@ -1498,6 +1521,7 @@ type TridentLaneAcceptances = (
 );
 
 /// Apply canonical Trident lanes and settle fees only for Accepted operations.
+#[allow(clippy::too_many_arguments)]
 fn apply_trident_lanes(
     store: &StateStore,
     block: &Block,
@@ -1559,6 +1583,7 @@ fn apply_trident_lanes(
         && block.drc_regular_keys.is_empty()
         && block.drc_signer_lists.is_empty()
         && block.stake_ops.is_empty()
+        && block.passport_attestations.is_empty()
     {
         return Ok((
             Vec::new(),
@@ -1625,6 +1650,11 @@ fn apply_trident_lanes(
     if !block.data_commitments.is_empty() && auth.is_none() {
         return Err(StateError::InvalidTx(
             "data commitments require network-bound auth".into(),
+        ));
+    }
+    if !block.passport_attestations.is_empty() && auth.is_none() {
+        return Err(StateError::InvalidTx(
+            "passport attestations require network-bound auth".into(),
         ));
     }
     if block.data_commitments.len() > agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK {
@@ -3072,6 +3102,30 @@ fn apply_trident_lanes(
         }
     }
 
+    if !block.passport_attestations.is_empty() {
+        let ctx = auth.expect("passport auth checked above");
+        let mut seen_ids = std::collections::HashSet::new();
+        for attestation in &block.passport_attestations {
+            let id = attestation.attestation_id();
+            if !seen_ids.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate passport attestation in block".into(),
+                ));
+            }
+            let keys = vec![
+                crate::passport_record_key(&id),
+                crate::passport_issuer_nonce_key(&attestation.issuer),
+                crate::community_summary_key(),
+            ];
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            let mut op_batch = WriteBatch::new();
+            register_passport_attestation_into(&mut op_batch, &lane, attestation, ctx)?;
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+    }
+
     Ok((
         drc_ticket_create_statuses,
         drc_escrow_create_statuses,
@@ -3363,7 +3417,7 @@ pub fn collect_address_utxos(
         found.push((op, out));
         Ok(())
     })?;
-    found.sort_by(|a, b| outpoint_key(&a.0).cmp(&outpoint_key(&b.0)));
+    found.sort_by_key(|a| outpoint_key(&a.0));
     Ok(found)
 }
 
@@ -3382,6 +3436,7 @@ fn outpoint_from_utxo_key(key: &[u8]) -> Result<OutPoint, StateError> {
 }
 
 /// Burn [`DA_INCLUSION_FEE_TLT`] from the operator's TLT UTXOs.
+#[allow(clippy::too_many_arguments)]
 fn debit_da_inclusion_fee(
     store: &StateStore,
     operator: &Address,
@@ -3416,7 +3471,7 @@ fn debit_da_inclusion_fee(
         })
         .map(|(op, out)| (*op, out.clone()))
         .collect();
-    from_block.sort_by(|a, b| outpoint_key(&a.0).cmp(&outpoint_key(&b.0)));
+    from_block.sort_by_key(|a| outpoint_key(&a.0));
     for (op, out) in from_block {
         if total >= fee {
             break;
@@ -3431,7 +3486,7 @@ fn debit_da_inclusion_fee(
             "DA inclusion fee: insufficient TLT (need {fee}, have {total})"
         )));
     }
-    selected.sort_by(|a, b| outpoint_key(&a.0).cmp(&outpoint_key(&b.0)));
+    selected.sort_by_key(|a| outpoint_key(&a.0));
     let burned_key = burned_supply_key(NativeAssetId::TLT);
     meta_before.extend(snapshot_meta_keys(store, &[burned_key])?);
     burn_tlt_fee_into(store, batch, fee)?;
@@ -3638,6 +3693,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
     }
     crate::tlt_covenant::revert_covenant_outputs(&mut batch, journal)?;
     revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
+    for (key, prior) in journal.passport_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     Ok(batch)
 }
 
@@ -3896,6 +3957,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -4110,6 +4172,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -4233,6 +4296,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -4323,6 +4387,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -4422,6 +4487,7 @@ mod tests {
                 drc_offer_cancels: vec![],
                 drc_multisign_attachments: vec![],
                 tlt_covenants: Vec::new(),
+                passport_attestations: Vec::new(),
             },
             1,
             None,
@@ -4520,6 +4586,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -4636,6 +4703,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -4734,6 +4802,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -4846,6 +4915,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -4987,6 +5057,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5649,6 +5720,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5950,5 +6022,116 @@ mod tests {
                 .as_base_units(),
             Amount::from_whole(10_000_000).unwrap().as_base_units()
         );
+    }
+
+    #[test]
+    fn signed_passport_lane_applies_and_reverts() {
+        use crate::{
+            canonical_community_root, load_canonical_community_summary, load_passport_attestation,
+            load_passport_issuer_nonce, register_hub_into,
+        };
+        use agora_crypto::sign_passport_attestation_bound;
+        use agora_governance::{HubAccreditationStatus, HubRecord};
+        use agora_types::{PassportAttestation, PassportCategory};
+
+        let store = StateStore::open_in_memory();
+        let issuer = KeyPair::from_secret_bytes(&[11; 32]).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let hub = HubRecord {
+            id: Hash([1; 32]),
+            public_name: "Agora Hub 1".into(),
+            classification: "Geographic".into(),
+            charter_hash: Hash([2; 32]),
+            coordinators: vec![issuer.address()],
+            treasury_multisig: Address([3; 20]),
+            election_term_epochs: 12,
+            reporting_interval_epochs: 3,
+            coi_disclosure_root: Hash([4; 32]),
+            deliverables_root: Hash([5; 32]),
+            accreditation_proposal_id: 1,
+            status: HubAccreditationStatus::Active,
+        };
+        let mut hub_batch = WriteBatch::new();
+        register_hub_into(&mut hub_batch, &store, &hub).unwrap();
+        store.write_batch(hub_batch).unwrap();
+        let root_before = canonical_community_root(&store).unwrap();
+        let summary_before = load_canonical_community_summary(&store).unwrap();
+
+        let mut attestation = PassportAttestation::unsigned(
+            issuer.address(),
+            Address([7; 20]),
+            PassportCategory::CommunitySupport,
+            Hash([3; 32]),
+            Hash([4; 32]),
+            10,
+            Some(20),
+            0,
+        );
+        sign_passport_attestation_bound(&mut attestation, &issuer, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let id = attestation.attestation_id();
+
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.passport_attestations = vec![attestation.clone()];
+        block.header.tx_root = block.compute_body_root();
+
+        let missing_hub_store = StateStore::open_in_memory();
+        GenesisBuilder::default()
+            .ignite(&missing_hub_store)
+            .unwrap();
+        assert!(apply_block_batched_with_auth(&missing_hub_store, &block, 0, Some(&auth)).is_err());
+
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(
+            load_passport_attestation(&store, &id).unwrap().unwrap(),
+            attestation
+        );
+        assert_eq!(
+            load_passport_issuer_nonce(&store, &issuer.address()).unwrap(),
+            1
+        );
+        let summary = load_canonical_community_summary(&store).unwrap();
+        assert_eq!(summary.hub_count, 1);
+        assert_eq!(summary.passport_count, 1);
+        assert_ne!(canonical_community_root(&store).unwrap(), root_before);
+
+        store
+            .write_batch(revert_journal_batched(&result.journal).unwrap())
+            .unwrap();
+        assert!(load_passport_attestation(&store, &id).unwrap().is_none());
+        assert_eq!(
+            load_passport_issuer_nonce(&store, &issuer.address()).unwrap(),
+            0
+        );
+        assert_eq!(
+            load_canonical_community_summary(&store).unwrap(),
+            summary_before
+        );
+        assert_eq!(canonical_community_root(&store).unwrap(), root_before);
     }
 }

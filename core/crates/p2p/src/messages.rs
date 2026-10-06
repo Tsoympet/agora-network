@@ -92,6 +92,8 @@ pub enum NetworkMessage {
     TypedCompactBlock(TypedCompactBody),
     /// Appended in Trident protocol v28; detached DRC multisign attachments on the tx topic.
     DrcMultisignAttachment(agora_types::DrcMultisignBlockAttachment),
+    /// Appended in Trident protocol v29; signed Hub-coordinator passport attestation.
+    PassportAttestation(agora_types::PassportAttestation),
 }
 
 impl NetworkMessage {
@@ -445,6 +447,25 @@ mod tests {
         assert_eq!(
             NetworkMessage::decode(&attachment.encode()).unwrap(),
             attachment
+        );
+
+        let passport = NetworkMessage::PassportAttestation(agora_types::PassportAttestation {
+            version: 1,
+            issuer: Address([1; 20]),
+            subject: Address([2; 20]),
+            category: agora_types::PassportCategory::Code,
+            evidence_hash: Hash([3; 32]),
+            issuer_policy_hash: Hash([4; 32]),
+            issued_epoch: 5,
+            expires_epoch: Some(10),
+            nonce: 0,
+            public_key: vec![1; 33],
+            signature: vec![2; 64],
+        });
+        assert_eq!(passport.encode()[0], 37);
+        assert_eq!(
+            NetworkMessage::decode(&passport.encode()).unwrap(),
+            passport
         );
 
         let mut block = Block::utxo(

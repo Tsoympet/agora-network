@@ -208,6 +208,8 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getNativeAssetSupply"
             | "agora_getProtocolTreasuries"
             | "agora_getCommunityRegistry"
+            | "agora_getPassportAttestation"
+            | "agora_getPassportIssuerNonce"
     )
 }
 

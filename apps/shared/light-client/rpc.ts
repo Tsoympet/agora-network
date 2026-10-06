@@ -358,6 +358,15 @@ export type LightClient = {
   ) => Promise<LightNativeAssetSupply>;
   getProtocolTreasuries: () => Promise<LightProtocolTreasuries>;
   getCommunityRegistry: (limit?: number) => Promise<LightCommunityRegistry>;
+  getPassportAttestation: (attestationId: string) => Promise<{
+    attestation_id: string;
+    status: string;
+    attestation: unknown | null;
+  }>;
+  getPassportIssuerNonce: (issuer: string) => Promise<{
+    issuer: string;
+    nonce: number;
+  }>;
   getDrcObject: (objectId: string) => Promise<{
     object_id: string;
     status: "live" | "unknown";
@@ -451,6 +460,9 @@ export type LightClient = {
     issuer_control_tx_id: string;
   }>;
   submitDrcIssuedClawback: (tx: unknown) => Promise<{ clawback_tx_id: string }>;
+  submitPassportAttestation: (attestation: unknown) => Promise<{
+    attestation_id: string;
+  }>;
   getConstitution: () => Promise<LightConstitution>;
   getGovernance: () => Promise<LightGovernance>;
   listProposals: (limit?: number) => Promise<LightProposalList>;
@@ -539,6 +551,17 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<LightProtocolTreasuries>("agora_getProtocolTreasuries", []),
     getCommunityRegistry: (limit = 64) =>
       call<LightCommunityRegistry>("agora_getCommunityRegistry", { limit }),
+    getPassportAttestation: (attestationId) =>
+      call<{
+        attestation_id: string;
+        status: string;
+        attestation: unknown | null;
+      }>("agora_getPassportAttestation", { attestation_id: attestationId }),
+    getPassportIssuerNonce: (issuer) =>
+      call<{ issuer: string; nonce: number }>(
+        "agora_getPassportIssuerNonce",
+        { issuer },
+      ),
     getDrcObject: (objectId) =>
       call<{
         object_id: string;
@@ -726,6 +749,10 @@ export function createLightClient(config: LightClientConfig): LightClient {
     submitDrcIssuedClawback: (tx) =>
       call<{ clawback_tx_id: string }>("agora_submitDrcIssuedClawback", {
         issued_clawback: tx,
+      }),
+    submitPassportAttestation: (attestation) =>
+      call<{ attestation_id: string }>("agora_submitPassportAttestation", {
+        attestation,
       }),
     getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
     getGovernance: () => call<LightGovernance>("agora_getGovernance", []),
