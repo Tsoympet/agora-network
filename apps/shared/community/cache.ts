@@ -110,6 +110,30 @@ export function presentCached<T>(
   };
 }
 
+/** No APNs or FCM client is linked. The in-app inbox is the delivery path. */
+export const PUSH_TRANSPORT = "PLANNED" as const;
+
+export type InAppNotice = {
+  id: string;
+  title: string;
+  body: string;
+  at: number;
+};
+
+export function inboxNotice(
+  title: string,
+  detail: string,
+  now: number,
+): InAppNotice {
+  const scrubbed = notificationBody(title, detail);
+  return {
+    id: `notice-${now}`,
+    title: scrubbed.title,
+    body: scrubbed.body,
+    at: now,
+  };
+}
+
 export function notificationBody(title: string, detail: string): { title: string; body: string } {
   const scrubbed = detail.replace(/\b\d[\d,]*\s*(DRC|TLT|OVL|base units)\b/gi, "[amount hidden]");
   if (/\b\d[\d,]*\s*(DRC|TLT|OVL)\b/i.test(scrubbed)) {

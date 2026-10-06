@@ -4,12 +4,12 @@
  */
 import assert from "node:assert/strict";
 
-import { memoryCacheStorage, notificationBody, presentCached, saveCache, loadCache, emptyCache } from "./cache.ts";
+import { PUSH_TRANSPORT, emptyCache, inboxNotice, loadCache, memoryCacheStorage, notificationBody, presentCached, saveCache } from "./cache.ts";
 import { createCommunityClient, preferChainTreasuries } from "./client.ts";
 import { communityFixtures, demoPassport, demoPrivateProfile, searchHubs } from "./fixtures.ts";
 import { proposalBadge, voteEligibility } from "./governance.ts";
 import { transitionMission } from "./missions.ts";
-import { advanceDrcPay, broadcastDrcPay, signDrcPayIntent } from "./pay.ts";
+import { advanceDrcPay, applyDrcNodeResult, broadcastDrcPay, signDrcPayIntent } from "./pay.ts";
 import { assertPaymentPreview, encodeAgoraQr, parseAgoraQr } from "./qr.ts";
 import { applyReputationEvent, emptyScores, splitPassport, transferBadge } from "./reputation.ts";
 import {
@@ -144,6 +144,42 @@ assert.equal(signed.destination, "agora1dest");
 const receipt = broadcastDrcPay({ mode: "signing", preview: preview!, signed: true });
 assert.equal(receipt.confirmed, false);
 assert.equal(receipt.broadcast, "unavailable");
+assert.equal(receipt.paymentId, null);
+const unconfirmed = applyDrcNodeResult({
+  mode: "signing",
+  preview: preview!,
+  signed: true,
+  rpcSupported: true,
+  paymentId: "pay-1",
+  nodeReceipt: null,
+});
+assert.equal(unconfirmed.broadcast, "submitted");
+assert.equal(unconfirmed.confirmed, false);
+const confirmed = applyDrcNodeResult({
+  mode: "signing",
+  preview: preview!,
+  signed: true,
+  rpcSupported: true,
+  paymentId: "pay-1",
+  nodeReceipt: { result: "delivered_exact" },
+});
+assert.equal(confirmed.confirmed, true);
+assert.match(confirmed.note, /did not recompute a DRC header proof/);
+assert.throws(
+  () =>
+    applyDrcNodeResult({
+      mode: "watch-only",
+      preview: preview!,
+      signed: true,
+      rpcSupported: true,
+      paymentId: "pay-1",
+      nodeReceipt: { result: "delivered_exact" },
+    }),
+  /watch-only/,
+);
+const hidden = inboxNotice("Mission", "Reward 25 DRC", 10);
+assert.equal(hidden.body.includes("25"), false);
+assert.equal(PUSH_TRANSPORT, "PLANNED");
 
 const technical = voteEligibility("ovl", {
   reputations: { ...emptyScores(), Community: 4 },
@@ -199,6 +235,13 @@ const report = await client.reportForum("post-welcome", "spam");
 assert.equal(report.data?.dispatched, false);
 const advanced = await client.advanceMission("mission-docs-review", "ACCEPTED");
 assert.equal(advanced.data?.recorded, false);
+await assert.rejects(
+  () =>
+    createCommunityClient({ baseUrl: "http://127.0.0.1:9" }).openSession({
+      token: "ab".repeat(16),
+    } as never),
+  /pasted bearer token/,
+);
 await assert.rejects(() => client.privateProfile(null), /community session/);
 const profile = await client.privateProfile("ab".repeat(16));
 assert.equal(profile.consensus, false);

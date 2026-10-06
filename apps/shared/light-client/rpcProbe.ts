@@ -32,6 +32,7 @@ const PROBE_PARAMS: Record<string, unknown> = {
   },
   agora_getDrcAccountObjects: { account: "00".repeat(20), limit: 1 },
   agora_submitAccountTransfer: { account_transfer: null },
+  agora_submitDrcPayment: { payment: null },
 };
 
 function methodMissing(message: string): boolean {

@@ -5,6 +5,7 @@ import {
   type DataPlane,
   type InfrastructureFetch,
 } from "../data-plane/deviceClient.ts";
+import type { CommunitySession, SessionChallenge } from "./session.ts";
 import type {
   AcademyCatalog,
   Bounty,
@@ -46,7 +47,19 @@ export type CommunityClient = {
   developers: () => Promise<OfflineView<DirectoryEntry[]>>;
   ecosystem: () => Promise<OfflineView<EcosystemSnapshot>>;
   reportForum: (postId: string, reason: string) => Promise<OfflineView<{ dispatched: boolean }>>;
+  replyToForum: (input: {
+    postId: string;
+    body: string;
+    authorAddress: string;
+    authorUsername?: string;
+  }) => Promise<OfflineView<{ id: string; body: string; source: string } | null>>;
   advanceMission: (id: string, to: string) => Promise<OfflineView<{ recorded: boolean }>>;
+  requestSessionChallenge: (address: string) => Promise<SessionChallenge>;
+  openSession: (input: {
+    challenge: SessionChallenge;
+    publicKey: string;
+    signature: string;
+  }) => Promise<CommunitySession>;
 };
 
 function serviceFor(path: string): string {
@@ -204,6 +217,50 @@ export function createCommunityClient(options: {
           "moderation service unreachable · report not dispatched",
         );
       }
+    },
+    async replyToForum(input) {
+      if (/\b(mnemonic|seed|xprv)\b/i.test(JSON.stringify(input))) {
+        throw new Error("forum reply cannot carry a seed");
+      }
+      if (!infra.configured) {
+        return view(
+          "infrastructure",
+          false,
+          null,
+          "forum replies run on infrastructure · this device did not start a forum server",
+        );
+      }
+      try {
+        const reply = await infra.facades.forum.reply(input);
+        return view(
+          "infrastructure",
+          true,
+          reply,
+          "reply stored by the forum service · not a consensus transaction",
+        );
+      } catch {
+        return view(
+          "infrastructure",
+          false,
+          null,
+          "forum service unreachable · reply not stored",
+        );
+      }
+    },
+    async requestSessionChallenge(address) {
+      if (!infra.configured) {
+        throw new Error("community session requires the infrastructure host");
+      }
+      return infra.facades.post<SessionChallenge>("community", "/session/challenge", { address });
+    },
+    async openSession(input) {
+      if ("token" in input) {
+        throw new Error("pasted bearer token is not a community session");
+      }
+      if (!infra.configured) {
+        throw new Error("community session requires the infrastructure host");
+      }
+      return infra.facades.post<CommunitySession>("community", "/session", input);
     },
     async advanceMission(id, to) {
       if (!infra.configured) {

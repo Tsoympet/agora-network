@@ -27,7 +27,9 @@ export type DrcPayReceipt = {
   asset: "DRC";
   signedLocally: boolean;
   broadcast: "submitted" | "unavailable";
-  confirmed: false;
+  /** True only when a node receipt object was returned. Never inferred. */
+  confirmed: boolean;
+  paymentId: string | null;
   note: string;
 };
 
@@ -85,6 +87,60 @@ export function broadcastDrcPay(input: {
     signedLocally: true,
     broadcast: "unavailable",
     confirmed: false,
-    note: "Signed on this device. Consensus DRC broadcast is not available in this light client, so nothing was submitted and the payment is not confirmed.",
+    paymentId: null,
+    note: "Signed on this device. The node did not accept agora_submitDrcPayment, so nothing was submitted and the payment is not confirmed.",
+  };
+}
+
+/**
+ * A node receipt is the only confirmation this client will show.
+ * A payment id without a receipt stays unconfirmed. Absence of RPC support
+ * does not invent a submission.
+ */
+export function applyDrcNodeResult(input: {
+  mode: WalletMode;
+  preview: QrPreview;
+  signed: boolean;
+  rpcSupported: boolean;
+  paymentId: string | null;
+  nodeReceipt: unknown;
+}): DrcPayReceipt {
+  assertCommunitySpendAllowed(input.mode);
+  assertPaymentPreview(input.preview);
+  if (!input.signed) throw new Error("sign before broadcast");
+  const base = {
+    destination: input.preview.destination!,
+    amount: input.preview.amount!,
+    asset: "DRC" as const,
+    signedLocally: true,
+  };
+  if (!input.rpcSupported || !input.paymentId) {
+    return {
+      ...base,
+      broadcast: "unavailable",
+      confirmed: false,
+      paymentId: null,
+      note: "agora_submitDrcPayment is not available on this node, so nothing was submitted and the payment is not confirmed.",
+    };
+  }
+  const hasReceipt =
+    input.nodeReceipt !== null &&
+    input.nodeReceipt !== undefined &&
+    typeof input.nodeReceipt === "object";
+  if (!hasReceipt) {
+    return {
+      ...base,
+      broadcast: "submitted",
+      confirmed: false,
+      paymentId: input.paymentId,
+      note: `Submitted as ${input.paymentId}. Unconfirmed until the node returns a DRC payment receipt. This client does not treat a payment id as confirmation.`,
+    };
+  }
+  return {
+    ...base,
+    broadcast: "submitted",
+    confirmed: true,
+    paymentId: input.paymentId,
+    note: `Node receipt present for ${input.paymentId}. This light client did not recompute a DRC header proof.`,
   };
 }

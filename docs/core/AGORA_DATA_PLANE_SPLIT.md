@@ -41,7 +41,7 @@ not boot an in-process server and it does not invent a balance.
 | `explorer-ui` | device | Renders node rows | Optional indexer, not bundled | Canonical blocks and transactions |
 | `guilds-ui` | device | Charter screen | Membership records | — |
 | `indexer` | infrastructure | Status over HTTP | `infrastructure/indexer` | — |
-| `forum-backend` | infrastructure | HTTP only | `infrastructure/forum-server` | — |
+| `forum-backend` | infrastructure | HTTP only | `infrastructure/forum-server` plus the JSON store | — |
 | `grant-mission-admin` | infrastructure | HTTP only | `infrastructure/grant-admin` | — |
 | `event-service` | infrastructure | HTTP only | `infrastructure/event-service` | — |
 | `notification-dispatch` | infrastructure | Token registration only | `infrastructure/notification-dispatch` | — |
@@ -63,6 +63,13 @@ not consensus. An Academy certificate or a passport attestation is a different
 record, `credential-attestations`, and only when that attestation exists.
 
 ## Trust
+
+The community host persists its catalog, forum replies, and mission reviews in
+a JSON file (`AGORA_COMMUNITY_STORE`, or
+`infrastructure/community-services/data/community-store.json` when the process
+is started directly). That file is infrastructure trust. The operator who runs
+the process can read and edit it. It is not consensus, not a header proof, and
+not a treasury balance. Sessions stay in process memory and are not seeds.
 
 Infrastructure is an operator. The operator can omit, reorder, delay, or alter
 what the service returns. Every infrastructure HTTP body is an envelope:

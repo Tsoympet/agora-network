@@ -1,4 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ArchitecturePanel } from "./components/ArchitecturePanel";
+import { useVaultSessionTimeout } from "./components/useVaultSessionTimeout";
+import { DEFAULT_SESSION_TIMEOUT_MS } from "../../shared/security/desktop";
 import {
   addressBech32FromMnemonic,
   clearPersistedVault,
@@ -35,6 +38,7 @@ import {
   type WatchOnlyWallet,
 } from "../../shared/light-client";
 import { CommunityTrustPanel } from "./components/CommunityTrustPanel";
+import { DocsAboutPanel } from "./components/DocsAboutPanel";
 import { FeatureSurfacesPanel } from "./components/FeatureSurfacesPanel";
 import { GovernancePanel } from "./components/GovernancePanel";
 import { LightClientPanel } from "./components/LightClientPanel";
@@ -126,10 +130,12 @@ export function App() {
   const [walletBusy, setWalletBusy] = useState(false);
 
   const [mnemonic, setMnemonic] = useState("");
-  const [mnemonicVisible, setMnemonicVisible] = useState(true);
+  const [mnemonicVisible, setMnemonicVisible] = useState(false);
   const [vaultPassword, setVaultPassword] = useState("");
   const [vaultHasBlob, setVaultHasBlob] = useState(false);
   const [vaultUnlocked, setVaultUnlocked] = useState(false);
+  const [sessionTimeoutMs, setSessionTimeoutMs] = useState(DEFAULT_SESSION_TIMEOUT_MS);
+  useVaultSessionTimeout(vaultUnlocked, onLockVault, sessionTimeoutMs);
   const [vaultBusy, setVaultBusy] = useState(false);
   const [vaultMsg, setVaultMsg] = useState<string | null>(null);
   const [toAddress, setToAddress] = useState("");
@@ -329,7 +335,7 @@ export function App() {
     const phrase = generateMnemonic(128);
     setWatchWallet(null);
     setMnemonic(phrase);
-    setMnemonicVisible(true);
+    setMnemonicVisible(false);
     setVaultUnlocked(true);
     try {
       const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
@@ -377,7 +383,7 @@ export function App() {
       const phrase = await openVault(sealed, vaultPassword);
       setWatchWallet(null);
       setMnemonic(phrase);
-      setMnemonicVisible(true);
+      setMnemonicVisible(false);
       setVaultUnlocked(true);
       const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
       setReceiveBech32(bech32);
@@ -768,6 +774,8 @@ export function App() {
       </p>
       ) : null}
 
+      {show("HOME", "SETTINGS") ? <DocsAboutPanel /> : null}
+
       {show("WALLET") ? (
       <section
         className="agora-rise agora-rise-delay-3"
@@ -1148,10 +1156,27 @@ export function App() {
           chainTreasuries={chainTreasuries}
           notifications={notifications}
           onNotifications={setNotifications}
+          spend={{
+            mode: watchWallet || !mnemonic.trim() ? "watch-only" : "signing",
+            mnemonic: watchWallet ? null : mnemonic,
+            network: nodeInfo?.network ?? null,
+            genesisHash: nodeInfo?.genesis_hash ?? null,
+            chainId: nodeInfo?.chain_id ?? null,
+            light: client,
+          }}
         />
       ) : null}
       {show("COMMUNITY", "PASSPORT", "ASSEMBLY", "TREASURY", "SETTINGS") ? (
         <CommunityTrustPanel subjectAddress={receiveBech32} community={community} />
+      ) : null}
+      {lane === "SETTINGS" ? (
+        <ArchitecturePanel
+          nodeUrl={rpcUrl}
+          unlocked={vaultUnlocked}
+          onLock={onLockVault}
+          timeoutMs={sessionTimeoutMs}
+          onTimeoutMs={setSessionTimeoutMs}
+        />
       ) : null}
     </main>
     </div>
