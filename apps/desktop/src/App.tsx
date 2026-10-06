@@ -38,6 +38,7 @@ import {
   type WatchOnlyWallet,
 } from "../../shared/light-client";
 import { CommunityTrustPanel } from "./components/CommunityTrustPanel";
+import { DocsAboutPanel } from "./components/DocsAboutPanel";
 import { FeatureSurfacesPanel } from "./components/FeatureSurfacesPanel";
 import { GovernancePanel } from "./components/GovernancePanel";
 import { LightClientPanel } from "./components/LightClientPanel";
@@ -772,6 +773,8 @@ export function App() {
         <span>TLT SECURE · PoW/UTXO</span>
       </p>
       ) : null}
+
+      {show("HOME", "SETTINGS") ? <DocsAboutPanel /> : null}
 
       {show("WALLET") ? (
       <section

@@ -52,6 +52,7 @@ import {
   type WatchOnlyWallet,
 } from "../shared/light-client";
 import { CommunityTrustPanel } from "./CommunityTrustPanel";
+import { DocsAboutPanel } from "./DocsAboutPanel";
 import { FeatureSurfacesPanel } from "./FeatureSurfacesPanel";
 import { LightClientPanel } from "./LightClientPanel";
 import { PairingPanel } from "./PairingPanel";
@@ -672,6 +673,8 @@ export default function App() {
         />
         </>
         ) : null}
+
+        {show("HOME", "SETTINGS") ? <DocsAboutPanel /> : null}
 
         {show("HOME", "ACTIVITY") && snap.updatedAt ? (
           <Text style={styles.footer}>
