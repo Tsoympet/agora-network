@@ -551,6 +551,9 @@ mod tests {
             2,
         )
         .unwrap();
+        // Direct policy mutation bypasses block acceptance. The composed root
+        // refuses a stale common object mirror, so rebuild it before commit.
+        crate::reindex_drc_ledger_objects(&store).unwrap();
         let tip = Hash([7; 32]);
         let root = compose_trident_state_root(&store, &tip).unwrap();
         drop(store);
