@@ -24,7 +24,7 @@ import {
 } from "./session.ts";
 import * as secp from "@noble/secp256k1";
 
-const secret = secp.utils.randomSecretKey();
+const secret = secp.utils.randomPrivateKey();
 const publicKey = secp.getPublicKey(secret, true);
 
 const split = splitPassport({

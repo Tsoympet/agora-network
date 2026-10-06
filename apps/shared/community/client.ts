@@ -191,14 +191,16 @@ export function preferChainTreasuries(
   chain:
     | {
         consensus_mutations_active?: boolean;
-        treasuries?: Array<{ id: string; asset: "TLT" | "OVL" | "DRC"; balance: { base_units?: string } | string }>;
+        treasuries?: Array<{ id: string; asset: "TLT" | "OVL" | "DRC"; balance: { base_units?: string } | string | number }>;
       }
     | null,
 ): CommunityTreasuryRow[] {
   if (!chain?.treasuries?.length) return community;
   return chain.treasuries.map((row) => {
     const balance =
-      typeof row.balance === "string" ? row.balance : (row.balance.base_units ?? "0");
+      typeof row.balance === "string" || typeof row.balance === "number"
+        ? String(row.balance)
+        : (row.balance.base_units ?? "0");
     return {
       id: row.id,
       asset: row.asset,
