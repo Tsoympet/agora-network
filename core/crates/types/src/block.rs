@@ -244,8 +244,8 @@ impl Block {
     }
 
     /// Compact gossip is UTXO-only unless a versioned typed compact names each
-    /// lane. Unknown lanes (today: detached multisign attachments) keep the
-    /// full-body fallback.
+    /// lane. Typed compact names every live body field, including detached DRC
+    /// multisign attachments (protocol v28 gossip + lane 29).
     pub fn requires_full_body_gossip(&self) -> bool {
         !self.account_transfers.is_empty()
             || !self.stake_ops.is_empty()
@@ -254,9 +254,10 @@ impl Block {
             || self.has_post_v4_body_lanes()
     }
 
-    /// Lanes that protocol-v27 typed compact cannot name from the mempool.
+    /// Historical name: every current lane is named. Kept so callers can still
+    /// fail closed if a future body field is added without a compact kind.
     pub fn typed_compact_unnamed_lanes(&self) -> bool {
-        !self.drc_multisign_attachments.is_empty()
+        false
     }
 
     /// Compute a simple pairwise tx merkle root (duplicate last leaf when odd).

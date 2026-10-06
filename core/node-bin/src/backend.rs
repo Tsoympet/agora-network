@@ -2742,7 +2742,12 @@ impl RpcBackend for NodeBackend {
             }
         }
         if let Some(net) = &self.net {
-            // Prefer compact + announce; peers inflate from mempool or issue GetBlock.
+            // Gossip detached attachments before typed compact so peers can
+            // inflate lane 29 from the mempool. A miss still issues GetBlock.
+            for attachment in &block.drc_multisign_attachments {
+                let _ =
+                    net.publish_message(NetworkMessage::DrcMultisignAttachment(attachment.clone()));
+            }
             let _ = net.publish_message(NetworkMessage::compact_from_block(&block));
             let _ = net.publish_message(NetworkMessage::BlockAnnounce { hash: id });
         }

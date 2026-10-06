@@ -1612,6 +1612,29 @@ async fn main() {
                             }
                         }
                     }
+                    NetworkMessage::DrcMultisignAttachment(attachment) => match mempool.lock() {
+                        Ok(mut pool) => match pool.admit_drc_multisign_attachment(attachment) {
+                            Ok(id) => {
+                                info!(
+                                    %peer,
+                                    %topic,
+                                    attachment = %id.to_hex(),
+                                    "DRC multisign attachment gossip admitted"
+                                );
+                            }
+                            Err(err) => {
+                                warn!(
+                                    %peer,
+                                    %topic,
+                                    error = %err,
+                                    "DRC multisign attachment gossip rejected"
+                                );
+                            }
+                        },
+                        Err(_) => {
+                            warn!(%peer, %topic, "DRC multisign attachment gossip dropped: mempool lock poisoned");
+                        }
+                    },
                     NetworkMessage::DrcIssuedClawback(tx) => {
                         let blue_score = chain
                             .lock()

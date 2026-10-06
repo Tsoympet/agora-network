@@ -76,13 +76,18 @@ fn policy_block_with_attachment() -> Block {
 }
 
 #[tokio::test]
-async fn issued_controls_v17_block_uses_full_body_not_compact() {
+async fn issued_controls_v17_block_uses_typed_compact() {
     let _ = tracing_subscriber::fmt::try_init();
     let block = policy_block_with_attachment();
-    assert!(matches!(
-        NetworkMessage::compact_from_block(&block),
-        NetworkMessage::Block(_)
-    ));
+    match NetworkMessage::compact_from_block(&block) {
+        NetworkMessage::TypedCompactBlock(body) => {
+            assert!(body
+                .lanes
+                .iter()
+                .any(|lane| lane.kind == agora_p2p::COMPACT_LANE_DRC_MULTISIGN));
+        }
+        other => panic!("expected typed compact, got {other:?}"),
+    }
 }
 
 #[tokio::test]

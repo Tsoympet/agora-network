@@ -393,7 +393,8 @@ impl NetworkNode {
             | NetworkMessage::DrcOfferCancel(_)
             | NetworkMessage::TltCovenant(_)
             | NetworkMessage::DataCommitment(_)
-            | NetworkMessage::OvlRawExecution(_) => {
+            | NetworkMessage::OvlRawExecution(_)
+            | NetworkMessage::DrcMultisignAttachment(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

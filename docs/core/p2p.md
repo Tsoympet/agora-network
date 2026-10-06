@@ -30,7 +30,7 @@ Topics and the getblock protocol are scoped by `NetworkConfig::network` (from `A
 | --- | --- | --- |
 | blocks | `agora/testnet/blocks/1` | `Block` / `BlockAnnounce` / `CompactBlock` / `GetBlock`; DA is carried only inside full blocks |
 | attestations | `agora/testnet/attestations/1` | `CheckpointAttestation` (Trident dual-PoS) |
-| txs | `agora/testnet/txs/1` | UTXO, account, stake, Agora-signed OVL execution, raw OVL-EVM (`OvlRawExecution`), DA authorizations, and versioned DRC settlement/control envelopes |
+| txs | `agora/testnet/txs/1` | UTXO, account, stake, Agora-signed OVL execution, raw OVL-EVM (`OvlRawExecution`), DA authorizations, detached DRC multisign attachments, and versioned DRC settlement/control envelopes |
 | getblock RR | `/agora/testnet/getblock/1` | CBOR `GetBlockRequest` / `GetBlockResponse` |
 
 `dev` (default) uses `agora/dev/…`. Peers on different networks never share a gossip mesh even on the same underlay.
@@ -39,10 +39,12 @@ Topics and the getblock protocol are scoped by `NetworkConfig::network` (from `A
 
 After a block is admitted locally, `agora-node` gossips:
 
-1. `CompactBlock { header, short_ids }` for UTXO-only bodies,
-   `TypedCompactBlock` (protocol v27) when typed lanes can be named, or
-   a full `Block` when a lane cannot be named (detached DRC multisign
-   attachments)
+1. `CompactBlock { header, short_ids }` for UTXO-only bodies, or
+   `TypedCompactBlock` (protocol v27) when typed lanes can be named.
+   Detached DRC multisign attachments are named lane 29; producers gossip
+   `DrcMultisignAttachment` (protocol v28, discriminant 36) on the tx topic
+   before compact so peers can inflate. Reconstruction miss or unknown kind
+   still issues GetBlock.
 2. `BlockAnnounce { hash }` — hash-only tip signal
 
 Receivers try `reconstruct_compact_block` against the local mempool. On miss (or hash-only announce without a body), they request the body from the announcing peer over the network-scoped **`/agora/<network>/getblock/1`** protocol (libp2p request-response, CBOR). `PendingFetches` dedupes in-flight hashes. If request-response fails, the node falls back to gossip `GetBlock` / `Block`.
@@ -92,12 +94,14 @@ reservations.
 Typed consensus lanes append `NetworkMessage` discriminants. Protocol v25
 adds `DataCommitment` (33); v26 adds `OvlRawExecution` (34) for version-2
 raw Ethereum envelopes on a separate mempool that does not reserve the OVL
-account nonce; v27 adds `TypedCompactBlock` (35) with named short-id lanes.
-Prior DRC policy, settlement, trust-line, issued-control, offer, and TLT
-covenant variants keep their discriminants. Default Experimental boot binds the
-DA fingerprint to the live mesh and burns `DA_INCLUSION_FEE_TLT` from the
-operator's TLT UTXOs on accept. Missing fingerprint is a signing-context error.
-`requires_full_body_gossip` still forbids UTXO compact for typed bodies.
+account nonce; v27 adds `TypedCompactBlock` (35) with named short-id lanes;
+v28 adds `DrcMultisignAttachment` (36) so detached multisign short ids can
+inflate from the mempool. Prior DRC policy, settlement, trust-line,
+issued-control, offer, and TLT covenant variants keep their discriminants.
+Default Experimental boot binds the DA fingerprint to the live mesh and burns
+`DA_INCLUSION_FEE_TLT` from the operator's TLT UTXOs on accept. Missing
+fingerprint is a signing-context error. `requires_full_body_gossip` still
+forbids UTXO compact for typed bodies.
 
 The v23 state transition adds no new `NetworkMessage` or block-body field.
 Nodes derive identical common DRC object/owner indexes and accepted-operation
