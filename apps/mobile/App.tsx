@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { ArchitecturePanel } from "./ArchitecturePanel";
+import { useVaultSessionTimeout } from "./useVaultSessionTimeout";
+import { DEFAULT_SESSION_TIMEOUT_MS } from "../shared/security/desktop";
 import * as Clipboard from "expo-clipboard";
 import { StatusBar } from "expo-status-bar";
 import {
@@ -114,10 +117,12 @@ export default function App() {
   const [walletBusy, setWalletBusy] = useState(false);
 
   const [mnemonic, setMnemonic] = useState("");
-  const [mnemonicVisible, setMnemonicVisible] = useState(true);
+  const [mnemonicVisible, setMnemonicVisible] = useState(false);
   const [vaultPassword, setVaultPassword] = useState("");
   const [vaultHasBlob, setVaultHasBlob] = useState(false);
   const [vaultUnlocked, setVaultUnlocked] = useState(false);
+  const [sessionTimeoutMs, setSessionTimeoutMs] = useState(DEFAULT_SESSION_TIMEOUT_MS);
+  useVaultSessionTimeout(vaultUnlocked, onLockVault, sessionTimeoutMs);
   const [vaultBusy, setVaultBusy] = useState(false);
   const [vaultMsg, setVaultMsg] = useState<string | null>(null);
   const [toAddress, setToAddress] = useState("");
@@ -332,7 +337,7 @@ export default function App() {
     const phrase = generateMnemonic(128);
     setWatchWallet(null);
     setMnemonic(phrase);
-    setMnemonicVisible(true);
+    setMnemonicVisible(false);
     setVaultUnlocked(true);
     try {
       const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
@@ -378,7 +383,7 @@ export default function App() {
       const phrase = await openVault(sealed, vaultPassword);
       setWatchWallet(null);
       setMnemonic(phrase);
-      setMnemonicVisible(true);
+      setMnemonicVisible(false);
       setVaultUnlocked(true);
       const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
       setReceiveBech32(bech32);
@@ -942,6 +947,15 @@ export default function App() {
             notifications={notifications}
             onNotifications={setNotifications}
             chainTreasuries={chainTreasuries}
+          />
+        ) : null}
+        {lane === "SETTINGS" ? (
+          <ArchitecturePanel
+            nodeUrl={rpcUrl}
+            unlocked={vaultUnlocked}
+            onLock={onLockVault}
+            timeoutMs={sessionTimeoutMs}
+            onTimeoutMs={setSessionTimeoutMs}
           />
         ) : null}
       </ScrollView>
