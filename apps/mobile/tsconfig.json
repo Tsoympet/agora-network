@@ -12,14 +12,20 @@
   },
   "include": [
     "App.tsx",
+    "CommunityTrustPanel.tsx",
+    "FeatureSurfacesPanel.tsx",
     "LightClientPanel.tsx",
     "PairingPanel.tsx",
-    "FeatureSurfacesPanel.tsx",
     "community/**/*.tsx",
     "global.d.ts",
     "../shared/light-client/**/*.ts",
     "../shared/community/**/*.ts",
+    "../shared/community-trust/**/*.ts",
     "../shared/brand/tokens.ts"
   ],
-  "exclude": ["../shared/light-client/**/*.test.ts", "../shared/community/**/*.test.ts"]
+  "exclude": [
+    "../shared/light-client/**/*.test.ts",
+    "../shared/community/**/*.test.ts",
+    "../shared/community-trust/**/*.test.ts"
+  ]
 }

@@ -9,13 +9,17 @@
 //! 5. **Community board** — EOS-style forum topics + constitution acks (`community`)
 //! 6. **Durable snapshot** — JSON for node Meta CF (`persist`)
 //! 7. **Launch-security math** — quadratic votes + 5% whale cap (`quadratic`, `whale`)
+//! 8. **Community trust** — local attributes, proposal transparency, rewards,
+//!    public aggregates, and portable identity (`community_trust`)
 //!
-//! See `docs/governance/CONSTITUTION.md` and `docs/governance/COMMUNITY.md`.
+//! See `docs/governance/CONSTITUTION.md`, `docs/governance/COMMUNITY.md`,
+//! and `docs/community/COMMUNITY_TRUST.md`.
 
 mod authorization;
 mod chamber;
 mod community;
 mod community_protocol;
+mod community_trust;
 mod constitution;
 mod engine;
 mod error;
@@ -40,6 +44,17 @@ pub use community_protocol::{
     CommunityProtocolError, ConflictReviewStatus, GrantKind, GrantMilestone, GrantRecord,
     GrantStatus, HubAccreditationStatus, HubKind, HubRecord, MilestoneStatus, MissionRecord,
     MissionStatus,
+};
+pub use community_trust::{
+    advisory_transparency, authority_badge, community_search_uses_device_location,
+    default_reward_program, evaluate_reward, export_portable_identity,
+    light_client_trust_assumptions, local_community_from_json, parse_portable_identity,
+    parse_public_analytics, proposal_view, reward_control, scaffold_public_analytics,
+    search_local_communities, seed_local_communities, transparency_from_proposal,
+    CommunityTrustError, ImplementationStatus, LocalCommunity, PortableIdentityBundle,
+    ProposalAuthority, ProposalFinalResult, ProposalTransparency, ProposalTransparencyView,
+    PublicAnalyticsAggregates, RewardConfig, RewardDecision, RewardKind, RewardSource,
+    TransparencyNarrative, TrustAssumption, MANUAL_REGION_SEARCH_NOTICE,
 };
 pub use constitution::{
     constitution_v1_hash_hex, hash_constitution_body, EnactedConstitution, CONSTITUTION_V1_BODY,
