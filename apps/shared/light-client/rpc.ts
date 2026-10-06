@@ -133,6 +133,14 @@ export type LightRewardPool = {
   amount: LightAmount;
 };
 
+export type LightNativeAssetSupply = {
+  asset: NativeAssetTicker;
+  maximum_supply: string;
+  issued_supply: string;
+  burned_supply: string;
+  net_supply: string;
+};
+
 export type LightProtocolTreasuries = {
   maturity: string;
   consensus_mutations_active: boolean;
@@ -260,6 +268,9 @@ export type LightClient = {
     epoch?: number,
   ) => Promise<LightValidatorSet>;
   getRewardPool: (asset: "OVL" | "DRC") => Promise<LightRewardPool>;
+  getNativeAssetSupply: (
+    asset: NativeAssetTicker,
+  ) => Promise<LightNativeAssetSupply>;
   getProtocolTreasuries: () => Promise<LightProtocolTreasuries>;
   getCommunityRegistry: (limit?: number) => Promise<LightCommunityRegistry>;
   estimateFee: () => Promise<FeeEstimate>;
@@ -349,6 +360,8 @@ export function createLightClient(config: LightClientConfig): LightClient {
       }),
     getRewardPool: (asset) =>
       call<LightRewardPool>("agora_getRewardPool", { asset }),
+    getNativeAssetSupply: (asset) =>
+      call<LightNativeAssetSupply>("agora_getNativeAssetSupply", { asset }),
     getProtocolTreasuries: () =>
       call<LightProtocolTreasuries>("agora_getProtocolTreasuries", []),
     getCommunityRegistry: (limit = 64) =>

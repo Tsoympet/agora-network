@@ -297,9 +297,11 @@ pub use state_root::{
 };
 pub use store::{StateStore, WriteBatch};
 pub use supply::{
-    ignite_trident_supply, issued_supply_key, load_issued_supply, load_max_supply,
-    load_schema_version, max_supply_key, put_issued_supply_into, put_max_supply_into,
-    put_schema_version_into, verify_supply_invariants,
+    burn_drc_fee_into, burned_supply_key, ignite_trident_supply, issued_supply_key,
+    load_burned_supply, load_issued_supply, load_max_supply, load_native_supply_state,
+    load_schema_version, max_supply_key, migrate_drc_fee_burn_schema, native_supply_root,
+    put_burned_supply_into, put_issued_supply_into, put_max_supply_into, put_schema_version_into,
+    verify_supply_invariants, NativeSupplyState, DRC_FEE_BURN_SCHEMA_VERSION,
 };
 pub use trident_genesis::{
     TridentFinalityPolicy, TridentGenesisArtifact, TridentGenesisValidator,

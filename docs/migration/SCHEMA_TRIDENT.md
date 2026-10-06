@@ -24,7 +24,8 @@
 | `16` | DRC weighted signer-list state and authorization journals |
 | `17` | Detached DRC multisign-attachment block lane |
 | `18` | DRC master-key-disable policy with no-lockout enforcement |
-| `19` (current) | Additive DRC ticket, escrow, check, payment-channel, trust-line, issued-control, receipt, and revert-journal key families |
+| `19` | Additive DRC ticket, escrow, check, payment-channel, trust-line, issued-control, receipt, and revert-journal key families |
+| `20` (current) | Per-asset lifetime-burn counters and accepted-only DRC fee destruction |
 
 Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
@@ -37,7 +38,9 @@ Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
 ## Meta key families (Trident)
 
-- OVL/DRC accounts (`account/…`), acceptance (`acceptance/…`), per-asset supply
+- OVL/DRC accounts (`account/…`), acceptance (`acceptance/…`), per-asset issued
+  supply (`meta/issued_supply/<asset>`) and lifetime burned supply
+  (`meta/burned_supply/<asset>`)
 - Staking: `stake/val|del|unbond|epoch|snap/…`
 - Finality: `finality/cert/<block_hash>`, `finality/tip_blue_score`
 - DRC payments: `payment/drc/seen|invoice|outbox|receipt/…`
@@ -54,8 +57,14 @@ Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
 Atomic `WriteBatch` commit rules from PRs #76–#81 remain mandatory.
 
-Schema 19 does not reinterpret frozen historical block or transaction bytes.
+Schema 20 does not reinterpret frozen historical block or transaction bytes.
 The later DRC objects are additive, but their body, signing, state-transition,
 and P2P versions still gate consensus compatibility. An older Experimental
 datadir needs replay/reindex (or a fresh Trident datadir) before public
 activation; no in-place migration CLI is claimed here.
+
+The library-level schema 19-to-20 fee-burn migration is intentionally narrow:
+it atomically creates zero burn counters and advances the schema, without
+inferring historical fees from the mixed-provenance DRC reward pool. It refuses
+other source versions and unexpected preexisting burn keys. Operational
+activation/reindex tooling remains required before public testnet.

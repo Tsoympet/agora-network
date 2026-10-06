@@ -315,6 +315,7 @@ pub trait RpcBackend: Send {
     fn get_validator_set(&self, asset: &str, epoch: Option<u64>) -> Result<Value, RpcError>;
     fn get_validator(&self, asset: &str, operator: &Address) -> Result<Value, RpcError>;
     fn get_reward_pool(&self, asset: &str) -> Result<Value, RpcError>;
+    fn get_native_asset_supply(&self, asset: &str) -> Result<Value, RpcError>;
     fn get_protocol_treasuries(&self) -> Result<Value, RpcError>;
     fn get_community_registry(&self, limit: usize) -> Result<Value, RpcError>;
     /// Admit a secp256k1-signed stake tx (bond/delegate/unbond/withdraw). Never mint-like.
@@ -1143,6 +1144,26 @@ impl RpcBackend for InMemoryBackend {
 
     fn get_reward_pool(&self, asset: &str) -> Result<Value, RpcError> {
         Ok(json!({ "asset": asset, "amount": 0 }))
+    }
+
+    fn get_native_asset_supply(&self, asset: &str) -> Result<Value, RpcError> {
+        let ticker = match asset.trim().to_ascii_uppercase().as_str() {
+            "TLT" => "TLT",
+            "OVL" => "OVL",
+            "DRC" => "DRC",
+            other => {
+                return Err(RpcError::InvalidParams(format!(
+                    "native asset must be TLT, OVL, or DRC, got {other}"
+                )));
+            }
+        };
+        Ok(json!({
+            "asset": ticker,
+            "maximum_supply": "0",
+            "issued_supply": "0",
+            "burned_supply": "0",
+            "net_supply": "0",
+        }))
     }
 
     fn get_protocol_treasuries(&self) -> Result<Value, RpcError> {

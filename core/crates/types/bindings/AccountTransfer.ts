@@ -13,7 +13,7 @@ import type { NativeAssetId } from "./NativeAssetId";
  */
 export type AccountTransfer = { version: number, asset: NativeAssetId, from: Address, to: Address, amount: Amount,
 /**
- * Explicit same-asset fee (credited to staking reward pool when Accepted).
+ * Explicit same-asset fee; accepted DRC fees burn and accepted OVL fees fund its reward pool.
  */
 fee: Amount,
 /**

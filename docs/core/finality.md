@@ -13,9 +13,10 @@ Empty active sets never satisfy quorum (no admin bypass). Stake is never price-c
 ## State root
 
 `compose_trident_state_root` (current domain
-`agora-trident-state-root-v13`) commits the UTXO set, OVL/DRC accounts and stake
-snapshots, versioned DRC authorization/settlement state, tip acceptance,
-finalized tip, governance/treasuries, canonical community state, and
+`agora-trident-state-root-v14`) commits the UTXO set, OVL/DRC accounts and stake
+snapshots, versioned DRC authorization/settlement state, native issued/burned/net
+supply accounting, tip acceptance, finalized tip, governance/treasuries,
+canonical community state, and
 authenticated DA state.
 
 Checkpoint bodies bind this root (no longer provisional zero).
@@ -48,7 +49,8 @@ Checkpoint bodies bind this root (no longer provisional zero).
 | --- | --- |
 | Slash proceeds → reward pool → epoch distribute | Wired |
 | Staking reserve drip (`stake/reserve_remaining`) | Working testnet defaults (10% of max); epoch drip wired |
-| `credit_fee_share_to_reward_pool` | Called for Accepted OVL/DRC account-transfer fees in block apply |
+| Accepted OVL account/execution fees | Credit the OVL reward pool via `credit_fee_share_to_reward_pool` |
+| Accepted DRC typed-operation fees | Destroyed into committed lifetime burned supply under protocol v22 |
 
 Never from TLT PoW mint.
 
@@ -64,7 +66,6 @@ transactions or contracts.
 - Deterministic OVL contract VM/storage (signed intrinsic-gas EOA boundary is active)
 - Any additional DRC feature family requires an explicit typed state transition
   and capability-specific review; there is no full-XRPL-parity or VM roadmap
-- Gov/treasury roots in state root (Phase 5)
 - Validator signing daemon
 
 See [`../consensus/HYBRID_POW_DUAL_POS.md`](../consensus/HYBRID_POW_DUAL_POS.md).

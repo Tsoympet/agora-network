@@ -6,8 +6,8 @@ use agora_consensus::{LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, Rand
 use agora_crypto::{sign_drc_issued_transfer_bound, sign_drc_trust_line_set_bound, KeyPair};
 use agora_p2p::Mempool;
 use agora_state_machine::{
-    credit_account_into, load_drc_issuer_liability, load_drc_trust_line_live, GenesisBuilder,
-    StateStore, WriteBatch,
+    credit_account_into, load_burned_supply, load_drc_issuer_liability, load_drc_trust_line_live,
+    put_issued_supply_into, GenesisBuilder, StateStore, WriteBatch,
 };
 use agora_types::{
     drc_trust_line_live_meta_key, Address, Amount, DrcIssuedTransferTx, DrcTrustLineSetTx, Hash,
@@ -69,8 +69,8 @@ pub fn sum_holder_balances_for_asset(
         .as_units()
 }
 
-pub fn reward_pool_balance(store: &StateStore) -> u64 {
-    agora_state_machine::load_reward_pool(store, NativeAssetId::DRC).unwrap_or(0)
+pub fn burned_supply_balance(store: &StateStore) -> u64 {
+    load_burned_supply(store, NativeAssetId::DRC).unwrap()
 }
 
 pub struct TrustLineFixture {
@@ -103,6 +103,7 @@ pub fn funded_trust_line_fixture() -> TrustLineFixture {
         )
         .unwrap();
     }
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 15_000_000);
     store.write_batch(funding).unwrap();
     let backend = NodeBackend::new(
         Arc::new(Mutex::new(boot_chain(store.clone(), genesis))),

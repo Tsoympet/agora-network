@@ -6,7 +6,7 @@ use agora_crypto::{sign_payment_channel_offledger_claim, KeyPair};
 use agora_rpc::{InMemoryBackend, RpcBackend, RpcDispatcher, RpcRequest};
 use agora_state_machine::{
     credit_account_into, load_drc_payment_channel_fund_event, lookup_drc_payment_channel_point,
-    GenesisBuilder, WriteBatch,
+    put_issued_supply_into, GenesisBuilder, WriteBatch,
 };
 use agora_types::{Amount, Hash, NativeAssetId};
 use serde_json::json;
@@ -42,6 +42,7 @@ fn rpc_point_queries_and_verify_after_restart_not_finality() {
         Amount::from_base_units(50_000),
     )
     .unwrap();
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 550_000);
     store.write_batch(funding).unwrap();
 
     let mut backend = NodeBackend::new(

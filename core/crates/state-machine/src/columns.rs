@@ -58,7 +58,8 @@ impl ColumnFamily {
 /// - `18` — DRC master-key disable policy (no-lockout invariant)
 /// - `19` — current additive DRC ticket, escrow, check, payment-channel,
 ///   trust-line, issued-control, receipt, and revert-journal key families
-pub const SCHEMA_VERSION: u32 = 19;
+/// - `20` — per-asset lifetime-burn counters and accepted-only DRC fee burning
+pub const SCHEMA_VERSION: u32 = 20;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {
@@ -82,6 +83,8 @@ pub mod meta_keys {
     pub const SCHEMA_VERSION: &[u8] = b"meta/schema_version";
     /// Per-asset issued supply prefix: `meta/issued_supply/<asset_wire_byte>`.
     pub const ISSUED_SUPPLY_ASSET_PREFIX: &[u8] = b"meta/issued_supply/";
+    /// Per-asset lifetime burned supply prefix: `meta/burned_supply/<asset_wire_byte>`.
+    pub const BURNED_SUPPLY_ASSET_PREFIX: &[u8] = b"meta/burned_supply/";
 
     // These keys reserve a lossless candidate Block 0 record and its bound
     // datadir identity for a future atomic loader. The v2 ignition path never

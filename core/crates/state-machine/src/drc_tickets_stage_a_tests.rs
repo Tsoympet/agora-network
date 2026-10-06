@@ -21,7 +21,11 @@ mod tests {
     };
     use crate::drc_ticket::load_drc_account_tickets;
     use crate::store::WriteBatch;
-    use crate::StateStore;
+    use crate::supply::{
+        load_burned_supply, load_issued_supply, put_burned_supply_into, put_issued_supply_into,
+        put_schema_version_into,
+    };
+    use crate::{StateStore, SCHEMA_VERSION};
 
     fn auth() -> TxAuthContext {
         TxAuthContext {
@@ -45,6 +49,15 @@ mod tests {
             Amount::from_base_units(amount),
         )
         .unwrap();
+        let issued = load_issued_supply(store, NativeAssetId::DRC)
+            .unwrap()
+            .checked_add(amount)
+            .unwrap();
+        put_issued_supply_into(&mut batch, NativeAssetId::DRC, issued);
+        for asset in NativeAssetId::ALL {
+            put_burned_supply_into(&mut batch, asset, load_burned_supply(store, asset).unwrap());
+        }
+        put_schema_version_into(&mut batch, SCHEMA_VERSION);
         store.write_batch(batch).unwrap();
     }
 

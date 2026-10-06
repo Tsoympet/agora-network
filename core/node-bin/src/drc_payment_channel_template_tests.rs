@@ -10,8 +10,8 @@ use agora_crypto::{
 };
 use agora_p2p::Mempool;
 use agora_state_machine::{
-    credit_account_into, lookup_drc_payment_channel_point, GenesisBuilder, StateStore,
-    TxAuthContext, WriteBatch,
+    credit_account_into, lookup_drc_payment_channel_point, put_issued_supply_into, GenesisBuilder,
+    StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
     materialize_drc_multisign_attachments, Address, Amount, Block, DrcPaymentChannelClaimTx,
@@ -78,6 +78,7 @@ fn funded_backend() -> (NodeBackend, Hash, KeyPair, KeyPair, KeyPair) {
         Amount::from_base_units(50_000),
     )
     .unwrap();
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 550_000);
     store.write_batch(funding).unwrap();
     let chain = Arc::new(Mutex::new(boot_chain(store.clone(), genesis)));
     let backend = NodeBackend::new(
@@ -311,6 +312,7 @@ fn public_e2e_invariant_create_fund_two_claims_schedule_finalize() {
         Amount::from_base_units(100_000),
     )
     .unwrap();
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 1_100_000);
     store.write_batch(funding).unwrap();
 
     let miner = KeyPair::from_secret_bytes(&[0x99; 32]).unwrap();

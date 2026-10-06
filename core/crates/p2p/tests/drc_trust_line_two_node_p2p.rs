@@ -8,8 +8,9 @@ use agora_p2p::{
     NetworkMessage, NetworkNode,
 };
 use agora_state_machine::{
-    apply_block_batched_with_auth_at_blue_score, credit_account_into, StateStore, TxAuthContext,
-    WriteBatch,
+    apply_block_batched_with_auth_at_blue_score, credit_account_into, put_burned_supply_into,
+    put_issued_supply_into, put_schema_version_into, StateStore, TxAuthContext, WriteBatch,
+    SCHEMA_VERSION,
 };
 use agora_types::{
     materialize_drc_multisign_attachments, validate_drc_multisign_attachment_lane, Amount, Block,
@@ -177,6 +178,11 @@ async fn full_block_trust_line_attachment_apply_and_tamper_rejected() {
         Amount::from_base_units(10_000),
     )
     .unwrap();
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 20_000);
+    for asset in NativeAssetId::ALL {
+        put_burned_supply_into(&mut funding, asset, 0);
+    }
+    put_schema_version_into(&mut funding, SCHEMA_VERSION);
     store.write_batch(funding).unwrap();
     let ctx = TxAuthContext {
         chain_id: CHAIN.into(),

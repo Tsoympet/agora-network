@@ -54,7 +54,9 @@ Same-block order: **policy → line control → issued transfer / clawback**. Pe
 ## Mesh / roots
 
 - Block body **v17** when issued-control lanes non-empty.
-- P2P fingerprint **v21**; state transition **v19** (`agora-trident-state-v19`) adds `drc-issued-controls-v1` root.
+- Issued controls entered P2P fingerprint **v21** / state transition **v19**.
+  The current aggregate fingerprint is v22 / `agora-trident-state-v20`; it
+  preserves the `drc-issued-controls-v1` root semantics.
 
 ## Public integration (Experimental)
 

@@ -4,8 +4,8 @@ use agora_rpc::RpcBackend;
 use agora_types::DrcIssuedAssetPolicyAction;
 
 use super::drc_issued_controls_public_helpers::{
-    assert_liability_equals_sum_balances, drc_balance, funded_trust_line_fixture,
-    issuer_outstanding, line_balance, mine_template, reward_pool_balance,
+    assert_liability_equals_sum_balances, burned_supply_balance, drc_balance,
+    funded_trust_line_fixture, issuer_outstanding, line_balance, mine_template,
     setup_clawback_ready_line, setup_live_line, signed_clawback, signed_policy_set,
 };
 use super::drc_trust_line_public_helpers::asset;
@@ -22,7 +22,7 @@ fn public_invariant_native_and_liability_through_policy_control_clawback() {
         .iter()
         .map(|a| drc_balance(fx.store.as_ref(), a))
         .sum();
-    let pool0 = reward_pool_balance(fx.store.as_ref());
+    let burned0 = burned_supply_balance(fx.store.as_ref());
 
     setup_clawback_ready_line(
         &mut fx.backend,
@@ -75,8 +75,8 @@ fn public_invariant_native_and_liability_through_policy_control_clawback() {
         .iter()
         .map(|a| drc_balance(fx.store.as_ref(), a))
         .sum();
-    let pool1 = reward_pool_balance(fx.store.as_ref());
-    assert_eq!(native0 + pool0, native1 + pool1);
+    let burned1 = burned_supply_balance(fx.store.as_ref());
+    assert_eq!(native0 + burned0, native1 + burned1);
 }
 
 #[test]

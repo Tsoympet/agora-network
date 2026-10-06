@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use agora_crypto::KeyPair;
 use agora_rpc::{RpcBackend, RpcDispatcher, RpcRequest};
-use agora_state_machine::{credit_account_into, GenesisBuilder, WriteBatch};
+use agora_state_machine::{
+    credit_account_into, put_issued_supply_into, GenesisBuilder, WriteBatch,
+};
 use agora_types::{Amount, DrcIssuedAssetPolicyAction, NativeAssetId};
 use serde_json::json;
 
@@ -33,6 +35,7 @@ fn rpc_policy_set_restart_query_receipt() {
         )
         .unwrap();
     }
+    put_issued_supply_into(&mut funding, NativeAssetId::DRC, 1_000_000);
     store.write_batch(funding).unwrap();
 
     let mut backend = crate::backend::NodeBackend::new(

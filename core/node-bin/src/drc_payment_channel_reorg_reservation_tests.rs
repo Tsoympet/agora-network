@@ -407,9 +407,7 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
     use agora_types::{Amount, NativeAssetId};
     use std::sync::{Arc, Mutex};
 
-    use super::drc_payment_channel_public_helpers::{
-        backend_config, boot_chain, reward_pool_balance,
-    };
+    use super::drc_payment_channel_public_helpers::{backend_config, boot_chain};
     use agora_p2p::Mempool;
 
     let dir = tempfile::tempdir().unwrap();
@@ -436,6 +434,7 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
         Amount::from_base_units(50_000),
     )
     .unwrap();
+    agora_state_machine::put_issued_supply_into(&mut funding, NativeAssetId::DRC, 550_000);
     store.write_batch(funding).unwrap();
 
     let mut backend = crate::NodeBackend::new(
@@ -447,10 +446,8 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
 
     let owner_addr = owner.address();
     let dest_addr = destination.address();
-    let pool0 = reward_pool_balance(store.as_ref());
     let quad0 = channel_conservation_quad(store.as_ref(), &owner_addr, &dest_addr, &Hash::ZERO);
     let total0: u64 = quad0.0 + quad0.1 + quad0.2 + quad0.3;
-    let mut pool_baseline = pool0;
     let initial_spendable =
         spendable_plus_locked(store.as_ref(), &owner_addr, &dest_addr, &Hash::ZERO);
 
@@ -459,7 +456,6 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
     backend.submit_drc_payment_channel_create(create).unwrap();
     mine_template(&mut backend);
     let quad1 = channel_conservation_quad(store.as_ref(), &owner_addr, &dest_addr, &channel_id);
-    pool_baseline = quad1.3;
     assert_eq!(quad1.0 + quad1.1 + quad1.2 + quad1.3, total0);
     assert_eq!(
         spendable_plus_locked(store.as_ref(), &owner_addr, &dest_addr, &channel_id),
@@ -472,7 +468,7 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
     mine_template(&mut backend);
     let fund_tip = virtual_tip(&backend);
     let quad2 = channel_conservation_quad(store.as_ref(), &owner_addr, &dest_addr, &channel_id);
-    let pool_after_fund = quad2.3;
+    let burned_after_fund = quad2.3;
     assert_eq!(quad2.0 + quad2.1 + quad2.2 + quad2.3, total0);
     assert_eq!(
         spendable_plus_locked(store.as_ref(), &owner_addr, &dest_addr, &channel_id),
@@ -504,7 +500,6 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
     assert_eq!(dest_after_claim, quad0.1 + 40 - 1);
     assert_eq!(locked_after_claim, 150 + 60 - 40);
     let quad3 = channel_conservation_quad(store.as_ref(), &owner_addr, &dest_addr, &channel_id);
-    pool_baseline = quad3.3;
     assert_eq!(quad3.0 + quad3.1 + quad3.2 + quad3.3, total0);
     assert_eq!(
         spendable_plus_locked(store.as_ref(), &owner_addr, &dest_addr, &channel_id),
@@ -516,7 +511,7 @@ fn nodebackend_post_accounting_claim_revert_reapply_restart_conservation() {
         channel_conservation_quad(store.as_ref(), &owner_addr, &dest_addr, &channel_id);
     assert_eq!(quad_revert.1, quad0.1);
     assert_eq!(quad_revert.2, 150 + 60);
-    assert_eq!(quad_revert.3, pool_after_fund);
+    assert_eq!(quad_revert.3, burned_after_fund);
     assert_eq!(
         quad_revert.0 + quad_revert.1 + quad_revert.2 + quad_revert.3,
         total0
