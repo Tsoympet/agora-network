@@ -153,6 +153,35 @@ export {
   type RpcReach,
 } from "./rpcEndpoint";
 export {
+  LIGHT_FEATURE_MATRIX,
+  matrixWithRpcAvailability,
+  type FeatureCapability,
+  type FeatureDomain,
+} from "./featureMatrix";
+export {
+  fetchTltHistory,
+  submitDrcNativePayment,
+  submitOvlTransfer,
+} from "./featureSurfaceActions";
+export {
+  probeLightClientRpc,
+  probeRpcMethod,
+  rpcMethodsFromMatrix,
+} from "./rpcProbe";
+export { submitBuiltEnvelope } from "./submitEnvelope";
+export {
+  verificationLabel,
+  verificationShort,
+  type VerificationStatus,
+} from "./verificationStatus";
+export {
+  type BuiltEnvelope,
+  buildAccountTransfer,
+  buildDrcPayment,
+  fixturePreimages,
+  requireSigner,
+} from "./envelopes";
+export {
   clearPersistedVault,
   DEFAULT_VAULT_STORAGE_KEY,
   keyValueVault,

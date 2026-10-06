@@ -37,7 +37,10 @@ RPC methods: `agora_getDagTips`, `agora_getBlock`, `agora_getLightHeaders`,
 `agora_getBlockBinding`, `agora_getTltInclusionProof`, `agora_getNativeBalances`,
 `agora_getTransaction`,
 `agora_getMempool`, `agora_getNodeInfo`, `agora_getBalance`, `agora_getUtxos`,
-`agora_submitTransaction`.
+`agora_submitTransaction`, plus DRC/OVL typed submits via `envelopes.ts`.
+
+Capability catalog: `featureMatrix.ts`, RPC probe: `rpcProbe.ts`, UI:
+`FeatureSurfacesPanel` on desktop and mobile.
 
 Addresses: Bech32m HRPs `agora` / `agoratest` / `agoradev` preferred; 40-char
 hex stays network-neutral. Pass the node network to `parseAddress(input, network)`

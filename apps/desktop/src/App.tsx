@@ -34,6 +34,7 @@ import {
   type TipSyncSnapshot,
   type WatchOnlyWallet,
 } from "../../shared/light-client";
+import { FeatureSurfacesPanel } from "./components/FeatureSurfacesPanel";
 import { GovernancePanel } from "./components/GovernancePanel";
 import { LightClientPanel } from "./components/LightClientPanel";
 import { PairingPanel } from "./components/PairingPanel";
@@ -639,6 +640,19 @@ export function App() {
         client={client}
         network={nodeInfo?.network ?? null}
         genesisHash={nodeInfo?.genesis_hash ?? null}
+      />
+
+      <FeatureSurfacesPanel
+        client={client}
+        network={nodeInfo?.network ?? null}
+        genesisHash={nodeInfo?.genesis_hash ?? null}
+        chainId={nodeInfo?.chain_id ?? null}
+        tltHex={receiveHex ?? watchWallet?.tltReceiveHex ?? null}
+        drcHex={watchWallet?.drcAccount ?? receiveHex ?? null}
+        ovlHex={watchWallet?.ovlAccount ?? receiveHex ?? null}
+        utxos={utxos}
+        spendMnemonic={mnemonic}
+        watchWallet={watchWallet}
       />
 
       <section

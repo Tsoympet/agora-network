@@ -27,6 +27,28 @@ validator signatures.
    object. The wallet refuses to call it header-proven.
 8. See selected-parent header sync and a finality label computed from PoW flag
    plus independent OVL and DRC stake totals.
+9. Open the **Capabilities** panel (desktop and phone) for the full feature
+   matrix: TLT, DRC, OVL, and network reads with **verified locally**,
+   **node-reported**, or **unavailable** labels. Spend wallets sign typed DRC/OVL
+   envelopes on-device (`envelopes.ts`); watch-only wallets query only.
+
+### Feature matrix (honest labels)
+
+| Domain | Surface | Label |
+| --- | --- | --- |
+| Network | RPC URL, genesis binding, header spine, OVL/DRC quorum math | local + node |
+| Network | Validator sets, native supply / fee burn | node when RPC exists |
+| TLT | Receive, UTXO list, coin-select send, fee estimate, tx history | mixed |
+| TLT | Merkle inclusion verify | local |
+| TLT | Covenant / HTLC spends | **unavailable** on this branch |
+| DRC | Policy, tags, DepositAuth, keys, multisign, tickets, escrow, checks, channels, trust lines, issued controls, owner objects | node |
+| DRC | Typed sign + submit | local signing; watch-only fails closed |
+| OVL | Native transfer, balance/nonce, validator views | mixed |
+| OVL | EVM contract deploy UI | **unavailable** (no fake eth_call wallet) |
+
+The canonical list lives in `apps/shared/light-client/featureMatrix.ts`. At
+runtime the wallet probes JSON-RPC method names and marks rows unavailable when
+the connected node does not implement them.
 
 ## What is verified on the device
 
