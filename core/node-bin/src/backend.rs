@@ -72,6 +72,19 @@ pub(crate) fn min_relay_fee() -> u64 {
         .unwrap_or(DEFAULT_MIN_RELAY_FEE)
 }
 
+fn fallback_tx_auth(network: &str, genesis: Hash) -> TxAuthContext {
+    let chain_id = match network.to_ascii_lowercase().as_str() {
+        "mainnet" => "agora-mainnet-1",
+        "testnet" => "agora-testnet-1",
+        _ => "agora-dev",
+    };
+    TxAuthContext {
+        chain_id: chain_id.into(),
+        genesis,
+        data_availability_network_fingerprint: None,
+    }
+}
+
 fn map_drc_index_error(error: agora_state_machine::StateError) -> RpcError {
     match error {
         agora_state_machine::StateError::InvalidTx(message) => RpcError::InvalidParams(message),
@@ -948,6 +961,12 @@ pub struct NodeBackend {
     network: String,
     /// Block 0 id for this datadir.
     genesis_hash: Hash,
+    /// Signing/DA domain captured at construction.
+    ///
+    /// RPC methods that already hold `chain` must not re-enter that mutex;
+    /// `std::sync::Mutex` is not reentrant and `agora_getNodeInfo` /
+    /// `agora_getBlockTemplate` would futex-wait forever.
+    tx_auth: TxAuthContext,
     /// Process-local Ethereum pending inbox, shared with raw-EVM gossip admit.
     /// Not part of the state root.
     pending_evm: Arc<Mutex<BTreeMap<[u8; 32], agora_ovl_evm::PendingTx>>>,
@@ -969,6 +988,11 @@ impl NodeBackend {
         mempool: Arc<Mutex<Mempool>>,
         config: NodeBackendConfig,
     ) -> Self {
+        let tx_auth = chain
+            .lock()
+            .ok()
+            .and_then(|guard| guard.auth_context())
+            .unwrap_or_else(|| fallback_tx_auth(&config.network, config.genesis_hash));
         Self {
             chain,
             store,
@@ -980,6 +1004,7 @@ impl NodeBackend {
             connected_peers: config.connected_peers,
             network: config.network,
             genesis_hash: config.genesis_hash,
+            tx_auth,
             pending_evm: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -989,21 +1014,7 @@ impl NodeBackend {
     }
 
     fn tx_auth(&self) -> TxAuthContext {
-        if let Ok(chain) = self.chain.lock() {
-            if let Some(auth) = chain.auth_context() {
-                return auth;
-            }
-        }
-        let chain_id = match self.network.to_ascii_lowercase().as_str() {
-            "mainnet" => "agora-mainnet-1",
-            "testnet" => "agora-testnet-1",
-            _ => "agora-dev",
-        };
-        TxAuthContext {
-            chain_id: chain_id.into(),
-            genesis: self.genesis_hash,
-            data_availability_network_fingerprint: None,
-        }
+        self.tx_auth.clone()
     }
 
     fn data_commitment_from_block(
