@@ -34,6 +34,7 @@ import {
   type TipSyncSnapshot,
   type WatchOnlyWallet,
 } from "../../shared/light-client";
+import { CommunityTrustPanel } from "./components/CommunityTrustPanel";
 import { FeatureSurfacesPanel } from "./components/FeatureSurfacesPanel";
 import { GovernancePanel } from "./components/GovernancePanel";
 import { LightClientPanel } from "./components/LightClientPanel";
@@ -1148,6 +1149,9 @@ export function App() {
           notifications={notifications}
           onNotifications={setNotifications}
         />
+      ) : null}
+      {show("COMMUNITY", "PASSPORT", "ASSEMBLY", "TREASURY", "SETTINGS") ? (
+        <CommunityTrustPanel subjectAddress={receiveBech32} community={community} />
       ) : null}
     </main>
     </div>
