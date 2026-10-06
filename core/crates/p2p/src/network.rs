@@ -391,7 +391,8 @@ impl NetworkNode {
             | NetworkMessage::DrcIssuedClawback(_)
             | NetworkMessage::DrcOfferCreate(_)
             | NetworkMessage::DrcOfferCancel(_)
-            | NetworkMessage::TltCovenant(_) => {
+            | NetworkMessage::TltCovenant(_)
+            | NetworkMessage::DataCommitment(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

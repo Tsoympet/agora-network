@@ -340,10 +340,12 @@ pub use trident_genesis::{
     TRIDENT_TX_SIGNING_VERSION,
 };
 pub use tx_index::{
-    covenant_tx_inclusion_key, covenant_tx_index_key, decode_tx_location, encode_tx_location,
-    index_block_transactions, index_block_transactions_into, list_covenant_tx_inclusions,
-    list_tx_inclusions, lookup_covenant_tx_location, lookup_tx_location,
-    set_primary_covenant_tx_location, set_primary_tx_location, tx_inclusion_key, tx_index_key,
+    covenant_tx_inclusion_key, covenant_tx_index_key, data_commitment_inclusion_key,
+    data_commitment_index_key, decode_tx_location, encode_tx_location, index_block_transactions,
+    index_block_transactions_into, list_covenant_tx_inclusions, list_data_commitment_inclusions,
+    list_tx_inclusions, lookup_covenant_tx_location, lookup_data_commitment_location,
+    lookup_tx_location, set_primary_covenant_tx_location, set_primary_data_commitment_location,
+    set_primary_tx_location, tx_inclusion_key, tx_index_key,
 };
 pub use utxo::{outpoint_key, outpoint_key_parts};
 pub use utxo_diff::{delete_utxo_journal, load_utxo_journal, store_utxo_journal, utxo_diff_key};

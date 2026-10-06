@@ -34,16 +34,16 @@ use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
-    admit_account_transfer, admit_drc_account_policy, admit_drc_check_cancel, admit_drc_check_cash,
-    admit_drc_check_create, admit_drc_deposit_preauth, admit_drc_escrow_cancel,
-    admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_issued_asset_policy_set,
-    admit_drc_issued_clawback, admit_drc_issued_transfer, admit_drc_offer_cancel,
-    admit_drc_offer_create, admit_drc_payment, admit_drc_payment_channel_claim,
-    admit_drc_payment_channel_close, admit_drc_payment_channel_create,
-    admit_drc_payment_channel_fund, admit_drc_regular_key, admit_drc_signer_list,
-    admit_drc_ticket_create, admit_drc_trust_line_issuer_control, admit_drc_trust_line_set,
-    admit_ovl_execution, admit_stake_tx, admit_tlt_covenant, admit_transaction, NodeBackend,
-    NodeBackendConfig,
+    admit_account_transfer, admit_data_commitment, admit_drc_account_policy,
+    admit_drc_check_cancel, admit_drc_check_cash, admit_drc_check_create,
+    admit_drc_deposit_preauth, admit_drc_escrow_cancel, admit_drc_escrow_create,
+    admit_drc_escrow_finish, admit_drc_issued_asset_policy_set, admit_drc_issued_clawback,
+    admit_drc_issued_transfer, admit_drc_offer_cancel, admit_drc_offer_create, admit_drc_payment,
+    admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
+    admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
+    admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_issuer_control,
+    admit_drc_trust_line_set, admit_ovl_execution, admit_stake_tx, admit_tlt_covenant,
+    admit_transaction, NodeBackend, NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::startup::{p2p_identity_path, prepare_legacy_datadir};
@@ -469,7 +469,7 @@ async fn main() {
 
     let chain_params = resolve_chain_params();
     let emission = chain_params.emission.clone();
-    let boot = resolve_boot_config(&chain_params);
+    let mut boot = resolve_boot_config(&chain_params);
     let pow_algo = boot.pow;
     let template_bits = boot.initial_bits;
 
@@ -550,6 +550,21 @@ async fn main() {
         fingerprint = %agora_p2p::fingerprint_topic_tag(&net_fp),
         "genesis ready"
     );
+
+    let da_lane_opt_in = matches!(
+        std::env::var("AGORA_ENABLE_DA_LANE")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    );
+    if da_lane_opt_in {
+        boot.data_availability_network_fingerprint = Some(net_fp);
+        info!(
+            fingerprint = %agora_p2p::fingerprint_topic_tag(&net_fp),
+            "DA commitment lane opt-in: mesh-bound, TLT inclusion fee still unspecified, Experimental"
+        );
+    }
 
     let chain = Arc::new(Mutex::new(
         ChainState::bootstrap_with(store.clone(), genesis_hash, boot.clone(), storage)
@@ -668,7 +683,7 @@ async fn main() {
     let tx_auth = agora_state_machine::TxAuthContext {
         chain_id: chain_params.network.chain_id().into(),
         genesis: genesis_hash,
-        data_availability_network_fingerprint: None,
+        data_availability_network_fingerprint: boot.data_availability_network_fingerprint,
     };
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));
@@ -1458,6 +1473,21 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "TLT covenant gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DataCommitment(authorization) => {
+                        match admit_data_commitment(
+                            store.as_ref(),
+                            &mempool,
+                            authorization,
+                            &tx_auth,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, data_commitment = %id.to_hex(), "DA commitment gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DA commitment gossip rejected");
                             }
                         }
                     }

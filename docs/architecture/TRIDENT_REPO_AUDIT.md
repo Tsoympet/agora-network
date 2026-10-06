@@ -19,7 +19,7 @@ parity files keep their own `INCOMPLETE` status lines.
 
 | Constant | Value | Notes |
 | --- | --- | --- |
-| `TRIDENT_PROTOCOL_VERSION` | 24 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis |
+| `TRIDENT_PROTOCOL_VERSION` | 25 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v25 appends `NetworkMessage::DataCommitment` |
 | Datadir `SCHEMA_VERSION` | 22 | Experimental; `OVL_EVM_SCHEMA_VERSION` is also 22 |
 | DRC fee-burn schema | 20 | Lifetime burned counters |
 | DRC ledger-index datadir | 21 | Common live-object / receipt rebuild |
@@ -47,7 +47,7 @@ Independent quorums; no price-oracle mixing.
 | DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared light-client query wrappers |
 | Dual-PoS finality / staking | Wired (Experimental) | `CheckpointAttestation`, `StakeTx` | Wired | Validator / pool / `agora_submitStakeTx` | Light-client reads exist |
 | Protocol treasuries / community registry | Genesis + library | No mutation gossip | No block lane | Read RPCs | Light-client reads exist |
-| DA commitments | Apply + journal | Full block only | **No** mempool / template selection | **No** submit / lookup RPC | None |
+| DA commitments | Apply + journal | `NetworkMessage::DataCommitment` (v25) | Wired; template only when fingerprint is set | `agora_submitDataCommitment` / `agora_getDataCommitment` | Light-client query + submit wrappers |
 
 `agora_getBalance` remains the TLT UTXO sum. Native OVL/DRC account
 balances and shared nonces are `agora_getAccountBalances`. Ethereum
@@ -58,7 +58,7 @@ balances and shared nonces are `agora_getAccountBalances`. Ethereum
 ## P2P and compact blocks
 
 `NetworkMessage` Borsh discriminants are append-only through
-`TltCovenant`. There is no DA, community, or raw-EVM gossip variant.
+`DataCommitment` (33). There is no community or raw-EVM gossip variant.
 
 `compact_from_block` is UTXO-only. Any nonempty account, stake, OVL,
 DRC, DA, offer, or covenant lane forces a full `Block` envelope. That
@@ -80,7 +80,7 @@ gates wallet, mining, faucet, and submit paths.
 submits, mining template, faucet, civic write RPCs.
 
 **Wired and public:** DAG/block/tx/mempool/node/fee, TLT covenant
-lookup, every implemented DRC `Get*` family method (payments through
+lookup, data-commitment lookup, every implemented DRC `Get*` family method (payments through
 DEX offers, objects, receipts, channels, trust lines, issued controls),
 finality/validator/supply/treasury/registry, constitution board reads.
 Ethereum JSON-RPC reads are public; `eth_sendRawTransaction` requires a
@@ -89,8 +89,7 @@ token.
 Wallet-sensitive `agora_getBalance` / `agora_getAccountBalances` /
 `agora_getUtxos` stay token-gated.
 
-There is no `agora_submitDataCommitment`, `agora_getDataCommitment`,
-`agora_submitDrcExecution`, or generic `agora_submitExecution`.
+There is no `agora_submitDrcExecution` or generic `agora_submitExecution`.
 
 ---
 
@@ -98,7 +97,7 @@ There is no `agora_submitDataCommitment`, `agora_getDataCommitment`,
 
 | Surface | What it does | Honest gap |
 | --- | --- | --- |
-| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, canonical `eth_*` reads | Keys stay on device. No RandomX recompute. No typed DRC/OVL builders. No DA wrapper |
+| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads | Keys stay on device. No RandomX recompute. No typed DRC/OVL builders |
 | Desktop / mobile wallets | TLT UTXO send + native OVL/DRC balance display | No typed DRC payment/DEX or OVL execution builders |
 | Explorer | DAG, tx lookup, protocol-lane reads, mempool, node, governance panel | No DEX book order-entry UI |
 | `agora-layers` HTTP | Historical lab; loopback | Non-canonical; mixed unauthenticated mutations |
@@ -126,9 +125,15 @@ the device.
 
 ## Data availability
 
-`Block.data_commitments` and the atomic apply/journal path exist.
-There is no mempool admission, no gossip envelope, no RPC, and no
-public district submission. Lab `recordDa` is an in-process assertion.
+`Block.data_commitments`, atomic apply/journal, mempool reservation,
+`NetworkMessage::DataCommitment` gossip, template selection, and
+`agora_submitDataCommitment` / `agora_getDataCommitment` exist. Default boot
+leaves the DA fingerprint unset, so submit/inclusion fail closed with
+`data commitment lane disabled pending TLT base-fee policy`.
+`AGORA_ENABLE_DA_LANE=1` binds the fingerprint to the live mesh
+(Experimental; no TLT debit schedule). Get distinguishes pending / accepted /
+confirmed (work depth) / finalized (full PoW ∧ OVL quorum ∧ DRC quorum) /
+conflict_lost / reverted and never maps lab `recordDa` to finality.
 See [`../core/data-availability.md`](../core/data-availability.md).
 
 ---
@@ -163,19 +168,19 @@ is the only programmable domain.
 
 These are real unfinished paths, not parity slogans:
 
-1. **DA submit / gossip / RPC** — consensus lane without a public
-   admission path.
-2. **OVL raw-EVM public mempool** — fingerprint has no raw-EVM topic;
+1. **OVL raw-EVM public mempool** — fingerprint has no raw-EVM topic;
    version 2 is rejected by the Agora-signed pool.
-3. **Compact-block multi-lane encoding** — full bodies for every
+2. **Compact-block multi-lane encoding** — full bodies for every
    non-UTXO lane. `Block::requires_full_body_gossip` is the single
    fail-closed gate so new lanes cannot silently enter UTXO compact ids.
-4. **Community consensus lanes** — registry is genesis + library only.
-5. **Wallet construction UX** — desktop/mobile still send TLT UTXO only;
+3. **Community consensus lanes** — registry is genesis + library only.
+4. **Wallet construction UX** — desktop/mobile still send TLT UTXO only;
    they now display native OVL/DRC balances. Typed DRC payment/DEX and
    OVL execution builders remain unwired.
-6. **Operator schema CLI** — replay/rebuild is documented, not shipped
+5. **Operator schema CLI** — replay/rebuild is documented, not shipped
    as a first-class binary.
+6. **DA TLT inclusion-fee policy** — transport is wired; default boot
+   stays fail-closed until a reviewed debit/sponsorship rule exists.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
 OVL/DRC, price-oracle stake mixing, silent kHeavyHash public PoW
@@ -199,3 +204,7 @@ This audit close-out adds:
   balance display.
 - `Block::requires_full_body_gossip` so compact gossip cannot forget a
   typed lane.
+- Protocol v25 `NetworkMessage::DataCommitment` gossip, mempool
+  reservation, template selection when the DA fingerprint is set, and
+  `agora_submitDataCommitment` / `agora_getDataCommitment` with honest
+  pending/accepted/confirmed/finalized statuses.

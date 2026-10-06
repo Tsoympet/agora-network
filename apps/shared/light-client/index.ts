@@ -9,6 +9,7 @@ export {
   type LightClientConfig,
   type LightCommunityRegistry,
   type LightConstitution,
+  type LightDataCommitmentLookup,
   type LightDrcOfferLookup,
   type LightDrcOfferPage,
   type LightFinality,

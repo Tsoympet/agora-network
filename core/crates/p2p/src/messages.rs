@@ -83,6 +83,8 @@ pub enum NetworkMessage {
     DrcOfferCancel(agora_types::DrcOfferCancelTx),
     /// Appended after offer gossip; TLT covenant spends on the transaction topic.
     TltCovenant(agora_types::TltCovenantTx),
+    /// Appended in Trident protocol v25; signed DA authorization on the tx topic.
+    DataCommitment(agora_types::DataCommitmentAuthorization),
 }
 
 impl NetworkMessage {
@@ -362,6 +364,24 @@ mod tests {
         let gossip = NetworkMessage::TltCovenant(tx.clone());
         assert_eq!(gossip.encode()[0], 32);
         assert_eq!(NetworkMessage::decode(&gossip.encode()).unwrap(), gossip);
+
+        let da = NetworkMessage::DataCommitment(DataCommitmentAuthorization::unsigned(
+            Address([7; 20]),
+            0,
+            DataAvailabilityCommitment::agora_layers_ovolos_batch(
+                "agora-ovolos-testnet-1".into(),
+                Hash([1; 32]),
+                Hash([2; 32]),
+                3,
+                Hash([4; 32]),
+                Hash([5; 32]),
+                Hash([6; 32]),
+                7,
+                8,
+            ),
+        ));
+        assert_eq!(da.encode()[0], 33);
+        assert_eq!(NetworkMessage::decode(&da.encode()).unwrap(), da);
 
         let mut block = Block::utxo(
             BlockHeader {

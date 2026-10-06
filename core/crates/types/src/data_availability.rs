@@ -1,8 +1,8 @@
 //! Provenance-bound data-commitment types for the Trident L1 block lane.
 //!
 //! These types define canonical bytes and operator authorization consumed by
-//! [`crate::Block::data_commitments`]. Standalone mempool/RPC submission remains
-//! disabled until Trident defines the TLT inclusion-fee policy.
+//! [`crate::Block::data_commitments`]. Standalone gossip and RPC exist; default
+//! boot stays fail-closed until `TxAuthContext` carries a DA fingerprint.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
@@ -132,8 +132,8 @@ impl DataAvailabilityCommitment {
 /// Signed operator authorization carried in `Block::data_commitments`.
 ///
 /// `replay_nonce` is cryptographically bound here and enforced atomically by
-/// the state transition. This type alone is not replay protection and remains
-/// deliberately unavailable through standalone RPC submission.
+/// the state transition. Standalone RPC/gossip admit only when the node has a
+/// DA network fingerprint.
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]

@@ -24,9 +24,9 @@ pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v2";
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
 pub const TRIDENT_GENESIS_ID_DOMAIN: &[u8] = b"agora-trident-genesis-identity-v2";
 pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-policy-v2";
-/// v24 commits the schema-22 OVL wei quotient and the dev-gated OVL-EVM-v1 world.
-/// DRC object indexing from v23 stays in force.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 24;
+/// v25 appends standalone `NetworkMessage::DataCommitment` gossip. Schema-22
+/// OVL wei / OVL-EVM-v1 from v24 and DRC object indexing from v23 stay in force.
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 25;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v9";
 const UNFROZEN: &str = "UNFROZEN";
 
