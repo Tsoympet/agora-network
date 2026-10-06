@@ -79,11 +79,28 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 
 ## Execution boundary
 
-`agora_submitOvlExecution` is the only programmable-execution submission
-method. Its `OvlExecutionTx` is intrinsically OVL-denominated and has no asset
-selector. Unknown fields such as `"asset": "DRC"` are rejected rather than
-ignored. There is no generic `agora_submitExecution`, DRC deploy/call, DRC VM,
-or contract-facing DRC method.
+`agora_submitOvlExecution` is the only Agora-signed programmable-execution
+submission method. Its `OvlExecutionTx` is intrinsically OVL-denominated and has
+no asset selector. Unknown fields such as `"asset": "DRC"` are rejected rather
+than ignored. There is no generic `agora_submitExecution`, DRC deploy/call, DRC
+VM, or contract-facing DRC method.
+
+## OVL Ethereum JSON-RPC
+
+`eth_*`, `net_*`, and `web3_clientVersion` are dispatched to
+`RpcBackend::ovl_ethereum_rpc`. The default implementation is method-not-found.
+`agora-node` loads the canonical OVL-EVM-v1 world and answers from it. Responses
+use a JSON-RPC 2.0 envelope.
+
+Public reads when `AGORA_RPC_TOKEN` is set include `web3_clientVersion`,
+`net_version`, `net_listening`, `net_peerCount`, `eth_chainId`, `eth_syncing`,
+`eth_blockNumber`, `eth_gasPrice`, `eth_maxPriorityFeePerGas`,
+`eth_getBalance`, `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`,
+`eth_call`, `eth_estimateGas`, `eth_feeHistory`, `eth_getTransactionByHash`,
+`eth_getTransactionReceipt`, `eth_getBlockByNumber`, `eth_getBlockByHash`,
+`eth_getLogs`, the block transaction-count methods, and the transaction-by-index
+methods. `eth_sendRawTransaction` requires the token and the dev/test gate.
+`eth_getProof` is not implemented. See [`ovl-evm.md`](ovl-evm.md).
 
 DRC payment, escrow, Check, payment-channel, trust-line, issued-asset,
 freeze/clawback, multisign, regular-key, and Ticket methods submit closed typed
@@ -147,6 +164,7 @@ When unset, JSON-RPC stays open (safe with the default loopback bind). When set:
 | --- | --- |
 | `GET /health` | `agora_submitTransaction` / `agora_submitBlock` |
 | `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` / DRC payment, policy, and preauthorization reads | `agora_getBlockTemplate` / `agora_fundAddress` |
+| `web3_clientVersion`, `net_*`, and `eth_*` reads | `eth_sendRawTransaction` |
 | `agora_getMempool` / `agora_getNodeInfo` / `agora_estimateFee` | `agora_getBalance` / `agora_getUtxos` |
 | `agora_getConstitution` / `agora_getGovernance` | `agora_submitProposal` / `agora_castGovVote` / … |
 | `agora_listProposals` / `agora_getProposal` / `agora_listOffices` | `agora_depositProposal` / tally / execute / forum post |

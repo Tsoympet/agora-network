@@ -15,7 +15,7 @@ pub use error::EvmError;
 pub use exec::{apply_raw_transaction, estimate_gas, eth_call, measure_shanghai_gas};
 pub use fee::{effective_gas_price, next_base_fee};
 pub use index::{index_receipts, topic};
-pub use rpc::{dispatch, PendingTx};
+pub use rpc::{dispatch, dispatch_with_view, EthNodeView, EthSyncStatus, PendingTx};
 pub use tx::{
     dev_signing_key, ethereum_address_from_signing_key, parse_raw_transaction, sign_eip1559,
     sign_eip2930, sign_legacy, AccessItem, ParsedTx,
