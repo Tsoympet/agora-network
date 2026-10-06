@@ -182,7 +182,11 @@ impl BorshSerialize for UtxoJournal {
         BorshSerialize::serialize(&self.drc_offer_meta_before, writer)?;
         BorshSerialize::serialize(&self.tlt_covenant_created, writer)?;
         BorshSerialize::serialize(&self.tlt_covenant_spent, writer)?;
-        BorshSerialize::serialize(&self.passport_meta_before, writer)?;
+        // Empty passport meta stays off the pre-passport journal wire so
+        // default journals still end with the two covenant length prefixes.
+        if !self.passport_meta_before.is_empty() {
+            BorshSerialize::serialize(&self.passport_meta_before, writer)?;
+        }
         Ok(())
     }
 }
