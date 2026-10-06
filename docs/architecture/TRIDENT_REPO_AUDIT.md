@@ -112,7 +112,7 @@ infrastructure servers or store operator keys.
 | Component | Maturity | Wiring |
 | --- | --- | --- |
 | Civic constitution / forum / Ecclesia prototype | Experimental administrative RPC | Local snapshot; not a consensus community lane |
-| Canonical Hub / Passport / Grant / Mission registry | Scaffold | Genesis records + `agora_getCommunityRegistry`; library APIs only; no block mutation lane |
+| Canonical Hub / Passport / Grant / Mission registry | Scaffold | Genesis records + `agora_getCommunityRegistry`; library APIs only; no signed mutation envelope, so no block lane |
 | Protocol treasuries | Scaffold / Experimental reads | `agora_getProtocolTreasuries`; signed disbursement is later |
 | Merchant / Passport / Grants docs | Scaffold | Specs, not consensus |
 
@@ -155,9 +155,10 @@ is the only programmable domain.
 
 - Testnet genesis v2 is frozen in-repo. Trident v3 draft remains
   **UNFROZEN**. Mainnet is not bootable.
-- Schema migrations exist as library helpers. A full operator
-  migrate/reindex CLI is still pending
-  ([`../migration/SCHEMA_TRIDENT.md`](../migration/SCHEMA_TRIDENT.md)).
+- Schema migrations exist as library helpers. `agora-node schema
+  report|migrate|reindex --data PATH` runs the supported rebuilds
+  (19→20 fee-burn, 20→21 ledger index with applied order, 21→22 marker,
+  object reindex). It does not freeze genesis.
 - Fast CI excludes `agora-node`, `agora-consensus`, `agora-p2p`,
   miner sidecar, stratum, seeder, and faucet. Node tests with default
   RocksDB features require `librocksdb-sys` native headers.
@@ -173,10 +174,10 @@ These are real unfinished paths, not parity slogans:
 2. **Compact-block multi-lane encoding** — full bodies for every
    non-UTXO lane. `Block::requires_full_body_gossip` is the single
    fail-closed gate so new lanes cannot silently enter UTXO compact ids.
-3. **Community consensus lanes** — registry is genesis + library only.
-4. **Operator schema CLI** — replay/rebuild is documented, not shipped
-   as a first-class binary.
-5. **DA TLT inclusion-fee policy** — transport is wired; default boot
+3. **Community consensus lanes** — skipped. Registry remains genesis +
+   library (`register_*_into`). There is no signed Hub/Grant/Mission
+   envelope to gossip without inventing a governance spend path.
+4. **DA TLT inclusion-fee policy** — transport is wired; default boot
    stays fail-closed until a reviewed debit/sponsorship rule exists.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
@@ -209,3 +210,6 @@ This audit close-out adds:
   DRC offer create/cancel, TLT covenant P2PKH, OVL account transfer, and
   Agora-signed OVL execution v1. Desktop/mobile submit those envelopes
   without embedding a node. Raw EVM is not built in the wallet.
+- `agora-node schema report|migrate|reindex` for supported library
+  rebuilds. Community consensus mutation stays unwired until a signed
+  envelope exists.

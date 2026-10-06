@@ -9,6 +9,7 @@ mod backend;
 mod civic;
 mod genesis_cli;
 mod http;
+mod schema_cli;
 mod startup;
 mod storage_policy;
 
@@ -460,9 +461,14 @@ fn process_headers_response(
 
 #[tokio::main]
 async fn main() {
-    let mut argv = std::env::args().skip(1);
-    if argv.next().as_deref() == Some("genesis") {
+    let mut argv = std::env::args().skip(1).peekable();
+    if argv.peek().map(String::as_str) == Some("genesis") {
+        argv.next();
         genesis_cli::run(argv);
+    }
+    if argv.peek().map(String::as_str) == Some("schema") {
+        argv.next();
+        schema_cli::run(argv);
     }
 
     tracing_subscriber::fmt::init();
