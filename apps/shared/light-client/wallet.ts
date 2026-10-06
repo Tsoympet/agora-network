@@ -29,6 +29,7 @@ import {
   encodeAddress,
   parseAddress,
 } from "./address";
+import { selectTltCoins } from "./coinselect";
 import type { LightClient, LightUtxo } from "./rpc";
 
 /** Provisional SLIP-0044 coin type — replace before mainnet freeze. */
@@ -309,17 +310,8 @@ export async function buildSignedTransfer(options: {
   const to = hexToBytes(toHex);
   if (to.length !== 20) throw new Error("to address must be 20 bytes");
 
-  const sorted = [...options.utxos].sort((a, b) => b.value - a.value);
-  const selected: LightUtxo[] = [];
-  let totalIn = 0;
-  for (const u of sorted) {
-    selected.push(u);
-    totalIn += u.value;
-    if (totalIn >= need) break;
-  }
-  if (totalIn < need) {
-    throw new Error(`insufficient funds: have ${totalIn}, need ${need}`);
-  }
+  const selected = selectTltCoins(options.utxos, options.amount, fee);
+  const totalIn = selected.reduce((sum, utxo) => sum + utxo.value, 0);
   const change = totalIn - need;
   const outputs: { value: number; address: Uint8Array }[] = [
     { value: options.amount, address: to },

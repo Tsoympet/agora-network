@@ -302,7 +302,8 @@ pub use staking::{
     ValidatorSetSnapshot, ValidatorStatus, MAX_VALIDATOR_COMMISSION_BPS,
 };
 pub use state_root::{
-    acceptance_root, compose_trident_state_root, finalized_tip_commitment, utxo_commitment,
+    acceptance_root, compose_trident_state_root, export_utxo_snapshot, finalized_tip_commitment,
+    utxo_commitment, utxo_entries_commitment, utxo_snapshot_binds, UtxoSetSnapshot,
     STATE_ROOT_DOMAIN,
 };
 pub use store::{StateStore, WriteBatch};
