@@ -139,6 +139,7 @@ mod marks;
 mod monetary;
 mod network;
 mod orphans;
+mod ovl_evm_state;
 mod payments;
 mod staking;
 mod state_root;
@@ -175,7 +176,7 @@ pub use block_zero::{
     TRIDENT_BLOCK_ZERO_STATE_VERSION, TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
     TRIDENT_DATADIR_IDENTITY_VERSION,
 };
-pub use columns::{meta_keys, ColumnFamily, SCHEMA_VERSION};
+pub use columns::{meta_keys, ColumnFamily, OVL_EVM_SCHEMA_VERSION, SCHEMA_VERSION};
 pub use community_state::{
     canonical_community_root, init_canonical_community_into, list_grants, list_hubs, list_missions,
     list_passport_attestations, load_canonical_community_summary, register_grant_into,
@@ -262,8 +263,8 @@ pub use drc_trust_line::{
 };
 pub use error::StateError;
 pub use execution::{
-    apply_ovl_execution, execution_fee, OvlExecutionReceipt, OVL_EXECUTION_VERSION,
-    OVL_INTRINSIC_GAS,
+    apply_ovl_execution, apply_ovl_execution_with_block, execution_fee, OvlExecutionReceipt,
+    OvlSelectedOrder, OVL_EXECUTION_VERSION, OVL_INTRINSIC_GAS,
 };
 pub use finality_store::{
     certificate_key, load_attestation_index, load_certificate, load_finalized_blue_score,
@@ -292,6 +293,10 @@ pub use network::{
     TESTNET_GENESIS_HASH_HEX, TESTNET_GENESIS_TIMESTAMP_MS, TESTNET_PREMINE_ADDRESS_HEX,
 };
 pub use orphans::{delete_orphan, list_orphans, load_orphan, orphan_key, store_orphan};
+pub use ovl_evm_state::{
+    legacy_ovl_quotient_to_wei, load_ovl_evm_world, ovl_evm_state_commitment,
+    put_ovl_evm_world_into, OVL_EVM_WORLD_KEY,
+};
 pub use payments::{
     apply_drc_payment, apply_drc_payment_at_blue_score, drc_payment_root, list_drc_outbox,
     load_drc_outbox_event, load_drc_payment_by_invoice, load_drc_payment_receipt,
@@ -311,7 +316,8 @@ pub use staking::{
     ValidatorSetSnapshot, ValidatorStatus, MAX_VALIDATOR_COMMISSION_BPS,
 };
 pub use state_root::{
-    acceptance_root, compose_trident_state_root, finalized_tip_commitment, utxo_commitment,
+    acceptance_root, compose_trident_state_root, export_utxo_snapshot, finalized_tip_commitment,
+    utxo_commitment, utxo_entries_commitment, utxo_snapshot_binds, UtxoSetSnapshot,
     STATE_ROOT_DOMAIN,
 };
 pub use store::{StateStore, WriteBatch};

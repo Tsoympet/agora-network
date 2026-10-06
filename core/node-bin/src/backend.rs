@@ -1,5 +1,6 @@
 //! Live [`RpcBackend`] backed by chain admission + mempool.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -236,6 +237,11 @@ pub(crate) fn admit_ovl_execution(
     let mut pool = mempool
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    if tx.version != agora_types::OVL_EXECUTION_VERSION {
+        return Err(RpcError::Rejected(
+            "raw EVM transactions are not admitted to the Agora-signed mempool".into(),
+        ));
+    }
     if pool.account_reserved(NativeAssetId::OVL, &tx.from) {
         return Err(RpcError::Rejected(
             "OVL account already has a pending nonce".into(),
@@ -777,6 +783,8 @@ pub struct NodeBackend {
     network: String,
     /// Block 0 id for this datadir.
     genesis_hash: Hash,
+    /// Process-local Ethereum pending inbox. Not part of the state root.
+    pending_evm: Mutex<BTreeMap<[u8; 32], agora_ovl_evm::PendingTx>>,
 }
 
 pub struct NodeBackendConfig {
@@ -806,6 +814,7 @@ impl NodeBackend {
             connected_peers: config.connected_peers,
             network: config.network,
             genesis_hash: config.genesis_hash,
+            pending_evm: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -1071,6 +1080,17 @@ impl RpcBackend for NodeBackend {
                 .map_err(|e| RpcError::Internal(e.to_string()))?;
         }
         Ok(id)
+    }
+
+    fn ovl_ethereum_rpc(&mut self, method: &str, params: &Value) -> Result<Value, RpcError> {
+        let world = agora_state_machine::load_ovl_evm_world(&self.store)
+            .map_err(|err| RpcError::Internal(err.to_string()))?;
+        let mut pending = self
+            .pending_evm
+            .lock()
+            .map_err(|_| RpcError::Internal("OVL EVM pending lock poisoned".into()))?;
+        agora_ovl_evm::dispatch(&world, &mut pending, method, params)
+            .map_err(|err| RpcError::Rejected(err.to_string()))
     }
 
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError> {

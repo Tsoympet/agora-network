@@ -36,8 +36,14 @@ use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
 /// Domain tag for the composed state root (versioned).
 pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v16";
 
-/// Deterministic UTXO-set commitment (sorted outpoint keys).
-pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
+/// Sorted UTXO set exported for snapshots. The column family itself is not pruned.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UtxoSetSnapshot {
+    pub entries: Vec<(OutPoint, TxOut)>,
+}
+
+/// Read every 36-byte UTXO key and sort by transaction id, then index.
+fn collect_utxo_entries(store: &StateStore) -> Result<Vec<(OutPoint, TxOut)>, StateError> {
     let mut entries: Vec<(OutPoint, TxOut)> = Vec::new();
     store.for_each_cf(ColumnFamily::Utxo, |key, value| {
         if key.len() != 36 {
@@ -62,7 +68,30 @@ pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
             .cmp(b.0.tx_id.as_bytes())
             .then(a.0.index.cmp(&b.0.index))
     });
-    Ok(Hash::hash_borsh(&(b"utxo-v1", &entries)))
+    Ok(entries)
+}
+
+/// Commitment of an already sorted UTXO export. Same domain as [`utxo_commitment`].
+pub fn utxo_entries_commitment(entries: &[(OutPoint, TxOut)]) -> Hash {
+    Hash::hash_borsh(&(b"utxo-v1", entries))
+}
+
+/// True when `snapshot` is the set that produced `commitment`.
+pub fn utxo_snapshot_binds(snapshot: &UtxoSetSnapshot, commitment: &Hash) -> bool {
+    utxo_entries_commitment(&snapshot.entries) == *commitment
+}
+
+/// Export the live UTXO set without deleting `cf_utxo`.
+pub fn export_utxo_snapshot(store: &StateStore) -> Result<UtxoSetSnapshot, StateError> {
+    Ok(UtxoSetSnapshot {
+        entries: collect_utxo_entries(store)?,
+    })
+}
+
+/// Deterministic UTXO-set commitment (sorted outpoint keys).
+pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
+    let snapshot = export_utxo_snapshot(store)?;
+    Ok(utxo_entries_commitment(&snapshot.entries))
 }
 
 /// Tip-block acceptance commitment (empty record hash if missing).
@@ -149,11 +178,23 @@ pub fn compose_trident_state_root(
         community,
         data_availability,
     ];
-    Ok(Hash::hash_borsh(&(
+    let base = Hash::hash_borsh(&(
         STATE_ROOT_DOMAIN,
         TRIDENT_STATE_TRANSITION_VERSION,
         components,
-    )))
+    ));
+    // Keep the schema-1 component tuple stable. Schema 22 folds in the OVL
+    // execution subroot without turning it into an Ethereum state root.
+    if crate::ovl_evm_state::ovl_evm_schema_active(crate::load_schema_version(store)?) {
+        let ovl_evm = crate::ovl_evm_state::ovl_evm_state_commitment(store)?;
+        Ok(Hash::hash_borsh(&(
+            b"agora-trident-state-root-ovl-evm-v1",
+            base,
+            ovl_evm,
+        )))
+    } else {
+        Ok(base)
+    }
 }
 
 #[cfg(test)]
@@ -186,6 +227,17 @@ mod tests {
         store.write_batch(batch).unwrap();
         let c = compose_trident_state_root(&store, &tip).unwrap();
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn utxo_snapshot_binds_to_the_same_commitment() {
+        let store = StateStore::open_in_memory();
+        crate::GenesisBuilder::default().ignite(&store).unwrap();
+        let commitment = utxo_commitment(&store).unwrap();
+        let snapshot = export_utxo_snapshot(&store).unwrap();
+        assert!(utxo_snapshot_binds(&snapshot, &commitment));
+        assert_eq!(utxo_entries_commitment(&snapshot.entries), commitment);
+        assert!(!snapshot.entries.is_empty());
     }
 
     #[test]

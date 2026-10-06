@@ -1,7 +1,7 @@
 # DRC / XRPL capability profile
 
 **Audited lineage:** reconciled contract-free DRC stack through protocol v22 fee burning
-**Current profile:** Trident protocol v23 common ledger-object identity and accepted-operation index
+**Current profile:** Trident protocol v24. DRC keeps the v23 ledger-object index. OVL schema 22 adds the dev-gated EVM world and does not give DRC a VM.
 **Audit date:** 2026-10-05  
 **Canonical DRC maturity:** Experimental  
 **Purpose:** executable capability inventory and dependency-ordered verification plan
@@ -159,9 +159,9 @@ books are specified in [`drc-native-dex.md`](drc-native-dex.md).
 | Trident protocol | `24` |
 | Transaction signing profile | `agora-trident-tx-v9` |
 | State transition | `agora-trident-state-v22` |
-| Highest DRC block-body wrapper | `agora-block-body-v18` |
-| Composed state-root domain | `agora-trident-state-root-v16` |
-| Datadir schema | `21` |
+| Highest DRC block-body wrapper | `agora-block-body-v17` |
+| Composed state-root domain | `agora-trident-state-root-v15`, plus the schema-22 OVL execution commitment |
+| Datadir schema | `22` (DRC object index remains the schema-21 family) |
 | Genesis | v3 draft, `UNFROZEN`; not bootable as a live Trident network |
 | DRC exchange | direct integer order book · Experimental |
 | DRC fee sink | lifetime burned-supply counter |

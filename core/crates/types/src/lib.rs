@@ -28,9 +28,13 @@ mod execution;
 mod finality;
 mod hash;
 mod hrp;
+mod ovl_wei;
 mod passport;
 mod payment;
 mod stake;
+mod tlt_coinselect;
+mod tlt_merkle;
+mod tlt_script;
 mod transaction;
 mod treasury;
 mod trident_header;
@@ -216,7 +220,10 @@ pub use drc_trust_line::{
     DRC_TRUST_LINE_SET_SIGNING_DOMAIN, DRC_TRUST_LINE_SET_TICKET_SIGNING_DOMAIN,
     DRC_TRUST_LINE_SET_TICKET_VERSION, DRC_TRUST_LINE_SET_TX_VERSION,
 };
-pub use execution::{OvlExecutionTx, OVL_EXECUTION_SIGNING_DOMAIN};
+pub use execution::{
+    OvlExecutionTx, OVL_EXECUTION_RAW_EVM_VERSION, OVL_EXECUTION_SIGNING_DOMAIN,
+    OVL_EXECUTION_VERSION,
+};
 pub use finality::{
     CheckpointAttestation, CheckpointBody, CheckpointState, FinalityCertificate,
     CHECKPOINT_ATTESTATION_DOMAIN,
@@ -225,6 +232,11 @@ pub use hash::Hash;
 pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
+};
+pub use ovl_wei::{
+    ovl_evm_chain_id_rejected, OvlFeeMarketParams, OvlWei, OVL_BASE_FEE_BURN_BPS,
+    OVL_EVM_DEV_CHAIN_ID, OVL_EVM_PROFILE, OVL_EVM_REVM_VERSION, OVL_EVM_SPEC_ID,
+    OVL_EVM_TESTNET_CHAIN_ID, OVL_LEGACY_DECIMALS, OVL_LEGACY_TO_WEI, OVL_WEI_DECIMALS,
 };
 pub use passport::{PassportAttestation, PassportCategory, PASSPORT_ATTESTATION_DOMAIN};
 pub use payment::{
@@ -239,6 +251,22 @@ pub use payment::{
 pub use stake::{
     SignedStakeTx, StakeOpKind, STAKE_TX_SIGNING_DOMAIN, STAKE_TX_SIGNING_DOMAIN_V2,
     STAKE_TX_TICKET_VERSION, STAKE_TX_VERSION,
+};
+pub use tlt_coinselect::{
+    select_tlt_coins, TltCoinSelectError, TltCoinSelection, TltSpendCoin,
+    TLT_COINSELECT_EXHAUSTIVE_CAP,
+};
+pub use tlt_merkle::{
+    prove_tlt_tx_merkle, tlt_tx_merkle_root, verify_tlt_tx_merkle, TltTxMerkleProof,
+};
+pub use tlt_script::{
+    eval_covenant_input, eval_tlt_script, is_p2sh_script, push_data, script_htlc, script_multisig,
+    script_p2pkh, script_p2sh, sequence_signals_rbf, SigChecker, TltCovenantInput,
+    TltCovenantOutput, TltCovenantTx, TltOutputOrigin, TltScriptError, TltSpendContext,
+    TLT_COVENANT_TX_DOMAIN, TLT_COVENANT_TX_VERSION, TLT_CSV_TIME_STEP_SECS,
+    TLT_LOCKTIME_TIME_THRESHOLD, TLT_MAX_MULTISIG, TLT_MAX_OPS, TLT_MAX_PUSH, TLT_MAX_SCRIPT_LEN,
+    TLT_MAX_STACK, TLT_SEQUENCE_DISABLE_FLAG, TLT_SEQUENCE_FINAL, TLT_SEQUENCE_LOCK_MASK,
+    TLT_SEQUENCE_TIME_FLAG,
 };
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
 pub use treasury::{TreasuryBalance, TreasuryId};
@@ -408,6 +436,8 @@ mod ts_export {
         "DrcTrustLineIssuerControlReceipt.ts",
         "DrcTrustLineIssuerControlTx.ts",
         "OvlExecutionTx.ts",
+        "OvlFeeMarketParams.ts",
+        "OvlWei.ts",
         "SignedStakeTx.ts",
         "Transaction.ts",
     ];
@@ -499,6 +529,8 @@ mod ts_export {
         DrcPaymentChannelScheduleEvent::export_all()
             .expect("export DrcPaymentChannelScheduleEvent");
         OvlExecutionTx::export_all().expect("export OvlExecutionTx");
+        OvlWei::export_all().expect("export OvlWei");
+        OvlFeeMarketParams::export_all().expect("export OvlFeeMarketParams");
         DrcPaymentTx::export_all().expect("export DrcPaymentTx");
         DrcPaymentOutboxEvent::export_all().expect("export DrcPaymentOutboxEvent");
         DrcPaymentResult::export_all().expect("export DrcPaymentResult");

@@ -60,7 +60,12 @@ impl ColumnFamily {
 ///   trust-line, issued-control, receipt, and revert-journal key families
 /// - `20` — per-asset lifetime-burn counters and accepted-only DRC fee burning
 /// - `21` — common DRC ledger-object identity/owner indexes and accepted-operation receipts
-pub const SCHEMA_VERSION: u32 = 21;
+/// - `22` — OVL u64 amounts are the exact 8-decimal quotient of 18-decimal wei,
+///   and the dev-gated OVL-EVM-v1 world is committed when present
+pub const SCHEMA_VERSION: u32 = 22;
+/// Schema at which stored OVL base units mean `wei / 10^10` and the EVM world
+/// joins the state root. Later schemas keep this interpretation.
+pub const OVL_EVM_SCHEMA_VERSION: u32 = 22;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {

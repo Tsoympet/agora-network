@@ -151,9 +151,8 @@ hard caps plus the accepted DRC fee; this is not an XRP reserve.
 | Trident protocol | `24` |
 | Transaction signing profile | `agora-trident-tx-v9` |
 | State transition | `agora-trident-state-v22` |
-| State-root domain | `agora-trident-state-root-v16` |
-| Block-body wrapper when offer lanes are present | `agora-block-body-v18` |
-| Datadir schema | `21` |
+| State-root domain | `agora-trident-state-root-v15` |
+| Datadir schema | `22` (this index remains the schema-21 object family) |
 | Common-index schema | `1` |
 | Genesis | v3 draft, `UNFROZEN`; no live Trident loader |
 

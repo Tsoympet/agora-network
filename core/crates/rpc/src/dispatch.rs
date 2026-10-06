@@ -41,6 +41,12 @@ impl<B: RpcBackend> RpcDispatcher<B> {
     }
 
     fn dispatch(&mut self, req: &RpcRequest) -> Result<Value, RpcError> {
+        if req.method.starts_with("eth_")
+            || req.method.starts_with("net_")
+            || req.method == "web3_clientVersion"
+        {
+            return self.backend.ovl_ethereum_rpc(&req.method, &req.params);
+        }
         let method = RpcMethod::parse(&req.method)
             .ok_or_else(|| RpcError::MethodNotFound(req.method.clone()))?;
         match method {
