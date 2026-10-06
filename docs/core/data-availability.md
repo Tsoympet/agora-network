@@ -96,13 +96,14 @@ recovery use the existing `pending_virtual` protocol.
 
 The DA lane entered at Trident protocol v10 / state transition v11. Protocol
 v25 appends standalone `NetworkMessage::DataCommitment` gossip. The current
-aggregate fingerprint is protocol v26 / `agora-trident-state-v22` after raw
-OVL-EVM gossip. Frozen pre-Trident/v2 constants remain unchanged.
+aggregate fingerprint is protocol v27 / `agora-trident-state-v22` after typed
+compact gossip. Frozen pre-Trident/v2 constants remain unchanged.
 
 Authenticated commitments now travel on the transaction gossip topic as
 `NetworkMessage::DataCommitment` (Borsh discriminant 33, appended after
-`TltCovenant`). Full blocks still carry `Block.data_commitments`. Compact
-gossip continues to fall back to the full body when the DA lane is nonempty.
+`TltCovenant`). Full blocks still carry `Block.data_commitments`. Named
+typed compact (v27) carries DA short ids under their own lane kind; UTXO
+compact is not used. Detached multisign attachments still force a full body.
 
 ## Fail-closed fee and transport policy
 

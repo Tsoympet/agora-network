@@ -21,10 +21,10 @@ use std::time::Duration;
 use agora_consensus::PowAlgorithm;
 use agora_p2p::{
     dial_addr, drain_orphans_after, fetch_seeder_peers_best_effort, load_or_generate_identity,
-    merge_bootstrap_peers, reconstruct_compact_block, validate_header_chain, FetchReason,
-    GetHeadersRequest, Mempool, NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage,
-    NetworkNode, OrphanPool, PeerId, PendingFetches, ReconstructError, SeederBook,
-    MAX_HEADERS_PER_RESPONSE,
+    merge_bootstrap_peers, reconstruct_compact_block, reconstruct_typed_compact,
+    validate_header_chain, FetchReason, GetHeadersRequest, Mempool, NetworkConfig, NetworkEvent,
+    NetworkHandle, NetworkMessage, NetworkNode, OrphanPool, PeerId, PendingFetches,
+    ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{
@@ -968,6 +968,113 @@ async fn main() {
                                     %topic,
                                     hash = %hash.to_hex(),
                                     "compact tx_root mismatch — requesting full block"
+                                );
+                                request_block_if_missing_with_reason(
+                                    &chain,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    hash,
+                                    FetchReason::Announce,
+                                );
+                            }
+                            Err(ReconstructError::UnsupportedLane(kind)) => {
+                                warn!(
+                                    %peer,
+                                    %topic,
+                                    kind,
+                                    hash = %hash.to_hex(),
+                                    "compact unsupported lane — requesting full block"
+                                );
+                                request_block_if_missing_with_reason(
+                                    &chain,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    hash,
+                                    FetchReason::Announce,
+                                );
+                            }
+                        }
+                    }
+                    NetworkMessage::TypedCompactBlock(body) => {
+                        let hash = body.header.hash();
+                        let have = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.has_block(&hash).ok())
+                            .unwrap_or(false);
+                        if have {
+                            pending.complete(&hash);
+                            continue;
+                        }
+                        let lookup = |kind: u8, sid: &[u8; 8]| {
+                            mempool
+                                .lock()
+                                .ok()
+                                .and_then(|pool| pool.clone_typed_lane_item(kind, sid))
+                        };
+                        match reconstruct_typed_compact(body, lookup) {
+                            Ok(block) => {
+                                pending.complete(&hash);
+                                if relay_drop_stale_parents(&chain, &block) {
+                                    let _ = topic;
+                                    continue;
+                                }
+                                handle_incoming_block(
+                                    BlockRelayContext {
+                                        chain: &chain,
+                                        mempool: &mempool,
+                                        store: orphan_store.as_ref(),
+                                        net: &net,
+                                    },
+                                    &mut orphans,
+                                    &mut pending,
+                                    peer,
+                                    block,
+                                );
+                                let _ = topic;
+                            }
+                            Err(ReconstructError::MissingShortIds(n)) => {
+                                info!(
+                                    %peer,
+                                    %topic,
+                                    missing = n,
+                                    hash = %hash.to_hex(),
+                                    "typed compact miss — requesting full block"
+                                );
+                                request_block_if_missing_with_reason(
+                                    &chain,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    hash,
+                                    FetchReason::Announce,
+                                );
+                            }
+                            Err(ReconstructError::TxRootMismatch) => {
+                                warn!(
+                                    %peer,
+                                    %topic,
+                                    hash = %hash.to_hex(),
+                                    "typed compact body root mismatch — requesting full block"
+                                );
+                                request_block_if_missing_with_reason(
+                                    &chain,
+                                    &mut pending,
+                                    &net,
+                                    peer,
+                                    hash,
+                                    FetchReason::Announce,
+                                );
+                            }
+                            Err(ReconstructError::UnsupportedLane(kind)) => {
+                                warn!(
+                                    %peer,
+                                    %topic,
+                                    kind,
+                                    hash = %hash.to_hex(),
+                                    "typed compact unsupported lane — requesting full block"
                                 );
                                 request_block_if_missing_with_reason(
                                     &chain,

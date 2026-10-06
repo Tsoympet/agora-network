@@ -35,6 +35,8 @@ pub enum ReconstructError {
     MissingShortIds(usize),
     /// Reassembled txs do not match `header.tx_root`.
     TxRootMismatch,
+    /// Typed compact version or lane kind this node cannot name.
+    UnsupportedLane(u8),
 }
 
 /// Rebuild a full block from a compact header + short ids via mempool lookup.

@@ -39,8 +39,10 @@ Topics and the getblock protocol are scoped by `NetworkConfig::network` (from `A
 
 After a block is admitted locally, `agora-node` gossips:
 
-1. `CompactBlock { header, short_ids }` for UTXO-only bodies, or a full `Block`
-   when any appended consensus lane is non-empty
+1. `CompactBlock { header, short_ids }` for UTXO-only bodies,
+   `TypedCompactBlock` (protocol v27) when typed lanes can be named, or
+   a full `Block` when a lane cannot be named (detached DRC multisign
+   attachments)
 2. `BlockAnnounce { hash }` — hash-only tip signal
 
 Receivers try `reconstruct_compact_block` against the local mempool. On miss (or hash-only announce without a body), they request the body from the announcing peer over the network-scoped **`/agora/<network>/getblock/1`** protocol (libp2p request-response, CBOR). `PendingFetches` dedupes in-flight hashes. If request-response fails, the node falls back to gossip `GetBlock` / `Block`.
@@ -90,12 +92,12 @@ reservations.
 Typed consensus lanes append `NetworkMessage` discriminants. Protocol v25
 adds `DataCommitment` (33); v26 adds `OvlRawExecution` (34) for version-2
 raw Ethereum envelopes on a separate mempool that does not reserve the OVL
-account nonce. Prior DRC policy, settlement, trust-line, issued-control,
-offer, and TLT covenant variants keep their discriminants. Default boot still
-leaves the DA fingerprint unset until a reviewed TLT inclusion-fee policy
-exists, so DA submit/template stay fail-closed unless `AGORA_ENABLE_DA_LANE=1`.
-Compact gossip of typed lanes still uses the full body until a versioned
-short-id format names lane kinds.
+account nonce; v27 adds `TypedCompactBlock` (35) with named short-id lanes.
+Prior DRC policy, settlement, trust-line, issued-control, offer, and TLT
+covenant variants keep their discriminants. Default boot still leaves the DA
+fingerprint unset until a reviewed TLT inclusion-fee policy exists, so DA
+submit/template stay fail-closed unless `AGORA_ENABLE_DA_LANE=1`.
+`requires_full_body_gossip` still forbids UTXO compact for typed bodies.
 
 The v23 state transition adds no new `NetworkMessage` or block-body field.
 Nodes derive identical common DRC object/owner indexes and accepted-operation

@@ -136,6 +136,12 @@ enum DrcSlotReservation {
     },
 }
 
+fn map_by_short_id<'a, T>(map: &'a HashMap<Hash, T>, short_id: &[u8; 8]) -> Option<&'a T> {
+    map.iter()
+        .find(|(id, _)| &id.as_bytes()[..8] == short_id.as_slice())
+        .map(|(_, value)| value)
+}
+
 impl Mempool {
     pub fn new(max_size: usize) -> Self {
         Self {
@@ -1471,10 +1477,140 @@ impl Mempool {
 
     /// Lookup by first 8 bytes of `tx_id` for compact-block inflation.
     pub fn get_by_short_id(&self, short_id: &[u8; 8]) -> Option<&Transaction> {
-        self.txs
-            .iter()
-            .find(|(id, _)| &id.as_bytes()[..8] == short_id.as_slice())
-            .map(|(_, tx)| tx)
+        map_by_short_id(&self.txs, short_id)
+    }
+
+    /// Named-lane compact inflation. OVL v1 and raw v2 share one lane kind.
+    pub fn clone_typed_lane_item(
+        &self,
+        kind: u8,
+        short_id: &[u8; 8],
+    ) -> Option<crate::typed_compact::CompactLaneItem> {
+        use crate::typed_compact::{
+            CompactLaneItem as Item, COMPACT_LANE_ACCOUNT, COMPACT_LANE_DATA_COMMITMENT,
+            COMPACT_LANE_DRC_ASSET_POLICY, COMPACT_LANE_DRC_CHANNEL_CLAIM,
+            COMPACT_LANE_DRC_CHANNEL_CLOSE, COMPACT_LANE_DRC_CHANNEL_CREATE,
+            COMPACT_LANE_DRC_CHANNEL_FUND, COMPACT_LANE_DRC_CHECK_CANCEL,
+            COMPACT_LANE_DRC_CHECK_CASH, COMPACT_LANE_DRC_CHECK_CREATE, COMPACT_LANE_DRC_CLAWBACK,
+            COMPACT_LANE_DRC_ESCROW_CANCEL, COMPACT_LANE_DRC_ESCROW_CREATE,
+            COMPACT_LANE_DRC_ESCROW_FINISH, COMPACT_LANE_DRC_ISSUED_TRANSFER,
+            COMPACT_LANE_DRC_ISSUER_CONTROL, COMPACT_LANE_DRC_OFFER_CANCEL,
+            COMPACT_LANE_DRC_OFFER_CREATE, COMPACT_LANE_DRC_PAYMENT, COMPACT_LANE_DRC_POLICY,
+            COMPACT_LANE_DRC_PREAUTH, COMPACT_LANE_DRC_REGULAR_KEY, COMPACT_LANE_DRC_SIGNER_LIST,
+            COMPACT_LANE_DRC_TICKET, COMPACT_LANE_DRC_TRUST_LINE, COMPACT_LANE_OVL_EXECUTION,
+            COMPACT_LANE_STAKE, COMPACT_LANE_TLT_COVENANT, COMPACT_LANE_UTXO,
+        };
+        match kind {
+            COMPACT_LANE_UTXO => map_by_short_id(&self.txs, short_id)
+                .cloned()
+                .map(Item::Utxo),
+            COMPACT_LANE_ACCOUNT => map_by_short_id(&self.account_txs, short_id)
+                .cloned()
+                .map(Item::Account),
+            COMPACT_LANE_STAKE => map_by_short_id(&self.stake_txs, short_id)
+                .cloned()
+                .map(Item::Stake),
+            COMPACT_LANE_OVL_EXECUTION => map_by_short_id(&self.ovl_execution_txs, short_id)
+                .cloned()
+                .or_else(|| map_by_short_id(&self.ovl_raw_execution_txs, short_id).cloned())
+                .map(Item::OvlExecution),
+            COMPACT_LANE_DRC_PAYMENT => map_by_short_id(&self.payment_txs, short_id)
+                .cloned()
+                .map(Item::DrcPayment),
+            COMPACT_LANE_DATA_COMMITMENT => map_by_short_id(&self.data_commitments, short_id)
+                .cloned()
+                .map(Item::DataCommitment),
+            COMPACT_LANE_DRC_POLICY => map_by_short_id(&self.drc_policy_txs, short_id)
+                .cloned()
+                .map(Item::DrcPolicy),
+            COMPACT_LANE_DRC_PREAUTH => map_by_short_id(&self.drc_deposit_preauth_txs, short_id)
+                .cloned()
+                .map(Item::DrcPreauth),
+            COMPACT_LANE_DRC_REGULAR_KEY => map_by_short_id(&self.drc_regular_key_txs, short_id)
+                .cloned()
+                .map(Item::DrcRegularKey),
+            COMPACT_LANE_DRC_SIGNER_LIST => map_by_short_id(&self.drc_signer_list_txs, short_id)
+                .cloned()
+                .map(Item::DrcSignerList),
+            COMPACT_LANE_DRC_TICKET => map_by_short_id(&self.drc_ticket_create_txs, short_id)
+                .cloned()
+                .map(Item::DrcTicket),
+            COMPACT_LANE_DRC_ESCROW_CREATE => {
+                map_by_short_id(&self.drc_escrow_create_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcEscrowCreate)
+            }
+            COMPACT_LANE_DRC_ESCROW_FINISH => {
+                map_by_short_id(&self.drc_escrow_finish_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcEscrowFinish)
+            }
+            COMPACT_LANE_DRC_ESCROW_CANCEL => {
+                map_by_short_id(&self.drc_escrow_cancel_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcEscrowCancel)
+            }
+            COMPACT_LANE_DRC_CHECK_CREATE => map_by_short_id(&self.drc_check_create_txs, short_id)
+                .cloned()
+                .map(Item::DrcCheckCreate),
+            COMPACT_LANE_DRC_CHECK_CASH => map_by_short_id(&self.drc_check_cash_txs, short_id)
+                .cloned()
+                .map(Item::DrcCheckCash),
+            COMPACT_LANE_DRC_CHECK_CANCEL => map_by_short_id(&self.drc_check_cancel_txs, short_id)
+                .cloned()
+                .map(Item::DrcCheckCancel),
+            COMPACT_LANE_DRC_CHANNEL_CREATE => {
+                map_by_short_id(&self.drc_payment_channel_create_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcChannelCreate)
+            }
+            COMPACT_LANE_DRC_CHANNEL_FUND => {
+                map_by_short_id(&self.drc_payment_channel_fund_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcChannelFund)
+            }
+            COMPACT_LANE_DRC_CHANNEL_CLAIM => {
+                map_by_short_id(&self.drc_payment_channel_claim_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcChannelClaim)
+            }
+            COMPACT_LANE_DRC_CHANNEL_CLOSE => {
+                map_by_short_id(&self.drc_payment_channel_close_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcChannelClose)
+            }
+            COMPACT_LANE_DRC_TRUST_LINE => map_by_short_id(&self.drc_trust_line_set_txs, short_id)
+                .cloned()
+                .map(Item::DrcTrustLine),
+            COMPACT_LANE_DRC_ISSUED_TRANSFER => {
+                map_by_short_id(&self.drc_issued_transfer_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcIssuedTransfer)
+            }
+            COMPACT_LANE_DRC_ASSET_POLICY => {
+                map_by_short_id(&self.drc_issued_asset_policy_set_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcAssetPolicy)
+            }
+            COMPACT_LANE_DRC_ISSUER_CONTROL => {
+                map_by_short_id(&self.drc_trust_line_issuer_control_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcIssuerControl)
+            }
+            COMPACT_LANE_DRC_CLAWBACK => map_by_short_id(&self.drc_issued_clawback_txs, short_id)
+                .cloned()
+                .map(Item::DrcClawback),
+            COMPACT_LANE_DRC_OFFER_CREATE => map_by_short_id(&self.drc_offer_create_txs, short_id)
+                .cloned()
+                .map(Item::DrcOfferCreate),
+            COMPACT_LANE_DRC_OFFER_CANCEL => map_by_short_id(&self.drc_offer_cancel_txs, short_id)
+                .cloned()
+                .map(Item::DrcOfferCancel),
+            COMPACT_LANE_TLT_COVENANT => map_by_short_id(&self.covenant_txs, short_id)
+                .cloned()
+                .map(Item::TltCovenant),
+            _ => None,
+        }
     }
 
     pub fn remove(&mut self, tx_id: &Hash) -> Option<Transaction> {

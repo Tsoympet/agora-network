@@ -402,6 +402,7 @@ impl NetworkNode {
             NetworkMessage::Block(_)
             | NetworkMessage::BlockAnnounce { .. }
             | NetworkMessage::CompactBlock { .. }
+            | NetworkMessage::TypedCompactBlock(_)
             | NetworkMessage::GetBlock { .. } => {
                 self.publish(self.topics.blocks(), message.encode())
             }

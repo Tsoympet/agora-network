@@ -19,7 +19,7 @@ parity files keep their own `INCOMPLETE` status lines.
 
 | Constant | Value | Notes |
 | --- | --- | --- |
-| `TRIDENT_PROTOCOL_VERSION` | 26 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v26 appends `NetworkMessage::OvlRawExecution` |
+| `TRIDENT_PROTOCOL_VERSION` | 27 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v27 appends `NetworkMessage::TypedCompactBlock` |
 | Datadir `SCHEMA_VERSION` | 22 | Experimental; `OVL_EVM_SCHEMA_VERSION` is also 22 |
 | DRC fee-burn schema | 20 | Lifetime burned counters |
 | DRC ledger-index datadir | 21 | Common live-object / receipt rebuild |
@@ -58,11 +58,15 @@ balances and shared nonces are `agora_getAccountBalances`. Ethereum
 ## P2P and compact blocks
 
 `NetworkMessage` Borsh discriminants are append-only through
-`OvlRawExecution` (34). There is no community mutation gossip variant.
+`TypedCompactBlock` (35). There is no community mutation gossip variant.
 
-`compact_from_block` is UTXO-only. Any nonempty account, stake, OVL,
-DRC, DA, offer, or covenant lane forces a full `Block` envelope. That
-is intentional until a versioned compact format can name lane kinds.
+`compact_from_block` keeps UTXO-only `CompactBlock`. Named typed lanes use
+`TypedCompactBlock` with a per-kind short-id list so offers, covenants, and DA
+cannot enter UTXO short ids. Detached DRC multisign attachments have no
+mempool map, so `Block::typed_compact_unnamed_lanes` still forces a full
+`Block` envelope. Reconstruction miss or unknown kind falls back to GetBlock.
+`Block::requires_full_body_gossip` remains the gate that UTXO compact cannot
+be used for typed bodies.
 
 IBD (`GetBlock`, orphan pool, headers-first catch-up) is wired for
 stored blocks. Compact misses follow the same full-body path.
@@ -169,14 +173,13 @@ is the only programmable domain.
 
 These are real unfinished paths, not parity slogans:
 
-1. **Compact-block multi-lane encoding** — full bodies for every
-   non-UTXO lane. `Block::requires_full_body_gossip` is the single
-   fail-closed gate so new lanes cannot silently enter UTXO compact ids.
-2. **Community consensus lanes** — skipped. Registry remains genesis +
+1. **Community consensus lanes** — skipped. Registry remains genesis +
    library (`register_*_into`). There is no signed Hub/Grant/Mission
    envelope to gossip without inventing a governance spend path.
-3. **DA TLT inclusion-fee policy** — transport is wired; default boot
+2. **DA TLT inclusion-fee policy** — transport is wired; default boot
    stays fail-closed until a reviewed debit/sponsorship rule exists.
+3. **Detached-multisign compact inflation** — those blocks still travel
+   as full bodies because attachments are not in the mempool.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
 OVL/DRC, price-oracle stake mixing, silent kHeavyHash public PoW
@@ -213,3 +216,6 @@ This audit close-out adds:
   envelope exists.
 - Protocol v26 `NetworkMessage::OvlRawExecution` gossip and a separate
   raw mempool. Version 2 remains rejected by the Agora-signed pool.
+- Protocol v27 `NetworkMessage::TypedCompactBlock` named-lane compact
+  gossip. UTXO `CompactBlock` is unchanged. Detached multisign
+  attachments still use the full-body fallback.

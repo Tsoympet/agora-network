@@ -16,9 +16,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Trident fingerprint domain + versions (distinct mesh from v2).
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
-/// v26 appends standalone `NetworkMessage::OvlRawExecution` gossip. v25 DA
-/// gossip, schema-22 OVL wei / OVL-EVM-v1, and DRC object indexing stay in force.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 26;
+/// v27 appends `NetworkMessage::TypedCompactBlock` named-lane compact gossip.
+/// v26 raw-EVM, v25 DA gossip, schema-22 OVL wei / OVL-EVM-v1, and DRC object
+/// indexing stay in force.
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 27;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v9";
 pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v22";
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v2";
@@ -84,7 +85,7 @@ mod tests {
         assert_ne!(v2, t1);
         assert_eq!(
             t1.to_hex(),
-            "70138efc3315aacec55e5870a9c155d890bd0506b31e086bfc36da44ff95d8da"
+            "596077a77de4004a068b188783b5ee4d09eba5b79e994d292289d3f6bb1e4e1b"
         );
         let t2 = trident_network_fingerprint("agora-trident-testnet-2", &genesis, &policy);
         assert_ne!(t1, t2);
@@ -100,7 +101,7 @@ mod tests {
             TRIDENT_CONSENSUS_POLICY_VERSION,
         ));
         assert_ne!(t1, prior);
-        assert_eq!(TRIDENT_PROTOCOL_VERSION, 26);
+        assert_eq!(TRIDENT_PROTOCOL_VERSION, 27);
         assert_eq!(TRIDENT_TX_SIGNING_VERSION, "agora-trident-tx-v9");
         assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v22");
     }
