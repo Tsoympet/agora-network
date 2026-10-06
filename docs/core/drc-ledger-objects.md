@@ -77,9 +77,11 @@ closed. Each receipt records:
 For detached multisign blocks, the canonical block ID continues to hash the
 frozen detached block bytes. The receipt operation is reconstructed with its
 body-root-committed multisign authorization, so transaction lookup uses the
-same signed envelope ID returned before template materialization. Orphan,
-duplicate, wrong-kind, or otherwise ambiguous attachment rows are rejected
-before state mutation.
+same signed envelope ID returned before template materialization. Consensus
+transaction Borsh still omits that trailer; the receipt encoding appends it
+after the operation so reload restores the signed envelope without changing
+lane or block bytes. Orphan, duplicate, wrong-kind, or otherwise ambiguous
+attachment rows are rejected before state mutation.
 
 ## Storage, root, rollback, and restart
 
