@@ -176,6 +176,7 @@ PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.
 ## Related specs
 
 - [`../assets/NATIVE_ASSETS.md`](../assets/NATIVE_ASSETS.md)
+- [`../core/drc-xrpl-capability-profile.md`](../core/drc-xrpl-capability-profile.md)
 - [`../assets/MONETARY_POLICY.md`](../assets/MONETARY_POLICY.md)
 - [`../staking/OVL_STAKING.md`](../staking/OVL_STAKING.md)
 - [`../staking/DRC_STAKING.md`](../staking/DRC_STAKING.md)
