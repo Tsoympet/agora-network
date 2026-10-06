@@ -2652,7 +2652,6 @@ impl RpcBackend for NodeBackend {
                     drc_offer_cancels: &drc_offer_cancels,
                     tlt_covenants: &tlt_covenants,
                     data_commitments: &data_commitments,
-                    ..BlockTemplateLanes::default()
                 },
             )
             .map_err(|e| RpcError::Internal(e.to_string()))
