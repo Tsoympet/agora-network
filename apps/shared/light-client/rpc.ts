@@ -370,6 +370,46 @@ export type LightClient = {
     constitution_hash: string;
     acked: boolean;
   }>;
+  getDrcAccountPolicy: (account: string) => Promise<Record<string, unknown>>;
+  getDrcDepositPreauth: (args: {
+    recipient: string;
+    authorized_source: string;
+  }) => Promise<Record<string, unknown>>;
+  getDrcAccountKeys: (account: string) => Promise<Record<string, unknown>>;
+  getDrcAccountSignerList: (account: string) => Promise<Record<string, unknown>>;
+  getDrcTicket: (args: {
+    owner: string;
+    ticket_sequence: number;
+  }) => Promise<Record<string, unknown>>;
+  getDrcEscrow: (escrowId: string) => Promise<Record<string, unknown>>;
+  getDrcEscrowReceipt: (escrowId: string) => Promise<Record<string, unknown>>;
+  getDrcCheck: (checkId: string) => Promise<Record<string, unknown>>;
+  getDrcCheckReceipt: (checkId: string) => Promise<Record<string, unknown>>;
+  getDrcPaymentChannel: (channelId: string) => Promise<Record<string, unknown>>;
+  getDrcPaymentChannelReceipt: (
+    channelId: string,
+  ) => Promise<Record<string, unknown>>;
+  getDrcPayment: (paymentId: string) => Promise<Record<string, unknown>>;
+  getDrcPaymentByInvoice: (args: {
+    recipient: string;
+    invoice_id: string;
+  }) => Promise<Record<string, unknown>>;
+  getDrcTrustLine: (args: {
+    holder: string;
+    issuer: string;
+    currency: string;
+  }) => Promise<Record<string, unknown>>;
+  getDrcIssuedAssetPolicy: (args: {
+    issuer: string;
+    currency: string;
+  }) => Promise<Record<string, unknown>>;
+  submitAccountTransfer: (body: unknown) => Promise<{ tx_id?: string }>;
+  submitDrcPayment: (body: unknown) => Promise<{ payment_id?: string }>;
+  submitSignedRpc: (
+    method: string,
+    paramKey: string,
+    body: unknown,
+  ) => Promise<unknown>;
 };
 
 export function createLightClient(config: LightClientConfig): LightClient {
@@ -505,5 +545,56 @@ export function createLightClient(config: LightClientConfig): LightClient {
       }),
     ackConstitution: (address, slot = 0) =>
       call("agora_ackConstitution", { address, slot }),
+    getDrcAccountPolicy: (account) =>
+      call("agora_getDrcAccountPolicy", { account }),
+    getDrcDepositPreauth: (args) =>
+      call("agora_getDrcDepositPreauth", {
+        recipient: args.recipient,
+        authorized_source: args.authorized_source,
+      }),
+    getDrcAccountKeys: (account) =>
+      call("agora_getDrcAccountKeys", { account }),
+    getDrcAccountSignerList: (account) =>
+      call("agora_getDrcAccountSignerList", { account }),
+    getDrcTicket: (args) =>
+      call("agora_getDrcTicket", {
+        owner: args.owner,
+        ticket_sequence: args.ticket_sequence,
+      }),
+    getDrcEscrow: (escrowId) =>
+      call("agora_getDrcEscrow", { escrow_id: escrowId }),
+    getDrcEscrowReceipt: (escrowId) =>
+      call("agora_getDrcEscrowReceipt", { escrow_id: escrowId }),
+    getDrcCheck: (checkId) => call("agora_getDrcCheck", { check_id: checkId }),
+    getDrcCheckReceipt: (checkId) =>
+      call("agora_getDrcCheckReceipt", { check_id: checkId }),
+    getDrcPaymentChannel: (channelId) =>
+      call("agora_getDrcPaymentChannel", { channel_id: channelId }),
+    getDrcPaymentChannelReceipt: (channelId) =>
+      call("agora_getDrcPaymentChannelReceipt", { channel_id: channelId }),
+    getDrcPayment: (paymentId) =>
+      call("agora_getDrcPayment", { payment_id: paymentId }),
+    getDrcPaymentByInvoice: (args) =>
+      call("agora_getDrcPaymentByInvoice", {
+        recipient: args.recipient,
+        invoice_id: args.invoice_id,
+      }),
+    getDrcTrustLine: (args) =>
+      call("agora_getDrcTrustLine", {
+        holder: args.holder,
+        issuer: args.issuer,
+        currency: args.currency,
+      }),
+    getDrcIssuedAssetPolicy: (args) =>
+      call("agora_getDrcIssuedAssetPolicy", {
+        issuer: args.issuer,
+        currency: args.currency,
+      }),
+    submitAccountTransfer: (body) =>
+      call("agora_submitAccountTransfer", { account_transfer: body }),
+    submitDrcPayment: (body) =>
+      call("agora_submitDrcPayment", { payment: body }),
+    submitSignedRpc: (method, paramKey, body) =>
+      call(method, { [paramKey]: body }),
   };
 }
