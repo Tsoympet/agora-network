@@ -3,7 +3,7 @@
 //! TLT remains UTXO. OVL and DRC balances + nonces live here and commit into the
 //! same atomic [`WriteBatch`] as UTXO apply when callers include account ops.
 
-use agora_crypto::verify_account_transfer_bound;
+use crate::drc_account_auth::verify_drc_account_transfer_operation;
 use agora_types::{AccountTransfer, Address, Amount, Hash, NativeAssetId};
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -43,6 +43,26 @@ pub fn load_account(
         return Ok(AccountState::default());
     };
     AccountState::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))
+}
+
+/// Whether an account has a canonical persisted record.
+///
+/// A missing account still loads as the all-zero default for read convenience,
+/// but owner-controlled state creation must distinguish that from an existing
+/// account, matching the account-address semantics of DRC policy operations.
+pub fn account_exists(
+    store: &StateStore,
+    asset: NativeAssetId,
+    address: &Address,
+) -> Result<bool, StateError> {
+    if asset == NativeAssetId::TLT {
+        return Err(StateError::InvalidTx(
+            "TLT uses UTXO module, not account module".into(),
+        ));
+    }
+    Ok(store
+        .get_cf(ColumnFamily::Meta, &account_key(asset, address))?
+        .is_some())
 }
 
 pub fn put_account_into(
@@ -122,8 +142,7 @@ pub(crate) fn apply_account_transfer_checked(
 
     // Auth before any mutation.
     if let Some(ctx) = auth {
-        verify_account_transfer_bound(tx, &ctx.chain_id, &ctx.genesis)
-            .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+        verify_drc_account_transfer_operation(store, tx, ctx)?;
     } else if tx.public_key.is_empty() && tx.signature.is_empty() {
         // Unsigned only allowed in tests that pass auth=None explicitly — still
         // require from address consistency via empty skip; production callers
@@ -134,15 +153,36 @@ pub(crate) fn apply_account_transfer_checked(
         ));
     }
 
+    use crate::drc_ticket::{begin_drc_account_sequence, finish_drc_account_sequence};
+    use agora_types::{resolve_drc_account_sequence, ACCOUNT_TRANSFER_DRC_TICKET_VERSION};
+
+    if tx.version >= ACCOUNT_TRANSFER_DRC_TICKET_VERSION && tx.asset != NativeAssetId::DRC {
+        return Err(StateError::InvalidTx(
+            "ticket-aware account transfer is DRC-only".into(),
+        ));
+    }
+
     let mut from = load_account(store, tx.asset, &tx.from)?;
     let mut to = load_account(store, tx.asset, &tx.to)?;
 
-    if from.nonce != tx.nonce {
-        return Err(StateError::InvalidTx(format!(
-            "bad nonce: got {} expected {}",
-            tx.nonce, from.nonce
-        )));
-    }
+    let sequence_ctx = if tx.asset == NativeAssetId::DRC {
+        let selector = resolve_drc_account_sequence(
+            tx.version,
+            ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+        Some(begin_drc_account_sequence(store, &tx.from, selector)?)
+    } else {
+        if from.nonce != tx.nonce {
+            return Err(StateError::InvalidTx(format!(
+                "bad nonce: got {} expected {}",
+                tx.nonce, from.nonce
+            )));
+        }
+        None
+    };
     // Recipient overflow before debit. Fee is same-asset and never credited to `to`.
     let new_to = to
         .balance
@@ -161,10 +201,20 @@ pub(crate) fn apply_account_transfer_checked(
     journal.before.push((tx.asset, tx.to, to.clone()));
 
     from.balance -= debit;
-    from.nonce = from
-        .nonce
-        .checked_add(1)
-        .ok_or_else(|| StateError::InvalidTx("nonce overflow".into()))?;
+    if let Some(ctx) = sequence_ctx {
+        finish_drc_account_sequence(
+            batch,
+            &tx.from,
+            &mut from,
+            ctx.consumption,
+            &ctx.tickets_before,
+        )?;
+    } else {
+        from.nonce = from
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| StateError::InvalidTx("nonce overflow".into()))?;
+    }
     to.balance = new_to;
 
     put_account_into(batch, tx.asset, &tx.from, &from)?;
@@ -246,6 +296,7 @@ mod tests {
         let auth = TxAuthContext {
             chain_id: "agora-trident-testnet-1".into(),
             genesis,
+            data_availability_network_fingerprint: None,
         };
 
         let mut batch = WriteBatch::new();

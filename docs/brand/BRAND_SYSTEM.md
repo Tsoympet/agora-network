@@ -37,10 +37,14 @@ Obsidian & Gold visual identity for all Agora clients.
 | Ticker | Name | Motif | Max supply | Layer |
 | --- | --- | --- | --- | --- |
 | TLT | Talanton | Balanced scales | 100,000,000 | L1 native PoW (RandomX) |
-| DRC | Drachma | Crested Corinthian helm | 6,000,000,000 | L3 native PoW (sha256) |
-| OVL | Ovolos | Winged helm, crossed spears | 21,000,000,000 | L2 native PoW (sha256) |
+| DRC | Drachma | Crested Corinthian helm | 6,000,000,000 | L1 native contract-free account/payment asset (never mined) |
+| OVL | Ovolos | Winged helm, crossed spears | 21,000,000,000 | L1 native execution/gas asset (never mined) |
 
-Supplies are frozen in `docs/genesis/*.genesis.json` (`tokens[]`). Each mark is native PoW money on its layer; only TLT is an L1 UTXO `Amount`.
+The displayed quantities mirror existing brand/genesis metadata; this brand
+document does not set Trident monetary policy. Only TLT is mined. OVL is the
+sole smart-contract/VM domain; DRC escrow, Checks, payment channels, trust
+lines, issued assets, freeze/clawback, multisign, and Tickets are typed native
+operations rather than contracts.
 
 ## Rules
 

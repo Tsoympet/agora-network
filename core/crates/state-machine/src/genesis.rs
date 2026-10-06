@@ -85,6 +85,28 @@ impl GenesisBuilder {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
+            drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
+            drc_multisign_attachments: vec![],
         }
     }
 
@@ -318,8 +340,8 @@ mod tests {
     #[test]
     fn genesis_ignites_working_staking_reserves() {
         use crate::{
-            load_schema_version, load_staking_reserve_remaining, DRC_WORKING_RESERVE_BASE,
-            OVL_WORKING_RESERVE_BASE, SCHEMA_VERSION,
+            load_burned_supply, load_schema_version, load_staking_reserve_remaining,
+            DRC_WORKING_RESERVE_BASE, OVL_WORKING_RESERVE_BASE, SCHEMA_VERSION,
         };
         use agora_types::NativeAssetId;
 
@@ -334,6 +356,9 @@ mod tests {
             load_staking_reserve_remaining(&store, NativeAssetId::DRC).unwrap(),
             DRC_WORKING_RESERVE_BASE
         );
+        for asset in NativeAssetId::ALL {
+            assert_eq!(load_burned_supply(&store, asset).unwrap(), 0);
+        }
     }
 
     #[test]

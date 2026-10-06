@@ -1,12 +1,15 @@
 use agora_types::{
-    AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcPaymentTx, Hash, OvlExecutionTx,
-    SignedStakeTx, Transaction,
+    AccountTransfer, Block, BlockHeader, CheckpointAttestation, DrcAccountPolicyTx,
+    DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx,
+    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::ibd::short_ids_for_block;
 
 /// Wire envelopes for gossip payloads.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum NetworkMessage {
     Transaction(Transaction),
@@ -34,6 +37,46 @@ pub enum NetworkMessage {
     OvlExecution(OvlExecutionTx),
     /// Appended in Trident protocol v4; native DRC payment envelope.
     DrcPayment(DrcPaymentTx),
+    /// Appended in Trident protocol v8; owner-authorized DRC recipient policy.
+    DrcAccountPolicy(DrcAccountPolicyTx),
+    /// Appended in Trident protocol v9; address-based DRC deposit preauthorization.
+    DrcDepositPreauth(DrcDepositPreauthTx),
+    /// Appended in Trident protocol v11; DRC regular-key rotation.
+    DrcRegularKey(DrcRegularKeyTx),
+    /// Appended in Trident protocol v12; DRC weighted signer lists.
+    DrcSignerList(DrcSignerListTx),
+    /// Appended in Trident protocol v15; DRC ticket creation.
+    DrcTicketCreate(DrcTicketCreateTx),
+    /// Appended in Trident protocol v17; native DRC escrow create.
+    DrcEscrowCreate(DrcEscrowCreateTx),
+    /// Appended in Trident protocol v17; native DRC escrow finish.
+    DrcEscrowFinish(DrcEscrowFinishTx),
+    /// Appended in Trident protocol v17; native DRC escrow cancel.
+    DrcEscrowCancel(DrcEscrowCancelTx),
+    /// Appended in Trident protocol v18; native DRC check create.
+    DrcCheckCreate(DrcCheckCreateTx),
+    /// Appended in Trident protocol v18; native DRC check cash.
+    DrcCheckCash(DrcCheckCashTx),
+    /// Appended in Trident protocol v18; native DRC check cancel.
+    DrcCheckCancel(DrcCheckCancelTx),
+    /// Appended in Trident protocol v19; native DRC payment channel create.
+    DrcPaymentChannelCreate(agora_types::DrcPaymentChannelCreateTx),
+    /// Appended in Trident protocol v19; native DRC payment channel fund.
+    DrcPaymentChannelFund(agora_types::DrcPaymentChannelFundTx),
+    /// Appended in Trident protocol v19; native DRC payment channel claim.
+    DrcPaymentChannelClaim(agora_types::DrcPaymentChannelClaimTx),
+    /// Appended in Trident protocol v19; native DRC payment channel close.
+    DrcPaymentChannelClose(agora_types::DrcPaymentChannelCloseTx),
+    /// Appended in Trident protocol v20; issuer-scoped trust line set.
+    DrcTrustLineSet(agora_types::DrcTrustLineSetTx),
+    /// Appended in Trident protocol v20; exact issued-value transfer.
+    DrcIssuedTransfer(agora_types::DrcIssuedTransferTx),
+    /// Appended in Trident protocol v21; issued-asset policy set.
+    DrcIssuedAssetPolicySet(agora_types::DrcIssuedAssetPolicySetTx),
+    /// Appended in Trident protocol v21; trust line issuer control.
+    DrcTrustLineIssuerControl(agora_types::DrcTrustLineIssuerControlTx),
+    /// Appended in Trident protocol v21; issued clawback.
+    DrcIssuedClawback(agora_types::DrcIssuedClawbackTx),
 }
 
 impl NetworkMessage {
@@ -54,6 +97,28 @@ impl NetworkMessage {
             && block.stake_ops.is_empty()
             && block.ovl_executions.is_empty()
             && block.drc_payments.is_empty()
+            && block.data_commitments.is_empty()
+            && block.drc_account_policies.is_empty()
+            && block.drc_deposit_preauths.is_empty()
+            && block.drc_regular_keys.is_empty()
+            && block.drc_signer_lists.is_empty()
+            && block.drc_ticket_creates.is_empty()
+            && block.drc_escrow_creates.is_empty()
+            && block.drc_escrow_finishes.is_empty()
+            && block.drc_escrow_cancels.is_empty()
+            && block.drc_check_creates.is_empty()
+            && block.drc_check_cashes.is_empty()
+            && block.drc_check_cancels.is_empty()
+            && block.drc_payment_channel_creates.is_empty()
+            && block.drc_payment_channel_funds.is_empty()
+            && block.drc_payment_channel_claims.is_empty()
+            && block.drc_payment_channel_closes.is_empty()
+            && block.drc_trust_line_sets.is_empty()
+            && block.drc_issued_transfers.is_empty()
+            && block.drc_issued_asset_policy_sets.is_empty()
+            && block.drc_trust_line_issuer_controls.is_empty()
+            && block.drc_issued_clawbacks.is_empty()
+            && block.drc_multisign_attachments.is_empty()
         {
             Self::CompactBlock {
                 header: block.header.clone(),
@@ -68,7 +133,10 @@ impl NetworkMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agora_types::Hash;
+    use agora_types::{
+        Address, Amount, DataAvailabilityCommitment, DataCommitmentAuthorization,
+        DrcAccountPolicyTx, Hash,
+    };
 
     #[test]
     fn compact_and_get_block_roundtrip() {
@@ -138,5 +206,157 @@ mod tests {
 
         let message = NetworkMessage::compact_from_block(&block);
         assert_eq!(message, NetworkMessage::Block(block));
+    }
+
+    #[test]
+    fn data_commitment_block_uses_existing_full_block_variant() {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block
+            .data_commitments
+            .push(DataCommitmentAuthorization::unsigned(
+                Address([7; 20]),
+                0,
+                DataAvailabilityCommitment::agora_layers_ovolos_batch(
+                    "agora-ovolos-testnet-1".into(),
+                    Hash([1; 32]),
+                    Hash([2; 32]),
+                    3,
+                    Hash([4; 32]),
+                    Hash([5; 32]),
+                    Hash([6; 32]),
+                    7,
+                    8,
+                ),
+            ));
+        block.header.tx_root = block.compute_body_root();
+
+        let message = NetworkMessage::compact_from_block(&block);
+        assert_eq!(message, NetworkMessage::Block(block.clone()));
+        assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+    }
+
+    #[test]
+    fn existing_wire_enum_discriminants_are_unchanged() {
+        let payment = DrcPaymentTx::unsigned(
+            Address([1; 20]),
+            Address([2; 20]),
+            agora_types::Amount::from_base_units(1),
+            agora_types::Amount::ZERO,
+            0,
+            Hash([3; 32]),
+            0,
+        );
+        let source_tagged = DrcPaymentTx::unsigned_v2(
+            Address([1; 20]),
+            Address([2; 20]),
+            agora_types::Amount::from_base_units(1),
+            agora_types::Amount::ZERO,
+            0,
+            Some(42),
+            Hash([3; 32]),
+            0,
+        );
+        assert_eq!(
+            NetworkMessage::Transaction(Transaction::unsigned(1, vec![], vec![], 0)).encode()[0],
+            0
+        );
+        assert_eq!(NetworkMessage::DrcPayment(payment).encode()[0], 9);
+        let message = NetworkMessage::DrcPayment(source_tagged);
+        assert_eq!(message.encode()[0], 9);
+        assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+
+        let policy = DrcAccountPolicyTx::set_require_destination_tag(
+            Address([4; 20]),
+            Amount::from_base_units(1),
+            0,
+        );
+        let message = NetworkMessage::DrcAccountPolicy(policy);
+        assert_eq!(message.encode()[0], 10);
+        assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+
+        let preauth = DrcDepositPreauthTx::authorize(
+            Address([4; 20]),
+            Address([5; 20]),
+            Amount::from_base_units(1),
+            0,
+        );
+        let message = NetworkMessage::DrcDepositPreauth(preauth);
+        assert_eq!(message.encode()[0], 11);
+        assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+
+        let ticket_create =
+            DrcTicketCreateTx::unsigned(Address([6; 20]), Amount::from_base_units(1), 0);
+        let message = NetworkMessage::DrcTicketCreate(ticket_create.clone());
+        assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
+    }
+
+    #[test]
+    fn trust_line_lane_block_uses_full_body_gossip() {
+        use agora_types::{
+            Address, Amount, DrcTrustLineSetTx, Hash, IssuedAmount, IssuedCurrencyCode,
+            DRC_TRUST_LINE_SET_TX_VERSION,
+        };
+
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.drc_trust_line_sets.push(DrcTrustLineSetTx {
+            version: DRC_TRUST_LINE_SET_TX_VERSION,
+            holder: Address([1; 20]),
+            issuer: Address([2; 20]),
+            currency: IssuedCurrencyCode([0u8; 20]),
+            limit: IssuedAmount::from_units(1),
+            fee: Amount::from_base_units(1),
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![],
+            signature: vec![],
+            multisign: None,
+        });
+        block.header.tx_root = block.compute_body_root();
+        let message = NetworkMessage::compact_from_block(&block);
+        assert_eq!(message, NetworkMessage::Block(block));
+    }
+
+    #[test]
+    fn drc_ticket_create_gossip_roundtrip_and_full_block_lane() {
+        let owner = Address([0x33; 20]);
+        let create = DrcTicketCreateTx::unsigned(owner, Amount::from_base_units(2), 3);
+        let gossip = NetworkMessage::DrcTicketCreate(create.clone());
+        assert_eq!(NetworkMessage::decode(&gossip.encode()).unwrap(), gossip);
+
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 1,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.drc_ticket_creates.push(create);
+        block.header.tx_root = block.compute_body_root();
+        let full = NetworkMessage::compact_from_block(&block);
+        assert_eq!(full, NetworkMessage::Block(block));
     }
 }

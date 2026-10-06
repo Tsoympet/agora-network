@@ -15,3 +15,6 @@ ts-rs = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
 bech32 = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

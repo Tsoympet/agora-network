@@ -3,8 +3,9 @@
 //! Bonding debits liquid account balances into staking locks. OVL and DRC sets
 //! never share stake or combine via prices.
 
+use crate::drc_account_auth::verify_drc_stake_operation;
 use agora_consensus::{SlashPolicy, ValidatorEvidence};
-use agora_crypto::{address_from_pubkey, parse_compressed_public_key, verify_stake_tx_bound};
+use agora_crypto::{address_from_pubkey, parse_compressed_public_key};
 use agora_types::{
     Address, CheckpointAttestation, Hash, NativeAssetId, SignedStakeTx, StakeOpKind,
 };
@@ -256,7 +257,10 @@ pub fn stake_meta_keys_touched(tx: &SignedStakeTx) -> Vec<Vec<u8>> {
     keys
 }
 
-/// Meta key for the OVL/DRC staking reward pool (fee-share / slash sink).
+/// Meta key for the OVL/DRC staking reward pool.
+///
+/// Both pools receive reserve drips and slash proceeds; only OVL receives
+/// accepted transaction fees after Trident protocol v22.
 pub fn reward_pool_meta_key(asset: NativeAssetId) -> Vec<u8> {
     reward_pool_key(asset)
 }
@@ -379,19 +383,25 @@ pub fn drip_staking_reserve(
     Ok(drip)
 }
 
-/// Fee-share sink for future OVL execution / DRC payment modules.
+/// Credit an accepted OVL transaction fee to the OVL reward pool.
 ///
-/// Call only for Accepted fee attribution in the same asset — never divert TLT miner fees.
+/// DRC transaction fees burn under protocol v22, while TLT fees remain in the
+/// UTXO/coinbase lane, so both assets fail closed here.
 pub fn credit_fee_share_to_reward_pool(
     store: &StateStore,
     batch: &mut WriteBatch,
     asset: NativeAssetId,
     amount: u64,
 ) -> Result<u64, StateError> {
+    if asset != NativeAssetId::OVL {
+        return Err(StateError::InvalidTx(
+            "fee-share reward pool only accepts OVL; accepted DRC fees burn".into(),
+        ));
+    }
     credit_reward_pool_into(store, batch, asset, amount)
 }
 
-/// Slash / fee proceeds held for epoch distribution (never TLT).
+/// Reserve drips, slash proceeds, and OVL fees held for epoch distribution.
 pub fn load_reward_pool(store: &StateStore, asset: NativeAssetId) -> Result<u64, StateError> {
     let Some(bytes) = store.get_cf(ColumnFamily::Meta, &reward_pool_key(asset))? else {
         return Ok(0);
@@ -786,16 +796,36 @@ pub fn apply_signed_stake_tx(
     if tx.asset != params.asset {
         return Err(StateError::InvalidTx("stake asset mismatch".into()));
     }
-    verify_stake_tx_bound(tx, &auth.chain_id, &auth.genesis)
-        .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+    verify_drc_stake_operation(store, tx, auth)?;
 
     let acct = load_account(store, tx.asset, &tx.actor)?;
-    if acct.nonce != tx.nonce {
-        return Err(StateError::InvalidTx(format!(
-            "bad stake nonce: got {} expected {}",
-            tx.nonce, acct.nonce
-        )));
+    use crate::drc_ticket::{begin_drc_account_sequence, finish_drc_account_sequence};
+    use agora_types::{resolve_drc_account_sequence, STAKE_TX_TICKET_VERSION};
+
+    if tx.version >= STAKE_TX_TICKET_VERSION && tx.asset != NativeAssetId::DRC {
+        return Err(StateError::InvalidTx(
+            "ticket-aware stake version requires DRC".into(),
+        ));
     }
+
+    let sequence_ctx = if tx.asset == NativeAssetId::DRC {
+        let selector = resolve_drc_account_sequence(
+            tx.version,
+            STAKE_TX_TICKET_VERSION,
+            tx.nonce,
+            tx.account_sequence,
+        )
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+        Some(begin_drc_account_sequence(store, &tx.actor, selector)?)
+    } else {
+        if acct.nonce != tx.nonce {
+            return Err(StateError::InvalidTx(format!(
+                "bad stake nonce: got {} expected {}",
+                tx.nonce, acct.nonce
+            )));
+        }
+        None
+    };
 
     let mut after = acct.clone();
     match tx.kind {
@@ -839,10 +869,20 @@ pub fn apply_signed_stake_tx(
                 .ok_or_else(|| StateError::InvalidTx("balance overflow".into()))?;
         }
     }
-    after.nonce = tx
-        .nonce
-        .checked_add(1)
-        .ok_or_else(|| StateError::InvalidTx("nonce overflow".into()))?;
+    if let Some(ctx) = sequence_ctx {
+        finish_drc_account_sequence(
+            batch,
+            &tx.actor,
+            &mut after,
+            ctx.consumption,
+            &ctx.tickets_before,
+        )?;
+    } else {
+        after.nonce = tx
+            .nonce
+            .checked_add(1)
+            .ok_or_else(|| StateError::InvalidTx("nonce overflow".into()))?;
+    }
     put_account_into(batch, tx.asset, &tx.actor, &after)?;
     Ok(())
 }
@@ -1417,6 +1457,7 @@ mod tests {
         let auth = TxAuthContext {
             chain_id: "agora-dev".into(),
             genesis,
+            data_availability_network_fingerprint: None,
         };
         let params = StakingParams {
             min_self_bond: 100,
@@ -1474,5 +1515,17 @@ mod tests {
         credit_fee_share_to_reward_pool(&store, &mut batch, NativeAssetId::OVL, 10).unwrap();
         store.write_batch(batch).unwrap();
         assert_eq!(load_reward_pool(&store, NativeAssetId::OVL).unwrap(), 260);
+
+        let mut rejected = WriteBatch::new();
+        assert!(matches!(
+            credit_fee_share_to_reward_pool(
+                &store,
+                &mut rejected,
+                NativeAssetId::DRC,
+                10
+            ),
+            Err(StateError::InvalidTx(message)) if message.contains("DRC fees burn")
+        ));
+        assert_eq!(load_reward_pool(&store, NativeAssetId::DRC).unwrap(), 0);
     }
 }

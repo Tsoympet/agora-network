@@ -6,7 +6,7 @@
 //! or unsigned compact transaction is accepted.
 
 use agora_crypto::verify_ovl_execution_bound;
-use agora_types::{Hash, NativeAssetId, OvlExecutionTx};
+use agora_types::{Hash, OvlExecutionTx};
 
 use crate::accounts::{load_account, put_account_into, AccountJournal};
 use crate::apply::TxAuthContext;
@@ -43,6 +43,12 @@ pub fn apply_ovl_execution(
     batch: &mut WriteBatch,
     journal: &mut AccountJournal,
 ) -> Result<OvlExecutionReceipt, StateError> {
+    let asset = tx.execution_asset();
+    if !asset.is_programmable_execution_asset() {
+        return Err(StateError::InvalidTx(
+            "programmable execution is restricted to OVL".into(),
+        ));
+    }
     if tx.version != OVL_EXECUTION_VERSION {
         return Err(StateError::InvalidTx(format!(
             "unsupported OVL execution version {}",
@@ -84,8 +90,8 @@ pub fn apply_ovl_execution(
         .as_base_units()
         .checked_add(fee)
         .ok_or_else(|| StateError::InvalidTx("OVL value+fee overflow".into()))?;
-    let mut from = load_account(store, NativeAssetId::OVL, &tx.from)?;
-    let mut to = load_account(store, NativeAssetId::OVL, &tx.to)?;
+    let mut from = load_account(store, asset, &tx.from)?;
+    let mut to = load_account(store, asset, &tx.to)?;
     if from.nonce != tx.nonce {
         return Err(StateError::InvalidTx(format!(
             "bad OVL execution nonce: got {} expected {}",
@@ -102,18 +108,16 @@ pub fn apply_ovl_execution(
         .checked_add(tx.value.as_base_units())
         .ok_or_else(|| StateError::InvalidTx("OVL recipient overflow".into()))?;
 
-    journal
-        .before
-        .push((NativeAssetId::OVL, tx.from, from.clone()));
-    journal.before.push((NativeAssetId::OVL, tx.to, to.clone()));
+    journal.before.push((asset, tx.from, from.clone()));
+    journal.before.push((asset, tx.to, to.clone()));
     from.balance -= debit;
     from.nonce = from
         .nonce
         .checked_add(1)
         .ok_or_else(|| StateError::InvalidTx("OVL nonce overflow".into()))?;
     to.balance = recipient_balance;
-    put_account_into(batch, NativeAssetId::OVL, &tx.from, &from)?;
-    put_account_into(batch, NativeAssetId::OVL, &tx.to, &to)?;
+    put_account_into(batch, asset, &tx.from, &from)?;
+    put_account_into(batch, asset, &tx.to, &to)?;
 
     Ok(OvlExecutionReceipt {
         tx_id: tx.tx_id(),
@@ -126,7 +130,7 @@ pub fn apply_ovl_execution(
 #[cfg(test)]
 mod tests {
     use agora_crypto::{derive_bip44, seed_from_mnemonic, sign_ovl_execution_bound, Bip44Path};
-    use agora_types::{Address, Amount, Hash, OvlExecutionTx};
+    use agora_types::{Address, Amount, Hash, NativeAssetId, OvlExecutionTx};
 
     use super::*;
     use crate::accounts::{credit_account_into, load_account};
@@ -143,6 +147,7 @@ mod tests {
         let auth = TxAuthContext {
             chain_id: "agora-dev".into(),
             genesis: Hash([1; 32]),
+            data_availability_network_fingerprint: None,
         };
         let mut funding = WriteBatch::new();
         credit_account_into(
@@ -206,11 +211,66 @@ mod tests {
             &TxAuthContext {
                 chain_id: "agora-dev".into(),
                 genesis: Hash::ZERO,
+                data_availability_network_fingerprint: None,
             },
             &mut batch,
             &mut journal,
         )
         .unwrap_err();
         assert!(err.to_string().contains("contract calls are not active"));
+    }
+
+    #[test]
+    fn drc_balance_cannot_fund_the_ovl_execution_lane() {
+        let store = StateStore::open_in_memory();
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let alice = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let bob = derive_bip44(&seed, &Bip44Path::external(1)).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis: Hash([1; 32]),
+            data_availability_network_fingerprint: None,
+        };
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &alice.address(),
+            Amount::from_base_units(100_000),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+
+        let mut tx = OvlExecutionTx::unsigned(
+            alice.address(),
+            bob.address(),
+            Amount::from_base_units(1_000),
+            OVL_INTRINSIC_GAS,
+            2,
+            0,
+            vec![],
+        );
+        sign_ovl_execution_bound(&mut tx, &alice, &auth.chain_id, &auth.genesis).unwrap();
+        let mut batch = WriteBatch::new();
+        let mut journal = AccountJournal::default();
+        let error = apply_ovl_execution(&store, &tx, &auth, &mut batch, &mut journal).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("insufficient OVL execution balance"));
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &alice.address())
+                .unwrap()
+                .balance,
+            100_000
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &alice.address())
+                .unwrap()
+                .balance,
+            0
+        );
+        assert!(journal.before.is_empty());
     }
 }

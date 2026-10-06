@@ -1,9 +1,9 @@
-//! Ovolos — Agora's optimistic rollup (L2) for EVM smart-contract scaling.
+//! Historical Ovolos rollup lab with OVL-only EVM execution.
 //!
-//! **OVL is native hybrid money on L2**: PoW coinbase issuance + bonded sequencers
-//! (PoS-style) for batch submit/finalize. It is not an L1 UTXO asset. Batches are
-//! sequenced optimistically, open to fraud proofs during a challenge window, then
-//! finalized. Operators post [`BatchCommitment`] blobs to L1 / Agora DA.
+//! This pre-Trident prototype is retained for tests, code reuse, and migration
+//! evidence; it is not canonical money or a public L2. Its VM and `eth_*`
+//! compatibility are strictly OVL-scoped and never accept DRC. Canonical smart
+//! contract execution belongs only to the Trident OVL domain.
 
 mod da;
 mod error;

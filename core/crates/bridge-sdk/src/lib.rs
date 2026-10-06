@@ -1,12 +1,14 @@
-//! Bridge-in-a-Box SDK for Agora District Chains (L3).
+//! Historical Bridge-in-a-Box lab SDK for pre-Trident District Chains.
 //!
-//! **DRC is native hybrid money on L3**: PoW coinbase issuance + bonded attestors
-//! (PoS-style quorum) for payment / bridge finality. It is not an L1 UTXO asset.
-//! Districts connect to the hub via lock-mint and burn-unlock messages.
+//! This crate preserves the former DRC L3 prototype for tests and migration
+//! evidence. It is non-canonical and non-routable from the Trident node. Its
+//! DRC functionality is a closed, typed payment ledger with no VM, bytecode,
+//! deploy, contract-call, Hook, or user-program path. Canonical DRC is native
+//! Trident L1 account state; OVL is the sole programmable execution domain.
 
 // Tagged payment / path-pay APIs take hub, district, parties, amounts, tags, and
 // nonces as distinct parameters; bundling them into option-structs would obscure
-// the XRPL-style call surface without improving safety.
+// the typed payment surface without improving safety.
 #![allow(clippy::too_many_arguments)]
 
 mod attestor;

@@ -12,9 +12,12 @@ Empty active sets never satisfy quorum (no admin bypass). Stake is never price-c
 
 ## State root
 
-`compose_trident_state_root` (domain `agora-trident-state-root-v1`) commits:
-
-UTXO set ∥ OVL accounts ∥ DRC accounts ∥ OVL stake snap ∥ DRC stake snap ∥ tip acceptance ∥ finalized tip ∥ gov/treasury placeholder (`Hash::ZERO` until Phase 5)
+`compose_trident_state_root` (current domain
+`agora-trident-state-root-v15`) commits the UTXO set, OVL/DRC accounts and stake
+snapshots, versioned DRC authorization/settlement state, native issued/burned/net
+supply accounting, common DRC live-object descriptors and accepted-operation
+receipts, tip acceptance, finalized tip, governance/treasuries, canonical
+community state, and authenticated DA state.
 
 Checkpoint bodies bind this root (no longer provisional zero).
 
@@ -46,17 +49,23 @@ Checkpoint bodies bind this root (no longer provisional zero).
 | --- | --- |
 | Slash proceeds → reward pool → epoch distribute | Wired |
 | Staking reserve drip (`stake/reserve_remaining`) | Working testnet defaults (10% of max); epoch drip wired |
-| `credit_fee_share_to_reward_pool` | Called for Accepted OVL/DRC account-transfer fees in block apply |
+| Accepted OVL account/execution fees | Credit the OVL reward pool via `credit_fee_share_to_reward_pool` |
+| Accepted DRC typed-operation fees | Destroyed into committed lifetime burned supply under protocol v22 |
 
 Never from TLT PoW mint.
+
+Programmable execution is OVL-only. DRC payment and settlement families
+(including escrow, Checks, payment channels, trust lines, issued-asset
+controls, multisign, and Tickets) are typed protocol-native lanes and never VM
+transactions or contracts.
 
 ## Still deferred
 
 - Versioned compact short IDs for account + stake lanes (current non-empty lane blocks use full-body gossip)
 - Ceremony-frozen reserve economics (replace working defaults)
 - Deterministic OVL contract VM/storage (signed intrinsic-gas EOA boundary is active)
-- DRC escrow, recurring authorization, multisig, cross-district paths, and tag registry (native tagged/invoiced payments are active)
-- Gov/treasury roots in state root (Phase 5)
+- Any additional DRC feature family requires an explicit typed state transition
+  and capability-specific review; there is no full-XRPL-parity or VM roadmap
 - Validator signing daemon
 
 See [`../consensus/HYBRID_POW_DUAL_POS.md`](../consensus/HYBRID_POW_DUAL_POS.md).

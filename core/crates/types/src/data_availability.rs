@@ -1,7 +1,8 @@
-//! Provenance-bound data-commitment candidates for a future Trident L1 lane.
+//! Provenance-bound data-commitment types for the Trident L1 block lane.
 //!
-//! These types define canonical bytes and operator authorization only. They are
-//! not part of [`crate::Block`] and are not accepted by the live L1 RPC yet.
+//! These types define canonical bytes and operator authorization consumed by
+//! [`crate::Block::data_commitments`]. Standalone mempool/RPC submission remains
+//! disabled until Trident defines the TLT inclusion-fee policy.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
@@ -22,12 +23,33 @@ pub const MAX_DA_CHAIN_ID_BYTES: usize = 128;
 
 /// Append-only source discriminant for explicitly non-canonical producer data.
 #[derive(
-    Clone, Copy, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
+    TS,
 )]
 #[ts(export)]
+#[repr(u8)]
+#[borsh(use_discriminant = true)]
 pub enum DataCommitmentSource {
     /// Historical `agora-layers` Ovolos batch data; never canonical OVL monetary state.
-    AgoraLayersOvolosBatchLab,
+    AgoraLayersOvolosBatchLab = 0x00,
+}
+
+impl DataCommitmentSource {
+    /// Stable key/wire byte. Future source variants must be appended.
+    pub const fn wire_byte(self) -> u8 {
+        self as u8
+    }
 }
 
 /// Deterministic commitment to one historical `agora-layers` Ovolos batch.
@@ -96,7 +118,7 @@ impl DataAvailabilityCommitment {
         Ok(())
     }
 
-    /// Canonical, domain-separated Borsh payload for future consensus review.
+    /// Canonical, domain-separated Borsh payload consumed by consensus.
     pub fn canonical_bytes(&self) -> Vec<u8> {
         borsh::to_vec(&(DA_COMMITMENT_PAYLOAD_DOMAIN, self))
             .expect("borsh serialize data commitment")
@@ -107,11 +129,11 @@ impl DataAvailabilityCommitment {
     }
 }
 
-/// Signed operator authorization that a future versioned L1 transaction can carry.
+/// Signed operator authorization carried in `Block::data_commitments`.
 ///
-/// `replay_nonce` is cryptographically bound here. A future state transition
-/// must still enforce and persist it atomically; this type alone is not replay
-/// protection and is deliberately not exposed through RPC.
+/// `replay_nonce` is cryptographically bound here and enforced atomically by
+/// the state transition. This type alone is not replay protection and remains
+/// deliberately unavailable through standalone RPC submission.
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
@@ -309,6 +331,18 @@ mod tests {
         assert_ne!(
             authorization.signing_bytes_bound("agora-trident-testnet-1", &genesis, &Hash([10; 32])),
             original
+        );
+    }
+
+    #[test]
+    fn source_wire_discriminant_is_stable() {
+        assert_eq!(
+            borsh::to_vec(&DataCommitmentSource::AgoraLayersOvolosBatchLab).unwrap(),
+            vec![0]
+        );
+        assert_eq!(
+            DataCommitmentSource::AgoraLayersOvolosBatchLab.wire_byte(),
+            0
         );
     }
 }

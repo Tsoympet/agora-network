@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 use agora_governance::{
@@ -6,8 +6,13 @@ use agora_governance::{
     CivicSnapshot, ProposalKind, TopicCategory, VoteChoice,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, BlockHeader, DrcPaymentTx, Hash, OutPoint,
-    OvlExecutionTx, Transaction, TxOut,
+    AccountTransfer, Address, Amount, Block, BlockHeader, DrcAcceptedOperationReceipt,
+    DrcAccountPolicy, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
+    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
+    DrcIssuedTransferTx, DrcLedgerObjectDescriptor, DrcLedgerObjectKind, DrcLedgerObjectPage,
+    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
+    DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -97,6 +102,14 @@ pub struct FeeEstimate {
     pub suggested_fee: u64,
 }
 
+/// Effective canonical DepositAuth status for one recipient/source pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrcDepositPreauthStatus {
+    pub preauthorized: bool,
+    pub deposit_auth_required: bool,
+    pub deposit_authorized: bool,
+}
+
 impl TxLookup {
     pub fn unknown(tx_id: Hash) -> Self {
         Self {
@@ -172,6 +185,134 @@ pub trait RpcBackend: Send {
     fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError>;
     fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError>;
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError>;
+    fn submit_drc_account_policy(&mut self, tx: DrcAccountPolicyTx) -> Result<Hash, RpcError>;
+    fn submit_drc_deposit_preauth(&mut self, tx: DrcDepositPreauthTx) -> Result<Hash, RpcError>;
+    fn submit_drc_regular_key(&mut self, tx: DrcRegularKeyTx) -> Result<Hash, RpcError>;
+    fn submit_drc_signer_list(&mut self, tx: DrcSignerListTx) -> Result<Hash, RpcError>;
+    fn submit_drc_ticket_create(&mut self, tx: DrcTicketCreateTx) -> Result<Hash, RpcError>;
+    fn submit_drc_escrow_create(&mut self, tx: DrcEscrowCreateTx) -> Result<Hash, RpcError>;
+    fn submit_drc_escrow_finish(&mut self, tx: DrcEscrowFinishTx) -> Result<Hash, RpcError>;
+    fn submit_drc_escrow_cancel(&mut self, tx: DrcEscrowCancelTx) -> Result<Hash, RpcError>;
+    fn submit_drc_check_create(&mut self, tx: DrcCheckCreateTx) -> Result<Hash, RpcError>;
+    fn submit_drc_check_cash(&mut self, tx: DrcCheckCashTx) -> Result<Hash, RpcError>;
+    fn submit_drc_check_cancel(&mut self, tx: DrcCheckCancelTx) -> Result<Hash, RpcError>;
+    fn get_drc_ticket(&self, owner: &Address, ticket_sequence: u64) -> Result<Value, RpcError>;
+    fn get_drc_escrow(&self, escrow_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_escrow_receipt(&self, escrow_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_check(&self, check_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_check_receipt(&self, check_id: &Hash) -> Result<Value, RpcError>;
+    fn submit_drc_payment_channel_create(
+        &mut self,
+        tx: DrcPaymentChannelCreateTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_payment_channel_fund(
+        &mut self,
+        tx: DrcPaymentChannelFundTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_payment_channel_claim(
+        &mut self,
+        tx: DrcPaymentChannelClaimTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_payment_channel_close(
+        &mut self,
+        tx: DrcPaymentChannelCloseTx,
+    ) -> Result<Hash, RpcError>;
+    fn get_drc_payment_channel(&self, channel_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_payment_channel_receipt(&self, channel_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_payment_channel_fund_event(&self, fund_tx_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_payment_channel_claim_event(&self, claim_tx_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_payment_channel_schedule_event(&self, close_tx_id: &Hash)
+        -> Result<Value, RpcError>;
+    fn verify_drc_payment_channel_claim(
+        &self,
+        channel_id: &Hash,
+        cumulative_authorized: Amount,
+        channel_claim_signature: &[u8],
+    ) -> Result<Value, RpcError>;
+    fn submit_drc_trust_line_set(&mut self, tx: DrcTrustLineSetTx) -> Result<Hash, RpcError>;
+    fn submit_drc_issued_transfer(&mut self, tx: DrcIssuedTransferTx) -> Result<Hash, RpcError>;
+    fn get_drc_trust_line(
+        &self,
+        holder: &Address,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_issuer_liability(
+        &self,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_issued_transfer_receipt(&self, transfer_tx_id: &Hash) -> Result<Value, RpcError>;
+    fn submit_drc_issued_asset_policy_set(
+        &mut self,
+        tx: agora_types::DrcIssuedAssetPolicySetTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_trust_line_issuer_control(
+        &mut self,
+        tx: agora_types::DrcTrustLineIssuerControlTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_issued_clawback(
+        &mut self,
+        tx: agora_types::DrcIssuedClawbackTx,
+    ) -> Result<Hash, RpcError>;
+    fn get_drc_issued_asset_policy(
+        &self,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_issued_asset_policy_receipt(
+        &self,
+        policy_set_tx_id: &Hash,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_trust_line_issuer_control_receipt(
+        &self,
+        control_tx_id: &Hash,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_issued_clawback_receipt(&self, clawback_tx_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_object(
+        &self,
+        object_id: &Hash,
+    ) -> Result<Option<DrcLedgerObjectDescriptor>, RpcError>;
+    fn get_drc_account_objects(
+        &self,
+        owner: &Address,
+        kind: Option<DrcLedgerObjectKind>,
+        limit: usize,
+        cursor: Option<&str>,
+    ) -> Result<DrcLedgerObjectPage, RpcError>;
+    fn get_drc_operation(
+        &self,
+        operation_id: &Hash,
+    ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError>;
+    fn get_drc_transaction(
+        &self,
+        transaction_id: &Hash,
+    ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError>;
+    /// Canonical virtual-view policy + shared DRC nonce; absent means unknown account.
+    fn get_drc_account_policy(
+        &self,
+        account: &Address,
+    ) -> Result<Option<(DrcAccountPolicy, u64)>, RpcError>;
+    /// Canonical point query only; no address or authorization enumeration.
+    fn get_drc_deposit_preauth(
+        &self,
+        owner: &Address,
+        authorized_source: &Address,
+    ) -> Result<Option<DrcDepositPreauthStatus>, RpcError>;
+    fn get_drc_account_keys(
+        &self,
+        account: &Address,
+    ) -> Result<Option<(Option<Address>, u64)>, RpcError>;
+    /// Returns quorum and entry count only (no signer enumeration).
+    fn get_drc_account_signer_list(
+        &self,
+        account: &Address,
+    ) -> Result<Option<(u32, u32, u64)>, RpcError>;
+    /// Root-committed canonical settlement only; pending is intentionally out of scope.
+    fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError>;
+    /// Exact recipient/invoice lookup; never scans or reports pending payments.
+    fn get_drc_payment_by_invoice(
+        &self,
+        recipient: &Address,
+        invoice_id: &Hash,
+    ) -> Result<Option<DrcPaymentReceipt>, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
     /// Live UTXO set for wallet coin selection.
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError>;
@@ -194,6 +335,7 @@ pub trait RpcBackend: Send {
     fn get_validator_set(&self, asset: &str, epoch: Option<u64>) -> Result<Value, RpcError>;
     fn get_validator(&self, asset: &str, operator: &Address) -> Result<Value, RpcError>;
     fn get_reward_pool(&self, asset: &str) -> Result<Value, RpcError>;
+    fn get_native_asset_supply(&self, asset: &str) -> Result<Value, RpcError>;
     fn get_protocol_treasuries(&self) -> Result<Value, RpcError>;
     fn get_community_registry(&self, limit: usize) -> Result<Value, RpcError>;
     /// Admit a secp256k1-signed stake tx (bond/delegate/unbond/withdraw). Never mint-like.
@@ -250,6 +392,21 @@ pub struct InMemoryBackend {
     mempool: HashMap<Hash, Transaction>,
     /// `tx_id` → `(block_id, index)` for confirmed txs.
     tx_index: HashMap<Hash, (Hash, u32)>,
+    /// Canonical exact-delivery receipts keyed by signed payment id.
+    drc_payment_receipts: HashMap<Hash, DrcPaymentReceipt>,
+    /// Recipient-scoped invoice key → signed payment id, mirroring canonical storage.
+    drc_payment_invoice_index: HashMap<(Address, Hash), Hash>,
+    /// Canonical DRC policy and shared account nonce for RPC tests.
+    drc_account_policies: HashMap<Address, (DrcAccountPolicy, u64)>,
+    /// Exact owner/source DepositAuth statuses for RPC tests.
+    drc_deposit_preauths: HashMap<(Address, Address), DrcDepositPreauthStatus>,
+    /// Live `(owner, ticket_sequence)` pairs for `agora_getDrcTicket` RPC tests.
+    drc_live_tickets: HashSet<(Address, u64)>,
+    /// Common live-object and accepted-operation indexes for dispatcher tests.
+    drc_objects: HashMap<Hash, DrcLedgerObjectDescriptor>,
+    drc_owner_objects: HashMap<Address, Vec<DrcLedgerObjectDescriptor>>,
+    drc_operations: HashMap<Hash, DrcAcceptedOperationReceipt>,
+    drc_transaction_operations: HashMap<Hash, Hash>,
     template_bits: u32,
     fund_nonce: u64,
     civic: Mutex<CivicSnapshot>,
@@ -264,6 +421,15 @@ impl Default for InMemoryBackend {
             utxos: HashMap::new(),
             mempool: HashMap::new(),
             tx_index: HashMap::new(),
+            drc_payment_receipts: HashMap::new(),
+            drc_payment_invoice_index: HashMap::new(),
+            drc_account_policies: HashMap::new(),
+            drc_deposit_preauths: HashMap::new(),
+            drc_live_tickets: HashSet::new(),
+            drc_objects: HashMap::new(),
+            drc_owner_objects: HashMap::new(),
+            drc_operations: HashMap::new(),
+            drc_transaction_operations: HashMap::new(),
             template_bits: 0,
             fund_nonce: 0,
             civic: Mutex::new(CivicSnapshot::genesis(10_000)),
@@ -300,6 +466,56 @@ impl InMemoryBackend {
 
     pub fn set_tips(&mut self, tips: Vec<Hash>) {
         self.tips = tips;
+    }
+
+    pub fn insert_drc_payment_receipt(&mut self, receipt: DrcPaymentReceipt) {
+        if receipt.invoice_id != Hash::ZERO {
+            self.drc_payment_invoice_index
+                .insert((receipt.to, receipt.invoice_id), receipt.payment_id);
+        }
+        self.drc_payment_receipts
+            .insert(receipt.payment_id, receipt);
+    }
+
+    pub fn insert_drc_account_policy(
+        &mut self,
+        account: Address,
+        policy: DrcAccountPolicy,
+        nonce: u64,
+    ) {
+        self.drc_account_policies.insert(account, (policy, nonce));
+    }
+
+    pub fn insert_drc_live_ticket(&mut self, owner: Address, ticket_sequence: u64) {
+        self.drc_live_tickets.insert((owner, ticket_sequence));
+    }
+
+    pub fn insert_drc_object(&mut self, descriptor: DrcLedgerObjectDescriptor) {
+        let owner_objects = self.drc_owner_objects.entry(descriptor.owner).or_default();
+        owner_objects.retain(|existing| existing.object_id != descriptor.object_id);
+        owner_objects.push(descriptor.clone());
+        owner_objects.sort_by(|left, right| {
+            left.kind
+                .cmp(&right.kind)
+                .then(left.object_id.cmp(&right.object_id))
+        });
+        self.drc_objects.insert(descriptor.object_id, descriptor);
+    }
+
+    pub fn insert_drc_operation_receipt(&mut self, receipt: DrcAcceptedOperationReceipt) {
+        self.drc_transaction_operations
+            .insert(receipt.historical_transaction_id, receipt.operation_id);
+        self.drc_operations.insert(receipt.operation_id, receipt);
+    }
+
+    pub fn insert_drc_deposit_preauth(
+        &mut self,
+        owner: Address,
+        authorized_source: Address,
+        status: DrcDepositPreauthStatus,
+    ) {
+        self.drc_deposit_preauths
+            .insert((owner, authorized_source), status);
     }
 
     pub fn insert_block(&mut self, block: Block) {
@@ -446,6 +662,469 @@ impl RpcBackend for InMemoryBackend {
         ))
     }
 
+    fn submit_drc_account_policy(&mut self, _tx: DrcAccountPolicyTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC account policies".into(),
+        ))
+    }
+
+    fn submit_drc_deposit_preauth(&mut self, _tx: DrcDepositPreauthTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC deposit preauthorizations".into(),
+        ))
+    }
+
+    fn submit_drc_regular_key(&mut self, _tx: DrcRegularKeyTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC regular-key operations".into(),
+        ))
+    }
+
+    fn submit_drc_signer_list(&mut self, _tx: DrcSignerListTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC signer-list operations".into(),
+        ))
+    }
+
+    fn submit_drc_ticket_create(&mut self, _tx: DrcTicketCreateTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC ticket creates".into(),
+        ))
+    }
+
+    fn submit_drc_escrow_create(&mut self, _tx: DrcEscrowCreateTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC escrow creates".into(),
+        ))
+    }
+
+    fn submit_drc_escrow_finish(&mut self, _tx: DrcEscrowFinishTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC escrow finishes".into(),
+        ))
+    }
+
+    fn submit_drc_escrow_cancel(&mut self, _tx: DrcEscrowCancelTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC escrow cancels".into(),
+        ))
+    }
+
+    fn submit_drc_check_create(&mut self, _tx: DrcCheckCreateTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC check creates".into(),
+        ))
+    }
+
+    fn submit_drc_check_cash(&mut self, _tx: DrcCheckCashTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC check cashes".into(),
+        ))
+    }
+
+    fn submit_drc_check_cancel(&mut self, _tx: DrcCheckCancelTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC check cancels".into(),
+        ))
+    }
+
+    fn get_drc_ticket(&self, owner: &Address, ticket_sequence: u64) -> Result<Value, RpcError> {
+        if *owner == Address::ZERO {
+            return Err(RpcError::InvalidParams("zero DRC ticket owner".into()));
+        }
+        let live = self.drc_live_tickets.contains(&(*owner, ticket_sequence));
+        Ok(if live {
+            json!({
+                "owner": owner.to_bech32(),
+                "ticket_sequence": ticket_sequence,
+                "status": "live",
+            })
+        } else {
+            json!({
+                "owner": owner.to_bech32(),
+                "ticket_sequence": ticket_sequence,
+                "status": "unknown",
+            })
+        })
+    }
+
+    fn get_drc_escrow(&self, escrow_id: &Hash) -> Result<Value, RpcError> {
+        if *escrow_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams("zero DRC escrow id".into()));
+        }
+        Ok(json!({
+            "escrow_id": escrow_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_escrow_receipt(&self, escrow_id: &Hash) -> Result<Value, RpcError> {
+        if *escrow_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams("zero DRC escrow id".into()));
+        }
+        Ok(json!({
+            "escrow_id": escrow_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_check(&self, check_id: &Hash) -> Result<Value, RpcError> {
+        if *check_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams("zero DRC check id".into()));
+        }
+        Ok(json!({
+            "check_id": check_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_check_receipt(&self, check_id: &Hash) -> Result<Value, RpcError> {
+        if *check_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams("zero DRC check id".into()));
+        }
+        Ok(json!({
+            "check_id": check_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn submit_drc_payment_channel_create(
+        &mut self,
+        _tx: DrcPaymentChannelCreateTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC payment channel creates".into(),
+        ))
+    }
+
+    fn submit_drc_payment_channel_fund(
+        &mut self,
+        _tx: DrcPaymentChannelFundTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC payment channel funds".into(),
+        ))
+    }
+
+    fn submit_drc_payment_channel_claim(
+        &mut self,
+        _tx: DrcPaymentChannelClaimTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC payment channel claims".into(),
+        ))
+    }
+
+    fn submit_drc_payment_channel_close(
+        &mut self,
+        _tx: DrcPaymentChannelCloseTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC payment channel closes".into(),
+        ))
+    }
+
+    fn get_drc_payment_channel(&self, channel_id: &Hash) -> Result<Value, RpcError> {
+        if *channel_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel id".into(),
+            ));
+        }
+        Ok(json!({
+            "channel_id": channel_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_payment_channel_receipt(&self, channel_id: &Hash) -> Result<Value, RpcError> {
+        if *channel_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel id".into(),
+            ));
+        }
+        Ok(json!({
+            "channel_id": channel_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_payment_channel_fund_event(&self, fund_tx_id: &Hash) -> Result<Value, RpcError> {
+        if *fund_tx_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel fund tx id".into(),
+            ));
+        }
+        Ok(json!({
+            "fund_tx_id": fund_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_payment_channel_claim_event(&self, claim_tx_id: &Hash) -> Result<Value, RpcError> {
+        if *claim_tx_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel claim tx id".into(),
+            ));
+        }
+        Ok(json!({
+            "claim_tx_id": claim_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_payment_channel_schedule_event(
+        &self,
+        close_tx_id: &Hash,
+    ) -> Result<Value, RpcError> {
+        if *close_tx_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel close tx id".into(),
+            ));
+        }
+        Ok(json!({
+            "close_tx_id": close_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn verify_drc_payment_channel_claim(
+        &self,
+        channel_id: &Hash,
+        _cumulative_authorized: Amount,
+        _channel_claim_signature: &[u8],
+    ) -> Result<Value, RpcError> {
+        if *channel_id == Hash::ZERO {
+            return Err(RpcError::InvalidParams(
+                "zero DRC payment channel id".into(),
+            ));
+        }
+        Err(RpcError::Rejected(
+            "in-memory backend cannot verify payment channel claims".into(),
+        ))
+    }
+
+    fn submit_drc_trust_line_set(&mut self, _tx: DrcTrustLineSetTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit trust line sets".into(),
+        ))
+    }
+
+    fn submit_drc_issued_transfer(&mut self, _tx: DrcIssuedTransferTx) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit issued transfers".into(),
+        ))
+    }
+
+    fn get_drc_trust_line(
+        &self,
+        _holder: &Address,
+        _asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError> {
+        Ok(json!({ "status": "unknown" }))
+    }
+
+    fn get_drc_issuer_liability(
+        &self,
+        asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError> {
+        asset
+            .validate()
+            .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+        Ok(json!({ "status": "unknown", "outstanding": "0" }))
+    }
+
+    fn get_drc_issued_transfer_receipt(&self, transfer_tx_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "transfer_tx_id": transfer_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn submit_drc_issued_asset_policy_set(
+        &mut self,
+        _tx: agora_types::DrcIssuedAssetPolicySetTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit issued asset policy".into(),
+        ))
+    }
+
+    fn submit_drc_trust_line_issuer_control(
+        &mut self,
+        _tx: agora_types::DrcTrustLineIssuerControlTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit issuer control".into(),
+        ))
+    }
+
+    fn submit_drc_issued_clawback(
+        &mut self,
+        _tx: agora_types::DrcIssuedClawbackTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit clawback".into(),
+        ))
+    }
+
+    fn get_drc_issued_asset_policy(
+        &self,
+        _asset: &agora_types::IssuedAssetId,
+    ) -> Result<Value, RpcError> {
+        Ok(json!({ "status": "unknown" }))
+    }
+
+    fn get_drc_issued_asset_policy_receipt(
+        &self,
+        policy_set_tx_id: &Hash,
+    ) -> Result<Value, RpcError> {
+        Ok(json!({
+            "policy_set_tx_id": policy_set_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_trust_line_issuer_control_receipt(
+        &self,
+        control_tx_id: &Hash,
+    ) -> Result<Value, RpcError> {
+        Ok(json!({
+            "control_tx_id": control_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_issued_clawback_receipt(&self, clawback_tx_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "clawback_tx_id": clawback_tx_id.to_hex(),
+            "status": "unknown",
+        }))
+    }
+
+    fn get_drc_object(
+        &self,
+        object_id: &Hash,
+    ) -> Result<Option<DrcLedgerObjectDescriptor>, RpcError> {
+        Ok(self.drc_objects.get(object_id).cloned())
+    }
+
+    fn get_drc_account_objects(
+        &self,
+        owner: &Address,
+        kind: Option<DrcLedgerObjectKind>,
+        limit: usize,
+        cursor: Option<&str>,
+    ) -> Result<DrcLedgerObjectPage, RpcError> {
+        if cursor.is_some() {
+            return Err(RpcError::InvalidParams(
+                "in-memory DRC object fixture does not support cursors".into(),
+            ));
+        }
+        if !(1..=100).contains(&limit) {
+            return Err(RpcError::InvalidParams(
+                "DRC account-object limit must be 1..=100".into(),
+            ));
+        }
+        let objects = self
+            .drc_owner_objects
+            .get(owner)
+            .into_iter()
+            .flatten()
+            .filter(|descriptor| kind.is_none_or(|filter| descriptor.kind == filter))
+            .take(limit)
+            .cloned()
+            .collect();
+        Ok(DrcLedgerObjectPage {
+            owner: *owner,
+            kind,
+            objects,
+            next_cursor: None,
+        })
+    }
+
+    fn get_drc_operation(
+        &self,
+        operation_id: &Hash,
+    ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError> {
+        Ok(self.drc_operations.get(operation_id).cloned())
+    }
+
+    fn get_drc_transaction(
+        &self,
+        transaction_id: &Hash,
+    ) -> Result<Option<DrcAcceptedOperationReceipt>, RpcError> {
+        Ok(self
+            .drc_transaction_operations
+            .get(transaction_id)
+            .and_then(|operation_id| self.drc_operations.get(operation_id))
+            .cloned())
+    }
+
+    fn get_drc_account_policy(
+        &self,
+        account: &Address,
+    ) -> Result<Option<(DrcAccountPolicy, u64)>, RpcError> {
+        Ok(self.drc_account_policies.get(account).copied())
+    }
+
+    fn get_drc_deposit_preauth(
+        &self,
+        owner: &Address,
+        authorized_source: &Address,
+    ) -> Result<Option<DrcDepositPreauthStatus>, RpcError> {
+        Ok(self
+            .drc_deposit_preauths
+            .get(&(*owner, *authorized_source))
+            .copied())
+    }
+
+    fn get_drc_account_keys(
+        &self,
+        _account: &Address,
+    ) -> Result<Option<(Option<Address>, u64)>, RpcError> {
+        Ok(None)
+    }
+
+    fn get_drc_account_signer_list(
+        &self,
+        _account: &Address,
+    ) -> Result<Option<(u32, u32, u64)>, RpcError> {
+        Ok(None)
+    }
+
+    fn get_drc_payment(&self, payment_id: &Hash) -> Result<Option<DrcPaymentReceipt>, RpcError> {
+        Ok(self.drc_payment_receipts.get(payment_id).cloned())
+    }
+
+    fn get_drc_payment_by_invoice(
+        &self,
+        recipient: &Address,
+        invoice_id: &Hash,
+    ) -> Result<Option<DrcPaymentReceipt>, RpcError> {
+        if *invoice_id == Hash::ZERO {
+            return Ok(None);
+        }
+        let Some(payment_id) = self
+            .drc_payment_invoice_index
+            .get(&(*recipient, *invoice_id))
+        else {
+            return Ok(None);
+        };
+        let receipt = self
+            .drc_payment_receipts
+            .get(payment_id)
+            .ok_or_else(|| RpcError::Internal("DRC invoice index is missing its receipt".into()))?;
+        if receipt.to != *recipient
+            || receipt.invoice_id != *invoice_id
+            || receipt.payment_id != *payment_id
+        {
+            return Err(RpcError::Internal(
+                "DRC invoice index does not match receipt routing".into(),
+            ));
+        }
+        Ok(Some(receipt.clone()))
+    }
+
     fn get_balance(&self, address: &Address) -> Amount {
         self.balances.get(address).copied().unwrap_or(Amount::ZERO)
     }
@@ -503,6 +1182,28 @@ impl RpcBackend for InMemoryBackend {
             stake_ops: vec![],
             ovl_executions: vec![],
             drc_payments: vec![],
+            data_commitments: vec![],
+            drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
+            drc_multisign_attachments: vec![],
         })
     }
 
@@ -549,6 +1250,26 @@ impl RpcBackend for InMemoryBackend {
 
     fn get_reward_pool(&self, asset: &str) -> Result<Value, RpcError> {
         Ok(json!({ "asset": asset, "amount": 0 }))
+    }
+
+    fn get_native_asset_supply(&self, asset: &str) -> Result<Value, RpcError> {
+        let ticker = match asset.trim().to_ascii_uppercase().as_str() {
+            "TLT" => "TLT",
+            "OVL" => "OVL",
+            "DRC" => "DRC",
+            other => {
+                return Err(RpcError::InvalidParams(format!(
+                    "native asset must be TLT, OVL, or DRC, got {other}"
+                )));
+            }
+        };
+        Ok(json!({
+            "asset": ticker,
+            "maximum_supply": "0",
+            "issued_supply": "0",
+            "burned_supply": "0",
+            "net_supply": "0",
+        }))
     }
 
     fn get_protocol_treasuries(&self) -> Result<Value, RpcError> {

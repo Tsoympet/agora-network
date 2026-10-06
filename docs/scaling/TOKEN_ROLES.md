@@ -5,16 +5,22 @@
 | Mark | Locus (target) | Consensus role | Meaning in Agora |
 | --- | --- | --- | --- |
 | **TLT** | L1 UTXO | RandomX PoW block proposal / ordering | Scarce settlement money; base network fees; security treasury |
-| **OVL** | L1 accounts | PoS validator set (finality) | Execution gas; builder economy; technical governance collateral |
-| **DRC** | L1 accounts | PoS validator set (finality) | Payments / merchants / community economy; community governance collateral |
+| **OVL** | L1 accounts | PoS validator set (finality) | Sole programmable execution/gas domain; builder economy; technical governance collateral |
+| **DRC** | L1 accounts | PoS validator set (finality) | Contract-free typed payments/settlement; merchants/community economy; community governance collateral |
 
 ## Terminology
 
 "Bitcoin-class", "Ethereum-class", and "XRP-class" describe **product roles**, not protocol equivalence.
 
 - OVL is **not** Ethereum-equivalent (no claim of full MPT / EIP surface unless implemented and labeled honestly).
-- DRC is **not** XRPL-equivalent (no trust lines / DEX by default) and is **not** a stablecoin unless a separately audited stabilizer exists.
+- DRC is **not** XRPL-equivalent. Implemented trust lines, issued-asset controls,
+  escrow, Checks, payment channels, multisign, and Tickets are closed native
+  state-machine operations, not evidence of full parity or contracts. DRC is
+  not a stablecoin unless a separately audited stabilizer exists.
 - Prefer maturity levels (Scaffold → Mainnet ready) over “role-complete.”
+
+OVL is the only native asset that may enter a VM or smart-contract execution
+path. DRC has no bytecode, deploy/call, Hook, or contract-facing API.
 
 ## Issuance (target)
 
@@ -33,6 +39,6 @@
 | Concern | Code on `main` today | Trident target |
 | --- | --- | --- |
 | TLT | L1 UTXO + RandomX | Unchanged locus; keep hardening |
-| OVL | L2 ledger + revm lab | L1 native accounts + execution module |
-| DRC | L3 district ledger lab | L1 native accounts + payment module |
+| OVL | Historical L2 ledger + OVL-only revm lab | L1 native accounts + execution module |
+| DRC | Historical contract-free L3 district ledger lab | L1 native accounts + typed payment/state module |
 | Finality | Pure PoW blues | PoW ∧ OVL ⅔ ∧ DRC ⅔ |

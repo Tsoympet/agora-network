@@ -1,7 +1,8 @@
-//! Drachma (DRC) native L3 ledger — district balances + PoW coinbase under cap.
+//! Historical Drachma L3 lab ledger — typed district payments and PoW evidence.
 //!
-//! DRC is **native money on L3**. It is not an L1 UTXO asset. Caps align with
-//! the genesis registry mark.
+//! This non-canonical prototype is retained for migration reproduction. It has
+//! no smart-contract or VM path; canonical DRC is native Trident L1 account
+//! state.
 
 use std::collections::HashMap;
 

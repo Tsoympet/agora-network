@@ -25,11 +25,26 @@ Consensus objects must have a single canonical definition. Clients consume the s
 | `Address` | 20-byte account payload (secp256k1-derived); display as Bech32m `agora1…` / `agoratest1…` / `agoradev1…` |
 | `OutPoint` / `TxIn` / `TxOut` | UTXO references and outputs |
 | `Transaction` | Signed transfer (`public_key` + `signature`) |
-| `OvlExecutionTx` | Signed, chain-bound OVL value/execution envelope with gas limits |
-| `DrcPaymentTx` / `DrcPaymentOutboxEvent` | Signed DRC settlement and deterministic routing event |
+| `AccountTransfer` | Closed OVL/DRC value-transfer envelope; no call data or executable payload |
+| `OvlExecutionTx` | Signed, chain-bound OVL-only value/execution envelope with gas limits and no asset selector |
+| `DrcPaymentTx` / `DrcPaymentOutboxEvent` | Versioned signed DRC settlement and deterministic source/destination-tag routing event |
+| `DrcPaymentReceipt` / `DrcPaymentResult` | Versioned exact full-delivery result; no partial-delivery variant |
+| `DrcAccountPolicyTx` / `DrcAccountPolicy` | Versioned owner-authorized DRC destination-tag and DepositAuth flags |
+| `DrcDepositPreauthTx` / `DrcDepositPreauth` | Address-only recipient grant/revoke operation and canonical record |
+| `DrcTrustLineSetTx` / `DrcIssuedTransferTx` | Contract-free issuer-scoped trust-line and exact issued-value operations |
+| `DrcIssuedAssetPolicySetTx` / `DrcTrustLineIssuerControlTx` / `DrcIssuedClawbackTx` | Issued-asset authorization, freeze, and exact clawback controls; never native-asset controls |
+| `DataAvailabilityCommitment` | Versioned Borsh integrity/provenance payload for explicitly non-canonical source data |
+| `DataCommitmentAuthorization` | secp256k1 operator authorization bound to L1 chain, genesis, fingerprint, and replay nonce |
 | `TransactionBody` | Signable subset (no auth material) |
-| `BlockHeader` / `Block` | Multi-parent DAG header + UTXO/account/stake/execution/payment lanes |
+| `BlockHeader` / `Block` | Multi-parent DAG header + UTXO/account/stake, OVL-only execution, typed DRC, and data lanes |
 | `TridentHeader` | Offline-only, version-gated commitment for a future Trident block path |
+
+`Block.ovl_executions` is the only programmable-execution lane. Every
+`Block.drc_*` lane is a closed protocol-native operation family: payments,
+policy, multisign/keys/Tickets, escrow, Checks, payment channels, trust lines,
+issued-asset controls, freeze, and clawback. DRC has no VM or contract
+transaction type. Serde rejects unknown execution selectors and unknown block
+lanes so JSON cannot smuggle DRC into an OVL or generic execution path.
 
 See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../assets/NATIVE_ASSETS.md`](../assets/NATIVE_ASSETS.md).
 
@@ -38,6 +53,13 @@ See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../as
 - `Transaction::tx_id()` = SHA-256(borsh(tx))
 - `Block::id()` = SHA-256(borsh(header))
 - `Block::compute_tx_root` = pairwise merkle over tx ids
+- `Block::compute_body_root` = compatibility-preserving nested roots for the
+  append-only lanes; issued-control entries activate the current v17 body root
+  over v16 trust-line/issued-transfer lanes and all prior lane roots
+
+`DataCommitmentSource` uses explicit stable Borsh discriminants; future variants
+must be appended. `Block` deserialization accepts older bodies that end before
+later appended lanes, but partial lengths/elements remain invalid.
 
 ## Header version boundary
 
@@ -65,5 +87,6 @@ binding, and an explicit consensus/network protocol switch.
 ## Change process
 
 1. Edit definitions in `core/crates/types`.
-2. Run `cargo test -p agora-types` (regenerates bindings).
+2. Run `cargo test -p agora-types export_shared_types` (regenerates the
+   explicitly exported shared bindings).
 3. Update any `apps/` imports of generated bindings.

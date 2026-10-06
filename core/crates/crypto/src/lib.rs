@@ -8,6 +8,18 @@ mod address;
 mod attestation;
 mod bip44;
 mod data_availability;
+mod drc_check;
+mod drc_deposit_preauth;
+mod drc_escrow;
+mod drc_issued_controls;
+mod drc_multisign;
+mod drc_operation;
+mod drc_payment_channel;
+mod drc_policy;
+mod drc_regular_key;
+mod drc_signer_list;
+mod drc_ticket;
+mod drc_trust_line;
 mod error;
 mod execution;
 mod keys;
@@ -26,6 +38,42 @@ pub use bip44::{
     derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,
 };
 pub use data_availability::{sign_data_commitment_bound, verify_data_commitment_bound};
+pub use drc_check::{
+    sign_drc_check_cancel_bound, sign_drc_check_cash_bound, sign_drc_check_create_bound,
+    verify_drc_check_cancel_bound, verify_drc_check_cash_bound, verify_drc_check_create_bound,
+};
+pub use drc_deposit_preauth::{sign_drc_deposit_preauth_bound, verify_drc_deposit_preauth_bound};
+pub use drc_escrow::{
+    sign_drc_escrow_cancel_bound, sign_drc_escrow_create_bound, sign_drc_escrow_finish_bound,
+    verify_drc_escrow_cancel_bound, verify_drc_escrow_create_bound, verify_drc_escrow_finish_bound,
+};
+pub use drc_issued_controls::{
+    sign_drc_issued_asset_policy_set_bound, sign_drc_issued_clawback_bound,
+    sign_drc_trust_line_issuer_control_bound, verify_drc_issued_asset_policy_set_bound,
+    verify_drc_issued_clawback_bound, verify_drc_trust_line_issuer_control_bound,
+};
+pub use drc_multisign::{
+    sign_drc_multisign_participant_bound, validate_drc_operation_authorization_fields,
+    verify_drc_multisign_against_list,
+};
+pub use drc_operation::verify_bound_secp256k1;
+pub use drc_payment_channel::{
+    sign_drc_payment_channel_claim_bound, sign_drc_payment_channel_close_bound,
+    sign_drc_payment_channel_create_bound, sign_drc_payment_channel_fund_bound,
+    sign_payment_channel_offledger_claim, verify_drc_payment_channel_claim_bound,
+    verify_drc_payment_channel_close_bound, verify_drc_payment_channel_create_bound,
+    verify_drc_payment_channel_fund_bound, verify_payment_channel_offledger_claim,
+};
+pub use drc_policy::{sign_drc_account_policy_bound, verify_drc_account_policy_bound};
+pub use drc_regular_key::{sign_drc_regular_key_bound, verify_drc_regular_key_bound};
+pub use drc_signer_list::{
+    sign_drc_signer_list_bound, verify_drc_signer_list_single_signature_bound,
+};
+pub use drc_ticket::{sign_drc_ticket_create_bound, verify_drc_ticket_create_bound};
+pub use drc_trust_line::{
+    sign_drc_issued_transfer_bound, sign_drc_trust_line_set_bound,
+    verify_drc_issued_transfer_bound, verify_drc_trust_line_set_bound,
+};
 pub use error::CryptoError;
 pub use execution::{sign_ovl_execution_bound, verify_ovl_execution_bound};
 pub use keys::{parse_compressed_public_key, KeyPair, PublicKeyBytes, SignatureBytes};

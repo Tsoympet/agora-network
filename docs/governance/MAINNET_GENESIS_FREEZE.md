@@ -1,4 +1,11 @@
-# Mainnet genesis freeze
+# Historical v2 mainnet genesis freeze (superseded)
+
+> **Historical only.** This checklist documents the pre-Trident layered draft
+> and must not be used to freeze Agora Trident L1. Its L2/L3 PoW and supply
+> statements describe retained artifacts, not canonical OVL/DRC policy.
+> Trident has one L1 genesis, only TLT is mined, OVL is the sole programmable
+> execution asset, and DRC is contract-free typed account/payment state. See
+> [`../genesis/README.md`](../genesis/README.md).
 
 Mainnet refuses boot until a frozen Block 0 is published. This checklist turns
 `docs/genesis/mainnet.genesis.draft.json` into a real `mainnet.genesis.json`.

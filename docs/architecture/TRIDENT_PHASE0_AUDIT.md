@@ -98,6 +98,8 @@ Key reusable design from that branch (concepts, not blind copy):
 - Account balances per district; payment + destination tags + path pay
 - Attestor “sign” path is set-membership of bonded addresses — **no secp256k1 attest verify**
 - `InMemoryTransport` only; mutation-order hazards called out in product requirements must be audited when porting
+- Historical payment code is contract-free. No bridge/lab API may route DRC
+  into the OVL `revm` executor.
 
 **Maturity language on `main`:** README / `PATH_TO_COMPLETE_CHAIN.md` say “role-complete” / “engineering finalized.” Trident replaces that with explicit maturity levels (Scaffold → Mainnet ready). OVL is **not** Ethereum-equivalent; DRC is **not** XRPL-equivalent.
 
@@ -200,7 +202,7 @@ No market-price combining of stakes. No admin bypass that drops a quorum. PoW ma
 | --- | --- | --- |
 | **TLT** | UTXO (preserve existing hardened path) | Settlement + mining coinbase already UTXO |
 | **OVL** | Native account module + staking substate | Matches execution/gas; avoids dual EVM ledger |
-| **DRC** | Native account module + staking/payment substate | Matches payments, tags, escrow |
+| **DRC** | Native account module + staking/typed-payment substate | Matches contract-free payments, tags, escrow, and settlement objects |
 
 All modules commit into **one Merkle/Borsh state root** applied atomically in the L1 transition. Cross-asset spends are rejected. No ERC-20 / application token confusion with native IDs.
 
@@ -241,7 +243,7 @@ sum(accounts + utxos + stake + unbonding + treasuries + escrow + burned_accounti
 | --- | --- | --- | --- |
 | Base network | TLT | Bytes, state growth, anti-spam, inclusion | TLT miners (+ optional burn/treasury split in policy) |
 | Execution | OVL | Compute, storage, deploy | OVL validators / builder treasury / burn per policy |
-| Payment | DRC | Payments, merchants, tags, escrow services | DRC validators / community treasury / burn per policy |
+| Payment | DRC | Typed payments, merchants, tags, escrow/settlement services; never VM execution | DRC validators / community treasury / burn per policy |
 
 Fee sponsorship and wallet atomic acquisition are **supported at protocol/wallet layer** without consensus price oracles. Fees credit only for `Accepted` transactions; concurrent DAG entitlement is deterministic via acceptance order.
 
@@ -274,7 +276,13 @@ Acceptance alone drives UTXO/account mutation, fee attribution, coinbase validat
 
 ### 3.8 DRC payment domain (L1 module)
 
-Native account payments, destination tags, merchant invoices, escrow, recurring-auth scaffold, multisig accounts, channel extension points. Validation before mutation; duplicate IDs / overflow checks before debit; outbox for transport events.
+Native account payments, destination tags, merchant invoices, escrow, Checks,
+payment channels, trust lines, issued assets and issuer controls, multisign,
+Tickets, and related payment capabilities are explicit typed transitions.
+They are not contracts and cannot invoke the OVL executor. Validation precedes
+mutation; duplicate IDs and overflow checks precede debit; transport events use
+an outbox. DRC will not gain a VM, bytecode, deploy/call, Hook, or generic
+execution API.
 
 ### 3.9 Staking
 
@@ -341,7 +349,7 @@ Do not manually copy balances with undocumented scripts.
 | File | Action |
 | --- | --- |
 | Port useful `ovolos-rollup` → `state-machine`/`execution` module | Delete compact unsigned + fund_caller |
-| Port useful `bridge-sdk` payment paths → DRC module | Fix mutation order; outbox |
+| Port useful `bridge-sdk` typed payment paths → DRC module | Keep contract-free; fix mutation order; outbox |
 | `layers-*` | Mark deprecated for money; optional lab |
 
 ### Phase 5 — governance & community
@@ -474,6 +482,7 @@ Each PR: scope, invariants, tests, migration impact, security notes; no unrelate
 | R10 | Acceptance vs Virtual soft-skip inconsistency | Single acceptance authority; Virtual becomes implementation detail |
 | R11 | Slashing parameters too aggressive | Conservative defaults + docs |
 | R12 | CI flaky RandomX / RocksDB | Dedicated jobs; no merge on red |
+| R13 | Generic execution routing admits DRC | OVL-specific types/RPC/P2P lanes; strict JSON; negative routing tests |
 
 ---
 
@@ -504,6 +513,7 @@ Each PR: scope, invariants, tests, migration impact, security notes; no unrelate
 
 - OVL gas spend; chain ID; no unsigned compact
 - DRC pay atomicity; duplicate ID; overflow-before-debit; outbox
+- DRC cannot deserialize, route, or fund any VM/deploy/call path; OVL execution remains available
 
 ### Phase 5
 
@@ -525,10 +535,11 @@ Each PR: scope, invariants, tests, migration impact, security notes; no unrelate
 | --- | --- | --- |
 | State model | Mixed: TLT UTXO + OVL/DRC accounts | Reuses hardened UTXO; matches execution/payments |
 | Acceptance | Port #82 concepts onto main | Preserve #76–#81; gain explicit authority |
-| Layer crates | Deprecate as money sources; reuse code | Avoid rewrite of payment/EVM semantics |
+| Layer crates | Deprecate as money sources; reuse typed DRC payment and OVL-only EVM code | Preserve history without creating a DRC execution route |
 | Migration | Genesis-native preferred | No public value to preserve |
 | OVL execution claim | Phased; not Ethereum-equivalent | Honest maturity |
 | DRC claim | Not a stablecoin; not XRPL-equivalent | Spec + threat model |
+| DRC execution | No contracts or VM; typed protocol operations only | Keep payment semantics deterministic and closed |
 | Finality | Triple conjunction | Censorship resistance + dual community stake |
 | Fee conversion | No consensus oracle | Avoid manipulation / complexity |
 

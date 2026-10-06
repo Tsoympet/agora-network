@@ -8,7 +8,15 @@ No value-bearing public multi-node OVL/DRC network must be preserved. **Launch T
 
 - Keep `docs/genesis/ovolos.*.json` and `drachma.*.json` as **historical artifacts**.
 - Mark `agora-layers` mint/credit RPCs as lab-only; disable on shared testnet/mainnet.
-- Reuse payment/EVM **code**, not live balances, unless an operator explicitly opts into snapshot migration.
+- Reuse closed DRC typed-payment **code** and OVL-only EVM **code**, not live
+  balances, unless an operator explicitly opts into snapshot migration. EVM
+  state can map only to a separately reviewed OVL policy; it can never become
+  DRC state or capability.
+
+Historical Drachma snapshots contain balances, typed payments, tags, bridge
+messages, and attestor state—not contracts. The retained `revm` snapshots and
+`eth_*` methods belong exclusively to the historical Ovolos lab. Neither lab
+runtime is a routable canonical Trident service.
 
 ## If balances require migration
 
@@ -66,16 +74,16 @@ The exporter:
 - commits proposed OVL/DRC allocations into a domain-separated SHA-256 Merkle
   root;
 - commits the complete audit body (allocations, district provenance, locks,
-  messages, and quarantined EVM head state) into `snapshot_root`;
+  messages, and quarantined **OVL** EVM head state) into `snapshot_root`;
 - reconciles minted, ledger, proposed-claim, and retired/burned totals; and
 - reports bridge locks, pending messages or L2 transactions, escrow mismatches,
   and non-empty EVM head state as blockers.
 
 The snapshot always contains `"claim_activation": false`. The tool does not
 write an L1 datadir, mint assets, generate claim transactions, choose freeze
-heights, or decide how historical EVM state and bridge locks should map into
-Trident. Those actions require a separately reviewed policy and claim
-transition.
+heights, or decide how historical OVL EVM state and bridge locks should map
+into Trident. No migration policy may reinterpret that EVM state as DRC.
+Those actions require a separately reviewed policy and claim transition.
 
 ### Conservation interpretation
 

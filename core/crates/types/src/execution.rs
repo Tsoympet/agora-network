@@ -4,15 +4,19 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Address, Amount, Hash};
+use crate::{Address, Amount, Hash, NativeAssetId};
 
 /// Domain separator for network-bound OVL execution signatures.
 pub const OVL_EXECUTION_SIGNING_DOMAIN: &[u8] = b"agora-trident-ovl-execution-v1";
 
 /// Signed account-based OVL value transfer or execution request.
+///
+/// The domain is fixed to OVL by the type and signing domain. There is no
+/// serialized asset selector, and JSON callers may not add one.
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
+#[serde(deny_unknown_fields)]
 pub struct OvlExecutionTx {
     pub version: u32,
     pub from: Address,
@@ -28,6 +32,11 @@ pub struct OvlExecutionTx {
 }
 
 impl OvlExecutionTx {
+    /// The only native asset that can enter the programmable execution lane.
+    pub const fn execution_asset(&self) -> NativeAssetId {
+        NativeAssetId::OVL
+    }
+
     pub fn signing_bytes_bound(&self, chain_id: &str, genesis: &Hash) -> Vec<u8> {
         let body = (
             OVL_EXECUTION_SIGNING_DOMAIN,
@@ -99,5 +108,24 @@ mod tests {
 
         tx.signature = vec![7u8; 64];
         assert_ne!(tx.tx_id(), unsigned_id);
+        assert_eq!(tx.execution_asset(), NativeAssetId::OVL);
+    }
+
+    #[test]
+    fn json_rejects_asset_selectors_on_ovl_execution() {
+        let tx = OvlExecutionTx::unsigned(
+            Address([1u8; 20]),
+            Address([2u8; 20]),
+            Amount::from_base_units(3),
+            40_000,
+            5,
+            6,
+            vec![],
+        );
+        let mut value = serde_json::to_value(tx).unwrap();
+        value["asset"] = serde_json::json!("DRC");
+
+        let error = serde_json::from_value::<OvlExecutionTx>(value).unwrap_err();
+        assert!(error.to_string().contains("unknown field `asset`"));
     }
 }

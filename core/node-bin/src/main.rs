@@ -2,6 +2,8 @@
 //!
 //! Wires consensus, state, p2p, HTTP JSON-RPC, and PoW-gated block admission.
 
+#![cfg_attr(test, allow(clippy::all))]
+
 mod admit;
 mod backend;
 mod civic;
@@ -32,8 +34,15 @@ use tracing::{info, warn};
 
 use crate::admit::{AdmitError, ChainBootConfig, ChainState};
 use crate::backend::{
-    admit_account_transfer, admit_drc_payment, admit_ovl_execution, admit_stake_tx,
-    admit_transaction, NodeBackend, NodeBackendConfig,
+    admit_account_transfer, admit_drc_account_policy, admit_drc_check_cancel, admit_drc_check_cash,
+    admit_drc_check_create, admit_drc_deposit_preauth, admit_drc_escrow_cancel,
+    admit_drc_escrow_create, admit_drc_escrow_finish, admit_drc_issued_asset_policy_set,
+    admit_drc_issued_clawback, admit_drc_issued_transfer, admit_drc_payment,
+    admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
+    admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
+    admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_issuer_control,
+    admit_drc_trust_line_set, admit_ovl_execution, admit_stake_tx, admit_transaction, NodeBackend,
+    NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::startup::{p2p_identity_path, prepare_legacy_datadir};
@@ -160,14 +169,16 @@ fn admit_gossip_block(
     mempool: &Arc<Mutex<Mempool>>,
     block: Block,
 ) -> Result<Hash, AdmitError> {
-    let id = {
+    let (id, virtual_blue_score) = {
         let mut guard = chain
             .lock()
             .map_err(|_| AdmitError::Storage("chain lock poisoned".into()))?;
-        guard.admit_block(block.clone())?
+        let id = guard.admit_block(block.clone())?;
+        let score = guard.virtual_blue_score()?;
+        (id, score)
     };
     if let Ok(mut pool) = mempool.lock() {
-        pool.evict_for_block(&block);
+        pool.evict_for_block_at_blue_score(&block, virtual_blue_score);
     }
     Ok(id)
 }
@@ -656,6 +667,7 @@ async fn main() {
     let tx_auth = agora_state_machine::TxAuthContext {
         chain_id: chain_params.network.chain_id().into(),
         genesis: genesis_hash,
+        data_availability_network_fingerprint: None,
     };
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));
@@ -1032,12 +1044,388 @@ async fn main() {
                         }
                     }
                     NetworkMessage::DrcPayment(tx) => {
-                        match admit_drc_payment(store.as_ref(), &mempool, tx, &tx_auth) {
+                        let application_blue_score = chain
+                            .lock()
+                            .map_err(|_| "chain lock poisoned".to_string())
+                            .and_then(|guard| {
+                                guard
+                                    .virtual_blue_score()
+                                    .map_err(|error| error.to_string())
+                            });
+                        match application_blue_score.and_then(|score| {
+                            admit_drc_payment(store.as_ref(), &mempool, tx, &tx_auth, score)
+                                .map_err(|error| error.to_string())
+                        }) {
                             Ok(id) => {
                                 info!(%peer, %topic, payment = %id.to_hex(), "DRC payment gossip admitted");
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "DRC payment gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcAccountPolicy(tx) => {
+                        match admit_drc_account_policy(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, policy = %id.to_hex(), "DRC account-policy gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC account-policy gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcDepositPreauth(tx) => {
+                        match admit_drc_deposit_preauth(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, preauth = %id.to_hex(), "DRC deposit-preauthorization gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC deposit-preauthorization gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcRegularKey(tx) => {
+                        match admit_drc_regular_key(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, regular_key = %id.to_hex(), "DRC regular-key gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC regular-key gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcSignerList(tx) => {
+                        match admit_drc_signer_list(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, signer_list = %id.to_hex(), "DRC signer-list gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC signer-list gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcTicketCreate(tx) => {
+                        match admit_drc_ticket_create(store.as_ref(), &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, ticket_create = %id.to_hex(), "DRC ticket-create gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC ticket-create gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcEscrowCreate(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_escrow_create(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, escrow_create = %id.to_hex(), "DRC escrow-create gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC escrow-create gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcEscrowFinish(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_escrow_finish(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, escrow_finish = %id.to_hex(), "DRC escrow-finish gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC escrow-finish gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcEscrowCancel(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_escrow_cancel(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, escrow_cancel = %id.to_hex(), "DRC escrow-cancel gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC escrow-cancel gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcCheckCreate(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_check_create(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, check_create = %id.to_hex(), "DRC check-create gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC check-create gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcCheckCash(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_check_cash(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, check_cash = %id.to_hex(), "DRC check-cash gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC check-cash gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcCheckCancel(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_check_cancel(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, check_cancel = %id.to_hex(), "DRC check-cancel gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC check-cancel gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcPaymentChannelCreate(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_payment_channel_create(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, channel_create = %id.to_hex(), "DRC payment-channel-create gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC payment-channel-create gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcPaymentChannelFund(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_payment_channel_fund(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, channel_fund = %id.to_hex(), "DRC payment-channel-fund gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC payment-channel-fund gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcPaymentChannelClaim(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_payment_channel_claim(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, channel_claim = %id.to_hex(), "DRC payment-channel-claim gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC payment-channel-claim gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcPaymentChannelClose(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_payment_channel_close(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, channel_close = %id.to_hex(), "DRC payment-channel-close gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC payment-channel-close gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcTrustLineSet(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_trust_line_set(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, trust_line_set = %id.to_hex(), "DRC trust-line-set gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC trust-line-set gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcIssuedTransfer(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_issued_transfer(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, issued_transfer = %id.to_hex(), "DRC issued-transfer gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC issued-transfer gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcIssuedAssetPolicySet(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_issued_asset_policy_set(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, policy_set = %id.to_hex(), "DRC issued asset policy gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC issued asset policy gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcTrustLineIssuerControl(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_trust_line_issuer_control(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, issuer_control = %id.to_hex(), "DRC issuer control gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC issuer control gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcIssuedClawback(tx) => {
+                        let blue_score = chain
+                            .lock()
+                            .ok()
+                            .and_then(|g| g.next_template_blue_score().ok())
+                            .unwrap_or(1);
+                        match admit_drc_issued_clawback(
+                            store.as_ref(),
+                            &mempool,
+                            tx,
+                            &tx_auth,
+                            blue_score,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, clawback = %id.to_hex(), "DRC issued clawback gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "DRC issued clawback gossip rejected");
                             }
                         }
                     }

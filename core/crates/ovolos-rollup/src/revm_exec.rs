@@ -1,9 +1,9 @@
-//! Production EVM binding via the audited `revm` crate.
+//! Historical OVL-only EVM binding via the audited `revm` crate.
 //!
-//! OVL plays the Ethereum role on L2: persistent account/contract state (including
-//! storage), value transfers, CREATE, and gas-metered execution. State roots are
-//! deterministic SHA-256 digests over the account + storage cache (not full
-//! Ethereum MPT roots yet).
+//! The pre-Trident OVL lab has persistent account/contract state (including
+//! storage), value transfers, CREATE, and gas-metered execution. DRC never
+//! enters this module. State roots are deterministic SHA-256 digests over the
+//! account + storage cache, not full Ethereum MPT roots.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;

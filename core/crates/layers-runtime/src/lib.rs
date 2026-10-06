@@ -3,6 +3,8 @@
 //! This in-process runtime is retained for tests, migration evidence, and code
 //! reuse. It is not a public multi-chain network or a canonical monetary state.
 //! Under Trident, OVL and DRC are native L1 account assets and are never mined.
+//! The embedded EVM is OVL-only; DRC exposes typed payment operations and has no
+//! contract, VM, deploy, or call path.
 
 mod error;
 mod migration;

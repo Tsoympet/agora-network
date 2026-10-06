@@ -18,6 +18,8 @@ pub enum StateError {
     ImmatureCoinbase(String),
     #[error("supply cap exceeded")]
     SupplyCapExceeded,
+    #[error("burned supply exceeds issued supply")]
+    BurnedSupplyExceedsIssued,
     #[error("block/tx limit: {0}")]
     BlockLimit(String),
     #[error("duplicate outpoint: {0}")]

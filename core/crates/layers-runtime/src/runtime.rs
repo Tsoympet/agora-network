@@ -11,7 +11,7 @@ use agora_ovolos_rollup::{
     decode_evm_tx, Batch, BatchCommitment, BatchStatus, EvmExecutor, EvmTx, FraudProof, OvlBlock,
     OvolosGenesis, OvolosRollup, RevmExecutor, RollupCheckpoint, OVOLOS_POW_ALGORITHM,
 };
-use agora_types::{Address, Amount, DataAvailabilityCommitment, Hash};
+use agora_types::{Address, Amount, DataAvailabilityCommitment, Hash, NativeAssetId};
 use serde::Serialize;
 
 use crate::persist::{parse_hash, LayersCheckpoint};
@@ -64,6 +64,10 @@ pub struct LayerInfo {
     /// Required labeling: this process is never canonical Trident state.
     pub canonical_l1: bool,
     pub maturity: &'static str,
+    /// The historical EVM lab is fixed to OVL and has no asset selector.
+    pub programmable_execution_asset: NativeAssetId,
+    /// DRC remains a closed typed-payment state machine even in the lab.
+    pub drc_programmable_execution: bool,
     pub hub_id: String,
     pub ovl_genesis_hash: String,
     pub ovl_chain_id: String,
@@ -99,14 +103,15 @@ pub struct LayerInfo {
 
 /// Historical in-process layer lab for integration tests and migration evidence.
 ///
-/// The lab uses `RevmExecutor` as reusable execution machinery; OVL is not
-/// Ethereum-equivalent and its canonical balance belongs to Trident L1.
+/// The lab uses `RevmExecutor` only for historical OVL execution. DRC has no
+/// route into that executor; its lab state remains typed payments only. OVL is
+/// not Ethereum-equivalent and both canonical balances belong to Trident L1.
 pub struct LayersRuntime {
     rollup: OvolosRollup<RevmExecutor>,
     intents: IntentEngine<CompositeSolver>,
     transport: Arc<InMemoryTransport>,
-    /// Pending compact EVM txs (`to||value||data`) for Ethereum-class mempool.
-    l2_mempool: Vec<EvmTx>,
+    /// Pending compact EVM txs (`to||value||data`) for the historical OVL lab.
+    ovl_evm_mempool: Vec<EvmTx>,
     ovl_genesis_hash: String,
     ovl_chain_id: String,
     /// Numeric chain id for `eth_chainId` (derived from genesis string hash).
@@ -165,7 +170,7 @@ impl LayersRuntime {
             rollup,
             intents,
             transport,
-            l2_mempool: Vec::new(),
+            ovl_evm_mempool: Vec::new(),
         })
     }
 
@@ -187,6 +192,8 @@ impl LayersRuntime {
         LayerInfo {
             canonical_l1: false,
             maturity: "Experimental",
+            programmable_execution_asset: NativeAssetId::OVL,
+            drc_programmable_execution: false,
             hub_id: self.hub_id.clone(),
             ovl_genesis_hash: self.ovl_genesis_hash.clone(),
             ovl_chain_id: self.ovl_chain_id.clone(),
@@ -263,8 +270,8 @@ impl LayersRuntime {
             .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
-    /// Execute txs against the current rollup head and return the post-state root.
-    pub fn execute_evm_batch(
+    /// Execute OVL txs against the current lab rollup head.
+    pub fn execute_ovl_evm_batch(
         &self,
         prev_state_root: &Hash,
         txs: &[EvmTx],
@@ -582,18 +589,18 @@ impl LayersRuntime {
             .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
-    // --- Historical EVM-compatibility lab helpers (`eth_*`) ---
+    // --- Historical OVL-only EVM-compatibility lab helpers (`eth_*`) ---
 
-    pub fn eth_chain_id(&self) -> u64 {
+    pub fn ovl_eth_chain_id(&self) -> u64 {
         self.ovl_eth_chain_id
     }
 
-    pub fn eth_block_number(&self) -> u64 {
+    pub fn ovl_eth_block_number(&self) -> u64 {
         self.rollup.tip_height().max(self.rollup.next_sequence())
     }
 
     /// Prefer the lab OVL ledger balance; fall back to its EVM account cache.
-    pub fn eth_get_balance(&self, address: Address) -> u128 {
+    pub fn ovl_eth_get_balance(&self, address: Address) -> u128 {
         let ovl = self.rollup.ovl().balance(address).as_base_units() as u128;
         if ovl > 0 {
             return ovl;
@@ -604,51 +611,60 @@ impl LayersRuntime {
             .unwrap_or(0)
     }
 
-    pub fn eth_get_transaction_count(&self, address: Address) -> u64 {
+    pub fn ovl_eth_get_transaction_count(&self, address: Address) -> u64 {
         self.rollup
             .executor()
             .nonce_of(&self.rollup.head_state_root(), address.0)
             .unwrap_or(0)
     }
 
-    pub fn eth_get_code(&self, address: Address) -> Vec<u8> {
+    pub fn ovl_eth_get_code(&self, address: Address) -> Vec<u8> {
         self.rollup
             .executor()
             .code_of(&self.rollup.head_state_root(), address.0)
     }
 
-    pub fn eth_get_storage_at(&self, address: Address, slot: [u8; 32]) -> [u8; 32] {
+    pub fn ovl_eth_get_storage_at(&self, address: Address, slot: [u8; 32]) -> [u8; 32] {
         self.rollup
             .executor()
             .storage_at_bytes(&self.rollup.head_state_root(), address.0, slot)
     }
 
-    pub fn eth_call(&self, to: Address, data: &[u8], value: u128) -> Result<Vec<u8>, LayersError> {
+    pub fn ovl_eth_call(
+        &self,
+        to: Address,
+        data: &[u8],
+        value: u128,
+    ) -> Result<Vec<u8>, LayersError> {
         self.rollup
             .executor()
             .eth_call(&self.rollup.head_state_root(), to.0, data, value)
             .map_err(|e| LayersError::Rollup(e.to_string()))
     }
 
-    /// Admit a signed RLP or compact EVM tx into the L2 mempool (`eth_sendRawTransaction`).
-    pub fn eth_send_raw_transaction(&mut self, raw: EvmTx) -> Result<Hash, LayersError> {
+    /// Admit a signed RLP or compact EVM tx into the OVL lab mempool.
+    pub fn ovl_eth_send_raw_transaction(&mut self, raw: EvmTx) -> Result<Hash, LayersError> {
         // Validate decode (recovers sender for RLP-signed txs).
         let _decoded = decode_evm_tx(&raw).map_err(|e| LayersError::Rollup(e.to_string()))?;
         let id = Hash::hash_bytes(&raw.0);
-        if self.l2_mempool.iter().any(|t| Hash::hash_bytes(&t.0) == id) {
+        if self
+            .ovl_evm_mempool
+            .iter()
+            .any(|t| Hash::hash_bytes(&t.0) == id)
+        {
             return Ok(id);
         }
-        self.l2_mempool.push(raw);
+        self.ovl_evm_mempool.push(raw);
         Ok(id)
     }
 
-    pub fn l2_mempool_len(&self) -> usize {
-        self.l2_mempool.len()
+    pub fn ovl_evm_mempool_len(&self) -> usize {
+        self.ovl_evm_mempool.len()
     }
 
-    /// Drain pending L2 txs (for sequencer batch building).
-    pub fn drain_l2_mempool(&mut self) -> Vec<EvmTx> {
-        std::mem::take(&mut self.l2_mempool)
+    /// Drain pending OVL EVM txs for historical sequencer batch building.
+    pub fn drain_ovl_evm_mempool(&mut self) -> Vec<EvmTx> {
+        std::mem::take(&mut self.ovl_evm_mempool)
     }
 
     /// Persist L2/L3 state under `dir/layers-checkpoint.json`.
@@ -673,7 +689,7 @@ impl LayersRuntime {
             sequencer_bonds: self.rollup.sequencers().bonds_snapshot(),
             revm_snapshots,
             bridge: self.intents.bridge().export_checkpoint(),
-            l2_mempool: self.l2_mempool.iter().map(|t| t.0.clone()).collect(),
+            l2_mempool: self.ovl_evm_mempool.iter().map(|t| t.0.clone()).collect(),
         };
         cp.save(dir)
     }
@@ -710,7 +726,7 @@ impl LayersRuntime {
             .bridge_mut()
             .import_checkpoint(cp.bridge)
             .map_err(|e| LayersError::Bridge(e.to_string()))?;
-        self.l2_mempool = cp.l2_mempool.into_iter().map(EvmTx).collect();
+        self.ovl_evm_mempool = cp.l2_mempool.into_iter().map(EvmTx).collect();
         Ok(true)
     }
 }
@@ -735,7 +751,7 @@ mod tests {
         .unwrap();
         rt.mint_ovl(payer, Amount::from_base_units(50_000)).unwrap();
         let txs = vec![encode_value_transfer([0xB2; 20], 9)];
-        let post = rt.execute_evm_batch(&Hash::ZERO, &txs).unwrap();
+        let post = rt.execute_ovl_evm_batch(&Hash::ZERO, &txs).unwrap();
         let batch = Batch {
             sequence: 0,
             prev_state_root: Hash::ZERO,
@@ -781,7 +797,7 @@ mod tests {
             .unwrap();
         let transactions = vec![encode_value_transfer([0xB2; 20], 9)];
         let post_state_root = runtime
-            .execute_evm_batch(&Hash::ZERO, &transactions)
+            .execute_ovl_evm_batch(&Hash::ZERO, &transactions)
             .unwrap();
         let batch = Batch {
             sequence: 0,
@@ -808,6 +824,28 @@ mod tests {
     }
 
     #[test]
+    fn historical_drc_credit_never_enters_the_ovl_evm_ledger() {
+        let mut runtime = LayersRuntime::new(LayersRuntimeConfig::default()).unwrap();
+        let account = Address([0xC3; 20]);
+
+        runtime
+            .credit_drc("agora-hub", account, Amount::from_base_units(500))
+            .unwrap();
+
+        assert_eq!(
+            runtime.drc_balance("agora-hub", account).as_base_units(),
+            500
+        );
+        assert_eq!(runtime.ovl_balance(account), Amount::ZERO);
+        assert_eq!(runtime.ovl_eth_get_balance(account), 0);
+        assert_eq!(
+            runtime.info().programmable_execution_asset,
+            NativeAssetId::OVL
+        );
+        assert!(!runtime.info().drc_programmable_execution);
+    }
+
+    #[test]
     fn end_to_end_layers_from_genesis() {
         let payer = Address([0xA1; 20]);
         let mut rt = LayersRuntime::new(LayersRuntimeConfig {
@@ -825,7 +863,7 @@ mod tests {
 
         let to = [0xB2u8; 20];
         let txs = vec![encode_value_transfer(to, 42)];
-        let post = rt.execute_evm_batch(&Hash::ZERO, &txs).unwrap();
+        let post = rt.execute_ovl_evm_batch(&Hash::ZERO, &txs).unwrap();
         let batch = Batch {
             sequence: 0,
             prev_state_root: Hash::ZERO,
@@ -841,14 +879,16 @@ mod tests {
         let treasury = Address::from_hex("ff9ec96f09eb154d038a552ecae59c50204ea9a9").unwrap();
         assert!(rt.drc_balance("agora-hub", treasury).as_base_units() > 0);
         assert!(rt.ovl_balance(treasury).as_base_units() > 0);
-        assert!(rt.eth_chain_id() > 0);
+        assert!(rt.ovl_eth_chain_id() > 0);
         // gas_payer was charged flat OVL gas for the batch.
-        assert!(rt.eth_get_balance(payer) < 1_000_000);
-        assert!(rt.eth_get_balance(payer) > 0);
+        assert!(rt.ovl_eth_get_balance(payer) < 1_000_000);
+        assert!(rt.ovl_eth_get_balance(payer) > 0);
 
         let info = rt.info();
         assert!(!info.canonical_l1);
         assert_eq!(info.maturity, "Experimental");
+        assert_eq!(info.programmable_execution_asset, NativeAssetId::OVL);
+        assert!(!info.drc_programmable_execution);
         assert_eq!(info.ovl_chain_id, "agora-ovolos-testnet-1");
         assert_eq!(info.drc_chain_id, "agora-drachma-testnet-1");
         assert!(info.ovl_native);

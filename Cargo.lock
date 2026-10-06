@@ -179,6 +179,7 @@ dependencies = [
  "agora-types",
  "borsh",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -207,6 +208,7 @@ name = "agora-p2p"
 version = "0.1.0"
 dependencies = [
  "agora-crypto",
+ "agora-state-machine",
  "agora-types",
  "borsh",
  "futures",
@@ -225,6 +227,7 @@ version = "0.1.0"
 dependencies = [
  "agora-governance",
  "agora-types",
+ "hex",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -245,6 +248,7 @@ dependencies = [
  "rocksdb",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.19",
  "tracing",
 ]
@@ -290,6 +294,7 @@ dependencies = [
  "borsh",
  "hex",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.19",
  "ts-rs",
@@ -5224,6 +5229,19 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.4.3",
+ "once_cell",
+ "rustix",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "termcolor"

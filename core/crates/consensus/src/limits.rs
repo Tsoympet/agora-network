@@ -8,6 +8,8 @@ pub struct ConsensusLimits {
     pub max_tx_inputs: usize,
     pub max_tx_outputs: usize,
     pub max_tx_bytes: usize,
+    /// Block-only cap while standalone DA mempool admission remains disabled.
+    pub max_data_commitments: usize,
     pub max_block_bytes: usize,
     /// Reject headers with `timestamp_ms > now + this`.
     pub max_timestamp_ahead_ms: u64,
@@ -27,6 +29,7 @@ impl Default for ConsensusLimits {
             max_tx_inputs: 64,
             max_tx_outputs: 64,
             max_tx_bytes: 100_000,
+            max_data_commitments: 64,
             max_block_bytes: 1_000_000,
             max_timestamp_ahead_ms: 60_000,
             coinbase_maturity: 100,
@@ -48,6 +51,7 @@ pub const MAX_BLOCK_TRANSACTIONS: usize = 129;
 pub const MAX_TX_INPUTS: usize = 64;
 pub const MAX_TX_OUTPUTS: usize = 64;
 pub const MAX_TX_BYTES: usize = 100_000;
+pub const MAX_DATA_COMMITMENTS_PER_BLOCK: usize = 64;
 pub const MAX_BLOCK_BYTES: usize = 1_000_000;
 pub const MAX_TIMESTAMP_AHEAD_MS: u64 = 60_000;
 pub const COINBASE_MATURITY: u64 = 100;

@@ -26,11 +26,14 @@ use agora_consensus::{
     KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher,
 };
 use agora_state_machine::{
-    apply_block_batched_virtual, ghostdag_key, index_block_transactions_into, list_tx_inclusions,
-    load_ghostdag_record, load_header, load_utxo_journal, lookup_tx_location, meta_keys,
-    revert_journal_batched, set_primary_tx_location, store_ghostdag_record, store_header,
-    store_header_into, sum_transfer_fees, utxo_diff_key, ColumnFamily, GhostdagRecord, StateStore,
-    TxAuthContext, WriteBatch,
+    apply_block_batched_virtual_at_blue_score, ghostdag_key, index_block_transactions_into,
+    list_tx_inclusions, load_ghostdag_record, load_header, load_schema_version, load_utxo_journal,
+    lookup_tx_location, meta_keys, migrate_drc_fee_burn_schema,
+    migrate_drc_ledger_object_index_schema_with_auth, revert_journal_batched,
+    set_primary_tx_location, store_ghostdag_record, store_header, store_header_into,
+    sum_transfer_fees, utxo_diff_key, verify_drc_ledger_object_index, ColumnFamily, GhostdagRecord,
+    StateStore, TxAuthContext, WriteBatch, DRC_FEE_BURN_SCHEMA_VERSION,
+    DRC_LEDGER_INDEX_DATADIR_SCHEMA,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -66,6 +69,8 @@ pub enum AdmitError {
     BlockTooLarge { got: usize, max: usize },
     #[error("too many transactions: {got} > {max}")]
     TooManyTransactions { got: usize, max: usize },
+    #[error("too many data commitments: {got} > {max}")]
+    TooManyDataCommitments { got: usize, max: usize },
     #[error("tx {tx_index} too large: {got} > {max}")]
     TxTooLarge {
         tx_index: usize,
@@ -128,6 +133,9 @@ pub struct ChainBootConfig {
     pub chain_id: String,
     /// Bound into Trident checkpoint bodies (from [`agora_state_machine::GenesisConsensusPolicy`]).
     pub consensus_policy_hash: Hash,
+    /// `None` keeps DA inclusion fail-closed until a reviewed TLT fee policy
+    /// explicitly activates this Trident-only block lane.
+    pub data_availability_network_fingerprint: Option<Hash>,
 }
 
 impl Default for ChainBootConfig {
@@ -143,6 +151,7 @@ impl Default for ChainBootConfig {
             emission: EmissionSchedule::default(),
             chain_id: String::new(),
             consensus_policy_hash: Hash::ZERO,
+            data_availability_network_fingerprint: None,
         }
     }
 }
@@ -160,8 +169,43 @@ impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
             emission: params.emission.clone(),
             chain_id: params.network.chain_id().into(),
             consensus_policy_hash,
+            data_availability_network_fingerprint: None,
         }
     }
+}
+
+/// Borrowed multi-lane body used to build a mining template.
+///
+/// Grouping lanes keeps template construction append-only as Trident gains
+/// consensus-recognized body kinds.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BlockTemplateLanes<'a> {
+    pub transfers: &'a [Transaction],
+    pub account_transfers: &'a [agora_types::AccountTransfer],
+    pub stake_ops: &'a [agora_types::SignedStakeTx],
+    pub ovl_executions: &'a [agora_types::OvlExecutionTx],
+    pub drc_payments: &'a [agora_types::DrcPaymentTx],
+    pub data_commitments: &'a [agora_types::DataCommitmentAuthorization],
+    pub drc_account_policies: &'a [agora_types::DrcAccountPolicyTx],
+    pub drc_deposit_preauths: &'a [agora_types::DrcDepositPreauthTx],
+    pub drc_regular_keys: &'a [agora_types::DrcRegularKeyTx],
+    pub drc_signer_lists: &'a [agora_types::DrcSignerListTx],
+    pub drc_ticket_creates: &'a [agora_types::DrcTicketCreateTx],
+    pub drc_escrow_creates: &'a [agora_types::DrcEscrowCreateTx],
+    pub drc_escrow_finishes: &'a [agora_types::DrcEscrowFinishTx],
+    pub drc_escrow_cancels: &'a [agora_types::DrcEscrowCancelTx],
+    pub drc_check_creates: &'a [agora_types::DrcCheckCreateTx],
+    pub drc_check_cashes: &'a [agora_types::DrcCheckCashTx],
+    pub drc_check_cancels: &'a [agora_types::DrcCheckCancelTx],
+    pub drc_payment_channel_creates: &'a [agora_types::DrcPaymentChannelCreateTx],
+    pub drc_payment_channel_funds: &'a [agora_types::DrcPaymentChannelFundTx],
+    pub drc_payment_channel_claims: &'a [agora_types::DrcPaymentChannelClaimTx],
+    pub drc_payment_channel_closes: &'a [agora_types::DrcPaymentChannelCloseTx],
+    pub drc_trust_line_sets: &'a [agora_types::DrcTrustLineSetTx],
+    pub drc_issued_transfers: &'a [agora_types::DrcIssuedTransferTx],
+    pub drc_issued_asset_policy_sets: &'a [agora_types::DrcIssuedAssetPolicySetTx],
+    pub drc_trust_line_issuer_controls: &'a [agora_types::DrcTrustLineIssuerControlTx],
+    pub drc_issued_clawbacks: &'a [agora_types::DrcIssuedClawbackTx],
 }
 
 impl ChainState {
@@ -208,6 +252,7 @@ impl ChainState {
             Some(TxAuthContext {
                 chain_id: boot.chain_id,
                 genesis,
+                data_availability_network_fingerprint: boot.data_availability_network_fingerprint,
             })
         };
 
@@ -230,8 +275,10 @@ impl ChainState {
             let tip = chain.select_virtual_tip()?.unwrap_or(genesis);
             chain.persist_virtual_tip(tip)?;
         }
+        chain.migrate_drc_fee_burn()?;
         // Crash recovery: finish any in-flight virtual reorg before serving.
         chain.recover_pending_virtual()?;
+        chain.migrate_drc_ledger_index()?;
         // Repair pre-PR-79 journals that persisted subsidy=0 so reorg accounting matches.
         chain.migrate_legacy_journal_subsidies()?;
         Ok(chain)
@@ -244,6 +291,21 @@ impl ChainState {
 
     pub fn virtual_tip(&self) -> Result<Hash, AdmitError> {
         Ok(self.load_virtual_tip()?.unwrap_or(self.genesis))
+    }
+
+    /// Objective GHOSTDAG blue score of the current virtual tip.
+    pub fn virtual_blue_score(&self) -> Result<u64, AdmitError> {
+        let tip = self.virtual_tip()?;
+        self.ghostdag
+            .blue_score(&tip)
+            .ok_or_else(|| AdmitError::Consensus(format!("uncolored {}", tip.to_hex())))
+    }
+
+    /// Exact GHOSTDAG blue score a template over the current parent set will receive.
+    pub fn next_template_blue_score(&self) -> Result<u64, AdmitError> {
+        let parents = self.select_template_parents()?;
+        let bits = self.expected_bits_for_parents(&parents)?;
+        self.simulate_blue_score(&parents, bits)
     }
 
     pub fn pow_algorithm(&self) -> PowAlgorithm {
@@ -444,18 +506,20 @@ impl ChainState {
         payout: Address,
         transfers: &[Transaction],
     ) -> Result<Block, AdmitError> {
-        self.block_template_lanes(payout, transfers, &[], &[], &[], &[])
+        self.block_template_lanes(
+            payout,
+            BlockTemplateLanes {
+                transfers,
+                ..BlockTemplateLanes::default()
+            },
+        )
     }
 
     /// Build a mining template with Trident body lanes.
     pub fn block_template_lanes(
         &self,
         payout: Address,
-        transfers: &[Transaction],
-        account_transfers: &[agora_types::AccountTransfer],
-        stake_ops: &[agora_types::SignedStakeTx],
-        ovl_executions: &[agora_types::OvlExecutionTx],
-        drc_payments: &[agora_types::DrcPaymentTx],
+        lanes: BlockTemplateLanes<'_>,
     ) -> Result<Block, AdmitError> {
         let parents = self.select_template_parents()?;
         let timestamp_ms = self.template_timestamp_ms(&parents)?;
@@ -465,7 +529,7 @@ impl ChainState {
         let scheduled = self.emission.reward_at_blue_score(blue_score);
         let emission = self.clamp_emission(scheduled)?;
         let max_transfers = self.limits.max_block_transactions.saturating_sub(1);
-        let included = &transfers[..transfers.len().min(max_transfers)];
+        let included = &lanes.transfers[..lanes.transfers.len().min(max_transfers)];
         // Fee total must match only the transfers that enter the block body.
         let fees = sum_transfer_fees(self.store.as_ref(), included)
             .map_err(|e| AdmitError::Utxo(e.to_string()))?;
@@ -498,11 +562,41 @@ impl ChainState {
                 tx_root: Hash::ZERO,
             },
             transactions,
-            account_transfers: account_transfers.to_vec(),
-            stake_ops: stake_ops.to_vec(),
-            ovl_executions: ovl_executions.to_vec(),
-            drc_payments: drc_payments.to_vec(),
+            account_transfers: lanes.account_transfers.to_vec(),
+            stake_ops: lanes.stake_ops.to_vec(),
+            ovl_executions: lanes.ovl_executions.to_vec(),
+            drc_payments: lanes.drc_payments.to_vec(),
+            data_commitments: lanes.data_commitments.to_vec(),
+            drc_account_policies: lanes.drc_account_policies.to_vec(),
+            drc_deposit_preauths: lanes.drc_deposit_preauths.to_vec(),
+            drc_regular_keys: lanes.drc_regular_keys.to_vec(),
+            drc_signer_lists: lanes.drc_signer_lists.to_vec(),
+            drc_ticket_creates: lanes.drc_ticket_creates.to_vec(),
+            drc_escrow_creates: lanes.drc_escrow_creates.to_vec(),
+            drc_escrow_finishes: lanes.drc_escrow_finishes.to_vec(),
+            drc_escrow_cancels: lanes.drc_escrow_cancels.to_vec(),
+            drc_check_creates: lanes.drc_check_creates.to_vec(),
+            drc_check_cashes: lanes.drc_check_cashes.to_vec(),
+            drc_check_cancels: lanes.drc_check_cancels.to_vec(),
+            drc_payment_channel_creates: lanes.drc_payment_channel_creates.to_vec(),
+            drc_payment_channel_funds: lanes.drc_payment_channel_funds.to_vec(),
+            drc_payment_channel_claims: lanes.drc_payment_channel_claims.to_vec(),
+            drc_payment_channel_closes: lanes.drc_payment_channel_closes.to_vec(),
+            drc_trust_line_sets: lanes.drc_trust_line_sets.to_vec(),
+            drc_issued_transfers: lanes.drc_issued_transfers.to_vec(),
+            drc_issued_asset_policy_sets: lanes.drc_issued_asset_policy_sets.to_vec(),
+            drc_trust_line_issuer_controls: lanes.drc_trust_line_issuer_controls.to_vec(),
+            drc_issued_clawbacks: lanes.drc_issued_clawbacks.to_vec(),
+            drc_multisign_attachments: Vec::new(),
         };
+        if let Some(ctx) = self.auth.as_ref() {
+            agora_types::materialize_drc_multisign_attachments(
+                &mut block,
+                &ctx.chain_id,
+                &ctx.genesis,
+            )
+            .map_err(|e| AdmitError::Consensus(e.to_string()))?;
+        }
         block.header.tx_root = block.compute_body_root();
         Ok(block)
     }
@@ -891,9 +985,14 @@ impl ChainState {
             let blue_score = self.ghostdag.blue_score(hash).unwrap_or(1);
             let scheduled = self.emission.reward_at_blue_score(blue_score);
             let emission = scheduled.min(max.saturating_sub(issued.min(max)));
-            let mut applied =
-                apply_block_batched_virtual(&overlay, &body, emission, self.auth.as_ref())
-                    .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+            let mut applied = apply_block_batched_virtual_at_blue_score(
+                &overlay,
+                &body,
+                emission,
+                self.auth.as_ref(),
+                blue_score,
+            )
+            .map_err(|e| AdmitError::Utxo(e.to_string()))?;
             if issued.saturating_add(applied.journal.subsidy) > max {
                 return Err(AdmitError::SupplyCapExceeded);
             }
@@ -945,6 +1044,12 @@ impl ChainState {
             return Err(AdmitError::TooManyTransactions {
                 got: block.transactions.len(),
                 max: self.limits.max_block_transactions,
+            });
+        }
+        if block.data_commitments.len() > self.limits.max_data_commitments {
+            return Err(AdmitError::TooManyDataCommitments {
+                got: block.data_commitments.len(),
+                max: self.limits.max_data_commitments,
             });
         }
         let block_bytes = borsh::to_vec(block).map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -1397,9 +1502,14 @@ impl ChainState {
         let emission = self.clamp_emission(scheduled)?;
         // Atomic commit: UTXO changes + revert journal + issued-supply update land as a
         // single WriteBatch so a crash cannot leave UTXOs and supply out of sync.
-        let mut applied =
-            apply_block_batched_virtual(self.store.as_ref(), &block, emission, self.auth.as_ref())
-                .map_err(|e| AdmitError::Utxo(e.to_string()))?;
+        let mut applied = apply_block_batched_virtual_at_blue_score(
+            self.store.as_ref(),
+            &block,
+            emission,
+            self.auth.as_ref(),
+            blue_score,
+        )
+        .map_err(|e| AdmitError::Utxo(e.to_string()))?;
         if applied.journal.subsidy > emission {
             return Err(AdmitError::Utxo(format!(
                 "coinbase subsidy {} exceeds clamped emission {emission}",
@@ -1761,6 +1871,45 @@ fn template_extranonce(timestamp_ms: u64) -> u32 {
 }
 
 impl ChainState {
+    fn migrate_drc_fee_burn(&self) -> Result<(), AdmitError> {
+        let schema = load_schema_version(self.store.as_ref())
+            .map_err(|error| AdmitError::Storage(error.to_string()))?;
+        if schema == DRC_FEE_BURN_SCHEMA_VERSION - 1 {
+            migrate_drc_fee_burn_schema(self.store.as_ref())
+                .map_err(|error| AdmitError::Storage(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn migrate_drc_ledger_index(&self) -> Result<(), AdmitError> {
+        let schema = load_schema_version(self.store.as_ref())
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        if schema == DRC_LEDGER_INDEX_DATADIR_SCHEMA - 1 {
+            let tip = self.virtual_tip()?;
+            let order = self.applied_blues(tip)?;
+            let applied: Vec<(Hash, u64)> = order
+                .into_iter()
+                .map(|hash| (hash, self.ghostdag.blue_score(&hash).unwrap_or(0)))
+                .collect();
+            migrate_drc_ledger_object_index_schema_with_auth(
+                self.store.as_ref(),
+                &applied,
+                self.auth.as_ref(),
+            )
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            return Ok(());
+        }
+        if schema == DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+            verify_drc_ledger_object_index(self.store.as_ref())
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        } else if schema > DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+            return Err(AdmitError::Storage(format!(
+                "unsupported future datadir schema {schema}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Rewrite legacy journals that loaded with `subsidy = 0` using block bodies.
     ///
     /// Only repairs journals whose `created` set includes the block's coinbase
@@ -1829,6 +1978,17 @@ impl ChainState {
                 account_before: journal.account_before,
                 stake_meta_before: journal.stake_meta_before,
                 payment_meta_before: journal.payment_meta_before,
+                data_availability_meta_before: journal.data_availability_meta_before,
+                drc_policy_meta_before: journal.drc_policy_meta_before,
+                drc_deposit_preauth_meta_before: journal.drc_deposit_preauth_meta_before,
+                drc_regular_key_meta_before: journal.drc_regular_key_meta_before,
+                drc_signer_list_meta_before: journal.drc_signer_list_meta_before,
+                drc_ticket_meta_before: journal.drc_ticket_meta_before,
+                drc_escrow_meta_before: journal.drc_escrow_meta_before,
+                drc_check_meta_before: journal.drc_check_meta_before,
+                drc_payment_channel_meta_before: journal.drc_payment_channel_meta_before,
+                drc_trust_line_meta_before: journal.drc_trust_line_meta_before,
+                drc_ledger_index_meta_before: journal.drc_ledger_index_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store
@@ -1880,7 +2040,15 @@ fn load_or_init_difficulty(
 mod tests {
     use super::*;
     use agora_consensus::RandomXPowHasher;
-    use agora_state_machine::GenesisBuilder;
+    use agora_crypto::{sign_drc_escrow_create_bound, KeyPair};
+    use agora_state_machine::{
+        credit_account_into, load_drc_ledger_object, load_drc_operation, load_drc_transaction,
+        put_issued_supply_into, store_utxo_journal, GenesisBuilder,
+    };
+    use agora_types::{
+        DrcEscrowCreateTx, DrcLedgerObjectKey, DrcOperation, NativeAssetId,
+        DRC_ESCROW_CREATE_TX_VERSION,
+    };
 
     #[test]
     fn rejects_wrong_bits_and_persists_difficulty() {
@@ -2008,6 +2176,135 @@ mod tests {
         assert!(child.header.parents.contains(&id));
     }
 
+    #[test]
+    fn bootstrap_migrates_schema20_objects_receipts_and_rollback_journal() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let boot = ChainBootConfig {
+            chain_id: "agora-dev".into(),
+            ..ChainBootConfig::default()
+        };
+        let mut chain = ChainState::bootstrap_with(
+            store.clone(),
+            genesis,
+            boot.clone(),
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        let owner = KeyPair::from_secret_bytes(&[0x71; 32]).unwrap();
+        let recipient = KeyPair::from_secret_bytes(&[0x72; 32]).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &owner.address(),
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        put_issued_supply_into(&mut funding, NativeAssetId::DRC, 1_000);
+        store.write_batch(funding).unwrap();
+
+        let mut create = DrcEscrowCreateTx {
+            version: DRC_ESCROW_CREATE_TX_VERSION,
+            owner: owner.address(),
+            recipient: recipient.address(),
+            amount: Amount::from_base_units(10),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            finish_after_blue_score: None,
+            cancel_after_blue_score: Some(100),
+            nonce: 0,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+        };
+        sign_drc_escrow_create_bound(&mut create, &owner, "agora-dev", &genesis).unwrap();
+        let operation = DrcOperation::EscrowCreate(create.clone());
+        let object_id = DrcLedgerObjectKey::Escrow {
+            escrow_id: create.escrow_id(),
+        }
+        .object_id();
+        let mut block = chain
+            .block_template_lanes(
+                owner.address(),
+                BlockTemplateLanes {
+                    drc_escrow_creates: std::slice::from_ref(&create),
+                    ..BlockTemplateLanes::default()
+                },
+            )
+            .unwrap();
+        block.header.nonce = 1;
+        let block_id = chain.admit_block(block).unwrap();
+        assert!(load_drc_ledger_object(&store, &object_id)
+            .unwrap()
+            .is_some());
+        assert!(load_drc_operation(&store, &operation.operation_id())
+            .unwrap()
+            .is_some());
+
+        let mut legacy_journal = load_utxo_journal(&store, &block_id)
+            .unwrap()
+            .expect("applied block journal");
+        legacy_journal.drc_ledger_index_meta_before.clear();
+        store_utxo_journal(&store, &block_id, &legacy_journal).unwrap();
+        let mut downgrade = WriteBatch::new();
+        for (key, _) in store
+            .scan_prefix(ColumnFamily::Meta, b"ledger/drc/")
+            .unwrap()
+        {
+            downgrade.delete_cf(ColumnFamily::Meta, &key);
+        }
+        downgrade.put_cf(
+            ColumnFamily::Meta,
+            meta_keys::SCHEMA_VERSION,
+            &(DRC_LEDGER_INDEX_DATADIR_SCHEMA - 1).to_le_bytes(),
+        );
+        store.write_batch(downgrade).unwrap();
+        drop(chain);
+
+        let restarted = ChainState::bootstrap_with(
+            store.clone(),
+            genesis,
+            boot.clone(),
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        assert_eq!(restarted.virtual_tip().unwrap(), block_id);
+        let receipt = load_drc_transaction(&store, &operation.historical_transaction_id())
+            .unwrap()
+            .expect("migrated transaction receipt");
+        assert_eq!(receipt.operation, operation);
+        assert_eq!(receipt.canonical_block_id, block_id);
+        assert!(load_drc_ledger_object(&store, &object_id)
+            .unwrap()
+            .is_some());
+        let migrated_journal = load_utxo_journal(&store, &block_id)
+            .unwrap()
+            .expect("rewritten journal");
+        assert!(!migrated_journal.drc_ledger_index_meta_before.is_empty());
+        drop(restarted);
+
+        let reopened =
+            ChainState::bootstrap_with(store.clone(), genesis, boot, StoragePolicy::default())
+                .unwrap();
+        assert_eq!(reopened.virtual_tip().unwrap(), block_id);
+        drop(reopened);
+
+        store
+            .write_batch(revert_journal_batched(&migrated_journal).unwrap())
+            .unwrap();
+        assert!(load_drc_ledger_object(&store, &object_id)
+            .unwrap()
+            .is_none());
+        assert!(load_drc_operation(&store, &receipt.operation_id)
+            .unwrap()
+            .is_none());
+    }
+
     fn sync_coinbase_commitment(block: &mut Block) {
         sync_coinbase_commitment_with(block, 1);
     }
@@ -2024,7 +2321,7 @@ mod tests {
                 extranonce,
             );
         }
-        block.header.tx_root = Block::compute_tx_root(&block.transactions);
+        block.header.tx_root = block.compute_body_root();
     }
 
     /// Backward-compatible alias used by older test helpers in this module.
@@ -2235,11 +2532,46 @@ mod tests {
                 nonce as u32,
             ),
         )];
-        block.header.tx_root = Block::compute_tx_root(&block.transactions);
+        block.header.tx_root = block.compute_body_root();
         let epoch = chain.randomx_epoch_for_parents(&block.header.parents);
         let digest = RandomXPowHasher.pow_hash_with_epoch(&block.header, epoch);
         assert!(LeadingZeroPow::leading_zero_bits(&digest) >= block.header.bits);
         chain.admit_block(block).unwrap()
+    }
+
+    fn signed_da_authorization(
+        keypair: &agora_crypto::KeyPair,
+        genesis: &Hash,
+        fingerprint: &Hash,
+        sequence: u64,
+        replay_nonce: u64,
+        marker: u8,
+    ) -> agora_types::DataCommitmentAuthorization {
+        let commitment = agora_types::DataAvailabilityCommitment::agora_layers_ovolos_batch(
+            "agora-ovolos-testnet-1".into(),
+            Hash([1; 32]),
+            Hash([marker; 32]),
+            sequence,
+            Hash([3; 32]),
+            Hash([marker.wrapping_add(1); 32]),
+            Hash([5; 32]),
+            6,
+            7,
+        );
+        let mut authorization = agora_types::DataCommitmentAuthorization::unsigned(
+            keypair.address(),
+            replay_nonce,
+            commitment,
+        );
+        agora_crypto::sign_data_commitment_bound(
+            &mut authorization,
+            keypair,
+            "agora-trident-testnet-1",
+            genesis,
+            fingerprint,
+        )
+        .unwrap();
+        authorization
     }
 
     #[test]
@@ -2886,6 +3218,154 @@ mod tests {
         }
         let merged = chain.admit_block(c).unwrap();
         assert!(chain.has_block(&merged).unwrap());
+    }
+
+    #[test]
+    fn da_conflict_follows_blue_order_and_reorg_restores_winner() {
+        use agora_state_machine::{
+            load_acceptance, load_data_commitment, load_data_commitment_nonce, meta_keys,
+        };
+        use agora_types::TransactionAcceptance;
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(store.as_ref()).unwrap();
+        let fingerprint = Hash([9; 32]);
+        let boot = ChainBootConfig {
+            initial_bits: 0,
+            chain_id: "agora-trident-testnet-1".into(),
+            data_availability_network_fingerprint: Some(fingerprint),
+            ..ChainBootConfig::default()
+        };
+        let mut chain = ChainState::bootstrap_with(
+            store.clone(),
+            genesis,
+            boot.clone(),
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let first = signed_da_authorization(&operator, &genesis, &fingerprint, 4, 0, 11);
+        let conflict = signed_da_authorization(&operator, &genesis, &fingerprint, 4, 0, 12);
+
+        let oversized = vec![first.clone(); chain.limits.max_data_commitments + 1];
+        let oversized_block = chain
+            .block_template_lanes(
+                Address::ZERO,
+                BlockTemplateLanes {
+                    data_commitments: &oversized,
+                    ..BlockTemplateLanes::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            chain.check_size_limits(&oversized_block),
+            Err(AdmitError::TooManyDataCommitments { .. })
+        ));
+
+        // Construct both siblings against the same pre-state before either is admitted.
+        let mut first_block = chain
+            .block_template_lanes(
+                Address([1; 20]),
+                BlockTemplateLanes {
+                    data_commitments: std::slice::from_ref(&first),
+                    ..BlockTemplateLanes::default()
+                },
+            )
+            .unwrap();
+        first_block.header.parents = vec![genesis];
+        first_block.header.bits = chain.expected_bits_for_parents(&[genesis]).unwrap();
+        first_block.header.timestamp_ms = 100_000;
+        sync_coinbase_commitment_with(&mut first_block, 1);
+
+        let mut conflict_block = chain
+            .block_template_lanes(
+                Address([2; 20]),
+                BlockTemplateLanes {
+                    data_commitments: std::slice::from_ref(&conflict),
+                    ..BlockTemplateLanes::default()
+                },
+            )
+            .unwrap();
+        conflict_block.header.parents = vec![genesis];
+        conflict_block.header.bits = chain.expected_bits_for_parents(&[genesis]).unwrap();
+        conflict_block.header.timestamp_ms = 101_000;
+        sync_coinbase_commitment_with(&mut conflict_block, 2);
+
+        let first_hash = chain.admit_block(first_block).unwrap();
+        let conflict_hash = chain.admit_block(conflict_block).unwrap();
+
+        let mut merge = chain.block_template(Address([3; 20]), &[]).unwrap();
+        merge.header.parents = vec![first_hash, conflict_hash];
+        merge.header.bits = chain
+            .expected_bits_for_parents(&merge.header.parents)
+            .unwrap();
+        merge.header.timestamp_ms = 102_000;
+        sync_coinbase_commitment_with(&mut merge, 3);
+        let merged = chain.admit_block(merge).unwrap();
+
+        let order = chain.ghostdag.blue_order(&chain.dag, merged).unwrap();
+        let first_position = order.iter().position(|hash| *hash == first_hash).unwrap();
+        let conflict_position = order
+            .iter()
+            .position(|hash| *hash == conflict_hash)
+            .unwrap();
+        let (winner, loser) = if first_position < conflict_position {
+            (first_hash, conflict_hash)
+        } else {
+            (conflict_hash, first_hash)
+        };
+        let winner_acceptance = load_acceptance(store.as_ref(), &winner).unwrap().unwrap();
+        let loser_acceptance = load_acceptance(store.as_ref(), &loser).unwrap().unwrap();
+        assert_eq!(
+            winner_acceptance.data_commitment_statuses,
+            vec![TransactionAcceptance::Accepted]
+        );
+        assert_eq!(
+            loser_acceptance.data_commitment_statuses,
+            vec![TransactionAcceptance::ConflictLost]
+        );
+        assert_eq!(
+            load_data_commitment(store.as_ref(), first.commitment.source, 4)
+                .unwrap()
+                .unwrap()
+                .accepted_in,
+            winner
+        );
+
+        // A longer chain rooted at the loser abandons the old winner. Revert restores
+        // the source/sequence key and nonce before the loser is applied as Accepted.
+        let mut alternate_tip = loser;
+        for nonce in 200..204 {
+            alternate_tip = mine_child(&mut chain, &[alternate_tip], Address([4; 20]), nonce);
+        }
+        assert_eq!(chain.virtual_tip().unwrap(), alternate_tip);
+        assert_eq!(
+            load_data_commitment(store.as_ref(), first.commitment.source, 4)
+                .unwrap()
+                .unwrap()
+                .accepted_in,
+            loser
+        );
+        assert_eq!(
+            load_data_commitment_nonce(store.as_ref(), &operator.address()).unwrap(),
+            1
+        );
+
+        let restarted =
+            ChainState::bootstrap_with(store.clone(), genesis, boot, StoragePolicy::default())
+                .unwrap();
+        assert_eq!(restarted.virtual_tip().unwrap(), alternate_tip);
+        assert_eq!(
+            load_data_commitment(store.as_ref(), first.commitment.source, 4)
+                .unwrap()
+                .unwrap()
+                .accepted_in,
+            loser
+        );
+        assert!(store
+            .get_cf(ColumnFamily::Meta, meta_keys::PENDING_VIRTUAL)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

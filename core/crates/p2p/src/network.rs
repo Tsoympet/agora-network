@@ -368,7 +368,27 @@ impl NetworkNode {
             | NetworkMessage::AccountTransfer(_)
             | NetworkMessage::StakeTx(_)
             | NetworkMessage::OvlExecution(_)
-            | NetworkMessage::DrcPayment(_) => {
+            | NetworkMessage::DrcPayment(_)
+            | NetworkMessage::DrcAccountPolicy(_)
+            | NetworkMessage::DrcDepositPreauth(_)
+            | NetworkMessage::DrcRegularKey(_)
+            | NetworkMessage::DrcSignerList(_)
+            | NetworkMessage::DrcTicketCreate(_)
+            | NetworkMessage::DrcEscrowCreate(_)
+            | NetworkMessage::DrcEscrowFinish(_)
+            | NetworkMessage::DrcEscrowCancel(_)
+            | NetworkMessage::DrcCheckCreate(_)
+            | NetworkMessage::DrcCheckCash(_)
+            | NetworkMessage::DrcCheckCancel(_)
+            | NetworkMessage::DrcPaymentChannelCreate(_)
+            | NetworkMessage::DrcPaymentChannelFund(_)
+            | NetworkMessage::DrcPaymentChannelClaim(_)
+            | NetworkMessage::DrcPaymentChannelClose(_)
+            | NetworkMessage::DrcTrustLineSet(_)
+            | NetworkMessage::DrcIssuedTransfer(_)
+            | NetworkMessage::DrcIssuedAssetPolicySet(_)
+            | NetworkMessage::DrcTrustLineIssuerControl(_)
+            | NetworkMessage::DrcIssuedClawback(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

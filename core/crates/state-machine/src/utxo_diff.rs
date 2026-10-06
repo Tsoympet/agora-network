@@ -70,6 +70,17 @@ mod tests {
             account_before: Vec::new(),
             stake_meta_before: Vec::new(),
             payment_meta_before: Vec::new(),
+            data_availability_meta_before: Vec::new(),
+            drc_policy_meta_before: Vec::new(),
+            drc_deposit_preauth_meta_before: Vec::new(),
+            drc_regular_key_meta_before: Vec::new(),
+            drc_signer_list_meta_before: Vec::new(),
+            drc_ticket_meta_before: Vec::new(),
+            drc_escrow_meta_before: Vec::new(),
+            drc_check_meta_before: Vec::new(),
+            drc_payment_channel_meta_before: Vec::new(),
+            drc_trust_line_meta_before: Vec::new(),
+            drc_ledger_index_meta_before: Vec::new(),
         };
         store_utxo_journal(&store, &hash, &journal).unwrap();
         let loaded = load_utxo_journal(&store, &hash).unwrap().unwrap();

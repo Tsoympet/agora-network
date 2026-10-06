@@ -27,3 +27,4 @@ rocksdb = { version = "0.22", optional = true }
 
 [dev-dependencies]
 agora-crypto = { workspace = true }
+tempfile = "3"

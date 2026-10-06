@@ -47,7 +47,20 @@ impl ColumnFamily {
 /// - `7` — native DRC payment lane, duplicate/invoice index, and outbox
 /// - `8` — canonical governance policy and asset-isolated protocol treasuries
 /// - `9` — canonical Hub, Passport, Grant, and Mission registry summary
-pub const SCHEMA_VERSION: u32 = 9;
+/// - `10` — authenticated DA commitment/index/replay state and revert journal
+/// - `11` — root-committed exact-delivery DRC receipt index
+/// - `12` — owner-authorized DRC recipient policy and payment-v3 tag presence
+/// - `13` — address-based DRC DepositAuth preauthorization records and journals
+/// - `14` — signed DRC payment-v4 GHOSTDAG blue-score expiry metadata
+/// - `15` — DRC regular-key state and authorization journals
+/// - `16` — DRC weighted signer-list state and authorization journals
+/// - `17` — DRC detached multisign attachments block lane
+/// - `18` — DRC master-key disable policy (no-lockout invariant)
+/// - `19` — current additive DRC ticket, escrow, check, payment-channel,
+///   trust-line, issued-control, receipt, and revert-journal key families
+/// - `20` — per-asset lifetime-burn counters and accepted-only DRC fee burning
+/// - `21` — common DRC ledger-object identity/owner indexes and accepted-operation receipts
+pub const SCHEMA_VERSION: u32 = 21;
 
 /// Well-known meta keys (borsh / raw byte values).
 pub mod meta_keys {
@@ -71,6 +84,8 @@ pub mod meta_keys {
     pub const SCHEMA_VERSION: &[u8] = b"meta/schema_version";
     /// Per-asset issued supply prefix: `meta/issued_supply/<asset_wire_byte>`.
     pub const ISSUED_SUPPLY_ASSET_PREFIX: &[u8] = b"meta/issued_supply/";
+    /// Per-asset lifetime burned supply prefix: `meta/burned_supply/<asset_wire_byte>`.
+    pub const BURNED_SUPPLY_ASSET_PREFIX: &[u8] = b"meta/burned_supply/";
 
     // These keys reserve a lossless candidate Block 0 record and its bound
     // datadir identity for a future atomic loader. The v2 ignition path never

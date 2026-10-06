@@ -16,10 +16,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Trident fingerprint domain + versions (distinct mesh from v2).
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
-/// v4 adds native DRC payment gossip and block-lane settlement.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 4;
-pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v1";
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v6";
+/// v23 activates the root-committed DRC object/owner/accepted-operation index.
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 23;
+pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v9";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v21";
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v2";
 
 /// Canonical network fingerprint hash (pre-Trident / genesis v2).
@@ -81,7 +81,58 @@ mod tests {
         let v2 = network_fingerprint("agora-trident-testnet-1", &genesis, &policy);
         let t1 = trident_network_fingerprint("agora-trident-testnet-1", &genesis, &policy);
         assert_ne!(v2, t1);
+        assert_eq!(
+            t1.to_hex(),
+            "ae061ab5dad44d057ed311f9fd8c8622c28bab3177856adf91f6b4f5a4f2eed5"
+        );
         let t2 = trident_network_fingerprint("agora-trident-testnet-2", &genesis, &policy);
         assert_ne!(t1, t2);
+
+        let prior = Hash::hash_borsh(&(
+            TRIDENT_NET_FP_DOMAIN,
+            8u32,
+            "agora-trident-testnet-1",
+            genesis.as_bytes(),
+            policy.as_bytes(),
+            "agora-trident-tx-v3",
+            "agora-trident-state-v9",
+            TRIDENT_CONSENSUS_POLICY_VERSION,
+        ));
+        assert_ne!(t1, prior);
+        assert_eq!(TRIDENT_PROTOCOL_VERSION, 23);
+        assert_eq!(TRIDENT_TX_SIGNING_VERSION, "agora-trident-tx-v9");
+        assert_eq!(TRIDENT_STATE_TRANSITION_VERSION, "agora-trident-state-v21");
+    }
+
+    #[test]
+    fn trident_genesis_and_p2p_fingerprint_versions_match() {
+        use agora_state_machine::TridentGenesisArtifact;
+
+        const DRAFT: &str =
+            include_str!("../../../../docs/genesis/trident.testnet.genesis.draft.json");
+        let artifact = TridentGenesisArtifact::from_json(DRAFT).unwrap();
+        let p2p_fingerprint = trident_network_fingerprint(
+            &artifact.chain_id,
+            &artifact.consensus_identity_hash(),
+            &artifact.consensus_policy_hash(),
+        );
+
+        assert_eq!(
+            TRIDENT_PROTOCOL_VERSION,
+            agora_state_machine::TRIDENT_PROTOCOL_VERSION
+        );
+        assert_eq!(
+            TRIDENT_TX_SIGNING_VERSION,
+            agora_state_machine::TRIDENT_TX_SIGNING_VERSION
+        );
+        assert_eq!(
+            TRIDENT_STATE_TRANSITION_VERSION,
+            agora_state_machine::TRIDENT_STATE_TRANSITION_VERSION
+        );
+        assert_eq!(
+            TRIDENT_CONSENSUS_POLICY_VERSION,
+            agora_state_machine::TRIDENT_CONSENSUS_POLICY_VERSION
+        );
+        assert_eq!(p2p_fingerprint, artifact.compute_network_fingerprint());
     }
 }
