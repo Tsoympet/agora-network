@@ -104,7 +104,9 @@ Public reads when `AGORA_RPC_TOKEN` is set include `web3_clientVersion`,
 `eth_call`, `eth_estimateGas`, `eth_feeHistory`, `eth_getTransactionByHash`,
 `eth_getTransactionReceipt`, `eth_getBlockByNumber`, `eth_getBlockByHash`,
 `eth_getLogs`, the block transaction-count methods, and the transaction-by-index
-methods. `eth_sendRawTransaction` requires the token and the dev/test gate.
+methods. `eth_sendRawTransaction` requires the token and the dev/test gate;
+it admits the raw gossip pool (`OvlRawExecution`, protocol v26) rather than
+the Agora-signed `OvlExecution` pool.
 `eth_getProof` is not implemented. See [`ovl-evm.md`](ovl-evm.md).
 
 DRC payment, escrow, Check, payment-channel, trust-line, issued-asset,

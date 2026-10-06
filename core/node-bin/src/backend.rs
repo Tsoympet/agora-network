@@ -373,6 +373,53 @@ pub(crate) fn admit_ovl_execution(
         .map_err(|e| RpcError::Rejected(e.to_string()))
 }
 
+/// Admit a version-2 raw Ethereum envelope to the raw pool (not Agora-signed).
+pub(crate) fn admit_ovl_raw_execution(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    pending_evm: &Mutex<BTreeMap<[u8; 32], agora_ovl_evm::PendingTx>>,
+    tx: OvlExecutionTx,
+) -> Result<Hash, RpcError> {
+    if tx.version != agora_types::OVL_EXECUTION_RAW_EVM_VERSION {
+        return Err(RpcError::Rejected(
+            "OVL raw gossip requires execution version 2".into(),
+        ));
+    }
+    let world = agora_state_machine::load_ovl_evm_world(store)
+        .map_err(|err| RpcError::Internal(err.to_string()))?;
+    if !world.active {
+        return Err(RpcError::Rejected(
+            "OVL-EVM-v1 is inactive on this genesis".into(),
+        ));
+    }
+    let parsed = agora_ovl_evm::parse_raw_transaction(&tx.data)
+        .map_err(|err| RpcError::Rejected(format!("raw EVM: {err}")))?;
+    if parsed.chain_id != world.chain_id {
+        return Err(RpcError::Rejected(
+            "pending transaction chain id mismatch".into(),
+        ));
+    }
+    agora_ovl_evm::measure_shanghai_gas(&world, &tx.data)
+        .map_err(|err| RpcError::Rejected(format!("raw EVM: {err}")))?;
+    let mut pending = pending_evm
+        .lock()
+        .map_err(|_| RpcError::Internal("OVL EVM pending lock poisoned".into()))?;
+    pending.insert(
+        parsed.hash,
+        agora_ovl_evm::PendingTx {
+            raw: tx.data.clone(),
+            from: parsed.caller,
+            nonce: parsed.nonce,
+        },
+    );
+    drop(pending);
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    pool.admit_ovl_raw_execution(tx)
+        .map_err(|e| RpcError::Rejected(e.to_string()))
+}
+
 /// Validate and reserve a signed native DRC payment.
 pub(crate) fn admit_drc_payment(
     store: &StateStore,
@@ -901,8 +948,9 @@ pub struct NodeBackend {
     network: String,
     /// Block 0 id for this datadir.
     genesis_hash: Hash,
-    /// Process-local Ethereum pending inbox. Not part of the state root.
-    pending_evm: Mutex<BTreeMap<[u8; 32], agora_ovl_evm::PendingTx>>,
+    /// Process-local Ethereum pending inbox, shared with raw-EVM gossip admit.
+    /// Not part of the state root.
+    pending_evm: Arc<Mutex<BTreeMap<[u8; 32], agora_ovl_evm::PendingTx>>>,
 }
 
 pub struct NodeBackendConfig {
@@ -932,8 +980,12 @@ impl NodeBackend {
             connected_peers: config.connected_peers,
             network: config.network,
             genesis_hash: config.genesis_hash,
-            pending_evm: Mutex::new(BTreeMap::new()),
+            pending_evm: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    pub(crate) fn pending_evm(&self) -> Arc<Mutex<BTreeMap<[u8; 32], agora_ovl_evm::PendingTx>>> {
+        self.pending_evm.clone()
     }
 
     fn tx_auth(&self) -> TxAuthContext {
@@ -1165,10 +1217,9 @@ impl NodeBackend {
         }
     }
 
-    /// Place process-local raw envelopes on this node's own template.
-    ///
-    /// They are not admitted to the Agora-signed mempool and are not published
-    /// as transactions. Public raw-EVM gossip remains PLANNED.
+    /// Place raw Ethereum envelopes from the local inbox and the raw gossip
+    /// pool onto this node's template. Version 2 stays off the Agora-signed
+    /// mempool. Mainnet labels skip this path.
     fn append_local_evm_executions(&self, executions: &mut Vec<OvlExecutionTx>) {
         if self.network.eq_ignore_ascii_case("mainnet") {
             return;
@@ -1182,14 +1233,31 @@ impl NodeBackend {
         let Ok(pending) = self.pending_evm.lock() else {
             return;
         };
+        let mut seen = std::collections::HashSet::new();
         for tx in pending.values() {
             if executions.len() >= DEFAULT_TEMPLATE_TX_LIMIT {
-                break;
+                return;
             }
             if agora_ovl_evm::measure_shanghai_gas(&world, &tx.raw).is_err() {
                 continue;
             }
+            seen.insert(tx.raw.clone());
             executions.push(OvlExecutionTx::raw_ethereum(tx.raw.clone()));
+        }
+        drop(pending);
+        if let Ok(pool) = self.mempool.lock() {
+            for tx in pool.select_ovl_raw_executions(DEFAULT_TEMPLATE_TX_LIMIT) {
+                if executions.len() >= DEFAULT_TEMPLATE_TX_LIMIT {
+                    break;
+                }
+                if seen.contains(&tx.data) {
+                    continue;
+                }
+                if agora_ovl_evm::measure_shanghai_gas(&world, &tx.data).is_err() {
+                    continue;
+                }
+                executions.push(tx);
+            }
         }
     }
 }
@@ -1499,12 +1567,38 @@ impl RpcBackend for NodeBackend {
             .map_err(|_| RpcError::Internal("OVL EVM pending lock poisoned".into()))?;
         pending.retain(|hash, _| world.receipts.iter().all(|receipt| receipt.hash != *hash));
         let view = self.eth_node_view();
-        agora_ovl_evm::dispatch_with_view(&world, &mut pending, &view, method, params).map_err(
-            |err| match err {
+        let result = agora_ovl_evm::dispatch_with_view(&world, &mut pending, &view, method, params)
+            .map_err(|err| match err {
                 agora_ovl_evm::EvmError::MethodNotFound(method) => RpcError::MethodNotFound(method),
                 agora_ovl_evm::EvmError::Rejected(message) => RpcError::Rejected(message),
-            },
-        )
+            })?;
+        if method.eq_ignore_ascii_case("eth_sendRawTransaction") {
+            if let Some(hash_hex) = result.as_str() {
+                let hex = hash_hex.strip_prefix("0x").unwrap_or(hash_hex);
+                if let Ok(bytes) = hex::decode(hex) {
+                    if bytes.len() == 32 {
+                        let mut hash = [0u8; 32];
+                        hash.copy_from_slice(&bytes);
+                        if let Some(pending_tx) = pending.get(&hash) {
+                            let envelope = OvlExecutionTx::raw_ethereum(pending_tx.raw.clone());
+                            drop(pending);
+                            let mut pool = self
+                                .mempool
+                                .lock()
+                                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+                            let _ = pool.admit_ovl_raw_execution(envelope.clone());
+                            drop(pool);
+                            if let Some(net) = &self.net {
+                                let _ =
+                                    net.publish_message(NetworkMessage::OvlRawExecution(envelope));
+                            }
+                            return Ok(result);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(result)
     }
 
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError> {
@@ -3470,6 +3564,15 @@ mod tests {
             .unwrap()
             .select_ovl_executions(8)
             .is_empty());
+        assert_eq!(
+            rpc.backend()
+                .mempool
+                .lock()
+                .unwrap()
+                .select_ovl_raw_executions(8)
+                .len(),
+            1
+        );
         let template = rpc.backend().get_block_template().unwrap();
         assert_eq!(template.ovl_executions.len(), 1);
         assert_eq!(template.ovl_executions[0].version, 2);

@@ -25,6 +25,8 @@ mod da_lane;
 mod issued_controls_lane;
 #[path = "offer_lane.rs"]
 mod offer_lane;
+#[path = "ovl_raw_lane.rs"]
+mod ovl_raw_lane;
 #[path = "payment_channel_lane.rs"]
 mod payment_channel_lane;
 #[path = "trust_line_lane.rs"]
@@ -61,6 +63,8 @@ pub struct Mempool {
     account_txs: HashMap<Hash, AccountTransfer>,
     stake_txs: HashMap<Hash, SignedStakeTx>,
     ovl_execution_txs: HashMap<Hash, OvlExecutionTx>,
+    /// Version-2 raw Ethereum envelopes. Not Agora-signed; not nonce-reserved.
+    ovl_raw_execution_txs: HashMap<Hash, OvlExecutionTx>,
     payment_txs: HashMap<Hash, DrcPaymentTx>,
     drc_policy_txs: HashMap<Hash, DrcAccountPolicyTx>,
     drc_deposit_preauth_txs: HashMap<Hash, DrcDepositPreauthTx>,
@@ -143,6 +147,7 @@ impl Mempool {
             account_txs: HashMap::new(),
             stake_txs: HashMap::new(),
             ovl_execution_txs: HashMap::new(),
+            ovl_raw_execution_txs: HashMap::new(),
             payment_txs: HashMap::new(),
             drc_policy_txs: HashMap::new(),
             drc_deposit_preauth_txs: HashMap::new(),
@@ -202,6 +207,7 @@ impl Mempool {
             + self.account_txs.len()
             + self.stake_txs.len()
             + self.ovl_execution_txs.len()
+            + self.ovl_raw_maps_len()
             + self.payment_txs.len()
             + self.drc_policy_txs.len()
             + self.drc_deposit_preauth_txs.len()
@@ -231,6 +237,7 @@ impl Mempool {
             || self.account_txs.contains_key(tx_id)
             || self.stake_txs.contains_key(tx_id)
             || self.ovl_execution_txs.contains_key(tx_id)
+            || self.ovl_raw_maps_contains(tx_id)
             || self.payment_txs.contains_key(tx_id)
             || self.drc_policy_txs.contains_key(tx_id)
             || self.drc_deposit_preauth_txs.contains_key(tx_id)
@@ -1693,6 +1700,10 @@ impl Mempool {
             }
         }
         for tx in &block.ovl_executions {
+            if tx.version == agora_types::OVL_EXECUTION_RAW_EVM_VERSION {
+                self.evict_ovl_raw(tx);
+                continue;
+            }
             consumed_account_nonces.insert((NativeAssetId::OVL, tx.from));
             let id = tx.tx_id();
             if self.ovl_execution_txs.remove(&id).is_some() {
@@ -3235,6 +3246,31 @@ mod tests {
         let mut pool = Mempool::new(8);
         let err = pool.admit_ovl_execution(tx).unwrap_err();
         assert!(err.to_string().contains("not admitted"));
+    }
+
+    #[test]
+    fn raw_evm_evicts_from_raw_pool_without_agora_nonce() {
+        use agora_types::Block;
+
+        let tx = agora_types::OvlExecutionTx::raw_ethereum(vec![0x02, 0x01]);
+        let mut pool = Mempool::new(8);
+        pool.admit_ovl_raw_execution(tx.clone()).unwrap();
+        assert!(pool.contains(&tx.tx_id()));
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.ovl_executions.push(tx.clone());
+        pool.evict_for_block(&block);
+        assert!(pool.select_ovl_raw_executions(8).is_empty());
+        assert!(!pool.contains(&tx.tx_id()));
     }
 
     fn covenant(index: u32, sequence: u32, nonce: u64) -> agora_types::TltCovenantTx {

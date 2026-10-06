@@ -96,8 +96,8 @@ recovery use the existing `pending_virtual` protocol.
 
 The DA lane entered at Trident protocol v10 / state transition v11. Protocol
 v25 appends standalone `NetworkMessage::DataCommitment` gossip. The current
-aggregate fingerprint is protocol v25 / `agora-trident-state-v22`. Frozen
-pre-Trident/v2 constants remain unchanged.
+aggregate fingerprint is protocol v26 / `agora-trident-state-v22` after raw
+OVL-EVM gossip. Frozen pre-Trident/v2 constants remain unchanged.
 
 Authenticated commitments now travel on the transaction gossip topic as
 `NetworkMessage::DataCommitment` (Borsh discriminant 33, appended after

@@ -19,7 +19,7 @@ parity files keep their own `INCOMPLETE` status lines.
 
 | Constant | Value | Notes |
 | --- | --- | --- |
-| `TRIDENT_PROTOCOL_VERSION` | 25 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v25 appends `NetworkMessage::DataCommitment` |
+| `TRIDENT_PROTOCOL_VERSION` | 26 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v26 appends `NetworkMessage::OvlRawExecution` |
 | Datadir `SCHEMA_VERSION` | 22 | Experimental; `OVL_EVM_SCHEMA_VERSION` is also 22 |
 | DRC fee-burn schema | 20 | Lifetime burned counters |
 | DRC ledger-index datadir | 21 | Common live-object / receipt rebuild |
@@ -42,7 +42,7 @@ Independent quorums; no price-oracle mixing.
 | TLT covenants v2 | Wired (Experimental) | `NetworkMessage::TltCovenant` (appended after offer cancel) | Wired; compact falls back to full body | `agora_submitTltCovenant`, `agora_getTltCovenant` | Shared builder + desktop/mobile P2PKH send |
 | OVL account transfer | Wired | `AccountTransfer` | Wired | `agora_submitAccountTransfer` | Shared builder + desktop/mobile send |
 | OVL execution (intrinsic gas) | Wired | `OvlExecution` | Wired | `agora_submitOvlExecution` | Shared v1 builder (empty calldata) + desktop/mobile send |
-| OVL-EVM-v1 (`revm` Shanghai) | Experimental, genesis-gated | **Not** on the Agora-signed gossip topic | Process-local pending inbox → local template only | Canonical `eth_*` / `net_*` / `web3_clientVersion`; `eth_sendRawTransaction` is local | No light-client `eth_*` wrapper |
+| OVL-EVM-v1 (`revm` Shanghai) | Experimental, genesis-gated | `NetworkMessage::OvlRawExecution` (v26); not on the Agora-signed topic | Separate raw pool + process-local inbox → template | Canonical `eth_*` / `net_*` / `web3_clientVersion`; `eth_sendRawTransaction` gossips raw | Canonical `eth_*` reads; no raw-EVM wallet builder |
 | DRC payments + XRPL-like objects | Wired (Experimental) | Typed envelopes through offer cancel | Wired; family reservations | Typed submit/get methods | Shared v4 payment builder + desktop/mobile send |
 | DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared builders + desktop/mobile native-DRC-vs-issued send |
 | Dual-PoS finality / staking | Wired (Experimental) | `CheckpointAttestation`, `StakeTx` | Wired | Validator / pool / `agora_submitStakeTx` | Light-client reads exist |
@@ -58,7 +58,7 @@ balances and shared nonces are `agora_getAccountBalances`. Ethereum
 ## P2P and compact blocks
 
 `NetworkMessage` Borsh discriminants are append-only through
-`DataCommitment` (33). There is no community or raw-EVM gossip variant.
+`OvlRawExecution` (34). There is no community mutation gossip variant.
 
 `compact_from_block` is UTXO-only. Any nonempty account, stake, OVL,
 DRC, DA, offer, or covenant lane forces a full `Block` envelope. That
@@ -143,7 +143,7 @@ See [`../core/data-availability.md`](../core/data-availability.md).
 | Asset | Canonical status | Highest honest claim |
 | --- | --- | --- |
 | TLT | `TALANTON BITCOIN FUNCTIONAL PARITY — INCOMPLETE` | Live UTXO/RandomX/GHOSTDAG is Multi-node devnet. Covenants are Experimental. No wrapped TLT, no v1 locktime/sequence, no 5-node production audit |
-| OVL | `OVOLOS ETHEREUM FUNCTIONAL PARITY — INCOMPLETE` | Shanghai-gated OVL-EVM-v1 + 100% base-fee burn is Experimental. Public raw-EVM gossip is PLANNED. Not Ethereum-equivalent |
+| OVL | `OVOLOS ETHEREUM FUNCTIONAL PARITY — INCOMPLETE` | Shanghai-gated OVL-EVM-v1 + 100% base-fee burn is Experimental. Raw-EVM gossip (v26) is Experimental and is not Ethereum txpool equivalence |
 | DRC | XRPL capability profile: Experimental / Partial | Contract-free closed operations plus native DEX. No paths, AMM, rippling, Hooks, or XRPL wire parity |
 
 DRC never receives a VM, bytecode, Hook, or user-defined program. OVL
@@ -169,15 +169,13 @@ is the only programmable domain.
 
 These are real unfinished paths, not parity slogans:
 
-1. **OVL raw-EVM public mempool** — fingerprint has no raw-EVM topic;
-   version 2 is rejected by the Agora-signed pool.
-2. **Compact-block multi-lane encoding** — full bodies for every
+1. **Compact-block multi-lane encoding** — full bodies for every
    non-UTXO lane. `Block::requires_full_body_gossip` is the single
    fail-closed gate so new lanes cannot silently enter UTXO compact ids.
-3. **Community consensus lanes** — skipped. Registry remains genesis +
+2. **Community consensus lanes** — skipped. Registry remains genesis +
    library (`register_*_into`). There is no signed Hub/Grant/Mission
    envelope to gossip without inventing a governance spend path.
-4. **DA TLT inclusion-fee policy** — transport is wired; default boot
+3. **DA TLT inclusion-fee policy** — transport is wired; default boot
    stays fail-closed until a reviewed debit/sponsorship rule exists.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
@@ -213,3 +211,5 @@ This audit close-out adds:
 - `agora-node schema report|migrate|reindex` for supported library
   rebuilds. Community consensus mutation stays unwired until a signed
   envelope exists.
+- Protocol v26 `NetworkMessage::OvlRawExecution` gossip and a separate
+  raw mempool. Version 2 remains rejected by the Agora-signed pool.

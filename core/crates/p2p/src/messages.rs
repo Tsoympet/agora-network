@@ -85,6 +85,8 @@ pub enum NetworkMessage {
     TltCovenant(agora_types::TltCovenantTx),
     /// Appended in Trident protocol v25; signed DA authorization on the tx topic.
     DataCommitment(agora_types::DataCommitmentAuthorization),
+    /// Appended in Trident protocol v26; raw Ethereum bytes (version 2). Not Agora-signed.
+    OvlRawExecution(agora_types::OvlExecutionTx),
 }
 
 impl NetworkMessage {
@@ -382,6 +384,12 @@ mod tests {
         ));
         assert_eq!(da.encode()[0], 33);
         assert_eq!(NetworkMessage::decode(&da.encode()).unwrap(), da);
+
+        let raw = NetworkMessage::OvlRawExecution(agora_types::OvlExecutionTx::raw_ethereum(vec![
+            0x02, 0xc0,
+        ]));
+        assert_eq!(raw.encode()[0], 34);
+        assert_eq!(NetworkMessage::decode(&raw.encode()).unwrap(), raw);
 
         let mut block = Block::utxo(
             BlockHeader {

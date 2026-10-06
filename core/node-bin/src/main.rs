@@ -43,8 +43,8 @@ use crate::backend::{
     admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
     admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
     admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_issuer_control,
-    admit_drc_trust_line_set, admit_ovl_execution, admit_stake_tx, admit_tlt_covenant,
-    admit_transaction, NodeBackend, NodeBackendConfig,
+    admit_drc_trust_line_set, admit_ovl_execution, admit_ovl_raw_execution, admit_stake_tx,
+    admit_tlt_covenant, admit_transaction, NodeBackend, NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::startup::{p2p_identity_path, prepare_legacy_datadir};
@@ -642,6 +642,7 @@ async fn main() {
             genesis_hash,
         },
     );
+    let pending_evm = backend.pending_evm();
     let dispatcher = Arc::new(tokio::sync::Mutex::new(RpcDispatcher::new(backend)));
     let rate_limit_per_minute = std::env::var("AGORA_RPC_RATE_LIMIT")
         .ok()
@@ -1062,6 +1063,21 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "OVL execution gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::OvlRawExecution(tx) => {
+                        match admit_ovl_raw_execution(
+                            store.as_ref(),
+                            &mempool,
+                            pending_evm.as_ref(),
+                            tx,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, tx = %id.to_hex(), "OVL raw-EVM gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "OVL raw-EVM gossip rejected");
                             }
                         }
                     }
