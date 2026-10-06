@@ -47,6 +47,7 @@ import {
   type TipSyncSnapshot,
   type WatchOnlyWallet,
 } from "../shared/light-client";
+import { DocsAboutPanel } from "./DocsAboutPanel";
 import { FeatureSurfacesPanel } from "./FeatureSurfacesPanel";
 import { LightClientPanel } from "./LightClientPanel";
 import { PairingPanel } from "./PairingPanel";
