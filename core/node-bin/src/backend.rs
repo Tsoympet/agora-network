@@ -229,7 +229,8 @@ pub(crate) fn admit_tlt_covenant(
         .map_err(|err| RpcError::Rejected(err.to_string()))
 }
 
-/// DA lane admission. Default boot stays fail-closed without a fingerprint.
+/// DA lane admission. Default Experimental boot binds the mesh fingerprint and
+/// requires the operator to hold at least [`agora_types::DA_INCLUSION_FEE_TLT`].
 pub(crate) fn admit_data_commitment(
     store: &StateStore,
     mempool: &Mutex<Mempool>,
@@ -241,7 +242,7 @@ pub(crate) fn admit_data_commitment(
         .as_ref()
         .filter(|fingerprint| **fingerprint != Hash::ZERO)
         .ok_or_else(|| {
-            RpcError::Rejected("data commitment lane disabled pending TLT base-fee policy".into())
+            RpcError::Rejected("data commitment requires a DA network fingerprint".into())
         })?;
     agora_crypto::verify_data_commitment_bound(
         &authorization,
@@ -270,6 +271,15 @@ pub(crate) fn admit_data_commitment(
         return Err(RpcError::Rejected(format!(
             "DA replay nonce {} does not match next {}",
             authorization.replay_nonce, expected
+        )));
+    }
+    let spendable = agora_state_machine::balance_of(store, &authorization.operator)
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+        .as_base_units();
+    if spendable < agora_types::DA_INCLUSION_FEE_TLT {
+        return Err(RpcError::Rejected(format!(
+            "DA inclusion fee: insufficient TLT (need {}, have {spendable})",
+            agora_types::DA_INCLUSION_FEE_TLT
         )));
     }
     let mut pool = mempool
@@ -4632,9 +4642,13 @@ mod tests {
     }
 
     #[test]
-    fn data_commitment_submit_is_fail_closed_until_fingerprint() {
+    fn data_commitment_submit_requires_fingerprint_and_tlt_fee() {
         let store = Arc::new(StateStore::open_in_memory());
-        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(operator.address())
+            .ignite(&store)
+            .unwrap();
         let fingerprint = Hash([9; 32]);
         let disabled = Arc::new(Mutex::new(
             ChainState::bootstrap_with(
@@ -4654,7 +4668,6 @@ mod tests {
             Arc::new(Mutex::new(Mempool::new(8))),
             backend_config(genesis),
         );
-        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
         let commitment = agora_types::DataAvailabilityCommitment::agora_layers_ovolos_batch(
             "agora-ovolos-testnet-1".into(),
             Hash([1; 32]),
@@ -4679,7 +4692,7 @@ mod tests {
         let err = disabled_backend
             .submit_data_commitment(authorization.clone())
             .unwrap_err();
-        assert!(err.to_string().contains("pending TLT base-fee policy"));
+        assert!(err.to_string().contains("DA network fingerprint"));
 
         let enabled = Arc::new(Mutex::new(
             ChainState::bootstrap_with(

@@ -1,7 +1,8 @@
 //! Consensus state for authenticated, provenance-bound data commitments.
 //!
 //! This module owns deterministic `(source, sequence)` acceptance and operator
-//! replay nonces. Transport and fee-policy activation remain separate concerns.
+//! replay nonces. Apply burns [`agora_types::DA_INCLUSION_FEE_TLT`] from the
+//! operator's TLT UTXOs; gossip still requires a mesh fingerprint.
 
 use agora_crypto::verify_data_commitment_bound;
 use agora_types::{

@@ -557,20 +557,12 @@ async fn main() {
         "genesis ready"
     );
 
-    let da_lane_opt_in = matches!(
-        std::env::var("AGORA_ENABLE_DA_LANE")
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "1" | "true" | "yes" | "on"
+    boot.data_availability_network_fingerprint = Some(net_fp);
+    info!(
+        fingerprint = %agora_p2p::fingerprint_topic_tag(&net_fp),
+        fee_tlt = agora_types::DA_INCLUSION_FEE_TLT,
+        "DA commitment lane enabled: mesh-bound, burns TLT inclusion fee, Experimental"
     );
-    if da_lane_opt_in {
-        boot.data_availability_network_fingerprint = Some(net_fp);
-        info!(
-            fingerprint = %agora_p2p::fingerprint_topic_tag(&net_fp),
-            "DA commitment lane opt-in: mesh-bound, TLT inclusion fee still unspecified, Experimental"
-        );
-    }
 
     let chain = Arc::new(Mutex::new(
         ChainState::bootstrap_with(store.clone(), genesis_hash, boot.clone(), storage)

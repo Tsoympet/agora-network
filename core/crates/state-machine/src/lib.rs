@@ -166,9 +166,10 @@ pub use accounts::{
 pub use apply::{
     apply_block, apply_block_batched, apply_block_batched_virtual,
     apply_block_batched_virtual_at_blue_score, apply_block_batched_with_auth,
-    apply_block_batched_with_auth_at_blue_score, apply_block_with_auth, balance_of, revert_journal,
-    revert_journal_batched, sum_transfer_fees, transfer_fee, validate_mempool_tx,
-    validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult, TxAuthContext, UtxoJournal,
+    apply_block_batched_with_auth_at_blue_score, apply_block_with_auth, balance_of,
+    collect_address_utxos, revert_journal, revert_journal_batched, sum_transfer_fees, transfer_fee,
+    validate_mempool_tx, validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult, TxAuthContext,
+    UtxoJournal,
 };
 pub use block_zero::{
     ensure_legacy_v2_datadir, load_verified_trident_block_zero, verify_trident_datadir_identity,
@@ -325,11 +326,12 @@ pub use state_root::{
 };
 pub use store::{StateStore, WriteBatch};
 pub use supply::{
-    burn_drc_fee_into, burned_supply_key, ignite_trident_supply, issued_supply_key,
-    load_burned_supply, load_issued_supply, load_max_supply, load_native_supply_state,
-    load_schema_version, max_supply_key, migrate_drc_fee_burn_schema, native_supply_root,
-    put_burned_supply_into, put_issued_supply_into, put_max_supply_into, put_schema_version_into,
-    verify_supply_invariants, NativeSupplyState, DRC_FEE_BURN_SCHEMA_VERSION,
+    burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key, ignite_trident_supply,
+    issued_supply_key, load_burned_supply, load_issued_supply, load_max_supply,
+    load_native_supply_state, load_schema_version, max_supply_key, migrate_drc_fee_burn_schema,
+    native_supply_root, put_burned_supply_into, put_issued_supply_into, put_max_supply_into,
+    put_schema_version_into, verify_supply_invariants, NativeSupplyState,
+    DRC_FEE_BURN_SCHEMA_VERSION,
 };
 pub use tlt_covenant::{load_covenant_utxo, validate_mempool_covenant, TltCovenantUtxoRecord};
 pub use trident_genesis::{

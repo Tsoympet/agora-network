@@ -94,9 +94,9 @@ adds `DataCommitment` (33); v26 adds `OvlRawExecution` (34) for version-2
 raw Ethereum envelopes on a separate mempool that does not reserve the OVL
 account nonce; v27 adds `TypedCompactBlock` (35) with named short-id lanes.
 Prior DRC policy, settlement, trust-line, issued-control, offer, and TLT
-covenant variants keep their discriminants. Default boot still leaves the DA
-fingerprint unset until a reviewed TLT inclusion-fee policy exists, so DA
-submit/template stay fail-closed unless `AGORA_ENABLE_DA_LANE=1`.
+covenant variants keep their discriminants. Default Experimental boot binds the
+DA fingerprint to the live mesh and burns `DA_INCLUSION_FEE_TLT` from the
+operator's TLT UTXOs on accept. Missing fingerprint is a signing-context error.
 `requires_full_body_gossip` still forbids UTXO compact for typed bodies.
 
 The v23 state transition adds no new `NetworkMessage` or block-body field.

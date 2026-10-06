@@ -155,8 +155,9 @@ pub struct ChainBootConfig {
     pub chain_id: String,
     /// Bound into Trident checkpoint bodies (from [`agora_state_machine::GenesisConsensusPolicy`]).
     pub consensus_policy_hash: Hash,
-    /// `None` keeps DA inclusion fail-closed until a reviewed TLT fee policy
-    /// explicitly activates this Trident-only block lane.
+    /// Mesh fingerprint bound into DA authorizations. Default Experimental boot
+    /// always sets this from the live network fingerprint; inclusion still burns
+    /// [`agora_types::DA_INCLUSION_FEE_TLT`] from the operator's TLT UTXOs.
     pub data_availability_network_fingerprint: Option<Hash>,
 }
 

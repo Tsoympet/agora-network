@@ -55,10 +55,11 @@ pub use block::{
     TRIDENT_BLOCK_BODY_V17_VERSION, TRIDENT_BLOCK_BODY_VERSION,
 };
 pub use data_availability::{
-    DataAvailabilityCommitment, DataCommitmentAuthorization, DataCommitmentError,
-    DataCommitmentSource, DA_COMMITMENT_AUTHORIZATION_DOMAIN,
+    da_fee_change_outpoint, DataAvailabilityCommitment, DataCommitmentAuthorization,
+    DataCommitmentError, DataCommitmentSource, DA_COMMITMENT_AUTHORIZATION_DOMAIN,
     DA_COMMITMENT_AUTHORIZATION_ID_DOMAIN, DA_COMMITMENT_AUTHORIZATION_VERSION,
-    DA_COMMITMENT_PAYLOAD_DOMAIN, DA_COMMITMENT_VERSION, MAX_DA_CHAIN_ID_BYTES,
+    DA_COMMITMENT_PAYLOAD_DOMAIN, DA_COMMITMENT_VERSION, DA_FEE_CHANGE_DOMAIN,
+    DA_INCLUSION_FEE_TLT, MAX_DA_CHAIN_ID_BYTES,
 };
 pub use drc_check::{
     check_cancel_submitter_allowed, check_cash_allowed, validate_check_expiration_bound,

@@ -47,7 +47,7 @@ Independent quorums; no price-oracle mixing.
 | DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared builders + desktop/mobile native-DRC-vs-issued send |
 | Dual-PoS finality / staking | Wired (Experimental) | `CheckpointAttestation`, `StakeTx` | Wired | Validator / pool / `agora_submitStakeTx` | Light-client reads exist |
 | Protocol treasuries / community registry | Genesis + library | No mutation gossip | No block lane | Read RPCs | Light-client reads exist |
-| DA commitments | Apply + journal | `NetworkMessage::DataCommitment` (v25) | Wired; template only when fingerprint is set | `agora_submitDataCommitment` / `agora_getDataCommitment` | Light-client query + submit wrappers |
+| DA commitments | Apply + journal + TLT fee | `NetworkMessage::DataCommitment` (v25) | Wired; default Experimental boot + `DA_INCLUSION_FEE_TLT` | `agora_submitDataCommitment` / `agora_getDataCommitment` | Light-client query + submit wrappers |
 
 `agora_getBalance` remains the TLT UTXO sum. Native OVL/DRC account
 balances and shared nonces are `agora_getAccountBalances`. Ethereum
@@ -131,11 +131,11 @@ the device.
 
 `Block.data_commitments`, atomic apply/journal, mempool reservation,
 `NetworkMessage::DataCommitment` gossip, template selection, and
-`agora_submitDataCommitment` / `agora_getDataCommitment` exist. Default boot
-leaves the DA fingerprint unset, so submit/inclusion fail closed with
-`data commitment lane disabled pending TLT base-fee policy`.
-`AGORA_ENABLE_DA_LANE=1` binds the fingerprint to the live mesh
-(Experimental; no TLT debit schedule). Get distinguishes pending / accepted /
+`agora_submitDataCommitment` / `agora_getDataCommitment` exist. Default
+Experimental boot binds the DA fingerprint to the live mesh. Accepted
+authorizations burn `DA_INCLUSION_FEE_TLT` (0.01 TLT) from the operator's
+P2PKH UTXOs and increment TLT burned supply. Submit/apply fail without
+fingerprint or without funds. Get distinguishes pending / accepted /
 confirmed (work depth) / finalized (full PoW ∧ OVL quorum ∧ DRC quorum) /
 conflict_lost / reverted and never maps lab `recordDa` to finality.
 See [`../core/data-availability.md`](../core/data-availability.md).
@@ -176,9 +176,7 @@ These are real unfinished paths, not parity slogans:
 1. **Community consensus lanes** — skipped. Registry remains genesis +
    library (`register_*_into`). There is no signed Hub/Grant/Mission
    envelope to gossip without inventing a governance spend path.
-2. **DA TLT inclusion-fee policy** — transport is wired; default boot
-   stays fail-closed until a reviewed debit/sponsorship rule exists.
-3. **Detached-multisign compact inflation** — those blocks still travel
+2. **Detached-multisign compact inflation** — those blocks still travel
    as full bodies because attachments are not in the mempool.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
@@ -204,7 +202,8 @@ This audit close-out adds:
 - `Block::requires_full_body_gossip` so compact gossip cannot forget a
   typed lane.
 - Protocol v25 `NetworkMessage::DataCommitment` gossip, mempool
-  reservation, template selection when the DA fingerprint is set, and
+  reservation, template selection on default Experimental boot, TLT
+  inclusion-fee debit (`DA_INCLUSION_FEE_TLT`), and
   `agora_submitDataCommitment` / `agora_getDataCommitment` with honest
   pending/accepted/confirmed/finalized statuses.
 - Device-local typed-lane builders (`typed-lanes.ts`) for DRC payment v4,

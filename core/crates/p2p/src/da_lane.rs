@@ -107,7 +107,7 @@ impl Mempool {
         Some(authorization)
     }
 
-    /// Deterministic authorization-id order. There is no DA fee yet.
+    /// Deterministic authorization-id order. Inclusion still burns the TLT fee at apply.
     pub fn select_data_commitments(&self, max: usize) -> Vec<DataCommitmentAuthorization> {
         let mut entries: Vec<_> = self.data_commitments.values().cloned().collect();
         entries.sort_by(|a, b| {

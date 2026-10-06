@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use agora_crypto::{address_from_pubkey, signer_address, verify_transaction_bound, PublicKeyBytes};
 use agora_types::{
-    Address, Amount, Block, Hash, NativeAssetId, OutPoint, Transaction, TransactionAcceptance,
-    TxOut,
+    da_fee_change_outpoint, Address, Amount, Block, Hash, NativeAssetId, OutPoint, Transaction,
+    TransactionAcceptance, TxOut, DA_INCLUSION_FEE_TLT,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -55,7 +55,7 @@ use crate::staking::{
     snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
 };
 use crate::store::WriteBatch;
-use crate::supply::{burn_drc_fee_into, burned_supply_key};
+use crate::supply::{burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key};
 use crate::utxo::outpoint_key;
 use crate::{StateError, StateStore};
 
@@ -1282,6 +1282,8 @@ fn apply_block_batched_mode(
         mode,
         &mut batch,
         &mut journal,
+        &mut spent_in_block,
+        &mut created_in_block,
     )?;
 
     let acceptance = BlockAcceptanceRecord {
@@ -1504,6 +1506,8 @@ fn apply_trident_lanes(
     mode: ApplyMode,
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
+    spent_in_block: &mut HashSet<OutPoint>,
+    created_in_block: &mut HashMap<OutPoint, TxOut>,
 ) -> Result<TridentLaneAcceptances, StateError> {
     // Validate the detached lane even when no typed operation is present. This
     // prevents orphan or cross-kind authorization bytes from becoming inert,
@@ -3017,9 +3021,7 @@ fn apply_trident_lanes(
             .as_ref()
             .filter(|fingerprint| **fingerprint != Hash::ZERO)
             .ok_or_else(|| {
-                StateError::InvalidTx(
-                    "data commitment lane disabled pending TLT base-fee policy".into(),
-                )
+                StateError::InvalidTx("data commitment requires a DA network fingerprint".into())
             })?;
         for authorization in &block.data_commitments {
             let mut op_batch = WriteBatch::new();
@@ -3036,6 +3038,16 @@ fn apply_trident_lanes(
             )?;
             match status {
                 TransactionAcceptance::Accepted => {
+                    debit_da_inclusion_fee(
+                        &lane,
+                        &authorization.operator,
+                        authorization.authorization_id(),
+                        &mut op_batch,
+                        journal,
+                        spent_in_block,
+                        created_in_block,
+                        &mut meta_before,
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.data_availability_meta_before.extend(meta_before);
@@ -3330,6 +3342,130 @@ fn verify_and_signer(
         }
         None => signer_address(tx).map_err(|e| StateError::InvalidTx(e.to_string())),
     }
+}
+
+/// Collect spendable TLT UTXOs for `address`, skipping already-spent outpoints.
+pub fn collect_address_utxos(
+    store: &StateStore,
+    address: &Address,
+    spent_in_block: &HashSet<OutPoint>,
+) -> Result<Vec<(OutPoint, TxOut)>, StateError> {
+    let mut found = Vec::new();
+    store.for_each_cf(ColumnFamily::Utxo, |key, value| {
+        let out = TxOut::try_from_slice(value).map_err(|e| StateError::Storage(e.to_string()))?;
+        if &out.address != address || out.value.as_base_units() == 0 {
+            return Ok(());
+        }
+        let op = outpoint_from_utxo_key(key)?;
+        if spent_in_block.contains(&op) {
+            return Ok(());
+        }
+        found.push((op, out));
+        Ok(())
+    })?;
+    found.sort_by(|a, b| outpoint_key(&a.0).cmp(&outpoint_key(&b.0)));
+    Ok(found)
+}
+
+fn outpoint_from_utxo_key(key: &[u8]) -> Result<OutPoint, StateError> {
+    if key.len() != 36 {
+        return Err(StateError::Storage("malformed UTXO key".into()));
+    }
+    let mut tx_id = [0u8; 32];
+    tx_id.copy_from_slice(&key[..32]);
+    let mut index_bytes = [0u8; 4];
+    index_bytes.copy_from_slice(&key[32..]);
+    Ok(OutPoint {
+        tx_id: Hash(tx_id),
+        index: u32::from_le_bytes(index_bytes),
+    })
+}
+
+/// Burn [`DA_INCLUSION_FEE_TLT`] from the operator's TLT UTXOs.
+fn debit_da_inclusion_fee(
+    store: &StateStore,
+    operator: &Address,
+    authorization_id: Hash,
+    batch: &mut WriteBatch,
+    journal: &mut UtxoJournal,
+    spent_in_block: &mut HashSet<OutPoint>,
+    created_in_block: &mut HashMap<OutPoint, TxOut>,
+    meta_before: &mut Vec<(Vec<u8>, Option<Vec<u8>>)>,
+) -> Result<(), StateError> {
+    let fee = DA_INCLUSION_FEE_TLT;
+    let mut selected = Vec::new();
+    let mut total = 0u64;
+    for (op, out) in collect_address_utxos(store, operator, spent_in_block)? {
+        if created_in_block.contains_key(&op) {
+            continue;
+        }
+        total = total
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("DA fee input overflow".into()))?;
+        selected.push((op, out));
+        if total >= fee {
+            break;
+        }
+    }
+    let mut from_block: Vec<(OutPoint, TxOut)> = created_in_block
+        .iter()
+        .filter(|(op, out)| {
+            &out.address == operator
+                && !spent_in_block.contains(*op)
+                && selected.iter().all(|(existing, _)| existing != *op)
+        })
+        .map(|(op, out)| (*op, out.clone()))
+        .collect();
+    from_block.sort_by(|a, b| outpoint_key(&a.0).cmp(&outpoint_key(&b.0)));
+    for (op, out) in from_block {
+        if total >= fee {
+            break;
+        }
+        total = total
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("DA fee input overflow".into()))?;
+        selected.push((op, out));
+    }
+    if total < fee {
+        return Err(StateError::InvalidTx(format!(
+            "DA inclusion fee: insufficient TLT (need {fee}, have {total})"
+        )));
+    }
+    selected.sort_by(|a, b| outpoint_key(&a.0).cmp(&outpoint_key(&b.0)));
+    let burned_key = burned_supply_key(NativeAssetId::TLT);
+    meta_before.extend(snapshot_meta_keys(store, &[burned_key])?);
+    burn_tlt_fee_into(store, batch, fee)?;
+    for (op, out) in &selected {
+        spend_utxo(batch, op, out, journal, spent_in_block, created_in_block);
+    }
+    let change = total - fee;
+    if change > 0 {
+        let change_op = da_fee_change_outpoint(&authorization_id);
+        if spent_in_block.contains(&change_op) || created_in_block.contains_key(&change_op) {
+            return Err(StateError::DuplicateOutpoint(format!(
+                "{}:{}",
+                change_op.tx_id.to_hex(),
+                change_op.index
+            )));
+        }
+        let change_out = TxOut {
+            value: Amount::from_base_units(change),
+            address: *operator,
+        };
+        let key = outpoint_key(&change_op);
+        if store.get_cf(ColumnFamily::Utxo, &key)?.is_some() {
+            return Err(StateError::DuplicateOutpoint(format!(
+                "{}:{} (already in utxo set)",
+                change_op.tx_id.to_hex(),
+                change_op.index
+            )));
+        }
+        let bytes = borsh::to_vec(&change_out).map_err(|e| StateError::Storage(e.to_string()))?;
+        batch.put_cf(ColumnFamily::Utxo, &key, &bytes);
+        journal.created.push(change_op);
+        created_in_block.insert(change_op, change_out);
+    }
+    Ok(())
 }
 
 pub(crate) fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
@@ -5598,11 +5734,17 @@ mod tests {
 
     #[test]
     fn data_commitment_lane_orders_duplicates_and_reverts_atomically() {
-        use crate::{data_availability_root, load_data_commitment, load_data_commitment_nonce};
+        use crate::{
+            data_availability_root, load_burned_supply, load_data_commitment,
+            load_data_commitment_nonce,
+        };
 
         let store = StateStore::open_in_memory();
-        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
         let keypair = KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(keypair.address())
+            .ignite(&store)
+            .unwrap();
         let fingerprint = Hash([9; 32]);
         let context = TxAuthContext {
             chain_id: "agora-trident-testnet-1".into(),
@@ -5612,6 +5754,8 @@ mod tests {
         let first = signed_data_commitment(&keypair, 4, 0, 11, &genesis, &fingerprint);
         let conflict = signed_data_commitment(&keypair, 4, 1, 12, &genesis, &fingerprint);
         let root_before = data_availability_root(&store).unwrap();
+        let burned_before = load_burned_supply(&store, NativeAssetId::TLT).unwrap();
+        let balance_before = balance_of(&store, &keypair.address()).unwrap();
         let coinbase = Transaction::unsigned(
             1,
             vec![],
@@ -5661,6 +5805,16 @@ mod tests {
             first
         );
         assert_ne!(data_availability_root(&store).unwrap(), root_before);
+        assert_eq!(
+            load_burned_supply(&store, NativeAssetId::TLT).unwrap(),
+            burned_before + DA_INCLUSION_FEE_TLT
+        );
+        assert_eq!(
+            balance_of(&store, &keypair.address())
+                .unwrap()
+                .as_base_units(),
+            balance_before.as_base_units() - DA_INCLUSION_FEE_TLT
+        );
 
         store
             .write_batch(revert_journal_batched(&journal).unwrap())
@@ -5669,6 +5823,14 @@ mod tests {
         assert_eq!(
             load_data_commitment_nonce(&store, &keypair.address()).unwrap(),
             0
+        );
+        assert_eq!(
+            load_burned_supply(&store, NativeAssetId::TLT).unwrap(),
+            burned_before
+        );
+        assert_eq!(
+            balance_of(&store, &keypair.address()).unwrap(),
+            balance_before
         );
     }
 
@@ -5714,15 +5876,79 @@ mod tests {
         let disabled_err = apply_block_batched_virtual(&store, &block, 0, Some(&disabled))
             .err()
             .expect("disabled DA lane must reject");
-        assert!(disabled_err.to_string().contains("base-fee policy"));
+        assert!(disabled_err.to_string().contains("DA network fingerprint"));
+
+        let unfunded = TxAuthContext {
+            chain_id: disabled.chain_id.clone(),
+            genesis: disabled.genesis,
+            data_availability_network_fingerprint: Some(fingerprint),
+        };
+        let unfunded_err = apply_block_batched_virtual(&store, &block, 0, Some(&unfunded))
+            .err()
+            .expect("unfunded DA operator must reject");
+        assert!(unfunded_err.to_string().contains("insufficient TLT"));
 
         let enabled = TxAuthContext {
+            chain_id: disabled.chain_id.clone(),
+            genesis: disabled.genesis,
             data_availability_network_fingerprint: Some(fingerprint),
-            ..disabled
         };
         assert!(apply_block_batched_virtual(&store, &block, 0, Some(&enabled)).is_err());
         assert!(load_data_commitment(&store, valid.commitment.source, 4)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn data_commitment_invalid_auth_discards_funded_partial_batch() {
+        use crate::load_data_commitment;
+
+        let store = StateStore::open_in_memory();
+        let keypair = KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(keypair.address())
+            .ignite(&store)
+            .unwrap();
+        let fingerprint = Hash([9; 32]);
+        let valid = signed_data_commitment(&keypair, 4, 0, 11, &genesis, &fingerprint);
+        let mut invalid = signed_data_commitment(&keypair, 5, 1, 12, &genesis, &fingerprint);
+        invalid.signature[0] ^= 1;
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.data_commitments = vec![valid.clone(), invalid];
+        block.header.tx_root = block.compute_body_root();
+        let enabled = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: Some(fingerprint),
+        };
+        assert!(apply_block_batched_virtual(&store, &block, 0, Some(&enabled)).is_err());
+        assert!(load_data_commitment(&store, valid.commitment.source, 4)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            balance_of(&store, &keypair.address())
+                .unwrap()
+                .as_base_units(),
+            Amount::from_whole(10_000_000).unwrap().as_base_units()
+        );
     }
 }
