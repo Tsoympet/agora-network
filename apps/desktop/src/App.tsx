@@ -15,6 +15,7 @@ import {
   sealVault,
   sendTransfer,
   shortAddress,
+  readNativeBalances,
   shortHash,
   startTipSync,
   walletNetworkFromNode,
@@ -22,9 +23,11 @@ import {
   type LightNodeInfo,
   type LightTxLookup,
   type LightUtxo,
+  type NativeBalances,
   type TipSyncSnapshot,
 } from "../../shared/light-client";
 import { GovernancePanel } from "./components/GovernancePanel";
+import { LightClientPanel } from "./components/LightClientPanel";
 
 const vaultStorage = localStorageVault();
 
@@ -70,6 +73,7 @@ export function App() {
   const [nodeInfo, setNodeInfo] = useState<LightNodeInfo | null>(null);
   const [address, setAddress] = useState("");
   const [balance, setBalance] = useState<number | null>(null);
+  const [nativeBalances, setNativeBalances] = useState<NativeBalances | null>(null);
   const [utxos, setUtxos] = useState<LightUtxo[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletBusy, setWalletBusy] = useState(false);
@@ -169,20 +173,24 @@ export function App() {
           : "Enter a network-matching Bech32 or 40-character hex address",
       );
       setBalance(null);
+      setNativeBalances(null);
       setUtxos([]);
       return;
     }
     setWalletBusy(true);
     setWalletError(null);
     try {
-      const [bal, set] = await Promise.all([
+      const [bal, set, native] = await Promise.all([
         client.getBalance(resolved),
         client.getUtxos(resolved),
+        client.getNativeBalances(resolved),
       ]);
       setBalance(bal.balance);
+      setNativeBalances(readNativeBalances(native));
       setUtxos(set.utxos);
     } catch (err) {
       setBalance(null);
+      setNativeBalances(null);
       setUtxos([]);
       setWalletError(err instanceof Error ? err.message : "lookup failed");
     } finally {
@@ -407,8 +415,9 @@ export function App() {
         className="agora-lede agora-rise agora-rise-delay-2"
         style={{ marginTop: "0.85rem" }}
       >
-        Desktop wallet: Bech32 receive, BIP-39 send, and live DAG tip sync over
-        HTTP JSON-RPC.
+        Desktop wallet for the whole Agora Network: create or restore a BIP-39
+        vault, read TLT, OVL, and DRC balances, verify TLT inclusion, and submit
+        signed transactions without running a full node.
       </p>
 
       <section
@@ -510,6 +519,12 @@ export function App() {
         ) : null}
       </section>
 
+      <LightClientPanel
+        client={client}
+        network={nodeInfo?.network ?? null}
+        genesisHash={nodeInfo?.genesis_hash ?? null}
+      />
+
       <section
         className="agora-rise agora-rise-delay-3"
         style={{ marginTop: "2.75rem", maxWidth: 520 }}
@@ -605,13 +620,34 @@ export function App() {
           </p>
         ) : null}
         {balance !== null ? (
-          <p style={{ marginTop: "0.85rem", fontSize: "0.95rem" }}>
-            Balance{" "}
-            <span style={{ color: "var(--agora-cyan)", fontFamily: "ui-monospace, monospace" }}>
-              {balance}
-            </span>{" "}
-            base units · {utxos.length} UTXO{utxos.length === 1 ? "" : "s"}
-          </p>
+          <div style={{ marginTop: "0.85rem", fontSize: "0.95rem" }}>
+            <p>
+              TLT{" "}
+              <span style={{ color: "var(--agora-cyan)", fontFamily: "ui-monospace, monospace" }}>
+                {nativeBalances?.assets.TLT.balance ?? balance}
+              </span>{" "}
+              base units · UTXO · node-reported · {utxos.length} output
+              {utxos.length === 1 ? "" : "s"}
+            </p>
+            {nativeBalances ? (
+              <>
+                <p>
+                  OVL{" "}
+                  <span style={{ color: "var(--agora-gold)", fontFamily: "ui-monospace, monospace" }}>
+                    {nativeBalances.assets.OVL.balance}
+                  </span>{" "}
+                  · account · node-reported
+                </p>
+                <p>
+                  DRC{" "}
+                  <span style={{ color: "var(--agora-cyan)", fontFamily: "ui-monospace, monospace" }}>
+                    {nativeBalances.assets.DRC.balance}
+                  </span>{" "}
+                  · account · node-reported
+                </p>
+              </>
+            ) : null}
+          </div>
         ) : null}
         {utxos.length > 0 ? (
           <ul

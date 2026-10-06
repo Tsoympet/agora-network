@@ -28,6 +28,7 @@ import {
   sealVault,
   sendTransfer,
   shortAddress,
+  readNativeBalances,
   shortHash,
   startTipSync,
   walletNetworkFromNode,
@@ -35,8 +36,10 @@ import {
   type LightNodeInfo,
   type LightTxLookup,
   type LightUtxo,
+  type NativeBalances,
   type TipSyncSnapshot,
 } from "../shared/light-client";
+import { LightClientPanel } from "./LightClientPanel";
 
 const vaultStorage = keyValueVault(SecureStore);
 
@@ -51,10 +54,14 @@ function env(name: string): string | undefined {
 }
 
 const RPC_URL = env("EXPO_PUBLIC_AGORA_RPC_URL") || "http://127.0.0.1:8545/rpc";
+const RPC_TOKEN = env("EXPO_PUBLIC_AGORA_RPC_TOKEN");
 const POLL_MS = Number(env("EXPO_PUBLIC_AGORA_POLL_MS")) || 2000;
 
 export default function App() {
-  const client = useMemo(() => createLightClient({ rpcUrl: RPC_URL }), []);
+  const client = useMemo(
+    () => createLightClient({ rpcUrl: RPC_URL, rpcToken: RPC_TOKEN }),
+    [],
+  );
   const [snap, setSnap] = useState<TipSyncSnapshot>({
     status: "idle",
     tips: [],
@@ -65,6 +72,7 @@ export default function App() {
   const [nodeInfo, setNodeInfo] = useState<LightNodeInfo | null>(null);
   const [address, setAddress] = useState("");
   const [balance, setBalance] = useState<number | null>(null);
+  const [nativeBalances, setNativeBalances] = useState<NativeBalances | null>(null);
   const [utxos, setUtxos] = useState<LightUtxo[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletBusy, setWalletBusy] = useState(false);
@@ -89,6 +97,23 @@ export default function App() {
   useEffect(() => startTipSync({ client, pollMs: POLL_MS, onUpdate: setSnap }), [
     client,
   ]);
+
+  useEffect(() => {
+    const doc = (
+      globalThis as {
+        document?: {
+          createElement: (tag: string) => { rel: string; href: string };
+          head: { appendChild: (node: unknown) => void };
+        };
+      }
+    ).document;
+    if (!doc) return;
+    const link = doc.createElement("link");
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600&display=swap";
+    doc.head.appendChild(link);
+  }, []);
 
   useEffect(() => {
     void loadSealedVault(vaultStorage).then((sealed) => {
@@ -164,20 +189,24 @@ export default function App() {
           : "Enter a network-matching Bech32 or 40-character hex address",
       );
       setBalance(null);
+      setNativeBalances(null);
       setUtxos([]);
       return;
     }
     setWalletBusy(true);
     setWalletError(null);
     try {
-      const [bal, set] = await Promise.all([
+      const [bal, set, native] = await Promise.all([
         client.getBalance(resolved),
         client.getUtxos(resolved),
+        client.getNativeBalances(resolved),
       ]);
       setBalance(bal.balance);
+      setNativeBalances(readNativeBalances(native));
       setUtxos(set.utxos);
     } catch (err) {
       setBalance(null);
+      setNativeBalances(null);
       setUtxos([]);
       setWalletError(err instanceof Error ? err.message : "lookup failed");
     } finally {
@@ -369,8 +398,9 @@ export default function App() {
           ) : null}
         </View>
         <Text style={styles.lede}>
-          Mobile wallet: Bech32 receive, BIP-39 send, and live DAG tip sync over
-          HTTP JSON-RPC.
+          Phone wallet for the whole Agora Network: restore or create a vault,
+          read TLT, OVL, and DRC balances, verify TLT inclusion, and submit
+          signed transactions without a full node.
         </Text>
 
         <Text style={styles.eyebrow}>Node</Text>
@@ -421,6 +451,12 @@ export default function App() {
             <Text style={styles.meta}>No tips yet</Text>
           ) : null}
         </View>
+
+        <LightClientPanel
+          client={client}
+          network={nodeInfo?.network ?? null}
+          genesisHash={nodeInfo?.genesis_hash ?? null}
+        />
 
         {snap.updatedAt ? (
           <Text style={styles.footer}>
@@ -486,8 +522,11 @@ export default function App() {
         {walletError ? <Text style={styles.error}>{walletError}</Text> : null}
         {balance !== null ? (
           <Text style={styles.meta}>
-            Balance {balance} base units · {utxos.length} UTXO
-            {utxos.length === 1 ? "" : "s"}
+            TLT {nativeBalances?.assets.TLT.balance ?? balance} · UTXO · node-reported ·{" "}
+            {utxos.length} output{utxos.length === 1 ? "" : "s"}
+            {nativeBalances
+              ? `\nOVL ${nativeBalances.assets.OVL.balance} · account · node-reported\nDRC ${nativeBalances.assets.DRC.balance} · account · node-reported`
+              : ""}
           </Text>
         ) : null}
         <View style={styles.tipList}>
@@ -666,6 +705,7 @@ const styles = StyleSheet.create({
   brand: {
     marginTop: 18,
     color: agoraBrand.colors.gold,
+    fontFamily: "Cinzel",
     fontSize: 34,
     fontWeight: "700",
     letterSpacing: 1,
@@ -699,6 +739,7 @@ const styles = StyleSheet.create({
   lede: {
     marginTop: 12,
     color: agoraBrand.colors.inkMuted,
+    fontFamily: "Inter",
     fontSize: 16,
     lineHeight: 24,
     maxWidth: 420,
@@ -706,6 +747,7 @@ const styles = StyleSheet.create({
   eyebrow: {
     marginTop: 36,
     color: agoraBrand.colors.goldSoft,
+    fontFamily: "Cinzel",
     fontSize: 12,
     letterSpacing: 2,
     textTransform: "uppercase",

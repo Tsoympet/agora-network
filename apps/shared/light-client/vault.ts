@@ -203,25 +203,37 @@ export function localStorageVault(
   };
 }
 
+type MaybePromise<T> = T | Promise<T>;
+
 /**
- * Adapter for Expo SecureStore / AsyncStorage-style APIs:
- * `getItem` / `setItem` / `deleteItem` (or `removeItem`).
+ * Adapter for AsyncStorage (`getItem` / `setItem` / `removeItem`) and Expo
+ * SecureStore (`getItemAsync` / `setItemAsync` / `deleteItemAsync`).
+ * SecureStore is preferred when both shapes are present so the mobile vault
+ * does not call missing synchronous methods.
  */
 export function keyValueVault(
   store: {
-    getItem(key: string): Promise<string | null>;
-    setItem(key: string, value: string): Promise<void>;
-    deleteItem?(key: string): Promise<void>;
-    removeItem?(key: string): Promise<void>;
+    getItem?(key: string): MaybePromise<string | null>;
+    setItem?(key: string, value: string): MaybePromise<void>;
+    deleteItem?(key: string): MaybePromise<void>;
+    removeItem?(key: string): MaybePromise<void>;
+    getItemAsync?(key: string): Promise<string | null>;
+    setItemAsync?(key: string, value: string): Promise<void>;
+    deleteItemAsync?(key: string): Promise<void>;
   },
   key: string = DEFAULT_VAULT_STORAGE_KEY,
 ): VaultStorage {
+  const get = store.getItemAsync ?? store.getItem;
+  const set = store.setItemAsync ?? store.setItem;
+  const del = store.deleteItemAsync ?? store.deleteItem ?? store.removeItem;
+  if (!get || !set) {
+    throw new Error("vault storage adapter is missing get/set");
+  }
   return {
-    load: () => store.getItem(key),
-    save: (raw) => store.setItem(key, raw),
+    load: () => Promise.resolve(get.call(store, key)),
+    save: (raw) => Promise.resolve(set.call(store, key, raw)).then(() => undefined),
     clear: async () => {
-      if (store.deleteItem) await store.deleteItem(key);
-      else if (store.removeItem) await store.removeItem(key);
+      if (del) await del.call(store, key);
     },
   };
 }

@@ -76,6 +76,27 @@ export {
   type TridentLightState,
 } from "./tridentLight";
 export {
+  assertExpectedNetwork,
+  compareHeaderSpines,
+  foldBodyBinding,
+  hashLightHeader,
+  readNativeBalances,
+  verifyDrcObjectHeaderProof,
+  verifyIncomingTlt,
+  verifyLaneId,
+  verifyReportedFinality,
+  verifySelectedParentSpine,
+  type BodyBindingStep,
+  type LightHeaderChain,
+  type LightHeaderFields,
+  type LightHeaderRecord,
+  type NativeAssetBalance,
+  type NativeBalances,
+  type SpineRelation,
+  type TltInclusionProof,
+  type TltInclusionResponse,
+} from "./agoraLight";
+export {
   addressBech32FromMnemonic,
   addressFromMnemonic,
   buildSignedTransfer,

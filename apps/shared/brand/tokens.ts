@@ -58,19 +58,16 @@ export const agoraBrand = {
   },
   marks: {
     TLT: {
-      name: "Talanton",
-      meaning: "Scales of value",
       ...agoraTokenSupplies.TLT,
+      meaning: "Scales of value",
     },
     DRC: {
-      name: "Drachma",
-      meaning: "Corinthian helm",
       ...agoraTokenSupplies.DRC,
+      meaning: "Corinthian helm",
     },
     OVL: {
-      name: "Ovolos",
-      meaning: "Winged helm / spears",
       ...agoraTokenSupplies.OVL,
+      meaning: "Winged helm / spears",
     },
   },
   wallet: {

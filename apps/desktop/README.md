@@ -11,6 +11,7 @@ Native crate: `apps/desktop/src-tauri` (`agora-desktop`).
 - Password vault (AES-256-GCM) persisted in `localStorage` — Unlock / Save / Lock
 - Compact node strip via `agora_getNodeInfo` (mempool, PoW, peers, archival)
 - Post-send pending → confirmed + confirmation depth
+- Whole-network light sync: selected-parent headers, TLT Merkle checks, DRC object query, OVL/DRC/TLT balances
 
 ```bash
 # Terminal A
@@ -33,7 +34,7 @@ Prebuilt installers ship on GitHub Releases (`v*` tags). See
 | `VITE_AGORA_RPC_URL` | `http://127.0.0.1:8545/rpc` | Node JSON-RPC |
 | `VITE_AGORA_POLL_MS` | `2000` | Tip poll interval |
 
-Shared client: `apps/shared/light-client`.
+Shared client: `apps/shared/light-client`. Threat model: [`docs/core/agora-light-client.md`](../../docs/core/agora-light-client.md).
 
 ### Optional CPU mining (sidecar)
 
