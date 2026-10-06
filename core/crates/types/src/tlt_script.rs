@@ -1,8 +1,9 @@
-//! Deterministic TLT covenant script (version 2 library).
+//! Deterministic TLT covenant script (version 2).
 //!
 //! The live UTXO lane still spends address-locked v1 [`crate::Transaction`] values.
-//! This module does not change that encoding. It defines a closed opcode set for
-//! P2PKH-style, P2SH, M-of-N, absolute and relative timelocks, and hashlocks.
+//! This module does not change that encoding. Block admission carries these
+//! transactions on a separate lane. The opcode set is closed: P2PKH-style, P2SH,
+//! M-of-N, absolute and relative timelocks, and hashlocks.
 //! There is no loop, jump, or concatenation opcode, so scripts are not
 //! Turing-complete.
 //!
@@ -12,7 +13,9 @@
 //! with no sign bit.
 
 use borsh::{BorshDeserialize, BorshSerialize};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use ts_rs::TS;
 
 use crate::{Address, Amount, Hash, OutPoint};
 
@@ -144,7 +147,10 @@ pub struct TltSpendContext {
 }
 
 /// One covenant input. Sequence is on the wire here; v1 [`crate::TxIn`] has none.
-#[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize)]
+#[derive(
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+)]
+#[ts(export)]
 pub struct TltCovenantInput {
     pub previous_outpoint: OutPoint,
     pub sequence: u32,
@@ -152,7 +158,10 @@ pub struct TltCovenantInput {
 }
 
 /// One covenant output. The live UTXO [`crate::TxOut`] remains value plus address.
-#[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize)]
+#[derive(
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+)]
+#[ts(export)]
 pub struct TltCovenantOutput {
     pub value: Amount,
     pub script_pubkey: Vec<u8>,
@@ -160,9 +169,13 @@ pub struct TltCovenantOutput {
 
 /// Versioned TLT covenant transaction.
 ///
-/// Not accepted by the live block body. `nonce` is retained so Agora replay
-/// binding is available even though Bitcoin transactions do not carry one.
-#[derive(Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize)]
+/// Admitted on the block's covenant lane, separate from v1 [`crate::Transaction`]
+/// bytes. `nonce` stays in the sighash so a signature cannot be replayed by
+/// editing it, and [`Self::sighash_preimage_bound`] binds a chain id and genesis.
+#[derive(
+    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
+)]
+#[ts(export)]
 pub struct TltCovenantTx {
     pub version: u32,
     pub inputs: Vec<TltCovenantInput>,
@@ -194,6 +207,64 @@ impl TltCovenantTx {
         ))
         .expect("covenant sighash serialization")
     }
+
+    /// Chain-bound sighash. A signature over [`Self::sighash_preimage`] does not
+    /// authorize this preimage, so the same witness cannot replay on another genesis.
+    pub fn sighash_preimage_bound(&self, chain_id: &str, genesis: &Hash) -> Vec<u8> {
+        borsh::to_vec(&(
+            b"agora-tlt-covenant-sighash-bound-v1",
+            chain_id,
+            genesis.as_bytes(),
+            self.sighash_preimage(),
+        ))
+        .expect("bound covenant sighash serialization")
+    }
+
+    /// True when every input is final. Bitcoin ignores `nLockTime` in that case.
+    pub fn locktime_is_ignored(&self) -> bool {
+        self.inputs
+            .iter()
+            .all(|input| input.sequence == TLT_SEQUENCE_FINAL)
+    }
+}
+
+/// Transaction-level locktime, before script execution.
+///
+/// Final sequences skip the check. Any non-final sequence requires `lock_time`
+/// to be a blue score or a unix time that the spend context has reached.
+pub fn covenant_locktime_satisfied(
+    tx: &TltCovenantTx,
+    spend_blue_score: u64,
+    median_time_past_secs: u64,
+) -> Result<(), TltScriptError> {
+    if tx.locktime_is_ignored() {
+        return Ok(());
+    }
+    if tx.lock_time < TLT_LOCKTIME_TIME_THRESHOLD {
+        if spend_blue_score < tx.lock_time {
+            return Err(TltScriptError::LocktimeNotMet);
+        }
+    } else if median_time_past_secs < tx.lock_time {
+        return Err(TltScriptError::LocktimeNotMet);
+    }
+    Ok(())
+}
+
+/// Address committed by [`script_p2pkh`], when `script` is exactly that template.
+pub fn p2pkh_address(script: &[u8]) -> Option<Address> {
+    if script.len() != 26
+        || script[0] != OP_DUP
+        || script[1] != OP_PUBKEYHASH
+        || script[2] != OP_PUSH
+        || script[3] != 20
+        || script[24] != OP_EQUALVERIFY
+        || script[25] != OP_CHECKSIG
+    {
+        return None;
+    }
+    let mut raw = [0u8; 20];
+    raw.copy_from_slice(&script[4..24]);
+    Some(Address(raw))
 }
 
 /// Agora P2PKH-style lock: DUP, SHA-256 prefix address, CHECKSIG.
@@ -335,12 +406,39 @@ pub fn eval_covenant_input<C: SigChecker>(
     origin: TltOutputOrigin,
     checker: &C,
 ) -> Result<(), TltScriptError> {
+    eval_covenant_input_preimage(
+        tx,
+        input_index,
+        script_pubkey,
+        spend_blue_score,
+        median_time_past_secs,
+        origin,
+        tx.sighash_preimage(),
+        checker,
+    )
+}
+
+/// Like [`eval_covenant_input`] with an explicit sighash preimage.
+///
+/// Consensus passes [`TltCovenantTx::sighash_preimage_bound`] so a witness signed
+/// for another chain id or genesis fails here without touching the v1 wire.
+#[allow(clippy::too_many_arguments)]
+pub fn eval_covenant_input_preimage<C: SigChecker>(
+    tx: &TltCovenantTx,
+    input_index: usize,
+    script_pubkey: &[u8],
+    spend_blue_score: u64,
+    median_time_past_secs: u64,
+    origin: TltOutputOrigin,
+    sighash_preimage: Vec<u8>,
+    checker: &C,
+) -> Result<(), TltScriptError> {
     if tx.version != TLT_COVENANT_TX_VERSION {
         return Err(TltScriptError::BadVersion);
     }
     let input = tx.inputs.get(input_index).ok_or(TltScriptError::BadInput)?;
     let ctx = TltSpendContext {
-        sighash_preimage: tx.sighash_preimage(),
+        sighash_preimage,
         lock_time: tx.lock_time,
         sequence: input.sequence,
         spend_blue_score,

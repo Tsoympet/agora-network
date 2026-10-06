@@ -107,6 +107,7 @@ impl GenesisBuilder {
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         }
     }
 
