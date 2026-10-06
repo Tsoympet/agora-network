@@ -77,6 +77,10 @@ pub enum NetworkMessage {
     DrcTrustLineIssuerControl(agora_types::DrcTrustLineIssuerControlTx),
     /// Appended in Trident protocol v21; issued clawback.
     DrcIssuedClawback(agora_types::DrcIssuedClawbackTx),
+    /// Appended in Trident protocol v24; native order-book offer create.
+    DrcOfferCreate(agora_types::DrcOfferCreateTx),
+    /// Appended in Trident protocol v24; native order-book offer cancel.
+    DrcOfferCancel(agora_types::DrcOfferCancelTx),
 }
 
 impl NetworkMessage {
@@ -119,6 +123,8 @@ impl NetworkMessage {
             && block.drc_trust_line_issuer_controls.is_empty()
             && block.drc_issued_clawbacks.is_empty()
             && block.drc_multisign_attachments.is_empty()
+            && block.drc_offer_creates.is_empty()
+            && block.drc_offer_cancels.is_empty()
         {
             Self::CompactBlock {
                 header: block.header.clone(),

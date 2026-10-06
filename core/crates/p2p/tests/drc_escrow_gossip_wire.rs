@@ -109,6 +109,8 @@ fn full_block_with_escrow_lanes_borsh_roundtrip() {
         drc_issued_asset_policy_sets: vec![],
         drc_trust_line_issuer_controls: vec![],
         drc_issued_clawbacks: vec![],
+        drc_offer_creates: vec![],
+        drc_offer_cancels: vec![],
         drc_multisign_attachments: vec![],
     };
     block.header.tx_root = block.compute_body_root();

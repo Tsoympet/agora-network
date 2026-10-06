@@ -6,13 +6,16 @@ use crate::{
     AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcCheckCancelTx,
     DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
     DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx,
-    DrcMultisignBlockAttachment, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash,
-    OvlExecutionTx, SignedStakeTx, Transaction,
+    DrcMultisignBlockAttachment, DrcOfferCancelTx, DrcOfferCreateTx, DrcPaymentChannelClaimTx,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
+    DrcTrustLineSetTx, Hash, OvlExecutionTx, SignedStakeTx, Transaction,
 };
 
-/// Explicit version/domain for bodies carrying native DRC payment channel operations.
+/// Explicit version/domain for bodies carrying native DRC offer operations.
+pub const TRIDENT_BLOCK_BODY_V18_VERSION: u16 = 18;
+pub const TRIDENT_BLOCK_BODY_V18_DOMAIN: &[u8] = b"agora-block-body-v18";
+/// Explicit version/domain for bodies carrying issued-control operations.
 pub const TRIDENT_BLOCK_BODY_V17_VERSION: u16 = 17;
 pub const TRIDENT_BLOCK_BODY_V17_DOMAIN: &[u8] = b"agora-block-body-v17";
 pub const TRIDENT_BLOCK_BODY_V16_VERSION: u16 = 16;
@@ -154,6 +157,11 @@ pub struct Block {
     /// Detached, body-root-committed DRC multisign authorization (consensus lane).
     #[serde(default)]
     pub drc_multisign_attachments: Vec<DrcMultisignBlockAttachment>,
+    /// Native order-book offers. Empty lanes stay absent from frozen pre-v18 bytes.
+    #[serde(default)]
+    pub drc_offer_creates: Vec<DrcOfferCreateTx>,
+    #[serde(default)]
+    pub drc_offer_cancels: Vec<DrcOfferCancelTx>,
 }
 
 impl Block {
@@ -187,6 +195,8 @@ impl Block {
             drc_issued_asset_policy_sets: Vec::new(),
             drc_trust_line_issuer_controls: Vec::new(),
             drc_issued_clawbacks: Vec::new(),
+            drc_offer_creates: Vec::new(),
+            drc_offer_cancels: Vec::new(),
             drc_multisign_attachments: Vec::new(),
         }
     }
@@ -218,6 +228,8 @@ impl Block {
             || !self.drc_trust_line_issuer_controls.is_empty()
             || !self.drc_issued_clawbacks.is_empty()
             || !self.drc_multisign_attachments.is_empty()
+            || !self.drc_offer_creates.is_empty()
+            || !self.drc_offer_cancels.is_empty()
     }
 
     /// Compute a simple pairwise tx merkle root (duplicate last leaf when odd).
@@ -252,7 +264,8 @@ impl Block {
     /// data commitments use v5; DRC account policies use v6; address-based DRC
     /// deposit preauthorizations use v7; payment-v4 expiry uses v8; regular keys use v9;
     /// signer lists use v10; detached multisign attachments use v11; ticket creates use v12;
-    /// native DRC escrow uses v13; native DRC checks use v14; native DRC payment channels use v15.
+    /// native DRC escrow uses v13; native DRC checks use v14; native DRC payment channels use v15;
+    /// trust lines use v16; issued controls use v17; native DRC offers use v18.
     pub fn compute_body_root(&self) -> Hash {
         let mut inner = self.compute_body_root_with_multisign_attachments();
         if !self.drc_ticket_creates.is_empty() {
@@ -404,6 +417,25 @@ impl Block {
                 policy_ids,
                 control_ids,
                 clawback_ids,
+            ));
+        }
+        if !self.drc_offer_creates.is_empty() || !self.drc_offer_cancels.is_empty() {
+            let create_ids: Vec<Hash> = self
+                .drc_offer_creates
+                .iter()
+                .map(DrcOfferCreateTx::offer_id)
+                .collect();
+            let cancel_ids: Vec<Hash> = self
+                .drc_offer_cancels
+                .iter()
+                .map(DrcOfferCancelTx::cancel_tx_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V18_DOMAIN,
+                TRIDENT_BLOCK_BODY_V18_VERSION,
+                inner,
+                create_ids,
+                cancel_ids,
             ));
         }
         inner
@@ -626,7 +658,12 @@ impl BorshSerialize for Block {
         BorshSerialize::serialize(&self.drc_issued_asset_policy_sets, writer)?;
         BorshSerialize::serialize(&self.drc_trust_line_issuer_controls, writer)?;
         BorshSerialize::serialize(&self.drc_issued_clawbacks, writer)?;
-        BorshSerialize::serialize(&self.drc_multisign_attachments, writer)
+        BorshSerialize::serialize(&self.drc_multisign_attachments, writer)?;
+        if self.drc_offer_creates.is_empty() && self.drc_offer_cancels.is_empty() {
+            return Ok(());
+        }
+        BorshSerialize::serialize(&self.drc_offer_creates, writer)?;
+        BorshSerialize::serialize(&self.drc_offer_cancels, writer)
     }
 }
 
@@ -661,6 +698,8 @@ impl BorshDeserialize for Block {
             drc_trust_line_issuer_controls: deserialize_trailing_vec(reader)?,
             drc_issued_clawbacks: deserialize_trailing_vec(reader)?,
             drc_multisign_attachments: deserialize_trailing_vec(reader)?,
+            drc_offer_creates: deserialize_trailing_vec(reader)?,
+            drc_offer_cancels: deserialize_trailing_vec(reader)?,
         })
     }
 }

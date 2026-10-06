@@ -5,14 +5,15 @@ use agora_types::{
     DrcAccountSequence, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
     DrcDepositPreauthAction, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
     DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx,
-    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
-    DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
-    DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
-    SignedStakeTx, Transaction, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
-    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_CHECK_CANCEL_TICKET_VERSION,
-    DRC_CHECK_CASH_TICKET_VERSION, DRC_CHECK_CREATE_TICKET_VERSION,
-    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_ESCROW_CANCEL_TICKET_VERSION,
-    DRC_ESCROW_CREATE_TICKET_VERSION, DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
+    DrcOfferCancelTx, DrcOfferCreateTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
+    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash,
+    NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
+    ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
+    DRC_CHECK_CANCEL_TICKET_VERSION, DRC_CHECK_CASH_TICKET_VERSION,
+    DRC_CHECK_CREATE_TICKET_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_ESCROW_CANCEL_TICKET_VERSION, DRC_ESCROW_CREATE_TICKET_VERSION,
+    DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
     DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 
@@ -20,6 +21,8 @@ use crate::P2pError;
 
 #[path = "issued_controls_lane.rs"]
 mod issued_controls_lane;
+#[path = "offer_lane.rs"]
+mod offer_lane;
 #[path = "payment_channel_lane.rs"]
 mod payment_channel_lane;
 #[path = "trust_line_lane.rs"]
@@ -83,6 +86,11 @@ pub struct Mempool {
     drc_issued_asset_policy_set_txs: HashMap<Hash, DrcIssuedAssetPolicySetTx>,
     drc_trust_line_issuer_control_txs: HashMap<Hash, DrcTrustLineIssuerControlTx>,
     drc_issued_clawback_txs: HashMap<Hash, DrcIssuedClawbackTx>,
+    drc_offer_create_txs: HashMap<Hash, DrcOfferCreateTx>,
+    drc_offer_cancel_txs: HashMap<Hash, DrcOfferCancelTx>,
+    pending_offer_cancels: HashMap<Hash, Hash>,
+    pending_native_offer_lock: HashMap<Address, u64>,
+    pending_issued_offer_reserve: HashMap<(Address, Hash), u64>,
     reserved_asset_policy_assets: HashMap<Hash, Hash>,
     reserved_issuer_control_slots: HashMap<(Address, Hash), Hash>,
     reserved_trust_line_set_slots: HashMap<(Address, Hash), Hash>,
@@ -153,6 +161,11 @@ impl Mempool {
             drc_issued_asset_policy_set_txs: HashMap::new(),
             drc_trust_line_issuer_control_txs: HashMap::new(),
             drc_issued_clawback_txs: HashMap::new(),
+            drc_offer_create_txs: HashMap::new(),
+            drc_offer_cancel_txs: HashMap::new(),
+            pending_offer_cancels: HashMap::new(),
+            pending_native_offer_lock: HashMap::new(),
+            pending_issued_offer_reserve: HashMap::new(),
             reserved_asset_policy_assets: HashMap::new(),
             reserved_issuer_control_slots: HashMap::new(),
             reserved_trust_line_set_slots: HashMap::new(),
@@ -191,6 +204,7 @@ impl Mempool {
             + self.payment_channel_maps_len()
             + self.trust_line_maps_len()
             + self.issued_controls_maps_len()
+            + self.offer_maps_len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -217,6 +231,7 @@ impl Mempool {
             || self.payment_channel_maps_contains(tx_id)
             || self.trust_line_maps_contains(tx_id)
             || self.issued_controls_maps_contains(tx_id)
+            || self.offer_maps_contains(tx_id)
     }
 
     pub fn ticket_consumer_reserved(&self, owner: &Address, ticket_sequence: u64) -> bool {
@@ -1551,6 +1566,13 @@ impl Mempool {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.issuer));
         }
         self.evict_issued_controls_lanes_from_block(block);
+        for tx in &block.drc_offer_creates {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.owner));
+        }
+        for tx in &block.drc_offer_cancels {
+            consumed_account_nonces.insert((NativeAssetId::DRC, tx.submitter));
+        }
+        self.evict_offer_lanes_from_block(block);
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
             let id = tx.policy_tx_id();
@@ -2014,6 +2036,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
@@ -2095,6 +2119,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);
@@ -2916,6 +2942,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         pool.evict_for_block(&block);

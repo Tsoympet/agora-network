@@ -555,6 +555,63 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 self.backend
                     .get_drc_issued_clawback_receipt(&clawback_tx_id)
             }
+            RpcMethod::SubmitDrcOfferCreate => {
+                let raw = req
+                    .params
+                    .get("offer_create")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: agora_types::DrcOfferCreateTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_offer_create(tx)?;
+                Ok(json!({ "offer_id": id.to_hex(), "simulated_fill": false }))
+            }
+            RpcMethod::SubmitDrcOfferCancel => {
+                let raw = req
+                    .params
+                    .get("offer_cancel")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: agora_types::DrcOfferCancelTx = serde_json::from_value(raw)
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                tx.validate_structure()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let id = self.backend.submit_drc_offer_cancel(tx)?;
+                Ok(json!({ "cancel_tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetDrcOffer => {
+                let offer_id = param_hash(&req.params, "offer_id")?;
+                self.backend.get_drc_offer(&offer_id)
+            }
+            RpcMethod::GetDrcAccountOffers => {
+                let account = param_address(&req.params, "account")?;
+                let cursor = match req.params.get("cursor") {
+                    Some(value) if !value.is_null() => Some(
+                        serde_json::from_value(value.clone())
+                            .map_err(|error| RpcError::InvalidParams(error.to_string()))?,
+                    ),
+                    _ => None,
+                };
+                let limit = optional_u64_opt(&req.params, "limit")?.map(|value| value as usize);
+                self.backend.get_drc_account_offers(&account, cursor, limit)
+            }
+            RpcMethod::GetDrcBookOffers => {
+                let book: agora_types::DrcOfferBook = serde_json::from_value(req.params.clone())
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                book.validate()
+                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let cursor = match req.params.get("cursor") {
+                    Some(value) if !value.is_null() => Some(
+                        serde_json::from_value(value.clone())
+                            .map_err(|error| RpcError::InvalidParams(error.to_string()))?,
+                    ),
+                    _ => None,
+                };
+                let limit = optional_u64_opt(&req.params, "limit")?.map(|value| value as usize);
+                self.backend.get_drc_book_offers(&book, cursor, limit)
+            }
             RpcMethod::GetDrcObject => {
                 let object_id = param_hash(&req.params, "object_id")?;
                 let object = self.backend.get_drc_object(&object_id)?;
@@ -1350,7 +1407,16 @@ mod tests {
             serde_json::to_value(receipt.operation_id).unwrap()
         );
 
-        for kind in ["offer", "evm", "contract", "bytecode", "hook"] {
+        let offer_kind = rpc.handle(RpcRequest {
+            id: Some(json!(5)),
+            method: "agora_getDrcAccountObjects".into(),
+            params: json!({ "account": owner.to_hex(), "kind": "offer" }),
+        });
+        assert!(
+            offer_kind.result.is_some(),
+            "offer is a closed ledger-object kind"
+        );
+        for kind in ["evm", "contract", "bytecode", "hook"] {
             let rejected = rpc.handle(RpcRequest {
                 id: Some(json!(5)),
                 method: "agora_getDrcAccountObjects".into(),
@@ -1480,6 +1546,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let genesis_id = genesis.id();
@@ -1630,6 +1698,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let mined_id = mined.id();
@@ -1682,6 +1752,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         rpc.backend_mut().insert_block(child);
@@ -2299,6 +2371,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2367,6 +2441,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2434,6 +2510,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);
@@ -2502,6 +2580,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         backend.insert_block(genesis);

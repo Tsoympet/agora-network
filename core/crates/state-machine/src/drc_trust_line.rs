@@ -534,6 +534,15 @@ pub fn apply_drc_issued_transfer(
 
     debit_drc_fee(store, batch, journal, &tx.sender, tx.fee, sequence_ctx)?;
 
+    if tx.sender != asset.issuer {
+        crate::drc_offer::assert_issued_offer_reserve(
+            store,
+            &tx.sender,
+            &asset,
+            tx.amount.as_units(),
+        )?;
+    }
+
     let policy = crate::drc_issued_controls::load_drc_issued_asset_policy(store, &asset)?;
     let issuer = asset.issuer;
     let movement_kind = if tx.sender == issuer && tx.recipient != issuer {

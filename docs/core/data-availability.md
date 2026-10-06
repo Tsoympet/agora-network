@@ -88,7 +88,7 @@ operator nonce is `ConflictLost`. Invalid authentication fails the block.
 
 Accepted records and operator replay cursors live under `da/v1/…` Meta keys.
 They entered the composed root at v7 and remain committed by the current
-`agora-trident-state-root-v15`. Their prior values are stored in `UtxoJournal`
+`agora-trident-state-root-v16`. Their prior values are stored in `UtxoJournal`
 and apply/revert with acceptance in the same `WriteBatch`, so reorg and crash
 recovery use the existing `pending_virtual` protocol.
 

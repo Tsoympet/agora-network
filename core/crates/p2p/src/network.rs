@@ -388,7 +388,9 @@ impl NetworkNode {
             | NetworkMessage::DrcIssuedTransfer(_)
             | NetworkMessage::DrcIssuedAssetPolicySet(_)
             | NetworkMessage::DrcTrustLineIssuerControl(_)
-            | NetworkMessage::DrcIssuedClawback(_) => {
+            | NetworkMessage::DrcIssuedClawback(_)
+            | NetworkMessage::DrcOfferCreate(_)
+            | NetworkMessage::DrcOfferCancel(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

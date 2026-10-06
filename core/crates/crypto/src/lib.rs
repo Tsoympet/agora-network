@@ -13,6 +13,7 @@ mod drc_deposit_preauth;
 mod drc_escrow;
 mod drc_issued_controls;
 mod drc_multisign;
+mod drc_offer;
 mod drc_operation;
 mod drc_payment_channel;
 mod drc_policy;
@@ -56,6 +57,10 @@ pub use drc_issued_controls::{
 pub use drc_multisign::{
     sign_drc_multisign_participant_bound, validate_drc_operation_authorization_fields,
     verify_drc_multisign_against_list,
+};
+pub use drc_offer::{
+    sign_drc_offer_cancel_bound, sign_drc_offer_create_bound, verify_drc_offer_cancel_bound,
+    verify_drc_offer_create_bound,
 };
 pub use drc_operation::verify_bound_secp256k1;
 pub use drc_payment_channel::{
