@@ -38,7 +38,10 @@ pub use ibd::{
 pub use identity::{load_or_generate_identity, save_identity};
 pub use libp2p::PeerId;
 pub use limits::{connection_limits_behaviour, connection_limits_for_max_peers};
-pub use mempool::{Mempool, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT};
+pub use mempool::{
+    Mempool, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT, TLT_RBF_MAX_REPLACEMENTS,
+    TLT_RBF_MIN_FEE_INCREASE,
+};
 pub use messages::NetworkMessage;
 pub use network::{dial_addr, NetworkEvent, NetworkHandle, NetworkNode};
 pub use scoring::{
