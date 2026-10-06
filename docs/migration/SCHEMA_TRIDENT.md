@@ -26,7 +26,8 @@
 | `18` | DRC master-key-disable policy with no-lockout enforcement |
 | `19` | Additive DRC ticket, escrow, check, payment-channel, trust-line, issued-control, receipt, and revert-journal key families |
 | `20` | Per-asset lifetime-burn counters and accepted-only DRC fee destruction |
-| `21` (current) | Common DRC live-object/owner index, accepted-operation receipts, and transaction-to-operation lookup |
+| `21` | Common DRC live-object/owner index, accepted-operation receipts, and transaction-to-operation lookup |
+| `22` (current) | OVL `u64` amounts are the exact `wei / 10^10` quotient. The dev-gated OVL-EVM-v1 world is committed under `meta/ovl/evm/v1/world` when present. DRC objects stay on the schema-21 index |
 
 Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 

@@ -147,11 +147,23 @@ pub fn compose_trident_state_root(
         community,
         data_availability,
     ];
-    Ok(Hash::hash_borsh(&(
+    let base = Hash::hash_borsh(&(
         STATE_ROOT_DOMAIN,
         TRIDENT_STATE_TRANSITION_VERSION,
         components,
-    )))
+    ));
+    // Keep the schema-1 component tuple stable. Schema 22 folds in the OVL
+    // execution subroot without turning it into an Ethereum state root.
+    if crate::ovl_evm_state::ovl_evm_schema_active(crate::load_schema_version(store)?) {
+        let ovl_evm = crate::ovl_evm_state::ovl_evm_state_commitment(store)?;
+        Ok(Hash::hash_borsh(&(
+            b"agora-trident-state-root-ovl-evm-v1",
+            base,
+            ovl_evm,
+        )))
+    } else {
+        Ok(base)
+    }
 }
 
 #[cfg(test)]

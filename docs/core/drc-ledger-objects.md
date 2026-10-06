@@ -147,11 +147,11 @@ support or define owner-reserve economics.
 
 | Surface | Value |
 | --- | --- |
-| Trident protocol | `23` |
+| Trident protocol | `24` |
 | Transaction signing profile | `agora-trident-tx-v9` |
-| State transition | `agora-trident-state-v21` |
+| State transition | `agora-trident-state-v22` |
 | State-root domain | `agora-trident-state-root-v15` |
-| Datadir schema | `21` |
+| Datadir schema | `22` (this index remains the schema-21 object family) |
 | Common-index schema | `1` |
 | Genesis | v3 draft, `UNFROZEN`; no live Trident loader |
 

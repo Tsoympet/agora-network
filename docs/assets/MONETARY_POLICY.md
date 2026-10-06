@@ -21,10 +21,11 @@
 
 ## OVL
 
-- Fixed maximum supply.
-- No mining.
-- Genesis allocation + working staking-reward reserve (`OVL_WORKING_RESERVE_BASE` = 10% of max).
-- Staking rewards may come from: predetermined staking emissions, OVL execution fees, slashing proceeds.
+- No live maximum at schema 22. The historical 21 billion whole-unit figure stays in the draft artifact and is not enforced.
+- No mining and no Ethereum-style block subsidy. Issuance beyond the historical staking-reserve drip is not configured.
+- Stored Agora balances, stake, treasuries, and supply counters remain `u64` exact quotients of 18-decimal wei (`wei = quotient * 10^10`).
+- Genesis allocation + working staking-reward reserve (`OVL_WORKING_RESERVE_BASE` = 10% of the historical recorded cap).
+- Staking rewards may come from: that predetermined reserve, version-1 OVL execution fees, and slashing proceeds. Version-2 base fees burn and the priority tip pays the configured EVM beneficiary.
 - No unrestricted administrator minting.
 - Supply-policy changes require explicit consensus upgrade / fork.
 

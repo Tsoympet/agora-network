@@ -15,7 +15,9 @@ use crate::accounts::{load_account, put_account_into};
 use crate::apply::TxAuthContext;
 use crate::columns::ColumnFamily;
 use crate::store::WriteBatch;
-use crate::supply::{load_issued_supply, load_max_supply, put_issued_supply_into};
+use crate::supply::{
+    load_issued_supply, load_max_supply, load_schema_version, put_issued_supply_into,
+};
 use crate::{StateError, StateStore};
 
 /// Consensus-wide upper bound for validator commission basis points.
@@ -374,7 +376,10 @@ pub fn drip_staking_reserve(
     let next_issued = issued
         .checked_add(drip)
         .ok_or_else(|| StateError::InvalidTx("issued overflow".into()))?;
-    if next_issued > max {
+    let schema = load_schema_version(store)?;
+    let historical_ovl_cap_is_live =
+        !(asset == NativeAssetId::OVL && crate::ovl_evm_state::ovl_evm_schema_active(schema));
+    if historical_ovl_cap_is_live && next_issued > max {
         return Err(StateError::SupplyCapExceeded);
     }
     put_staking_reserve_remaining_into(batch, asset, remaining - drip);

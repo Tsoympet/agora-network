@@ -173,6 +173,7 @@ dependencies = [
  "agora-consensus",
  "agora-crypto",
  "agora-governance",
+ "agora-ovl-evm",
  "agora-p2p",
  "agora-rpc",
  "agora-state-machine",
@@ -184,6 +185,23 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "agora-ovl-evm"
+version = "0.1.0"
+dependencies = [
+ "agora-types",
+ "alloy-primitives",
+ "alloy-rlp",
+ "borsh",
+ "hex",
+ "k256",
+ "revm",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -242,6 +260,7 @@ dependencies = [
  "agora-consensus",
  "agora-crypto",
  "agora-governance",
+ "agora-ovl-evm",
  "agora-types",
  "borsh",
  "hex",

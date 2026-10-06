@@ -184,6 +184,14 @@ pub trait RpcBackend: Send {
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
     fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError>;
     fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError>;
+    /// Ethereum JSON-RPC over the canonical OVL execution world.
+    ///
+    /// The default is method-not-found so backends that have not loaded an
+    /// execution world cannot invent balances or receipts.
+    fn ovl_ethereum_rpc(&mut self, method: &str, params: &Value) -> Result<Value, RpcError> {
+        let _ = params;
+        Err(RpcError::MethodNotFound(method.to_string()))
+    }
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError>;
     fn submit_drc_account_policy(&mut self, tx: DrcAccountPolicyTx) -> Result<Hash, RpcError>;
     fn submit_drc_deposit_preauth(&mut self, tx: DrcDepositPreauthTx) -> Result<Hash, RpcError>;

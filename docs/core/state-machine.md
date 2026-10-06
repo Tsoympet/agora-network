@@ -113,14 +113,15 @@ Transaction index (`cf_warm`): key `tx/` ‖ `tx_id`, value `block_id` ‖ `inde
 
 ## Trident staking + finality store (Phase 3+)
 
-Meta CF keys are additive; the current `SCHEMA_VERSION` is `21`:
+Meta CF keys are additive; the current `SCHEMA_VERSION` is `22`:
 
 - `stake/val|del|unbond|epoch|snap|reward_pool|reserve_remaining/…` — staking + slash/reward + reserve
 - `finality/cert|idx|last_att/…`, `finality/tip_blue_score` — certificates, signer index, tip
 - `meta/issued_supply|burned_supply/<asset>` — native issued/burned counters
 - `ledger/drc/object|operation/…` — typed live-object mirrors, bounded owner
   rows, accepted-operation receipts, and historical transaction mappings
-- `compose_trident_state_root` — canonical multi-asset commitment for checkpoint bodies (`agora-trident-state-root-v15`)
+- `meta/ovl/evm/v1/world` — dev-gated OVL-EVM-v1 world, included in the state root at schema 22
+- `compose_trident_state_root` — canonical multi-asset commitment for checkpoint bodies (`agora-trident-state-root-v15`, with an OVL execution commitment at schema 22)
 
 Node admit enforces reorg-beyond-finality. Account, stake, OVL execution,
 native DRC policy/preauthorization/payments, contract-free settlement objects,

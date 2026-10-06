@@ -421,7 +421,15 @@ impl Mempool {
     }
 
     /// Admit a pre-validated OVL execution envelope.
+    ///
+    /// Version 2 raw Ethereum bytes are a block-lane path. They are not
+    /// gossiped through the Agora-signed mempool.
     pub fn admit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, P2pError> {
+        if tx.version != 1 {
+            return Err(P2pError::MempoolRejected(
+                "raw EVM transactions are not admitted to the Agora-signed mempool".into(),
+            ));
+        }
         let id = tx.tx_id();
         if self.ovl_execution_txs.contains_key(&id) {
             return Ok(id);
@@ -2761,5 +2769,13 @@ mod tests {
         pool.admit_drc_payment_channel_create(create).unwrap();
         assert!(pool.pending_payment_channel_create(&channel_id));
         assert!(pool.admit_drc_payment_channel_fund(fund).is_err());
+    }
+
+    #[test]
+    fn raw_evm_envelopes_are_not_mempool_transactions() {
+        let tx = agora_types::OvlExecutionTx::raw_ethereum(vec![0x02, 0x01]);
+        let mut pool = Mempool::new(8);
+        let err = pool.admit_ovl_execution(tx).unwrap_err();
+        assert!(err.to_string().contains("not admitted"));
     }
 }

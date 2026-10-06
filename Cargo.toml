@@ -10,6 +10,7 @@ members = [
     "core/crates/miner-sidecar",
     "core/crates/governance",
     "core/crates/ovolos-rollup",
+    "core/crates/ovl-evm",
     "core/crates/bridge-sdk",
     "core/crates/intent-engine",
     "core/crates/layers-runtime",
@@ -38,6 +39,7 @@ agora-p2p = { path = "core/crates/p2p" }
 agora-rpc = { path = "core/crates/rpc" }
 agora-governance = { path = "core/crates/governance" }
 agora-ovolos-rollup = { path = "core/crates/ovolos-rollup" }
+agora-ovl-evm = { path = "core/crates/ovl-evm" }
 agora-bridge-sdk = { path = "core/crates/bridge-sdk" }
 agora-intent-engine = { path = "core/crates/intent-engine" }
 agora-layers-runtime = { path = "core/crates/layers-runtime" }
