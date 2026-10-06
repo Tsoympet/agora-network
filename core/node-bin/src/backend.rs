@@ -1574,26 +1574,20 @@ impl RpcBackend for NodeBackend {
             })?;
         if method.eq_ignore_ascii_case("eth_sendRawTransaction") {
             if let Some(hash_hex) = result.as_str() {
-                let hex = hash_hex.strip_prefix("0x").unwrap_or(hash_hex);
-                if let Ok(bytes) = hex::decode(hex) {
-                    if bytes.len() == 32 {
-                        let mut hash = [0u8; 32];
-                        hash.copy_from_slice(&bytes);
-                        if let Some(pending_tx) = pending.get(&hash) {
-                            let envelope = OvlExecutionTx::raw_ethereum(pending_tx.raw.clone());
-                            drop(pending);
-                            let mut pool = self
-                                .mempool
-                                .lock()
-                                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
-                            let _ = pool.admit_ovl_raw_execution(envelope.clone());
-                            drop(pool);
-                            if let Some(net) = &self.net {
-                                let _ =
-                                    net.publish_message(NetworkMessage::OvlRawExecution(envelope));
-                            }
-                            return Ok(result);
+                if let Some(hash) = Hash::from_hex(hash_hex) {
+                    if let Some(pending_tx) = pending.get(hash.as_bytes()) {
+                        let envelope = OvlExecutionTx::raw_ethereum(pending_tx.raw.clone());
+                        drop(pending);
+                        let mut pool = self
+                            .mempool
+                            .lock()
+                            .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+                        let _ = pool.admit_ovl_raw_execution(envelope.clone());
+                        drop(pool);
+                        if let Some(net) = &self.net {
+                            let _ = net.publish_message(NetworkMessage::OvlRawExecution(envelope));
                         }
+                        return Ok(result);
                     }
                 }
             }
