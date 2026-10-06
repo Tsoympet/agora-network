@@ -243,6 +243,16 @@ impl Block {
             || !self.tlt_covenants.is_empty()
     }
 
+    /// Compact gossip is UTXO-only. Any typed lane needs the full body until a
+    /// versioned short-id format can name lane kinds without ambiguity.
+    pub fn requires_full_body_gossip(&self) -> bool {
+        !self.account_transfers.is_empty()
+            || !self.stake_ops.is_empty()
+            || !self.ovl_executions.is_empty()
+            || !self.drc_payments.is_empty()
+            || self.has_post_v4_body_lanes()
+    }
+
     /// Compute a simple pairwise tx merkle root (duplicate last leaf when odd).
     ///
     /// Kept intentionally minimal for Phase 1 ID stability; consensus may harden this later.

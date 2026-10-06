@@ -164,6 +164,25 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getDrcAccountPolicy"
             | "agora_getDrcDepositPreauth"
             | "agora_getDrcAccountKeys"
+            | "agora_getDrcAccountSignerList"
+            | "agora_getDrcTicket"
+            | "agora_getDrcEscrow"
+            | "agora_getDrcEscrowReceipt"
+            | "agora_getDrcCheck"
+            | "agora_getDrcCheckReceipt"
+            | "agora_getDrcPaymentChannel"
+            | "agora_getDrcPaymentChannelReceipt"
+            | "agora_getDrcPaymentChannelFundEvent"
+            | "agora_getDrcPaymentChannelClaimEvent"
+            | "agora_getDrcPaymentChannelScheduleEvent"
+            | "agora_verifyDrcPaymentChannelClaim"
+            | "agora_getDrcTrustLine"
+            | "agora_getDrcIssuerLiability"
+            | "agora_getDrcIssuedTransferReceipt"
+            | "agora_getDrcIssuedAssetPolicy"
+            | "agora_getDrcIssuedAssetPolicyReceipt"
+            | "agora_getDrcTrustLineIssuerControlReceipt"
+            | "agora_getDrcIssuedClawbackReceipt"
             | "agora_getDrcObject"
             | "agora_getDrcAccountObjects"
             | "agora_getDrcOperation"
@@ -341,6 +360,18 @@ mod tests {
         assert!(!method_requires_token("agora_getDrcAccountPolicy"));
         assert!(!method_requires_token("agora_getDrcDepositPreauth"));
         assert!(!method_requires_token("agora_getDrcAccountKeys"));
+        assert!(!method_requires_token("agora_getDrcAccountSignerList"));
+        assert!(!method_requires_token("agora_getDrcTicket"));
+        assert!(!method_requires_token("agora_getDrcEscrow"));
+        assert!(!method_requires_token("agora_getDrcEscrowReceipt"));
+        assert!(!method_requires_token("agora_getDrcCheck"));
+        assert!(!method_requires_token("agora_getDrcCheckReceipt"));
+        assert!(!method_requires_token("agora_getDrcPaymentChannel"));
+        assert!(!method_requires_token("agora_getDrcPaymentChannelReceipt"));
+        assert!(!method_requires_token("agora_verifyDrcPaymentChannelClaim"));
+        assert!(!method_requires_token("agora_getDrcTrustLine"));
+        assert!(!method_requires_token("agora_getDrcIssuerLiability"));
+        assert!(!method_requires_token("agora_getDrcIssuedAssetPolicy"));
         assert!(!method_requires_token("agora_getDrcObject"));
         assert!(!method_requires_token("agora_getDrcAccountObjects"));
         assert!(!method_requires_token("agora_getDrcOperation"));
