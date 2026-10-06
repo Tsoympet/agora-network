@@ -98,8 +98,132 @@ confirmed. The dev server keeps sessions in memory and does not store seeds.
 ## Still out of this slice
 
 - Camera QR capture.
-- Constructing and submitting a consensus `DrcPaymentTx`.
+- Constructing and submitting a consensus `DrcPaymentTx` from the community pay screen (the light-client envelope builder exists separately and is not a confirmation).
 - Delivering phone push notifications.
 - A durable multi-user community service.
 - Signed, block-replicated governance and treasury disbursement.
 - Issuing canonical passport attestations from the wallet.
+
+The architecture slice below does not replace the product modules in
+`apps/shared/community`. It adds stores, service boundaries, folder re-exports,
+and security hooks. Threat model:
+[`LIGHT_CLIENT_SECURITY_MODEL.md`](LIGHT_CLIENT_SECURITY_MODEL.md).
+
+## 48. Data architecture
+
+Blockchain storage is only for facts the device can recompute or that
+consensus has committed. Everything else has an explicit store.
+
+| Store | Holds | Does not hold |
+| --- | --- | --- |
+| BLOCKCHAIN | Header hashes, TLT Merkle proofs, signed transaction bytes, committed registry roots | Display names, likes, notification toggles, node-reported balances |
+| COMMUNITY | Passport profiles, drafts, forum text, merchant directory copy, fixture bundles labeled community submitted | Keys, finality, payment receipts |
+| INDEXER | Node-reported balances, list order, treasury rows from `agora_getProtocolTreasuries`, service mirrors | Spend authorization, header proofs |
+| USER PRIVATE | Mnemonic, vault password, PIN hash, RPC token, spend-session secret | Anything sent to a community API |
+| CACHE | Tip snapshots, offline views, QR matrices | A claim that cached data is confirmed |
+| NOTIFICATIONS | On-device preferences and amount-stripped push copy | Chain events |
+
+`placementFor` in `apps/shared/core/stores.ts` is the map. A mnemonic cannot be
+placed in BLOCKCHAIN.
+
+## 49. Backend
+
+`apps/shared/core/services.ts` defines in-process adapters for Community API,
+Identity/Passport, Mission, Grant, Bounty, Academy, Event, Merchant, Forum,
+Notification, and Indexing. Each adapter documents what it can lie about and
+what it must not claim. Reads return an empty **PLANNED** list with
+`fabricated: false`. Mutations are not accepted.
+
+`apps/community-api` remains the experimental HTTP adapter from the product
+slice. Its fixture mode can lie about community-submitted records. It still
+must not claim those records are on-chain verified, and it must not store seeds.
+
+## 50. Client modules
+
+`apps/shared/moduleMap.ts` lists the folders. `community` stays the existing
+product module so pairing and the community screens keep their imports. The
+other folders re-export that module and the light client instead of moving
+files:
+
+`core` `wallet` `lightclient` `drc` `ovl` `tlt` `passport` `community`
+`missions` `academy` `grants` `bounties` `guilds` `merchants` `events`
+`assembly` `treasury` `forum` `notifications` `explorer` `security` `settings`.
+
+Desktop and phone settings import `ArchitecturePanel` from those folders.
+
+## 51. Mobile security
+
+SecureStore keeps the sealed vault blob. PIN records store a salted hash and
+`holdsSeed: false`. Hardware biometrics, secure-element keys, and native
+screenshot blocking (iOS and Android) are **PLANNED**. The mnemonic stays
+hidden until Show. Clipboard copy of a seed requires an explicit reveal.
+Phishing-resistant confirmations use the transaction preview: destination and
+amount are shown, and `signed` stays false until the preview id is confirmed.
+
+## 52. PC security
+
+The vault remains AES-256-GCM in `localStorage`. Version 1 blobs still open.
+A stronger KDF is **PLANNED**. The desktop wallet locks after inactivity
+(default five minutes) and clears the mnemonic from memory. Node-address
+warnings cover plaintext HTTP, localhost, embedded credentials, punycode, and
+a host that does not match the saved endpoint. `HardwareSigner` is the USB
+wallet hook and returns **PLANNED** because no USB signer is linked. Signing
+goes through `signAfterPreview`.
+
+## 53–55. Beginner and advanced
+
+Beginner surfaces are create wallet, import wallet, Passport, receive DRC,
+pay, community, first mission, Academy, merchants, projects, and join Guild.
+Projects stay **PLANNED**. Beginner copy is `DRC PAYMENTS`, `OVL APPLICATIONS`,
+`TLT SECURITY/VALUE`, and `COMMUNITY PARTICIPATION`, without consensus jargon.
+
+Advanced surfaces are RPC, raw transactions, UTXO details, proofs, network,
+and developer tools. Contract calls are **PLANNED** because OVL-EVM is not on
+this base. Nonempty calldata is rejected.
+
+## 56–57. Explorer integration
+
+`apps/shared/explorer/links.ts` points DRC, OVL, and TLT transactions at the
+explorer `#tx` section, blocks at `#live`, and treasury rows at `#trident`,
+and only when the caller already has a real id. Contracts, tokens, NFTs, DEX,
+and AMM links are **PLANNED**.
+
+Community trails:
+
+- Grant → funding transaction → treasury → recipient → Passport. A missing
+  funding transaction is **PLANNED**. A grant id is not a disbursement.
+- Merchant → DRC address → payments → profile. Profiles and sales stay
+  **PLANNED**.
+- Developer → Passport → projects → contracts → grants → missions. Projects
+  and contracts are **PLANNED**.
+- Miner → public stats → TLT contribution. Miner stats are **PLANNED**. A
+  real TLT transaction id can open `#tx`.
+
+## 58. Implementation rule
+
+No mock confirmations, governance outcomes, reputation proofs, or merchant
+activity are added in this slice. Cache views keep `confirmed: false`. The
+community pay path keeps `broadcast: "unavailable"` and `confirmed: false`.
+In-process services return no records. Likes do not move reputation. A
+governance badge without a chain commitment stays advisory. Bounty payment,
+event attendance, guild join, academy certificates, and treasury spend stay
+**PLANNED**.
+
+## 59. Tests and security notes
+
+`apps/shared/architecture/architecture.test.ts` covers passport signatures and
+nonce replay, reputation events that ignore likes, mission transitions,
+grant milestones that do not disburse, empty bounties, advisory governance
+badges, merchant QR parse and seal tampering, notification preferences,
+TLT Merkle proofs, wallet vault and spend-session integration, DRC/OVL/TLT
+builders present and contract calls **PLANNED**, authorization, privacy,
+rate limits with Sybil resistance still **PLANNED**, and a locked session
+that cannot export a seed.
+
+```bash
+cd apps/shared
+node --experimental-strip-types --import ./light-client/register-ts-ext.mjs architecture/architecture.test.ts
+```
+
+Security notes for operators are in
+[`LIGHT_CLIENT_SECURITY_MODEL.md`](LIGHT_CLIENT_SECURITY_MODEL.md).
