@@ -27,6 +27,7 @@ import type { DrcTicketCreateTx } from "./DrcTicketCreateTx";
 import type { DrcTrustLineIssuerControlTx } from "./DrcTrustLineIssuerControlTx";
 import type { DrcTrustLineSetTx } from "./DrcTrustLineSetTx";
 import type { OvlExecutionTx } from "./OvlExecutionTx";
+import type { PassportAttestation } from "./PassportAttestation";
 import type { SignedStakeTx } from "./SignedStakeTx";
 import type { TltCovenantTx } from "./TltCovenantTx";
 import type { Transaction } from "./Transaction";
@@ -153,4 +154,8 @@ drc_offer_creates: Array<DrcOfferCreateTx>, drc_offer_cancels: Array<DrcOfferCan
 /**
  * TLT covenant spends. Absent from the wire when empty so v1 block bytes stay frozen.
  */
-tlt_covenants: Array<TltCovenantTx>, };
+tlt_covenants: Array<TltCovenantTx>,
+/**
+ * Signed Hub-coordinator passport attestations. Empty stays off the frozen wire.
+ */
+passport_attestations: Array<PassportAttestation>, };
