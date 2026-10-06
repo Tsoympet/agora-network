@@ -164,6 +164,11 @@ is the only programmable domain.
 
 - Testnet genesis v2 is frozen in-repo. Trident v3 draft remains
   **UNFROZEN**. Mainnet is not bootable.
+- Freeze-ready v3 artifacts (not the public draft) can be materialized into
+  live Block 0 UTXO/account/treasury/validator state. `compose_trident_state_root`
+  must equal the live `TridentHeader` state root before commit.
+  `AGORA_TRIDENT_GENESIS_FILE` boots that datadir; `AGORA_GENESIS_FILE` stays
+  v2-only. Docker-compose still points at frozen v2.
 - Schema migrations exist as library helpers. `agora-node schema
   report|migrate|reindex --data PATH` runs the supported rebuilds
   (19→20 fee-burn, 20→21 ledger index with applied order, 21→22 marker,
@@ -178,11 +183,22 @@ is the only programmable domain.
 
 These are real unfinished paths, not parity slogans:
 
-1. **Hub / Grant / Mission consensus lanes** — skipped honestly.
+1. **Public Trident testnet freeze** — the checked-in v3 draft is UNFROZEN.
+   Ceremony must supply allocations, validator keys, hashes, timestamp, bits,
+   and a Block 0 nonce when bits are nonzero. Until that artifact exists and
+   boot+IBD+tx+finality are demonstrated on a public mesh, maturity stays
+   below Public testnet. Frozen v2 TLT peers boot and send, but dual-PoS
+   never finalizes (empty OVL/DRC genesis sets).
+2. **Hub / Grant / Mission consensus lanes** — skipped honestly.
    `HubRecord`, `GrantRecord`, and `MissionRecord` have no secp256k1
    envelope. Unsigned mutation RPC would be theater. The signed
    passport attestation lane is wired instead. Civic votes remain
    local-admin snapshots, not consensus.
+3. **Vesting unlock / treasury spend** — genesis vesting is withheld from
+   liquid balances, but there is no consensus unlock tx. Protocol treasury
+   reads exist; signed disbursement does not.
+4. **`TridentHeader` is not the gossip header** — Block 0 identity is bound
+   in Meta; IBD/mining still use `BlockHeader`.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
 OVL/DRC, price-oracle stake mixing, silent kHeavyHash public PoW
@@ -233,3 +249,8 @@ This audit close-out adds:
   compact lane 30, mempool issuer reservation, apply/journal revert,
   and `agora_submitPassportAttestation` / `agora_getPassportAttestation`
   / `agora_getPassportIssuerNonce`.
+- Freeze-ready-only live Block 0 materializer: TLT UTXOs, OVL/DRC liquid
+  accounts (allocation − vesting − self-bond), artifact treasuries/controls,
+  epoch-zero validators, `compose_trident_state_root` vs live
+  `TridentHeader.state_root`, `AGORA_TRIDENT_GENESIS_FILE` boot, and
+  `agora-node genesis trident materialize`. Public draft stays UNFROZEN.

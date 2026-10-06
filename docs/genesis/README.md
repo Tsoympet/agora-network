@@ -86,38 +86,25 @@ validator keys, policy values, and final hashes; this tooling does not invent
 them. The verifier is **Scaffold** maturity and does not establish Public
 testnet readiness.
 
-The integrated runtime is still insufficient for a safe Trident node loader.
-Genesis storage has an atomic prepared-batch commit, and a freeze-ready
-artifact can now produce a complete typed policy candidate without compiled
-policy defaults. It can also prepare a versioned Block 0 commitment (manifest
-v3, including chain ID, network fingerprint, and complete validator
-registrations) and a lossless Meta envelope
-that is overlay-verified before a future loader may append it. Storage envelope
-v3 now includes a separately versioned Borsh datadir identity, persisted in the
-same atomic batch and checked byte-for-byte on reopen. That identity binds the
-chain, network fingerprint, artifact, consensus policy, Block 0 commitment,
-committed state root, header network identity, and the concrete header hash
-when one is available. A separate,
-domain- and version-gated `TridentHeader` can now be derived offline from the
-verified commitment plus caller-supplied timestamp, difficulty, nonce, and
-concrete-body root. It commits the canonical state root and all required
-artifact, policy, Block 0, protocol, and state-transition identities. The
-legacy `BlockHeader`, `Block`, hashes, P2P bytes, and node boot remain unchanged.
+A freeze-ready artifact (not the checked-in draft) can now be materialized
+into live Block 0 state:
 
-The v2 node rejects any complete or partial Trident identity before loading or
-creating its libp2p key, constructing a swarm, or binding RPC. A future Trident
-node must derive the expected identity from independently verified inputs and
-pass the exact stored-byte comparison at the same startup boundary.
+```bash
+cargo run -p agora-node -- genesis trident materialize \
+  --file PATH --data /tmp/trident-datadir
+```
 
-The candidate is still deliberately not accepted as live state: `genesis_hash` still
-names the full artifact identity, while DAG bootstrap requires the hash of a
-concrete runtime block/header. Remaining blockers are the concrete Trident
-Block 0 body and body-root rule; lossless atomic
-UTXO/account/treasury/vesting/validator/finality writes whose recomputed live
-state root equals the offline header; and explicit consensus, PoW, storage,
-P2P, and RPC activation gates.
-Until those exist together, v3 remains offline-only and
-`AGORA_GENESIS_FILE` continues to accept v2 artifacts only.
+That command fails on the public UNFROZEN draft, as required. On a freeze-ready
+file it writes UTXO/account/treasury/validator state, binds a `TridentHeader`
+whose state root is `compose_trident_state_root`, and stores datadir identity.
+`agora-node` boots that datadir only when `AGORA_TRIDENT_GENESIS_FILE` points
+at the same freeze-ready file. `AGORA_GENESIS_FILE` remains v2-only and cannot
+be combined with the Trident file.
+
+Gossip and mining still use `Block`/`BlockHeader`. Dual-PoS can finalize only
+after a ceremony-selected OVL+DRC genesis set exists in a freeze-ready
+artifact. Until that artifact is published and a public mesh is run, v3 is not
+Public testnet.
 
 Populated `genesis_set` entries use:
 

@@ -9,6 +9,7 @@ mod acceptance;
 mod accounts;
 mod apply;
 mod block_zero;
+mod block_zero_live;
 mod columns;
 mod community_state;
 mod data_availability;
@@ -180,6 +181,10 @@ pub use block_zero::{
     TRIDENT_BLOCK_ZERO_STATE_VERSION, TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
     TRIDENT_DATADIR_IDENTITY_VERSION,
 };
+pub use block_zero_live::{
+    load_or_materialize_trident_block_zero, materialize_trident_block_zero_live,
+    TridentBlockZeroLiveMaterialization,
+};
 pub use columns::{meta_keys, ColumnFamily, OVL_EVM_SCHEMA_VERSION, SCHEMA_VERSION};
 pub use community_state::{
     canonical_community_root, community_summary_key, init_canonical_community_into,
@@ -283,8 +288,8 @@ pub use ghostdag_store::{
 };
 pub use governance_state::{
     authorization_policy_root, governance_treasury_root, init_canonical_governance_into,
-    load_canonical_governance_policy, load_protocol_treasuries, load_protocol_treasury,
-    CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
+    init_trident_governance_into, load_canonical_governance_policy, load_protocol_treasuries,
+    load_protocol_treasury, CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
 };
 pub use headers::{header_key, load_header, store_header, store_header_into};
 pub use marks::{default_token_marks, TokenMark};

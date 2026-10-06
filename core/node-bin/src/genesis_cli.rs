@@ -3,7 +3,8 @@
 use std::path::PathBuf;
 
 use agora_state_machine::{
-    ChainParams, GenesisArtifact, NetworkId, TridentGenesisArtifact, TESTNET_GENESIS_HASH_HEX,
+    load_or_materialize_trident_block_zero, ChainParams, GenesisArtifact, NetworkId, StateStore,
+    TridentGenesisArtifact, TESTNET_GENESIS_HASH_HEX,
 };
 
 fn usage() -> ! {
@@ -12,11 +13,13 @@ fn usage() -> ! {
   agora-node genesis dump [--network testnet|dev] [--out PATH]
   agora-node genesis verify [--network testnet] [--file PATH]
   agora-node genesis trident verify --file PATH --mode draft|freeze-ready
+  agora-node genesis trident materialize --file PATH --data PATH [--nonce N]
 
 Defaults: network=testnet, dump writes docs/genesis/<network>.genesis.json when --out omitted
           and CWD is the repo root; otherwise stdout.
 
-The Trident command is offline-only and cannot boot or freeze a v3 artifact."
+verify is offline-only and cannot freeze a v3 artifact. materialize writes live
+Block 0 state only for a freeze-ready artifact; the public draft is expected to fail."
     );
     std::process::exit(2);
 }
@@ -44,6 +47,7 @@ enum TridentValidationMode {
 fn trident(mut args: impl Iterator<Item = String>) -> ! {
     match args.next().as_deref() {
         Some("verify") => trident_verify(args),
+        Some("materialize") => trident_materialize(args),
         Some(other) => {
             eprintln!("unknown Trident genesis subcommand: {other}");
             usage();
@@ -129,6 +133,91 @@ fn trident_verify(mut args: impl Iterator<Item = String>) -> ! {
         }
     }
     std::process::exit(0);
+}
+
+fn trident_materialize(mut args: impl Iterator<Item = String>) -> ! {
+    let mut file = None;
+    let mut data = None;
+    let mut nonce = 0u64;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--file" | "-f" => {
+                file = Some(PathBuf::from(args.next().unwrap_or_else(|| usage())));
+            }
+            "--data" => {
+                data = Some(PathBuf::from(args.next().unwrap_or_else(|| usage())));
+            }
+            "--nonce" => {
+                let value = args.next().unwrap_or_else(|| usage());
+                nonce = value.parse().unwrap_or_else(|_| {
+                    eprintln!("invalid Block 0 nonce: {value}");
+                    usage();
+                });
+            }
+            other => {
+                eprintln!("unknown Trident materialize flag: {other}");
+                usage();
+            }
+        }
+    }
+    let file = file.unwrap_or_else(|| {
+        eprintln!("Trident materialize requires --file");
+        usage();
+    });
+    let data = data.unwrap_or_else(|| {
+        eprintln!("Trident materialize requires --data");
+        usage();
+    });
+    let raw = match std::fs::read_to_string(&file) {
+        Ok(raw) => raw,
+        Err(error) => {
+            eprintln!("read {}: {error}", file.display());
+            std::process::exit(1);
+        }
+    };
+    let artifact = match TridentGenesisArtifact::from_json(&raw) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            eprintln!("FAIL: parse Trident artifact: {error}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(error) = artifact.validate_freeze_ready() {
+        eprintln!("FAIL: {error}");
+        std::process::exit(1);
+    }
+    if let Err(error) = std::fs::create_dir_all(&data) {
+        eprintln!("create {}: {error}", data.display());
+        std::process::exit(1);
+    }
+    let store = match StateStore::open(&data) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("open {}: {error}", data.display());
+            std::process::exit(1);
+        }
+    };
+    match load_or_materialize_trident_block_zero(&store, &artifact, nonce) {
+        Ok(live) => {
+            println!("network: {}", artifact.network);
+            println!("genesis_hash: {}", live.genesis_hash.to_hex());
+            println!("body_root: {}", live.body_root.to_hex());
+            println!("live_state_root: {}", live.live_state_root.to_hex());
+            println!("manifest_state_root: {}", live.manifest_state_root.to_hex());
+            println!(
+                "block_zero_commitment: {}",
+                live.record.commitment.hash().to_hex()
+            );
+            println!(
+                "LIVE MATERIALIZED: freeze-ready Block 0 written; this is not a public-testnet freeze"
+            );
+            std::process::exit(0);
+        }
+        Err(error) => {
+            eprintln!("FAIL: {error}");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn parse_flags(mut args: impl Iterator<Item = String>) -> (NetworkId, Option<PathBuf>) {

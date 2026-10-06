@@ -553,6 +553,28 @@ impl TridentBlockZeroState {
         verify_trident_datadir_identity(store, &expected.datadir_identity)?;
         Ok(loaded)
     }
+
+    /// Stage the Meta envelope bound to a live composed-root header. Does not
+    /// write live balances; the live materializer appends those separately.
+    pub fn stage_verified_live_envelope_batch(
+        &self,
+        store: &StateStore,
+        header: &TridentHeader,
+        live_state_root: &Hash,
+    ) -> Result<(TridentBlockZeroStorageRecord, WriteBatch), StateError> {
+        ensure_block_zero_absent(store)?;
+        let record = TridentBlockZeroStorageRecord::from_state_and_live_header(
+            self,
+            header,
+            live_state_root,
+        )
+        .map_err(StateError::Storage)?;
+        let batch = encode_block_zero_batch(&record)?;
+        let overlay = store.cow_overlay();
+        overlay.write_batch(batch.clone())?;
+        reread_staged_block_zero(&overlay, &record)?;
+        Ok((record, batch))
+    }
 }
 
 impl TridentBlockZeroCommitment {
@@ -645,6 +667,50 @@ impl TridentBlockZeroCommitment {
             )
             .map_err(|error| error.to_string())
     }
+
+    /// Offline header whose `state_root` is the live composed root, not the manifest hash.
+    ///
+    /// The Block 0 commitment still hashes the native-state manifest. The header
+    /// commits to `compose_trident_state_root` after lossless live materialization.
+    pub fn to_live_trident_header(
+        &self,
+        timestamp_ms: u64,
+        bits: u32,
+        nonce: u64,
+        body_root: Hash,
+        live_state_root: Hash,
+    ) -> Result<TridentHeader, String> {
+        TridentHeader::new(
+            self.trident_header_identity()?,
+            Vec::new(),
+            timestamp_ms,
+            bits,
+            nonce,
+            body_root,
+            live_state_root,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    /// Recheck a live Block 0 header against identity plus recomputed live roots.
+    pub fn verify_live_trident_header(
+        &self,
+        header: &TridentHeader,
+        expected_body_root: Hash,
+        expected_live_state_root: Hash,
+    ) -> Result<(), String> {
+        self.verify()?;
+        if !header.parents.is_empty() {
+            return Err("Trident Block 0 header must not have parents".into());
+        }
+        header
+            .verify_against(
+                &self.trident_header_identity()?,
+                expected_body_root,
+                expected_live_state_root,
+            )
+            .map_err(|error| error.to_string())
+    }
 }
 
 impl TridentDatadirHeaderIdentity {
@@ -711,6 +777,33 @@ impl TridentDatadirIdentity {
             committed_state_root: commitment.state_root,
             header_identity: TridentDatadirHeaderIdentity::from_header_identity(&header_identity),
             block_zero_header_hash,
+        };
+        identity.verify()?;
+        Ok(identity)
+    }
+
+    /// Bind a live Block 0 header whose state root is the composed live root.
+    pub fn from_block_zero_with_live_header(
+        commitment: &TridentBlockZeroCommitment,
+        header: &TridentHeader,
+        live_state_root: &Hash,
+    ) -> Result<Self, String> {
+        commitment.verify_live_trident_header(header, header.body_root, *live_state_root)?;
+        let header_identity = commitment.trident_header_identity()?;
+        let identity = Self {
+            version: TRIDENT_DATADIR_IDENTITY_VERSION,
+            chain_id: commitment.chain_id.clone(),
+            network_fingerprint: commitment.network_fingerprint,
+            artifact_identity: commitment.artifact_identity,
+            consensus_policy_hash: commitment.consensus_policy_hash,
+            block_zero_commitment: commitment.hash(),
+            committed_state_root: commitment.state_root,
+            header_identity: TridentDatadirHeaderIdentity::from_header_identity(&header_identity),
+            block_zero_header_hash: Some(
+                header
+                    .commitment_hash()
+                    .map_err(|error| error.to_string())?,
+            ),
         };
         identity.verify()?;
         Ok(identity)
@@ -803,6 +896,36 @@ impl TridentBlockZeroStorageRecord {
         let commitment = state.commitment();
         let commitment_hash = commitment.hash();
         let datadir_identity = TridentDatadirIdentity::from_block_zero(&commitment, header)?;
+        let record = Self {
+            version: TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
+            manifest: state.clone(),
+            canonical_payload,
+            commitment,
+            commitment_hash,
+            artifact_identity: state.artifact_identity,
+            consensus_policy_hash: state.consensus_policy_hash,
+            network_fingerprint: state.network_fingerprint,
+            chain_id: state.chain_id.clone(),
+            datadir_identity,
+        };
+        record.verify()?;
+        Ok(record)
+    }
+
+    /// Storage envelope bound to a live composed-root header.
+    pub fn from_state_and_live_header(
+        state: &TridentBlockZeroState,
+        header: &TridentHeader,
+        live_state_root: &Hash,
+    ) -> Result<Self, String> {
+        let canonical_payload = state.verified_borsh_payload()?;
+        let commitment = state.commitment();
+        let commitment_hash = commitment.hash();
+        let datadir_identity = TridentDatadirIdentity::from_block_zero_with_live_header(
+            &commitment,
+            header,
+            live_state_root,
+        )?;
         let record = Self {
             version: TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
             manifest: state.clone(),
