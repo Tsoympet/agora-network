@@ -44,6 +44,10 @@ pub struct EvmReceipt {
     pub effective_gas_price: u128,
     pub logs: Vec<EvmLog>,
     pub output: Vec<u8>,
+    /// Signed envelope. Transaction getters read nonce, value, and gas limit
+    /// from these bytes. The empty receipt list still borsh-encodes as a bare
+    /// length, so an inactive world keeps the same execution subroot.
+    pub raw: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]

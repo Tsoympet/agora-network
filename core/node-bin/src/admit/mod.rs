@@ -33,7 +33,7 @@ use agora_state_machine::{
     set_primary_tx_location, store_ghostdag_record, store_header, store_header_into,
     sum_transfer_fees, utxo_diff_key, verify_drc_ledger_object_index, ColumnFamily, GhostdagRecord,
     StateStore, TxAuthContext, WriteBatch, DRC_FEE_BURN_SCHEMA_VERSION,
-    DRC_LEDGER_INDEX_DATADIR_SCHEMA,
+    DRC_LEDGER_INDEX_DATADIR_SCHEMA, SCHEMA_VERSION,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -1899,10 +1899,12 @@ impl ChainState {
             .map_err(|e| AdmitError::Storage(e.to_string()))?;
             return Ok(());
         }
-        if schema == DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+        // Schema 22 commits the OVL-EVM world without replacing the schema-21
+        // ledger index, so every current datadir still has to verify it.
+        if (DRC_LEDGER_INDEX_DATADIR_SCHEMA..=SCHEMA_VERSION).contains(&schema) {
             verify_drc_ledger_object_index(self.store.as_ref())
                 .map_err(|e| AdmitError::Storage(e.to_string()))?;
-        } else if schema > DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+        } else if schema > SCHEMA_VERSION {
             return Err(AdmitError::Storage(format!(
                 "unsupported future datadir schema {schema}"
             )));
