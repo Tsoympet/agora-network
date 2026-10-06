@@ -87,7 +87,9 @@ pub use mnemonic::{generate_mnemonic, seed_fingerprint, seed_from_mnemonic};
 pub use passport::{sign_passport_attestation_bound, verify_passport_attestation_bound};
 pub use payment::{sign_drc_payment_bound, verify_drc_payment_bound};
 pub use stake::{sign_stake_tx_bound, verify_stake_tx_bound};
-pub use tlt_script::{sign_tlt_covenant_preimage, verify_tlt_covenant_input};
+pub use tlt_script::{
+    sign_tlt_covenant_preimage, verify_tlt_covenant_input, verify_tlt_covenant_input_preimage,
+};
 pub use transaction::{
     sign_transaction, sign_transaction_bound, signature_from_slice, signer_address,
     verify_transaction, verify_transaction_bound,

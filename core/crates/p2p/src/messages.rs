@@ -81,6 +81,8 @@ pub enum NetworkMessage {
     DrcOfferCreate(agora_types::DrcOfferCreateTx),
     /// Appended in Trident protocol v24; native order-book offer cancel.
     DrcOfferCancel(agora_types::DrcOfferCancelTx),
+    /// Appended after offer gossip; TLT covenant spends on the transaction topic.
+    TltCovenant(agora_types::TltCovenantTx),
 }
 
 impl NetworkMessage {
@@ -125,6 +127,7 @@ impl NetworkMessage {
             && block.drc_multisign_attachments.is_empty()
             && block.drc_offer_creates.is_empty()
             && block.drc_offer_cancels.is_empty()
+            && block.tlt_covenants.is_empty()
         {
             Self::CompactBlock {
                 header: block.header.clone(),
@@ -361,6 +364,46 @@ mod tests {
             vec![],
         );
         block.drc_ticket_creates.push(create);
+        block.header.tx_root = block.compute_body_root();
+        let full = NetworkMessage::compact_from_block(&block);
+        assert_eq!(full, NetworkMessage::Block(block));
+    }
+
+    #[test]
+    fn tlt_covenant_gossip_is_appended_and_forces_full_block() {
+        let tx = agora_types::TltCovenantTx {
+            version: agora_types::TLT_COVENANT_TX_VERSION,
+            inputs: vec![agora_types::TltCovenantInput {
+                previous_outpoint: agora_types::OutPoint {
+                    tx_id: Hash([9; 32]),
+                    index: 0,
+                },
+                sequence: agora_types::TLT_SEQUENCE_FINAL,
+                script_sig: vec![1],
+            }],
+            outputs: vec![agora_types::TltCovenantOutput {
+                value: agora_types::Amount::from_base_units(1),
+                script_pubkey: vec![2],
+            }],
+            lock_time: 0,
+            nonce: 1,
+        };
+        let gossip = NetworkMessage::TltCovenant(tx.clone());
+        assert_eq!(gossip.encode()[0], 32);
+        assert_eq!(NetworkMessage::decode(&gossip.encode()).unwrap(), gossip);
+
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 1,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.tlt_covenants.push(tx);
         block.header.tx_root = block.compute_body_root();
         let full = NetworkMessage::compact_from_block(&block);
         assert_eq!(full, NetworkMessage::Block(block));

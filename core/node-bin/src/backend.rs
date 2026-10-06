@@ -14,8 +14,8 @@ use agora_p2p::{
     Mempool, NetworkHandle, NetworkMessage, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT,
 };
 use agora_rpc::{
-    DrcDepositPreauthStatus, FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError, TxLookup,
-    UtxoEntry,
+    DrcDepositPreauthStatus, FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError,
+    TltCovenantLookup, TxLookup, UtxoEntry,
 };
 use agora_state_machine::{
     apply_account_transfer, apply_drc_account_policy, apply_drc_check_cancel, apply_drc_check_cash,
@@ -36,25 +36,26 @@ use agora_state_machine::{
     load_drc_trust_line_live, load_epoch, load_known_drc_account_keys,
     load_known_drc_account_policy, load_known_drc_account_signer_summary,
     load_known_drc_deposit_authorization, load_native_supply_state, load_protocol_treasuries,
-    load_reward_pool, load_validator, lookup_drc_check_point, lookup_drc_escrow_point,
-    lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point, lookup_drc_ticket_point,
-    lookup_drc_trust_line_point, lookup_tx_location, meta_keys, outpoint_key,
-    plan_drc_mempool_reservation, validate_mempool_tx_with_auth, AccountJournal, ColumnFamily,
-    DrcMempoolReservation, DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext,
-    WriteBatch,
+    load_reward_pool, load_validator, lookup_covenant_tx_location, lookup_drc_check_point,
+    lookup_drc_escrow_point, lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point,
+    lookup_drc_ticket_point, lookup_drc_trust_line_point, lookup_tx_location, meta_keys,
+    outpoint_key, plan_drc_mempool_reservation, validate_mempool_covenant,
+    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, DrcMempoolReservation,
+    DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, CheckpointAttestation, DrcAcceptedOperationReceipt,
-    DrcAccountPolicy, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
-    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
-    DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcLedgerObjectDescriptor,
-    DrcLedgerObjectKind, DrcLedgerObjectPage, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
-    DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
-    TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
-    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
-    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    sequence_signals_rbf, AccountTransfer, Address, Amount, Block, CheckpointAttestation,
+    DrcAcceptedOperationReceipt, DrcAccountPolicy, DrcAccountPolicyTx, DrcCheckCancelTx,
+    DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
+    DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx,
+    DrcLedgerObjectDescriptor, DrcLedgerObjectKind, DrcLedgerObjectPage, DrcPaymentChannelClaimTx,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx,
+    DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
+    DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
+    SignedStakeTx, TltCovenantTx, Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
+    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -146,6 +147,71 @@ pub(crate) fn admit_transaction(
     // Auth already verified; mempool only tracks reservations / fee market.
     pool.admit_priced(tx, fee)
         .map_err(|e| RpcError::Rejected(e.to_string()))
+}
+
+/// Covenant lane admission. v1 wire and premine address locks are unchanged.
+pub(crate) fn admit_tlt_covenant(
+    store: &StateStore,
+    chain: &Mutex<ChainState>,
+    mempool: &Mutex<Mempool>,
+    tx: TltCovenantTx,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let (blue_score, median_time_secs) = {
+        let chain = chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?;
+        let blue_score = chain
+            .next_template_blue_score()
+            .map_err(|err| RpcError::Internal(err.to_string()))?;
+        let parents = chain
+            .select_template_parents()
+            .map_err(|err| RpcError::Internal(err.to_string()))?;
+        let median_time_secs = chain
+            .template_median_time_secs(&parents)
+            .map_err(|err| RpcError::Internal(err.to_string()))?;
+        (blue_score, median_time_secs)
+    };
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    // A replacement must be checked as if the conflicting reservations were free.
+    // `replace_covenant` still rejects v1 conflicts, missing signals, and low fees.
+    let mut spent = pool.reserved().clone();
+    let conflicts = tx
+        .inputs
+        .iter()
+        .any(|input| spent.contains(&input.previous_outpoint));
+    if conflicts {
+        if !tx
+            .inputs
+            .iter()
+            .any(|input| sequence_signals_rbf(input.sequence))
+        {
+            return Err(RpcError::Rejected(
+                "covenant conflicts with the mempool and does not signal replace-by-fee".into(),
+            ));
+        }
+        for input in &tx.inputs {
+            spent.remove(&input.previous_outpoint);
+        }
+    }
+    let fee =
+        validate_mempool_covenant(store, &tx, &spent, Some(auth), blue_score, median_time_secs)
+            .map_err(|err| RpcError::Rejected(format!("covenant: {err}")))?;
+    let min_fee = min_relay_fee();
+    if fee < min_fee {
+        return Err(RpcError::Rejected(format!(
+            "fee too low: {fee} < min relay {min_fee}"
+        )));
+    }
+    if conflicts {
+        return pool
+            .replace_covenant(tx, fee)
+            .map_err(|err| RpcError::Rejected(err.to_string()));
+    }
+    pool.admit_covenant(tx, fee)
+        .map_err(|err| RpcError::Rejected(err.to_string()))
 }
 
 /// Validate and reserve an OVL/DRC account transfer under the mempool lock.
@@ -1060,6 +1126,54 @@ impl RpcBackend for NodeBackend {
             }
         }
         Ok(id)
+    }
+
+    fn submit_tlt_covenant(&mut self, tx: TltCovenantTx) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_tlt_covenant(&self.store, &self.chain, &self.mempool, tx.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            if let Err(err) = net.publish_message(NetworkMessage::TltCovenant(tx)) {
+                return Err(RpcError::Internal(err.to_string()));
+            }
+        }
+        Ok(id)
+    }
+
+    fn get_tlt_covenant(&self, tx_id: &Hash) -> Result<TltCovenantLookup, RpcError> {
+        {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            if let Some(tx) = pool.get_covenant(tx_id) {
+                return Ok(TltCovenantLookup::pending(tx.clone(), pool.fee_of(tx_id)));
+            }
+        }
+        let Some((block_id, index)) = lookup_covenant_tx_location(self.store.as_ref(), tx_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        else {
+            return Ok(TltCovenantLookup::unknown(*tx_id));
+        };
+        let Some(block) = self.get_block(&block_id) else {
+            return Ok(TltCovenantLookup::unknown(*tx_id));
+        };
+        let Some(tx) = block.tlt_covenants.get(index as usize) else {
+            return Ok(TltCovenantLookup::unknown(*tx_id));
+        };
+        match self
+            .chain
+            .lock()
+            .ok()
+            .and_then(|g| g.confirmations(&block_id))
+        {
+            Some(confirmations) => Ok(TltCovenantLookup::confirmed(
+                tx.clone(),
+                block_id,
+                index,
+                confirmations,
+            )),
+            None => Ok(TltCovenantLookup::orphaned(tx.clone(), block_id, index)),
+        }
     }
 
     fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError> {
@@ -2049,6 +2163,7 @@ impl RpcBackend for NodeBackend {
             drc_issued_clawbacks,
             drc_offer_creates,
             drc_offer_cancels,
+            tlt_covenants,
         ) = {
             let pool = self
                 .mempool
@@ -2085,6 +2200,7 @@ impl RpcBackend for NodeBackend {
                 pool.select_drc_issued_clawbacks(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_offer_creates(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_offer_cancels(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_covenants(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         chain
@@ -2118,6 +2234,7 @@ impl RpcBackend for NodeBackend {
                     drc_issued_clawbacks: &drc_issued_clawbacks,
                     drc_offer_creates: &drc_offer_creates,
                     drc_offer_cancels: &drc_offer_cancels,
+                    tlt_covenants: &tlt_covenants,
                     ..BlockTemplateLanes::default()
                 },
             )
@@ -3569,6 +3686,173 @@ mod tests {
             .pending_escrow_create(&escrow_id));
         let unknown = backend.get_drc_escrow(&Hash([0xab; 32])).unwrap();
         assert_eq!(unknown["status"], json!("unknown"));
+    }
+
+    #[test]
+    fn tlt_covenant_submit_query_template_and_restart() {
+        use agora_consensus::EmissionSchedule;
+        use agora_crypto::sign_tlt_covenant_preimage;
+        use agora_rpc::TxStatus;
+        use agora_types::{
+            prove_tlt_tx_merkle, push_data, script_p2pkh, tlt_tx_merkle_root, verify_tlt_tx_merkle,
+            TltCovenantInput, TltCovenantOutput, TltCovenantTx, TLT_COVENANT_TX_VERSION,
+            TLT_SEQUENCE_FINAL,
+        };
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let to = derive_bip44(&seed, &Bip44Path::external(1))
+            .unwrap()
+            .address();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(from.address())
+            .ignite(&store)
+            .unwrap();
+        let genesis_block = {
+            let bytes = store
+                .get_cf(ColumnFamily::Hot, genesis.as_bytes())
+                .unwrap()
+                .unwrap();
+            Block::try_from_slice(&bytes).unwrap()
+        };
+        let premine = genesis_block.transactions[0].outputs[0]
+            .value
+            .as_base_units();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap_with(
+                store.clone(),
+                genesis,
+                crate::admit::ChainBootConfig {
+                    chain_id: "agora-dev".into(),
+                    ..crate::admit::ChainBootConfig::default()
+                },
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mut backend = NodeBackend::new(
+            chain.clone(),
+            store.clone(),
+            mempool,
+            NodeBackendConfig {
+                miner_address: Address([1; 20]),
+                ..backend_config(genesis)
+            },
+        );
+
+        let mut cheap = TltCovenantTx {
+            version: TLT_COVENANT_TX_VERSION,
+            inputs: vec![TltCovenantInput {
+                previous_outpoint: OutPoint {
+                    tx_id: genesis_block.transactions[0].tx_id(),
+                    index: 0,
+                },
+                sequence: TLT_SEQUENCE_FINAL - 1,
+                script_sig: Vec::new(),
+            }],
+            outputs: vec![TltCovenantOutput {
+                value: Amount::from_base_units(premine),
+                script_pubkey: script_p2pkh(&to),
+            }],
+            lock_time: 0,
+            nonce: 1,
+        };
+        let cheap_preimage = cheap.sighash_preimage_bound("agora-dev", &genesis);
+        let cheap_sig = sign_tlt_covenant_preimage(&from, &cheap_preimage).unwrap();
+        let mut cheap_script = Vec::new();
+        push_data(&mut cheap_script, &cheap_sig).unwrap();
+        push_data(&mut cheap_script, &from.public_key_bytes()).unwrap();
+        cheap.inputs[0].script_sig = cheap_script;
+        assert!(backend.submit_tlt_covenant(cheap).is_err());
+
+        let fee = 1u64;
+        let mut tx = TltCovenantTx {
+            version: TLT_COVENANT_TX_VERSION,
+            inputs: vec![TltCovenantInput {
+                previous_outpoint: OutPoint {
+                    tx_id: genesis_block.transactions[0].tx_id(),
+                    index: 0,
+                },
+                sequence: TLT_SEQUENCE_FINAL - 1,
+                script_sig: Vec::new(),
+            }],
+            outputs: vec![TltCovenantOutput {
+                value: Amount::from_base_units(premine - fee),
+                script_pubkey: script_p2pkh(&to),
+            }],
+            lock_time: 0,
+            nonce: 2,
+        };
+        let preimage = tx.sighash_preimage_bound("agora-dev", &genesis);
+        let signature = sign_tlt_covenant_preimage(&from, &preimage).unwrap();
+        let mut script_sig = Vec::new();
+        push_data(&mut script_sig, &signature).unwrap();
+        push_data(&mut script_sig, &from.public_key_bytes()).unwrap();
+        tx.inputs[0].script_sig = script_sig;
+        let id = backend.submit_tlt_covenant(tx.clone()).unwrap();
+        assert_eq!(id, tx.tx_id());
+        let pending = backend.get_tlt_covenant(&id).unwrap();
+        assert_eq!(pending.status, TxStatus::Pending);
+        assert_eq!(pending.fee, Some(fee));
+
+        let mut replacement = tx.clone();
+        replacement.nonce = 3;
+        replacement.outputs[0].value = Amount::from_base_units(premine - 2);
+        replacement.inputs[0].script_sig.clear();
+        let replacement_preimage = replacement.sighash_preimage_bound("agora-dev", &genesis);
+        let replacement_sig = sign_tlt_covenant_preimage(&from, &replacement_preimage).unwrap();
+        let mut replacement_script = Vec::new();
+        push_data(&mut replacement_script, &replacement_sig).unwrap();
+        push_data(&mut replacement_script, &from.public_key_bytes()).unwrap();
+        replacement.inputs[0].script_sig = replacement_script;
+        let replaced = backend.submit_tlt_covenant(replacement.clone()).unwrap();
+        assert!(backend.get_tlt_covenant(&id).unwrap().transaction.is_none());
+        assert_eq!(
+            backend.get_tlt_covenant(&replaced).unwrap().status,
+            TxStatus::Pending
+        );
+
+        let mut template = backend.get_block_template().unwrap();
+        assert_eq!(template.tlt_covenants.len(), 1);
+        assert_eq!(template.tlt_covenants[0].tx_id(), replaced);
+        assert_eq!(
+            template.transactions[0].outputs[0].value.as_base_units(),
+            EmissionSchedule::default().initial_reward + 2
+        );
+        let leaves: Vec<_> = template.transactions.iter().map(|tx| tx.tx_id()).collect();
+        let merkle = tlt_tx_merkle_root(&leaves);
+        assert_eq!(merkle, Block::compute_tx_root(&template.transactions));
+        assert_ne!(template.header.tx_root, merkle);
+        let proof = prove_tlt_tx_merkle(&leaves, 0).unwrap();
+        assert!(verify_tlt_tx_merkle(&merkle, &proof));
+
+        template.header.nonce = 1;
+        let pow = RandomXPowHasher.pow_hash(&template.header);
+        agora_consensus::LeadingZeroPow::new(PowAlgorithm::RandomX)
+            .verify(&template.header, &pow)
+            .unwrap();
+        let block_id = backend.submit_block(template.clone()).unwrap();
+        let confirmed = backend.get_tlt_covenant(&replaced).unwrap();
+        assert_eq!(confirmed.status, TxStatus::Confirmed);
+        assert_eq!(confirmed.block_id, Some(block_id));
+        assert_eq!(backend.get_balance(&to).as_base_units(), premine - 2);
+        assert!(backend.submit_tlt_covenant(replacement).is_err());
+
+        let restarted = ChainState::bootstrap_with(
+            store,
+            genesis,
+            crate::admit::ChainBootConfig {
+                chain_id: "agora-dev".into(),
+                ..crate::admit::ChainBootConfig::default()
+            },
+            crate::storage_policy::StoragePolicy::default(),
+        )
+        .unwrap();
+        let reloaded = restarted.load_block(&block_id).unwrap().unwrap();
+        assert_eq!(reloaded.tlt_covenants[0].tx_id(), replaced);
+        assert_eq!(reloaded.header.tx_root, template.header.tx_root);
     }
 }
 

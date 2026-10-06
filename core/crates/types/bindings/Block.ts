@@ -28,6 +28,7 @@ import type { DrcTrustLineIssuerControlTx } from "./DrcTrustLineIssuerControlTx"
 import type { DrcTrustLineSetTx } from "./DrcTrustLineSetTx";
 import type { OvlExecutionTx } from "./OvlExecutionTx";
 import type { SignedStakeTx } from "./SignedStakeTx";
+import type { TltCovenantTx } from "./TltCovenantTx";
 import type { Transaction } from "./Transaction";
 
 /**
@@ -148,4 +149,8 @@ drc_multisign_attachments: Array<DrcMultisignBlockAttachment>,
 /**
  * Native order-book offers. Empty lanes stay absent from frozen pre-v18 bytes.
  */
-drc_offer_creates: Array<DrcOfferCreateTx>, drc_offer_cancels: Array<DrcOfferCancelTx>, };
+drc_offer_creates: Array<DrcOfferCreateTx>, drc_offer_cancels: Array<DrcOfferCancelTx>,
+/**
+ * TLT covenant spends. Absent from the wire when empty so v1 block bytes stay frozen.
+ */
+tlt_covenants: Array<TltCovenantTx>, };

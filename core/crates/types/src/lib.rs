@@ -260,7 +260,8 @@ pub use tlt_merkle::{
     prove_tlt_tx_merkle, tlt_tx_merkle_root, verify_tlt_tx_merkle, TltTxMerkleProof,
 };
 pub use tlt_script::{
-    eval_covenant_input, eval_tlt_script, is_p2sh_script, push_data, script_htlc, script_multisig,
+    covenant_locktime_satisfied, eval_covenant_input, eval_covenant_input_preimage,
+    eval_tlt_script, is_p2sh_script, p2pkh_address, push_data, script_htlc, script_multisig,
     script_p2pkh, script_p2sh, sequence_signals_rbf, SigChecker, TltCovenantInput,
     TltCovenantOutput, TltCovenantTx, TltOutputOrigin, TltScriptError, TltSpendContext,
     TLT_COVENANT_TX_DOMAIN, TLT_COVENANT_TX_VERSION, TLT_CSV_TIME_STEP_SECS,
@@ -372,6 +373,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -440,6 +442,9 @@ mod ts_export {
         "OvlWei.ts",
         "SignedStakeTx.ts",
         "Transaction.ts",
+        "TltCovenantInput.ts",
+        "TltCovenantOutput.ts",
+        "TltCovenantTx.ts",
     ];
 
     fn normalize_generated_bindings() {
@@ -467,6 +472,9 @@ mod ts_export {
         TxOut::export_all().expect("export TxOut");
         Transaction::export_all().expect("export Transaction");
         BlockHeader::export_all().expect("export BlockHeader");
+        TltCovenantInput::export_all().expect("export TltCovenantInput");
+        TltCovenantOutput::export_all().expect("export TltCovenantOutput");
+        TltCovenantTx::export_all().expect("export TltCovenantTx");
         Block::export_all().expect("export Block");
         NativeAssetId::export_all().expect("export NativeAssetId");
         NativeAmount::export_all().expect("export NativeAmount");

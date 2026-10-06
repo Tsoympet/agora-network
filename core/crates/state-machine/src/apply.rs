@@ -82,7 +82,7 @@ pub struct TxAuthContext {
 /// Accounting fields (`fees`, `subsidy`, `coinbase_total`) are persisted so unapply
 /// never reverse-engineers fees from spent/created lists (which omit same-block
 /// parent→child package edges). Account/stake lane snapshots restore OVL/DRC Meta.
-#[derive(Debug, Default, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct UtxoJournal {
     /// Outputs removed while applying (for revert: re-insert).
     pub spent: Vec<(OutPoint, TxOut)>,
@@ -122,6 +122,10 @@ pub struct UtxoJournal {
     pub drc_ledger_index_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     /// Offer live, index, reserve, sequence, and receipt keys before Accepted offers.
     pub drc_offer_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    /// Script outputs created by this block's covenant lane (revert deletes them).
+    pub tlt_covenant_created: Vec<OutPoint>,
+    /// Script outputs spent by this block's covenant lane (revert restores them).
+    pub tlt_covenant_spent: Vec<(OutPoint, crate::tlt_covenant::TltCovenantUtxoRecord)>,
 }
 
 /// Journal layout before the offer lane. Trailing offer snapshots must not be
@@ -147,6 +151,105 @@ struct UtxoJournalV15Index {
     drc_payment_channel_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     drc_trust_line_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     drc_ledger_index_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
+impl BorshSerialize for UtxoJournal {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> borsh::io::Result<()> {
+        // Offer meta is the DEX trailing field. Covenant vectors stay optional on
+        // decode so offer-only journals written before this merge still load.
+        BorshSerialize::serialize(&self.spent, writer)?;
+        BorshSerialize::serialize(&self.created, writer)?;
+        BorshSerialize::serialize(&self.fees, writer)?;
+        BorshSerialize::serialize(&self.subsidy, writer)?;
+        BorshSerialize::serialize(&self.coinbase_total, writer)?;
+        BorshSerialize::serialize(&self.account_before, writer)?;
+        BorshSerialize::serialize(&self.stake_meta_before, writer)?;
+        BorshSerialize::serialize(&self.payment_meta_before, writer)?;
+        BorshSerialize::serialize(&self.data_availability_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_policy_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_deposit_preauth_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_regular_key_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_signer_list_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_ticket_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_escrow_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_check_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_payment_channel_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_trust_line_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_ledger_index_meta_before, writer)?;
+        BorshSerialize::serialize(&self.drc_offer_meta_before, writer)?;
+        BorshSerialize::serialize(&self.tlt_covenant_created, writer)?;
+        BorshSerialize::serialize(&self.tlt_covenant_spent, writer)?;
+        Ok(())
+    }
+}
+
+impl BorshDeserialize for UtxoJournal {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let mut journal = Self {
+            spent: Vec::deserialize_reader(reader)?,
+            created: Vec::deserialize_reader(reader)?,
+            fees: u64::deserialize_reader(reader)?,
+            subsidy: u64::deserialize_reader(reader)?,
+            coinbase_total: u64::deserialize_reader(reader)?,
+            account_before: Vec::deserialize_reader(reader)?,
+            stake_meta_before: Vec::deserialize_reader(reader)?,
+            payment_meta_before: Vec::deserialize_reader(reader)?,
+            data_availability_meta_before: Vec::deserialize_reader(reader)?,
+            drc_policy_meta_before: Vec::deserialize_reader(reader)?,
+            drc_deposit_preauth_meta_before: Vec::deserialize_reader(reader)?,
+            drc_regular_key_meta_before: Vec::deserialize_reader(reader)?,
+            drc_signer_list_meta_before: Vec::deserialize_reader(reader)?,
+            drc_ticket_meta_before: Vec::deserialize_reader(reader)?,
+            drc_escrow_meta_before: Vec::deserialize_reader(reader)?,
+            drc_check_meta_before: Vec::deserialize_reader(reader)?,
+            drc_payment_channel_meta_before: Vec::deserialize_reader(reader)?,
+            drc_trust_line_meta_before: Vec::deserialize_reader(reader)?,
+            drc_ledger_index_meta_before: Vec::deserialize_reader(reader)?,
+            drc_offer_meta_before: Vec::deserialize_reader(reader)?,
+            tlt_covenant_created: Vec::new(),
+            tlt_covenant_spent: Vec::new(),
+        };
+        if let Some(created) = read_optional_vec(reader)? {
+            journal.tlt_covenant_created = created;
+            journal.tlt_covenant_spent = Vec::deserialize_reader(reader)?;
+        }
+        Ok(journal)
+    }
+}
+
+fn read_optional_vec<T, R>(reader: &mut R) -> Result<Option<Vec<T>>, borsh::io::Error>
+where
+    T: BorshDeserialize,
+    R: borsh::io::Read,
+{
+    let Some(len) = read_optional_len(reader)? else {
+        return Ok(None);
+    };
+    let mut values = Vec::with_capacity((len as usize).min(1024));
+    for _ in 0..len {
+        values.push(T::deserialize_reader(reader)?);
+    }
+    Ok(Some(values))
+}
+
+fn read_optional_len<R: borsh::io::Read>(reader: &mut R) -> Result<Option<u32>, borsh::io::Error> {
+    let mut bytes = [0u8; 4];
+    let mut filled = 0usize;
+    while filled < bytes.len() {
+        match reader.read(&mut bytes[filled..]) {
+            Ok(0) if filled == 0 => return Ok(None),
+            Ok(0) => {
+                return Err(borsh::io::Error::new(
+                    borsh::io::ErrorKind::UnexpectedEof,
+                    "partial trailing journal length",
+                ));
+            }
+            Ok(read) => filled += read,
+            Err(err) if err.kind() == borsh::io::ErrorKind::Interrupted => {}
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(Some(u32::from_le_bytes(bytes)))
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -403,6 +506,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: v15.drc_trust_line_meta_before,
                 drc_ledger_index_meta_before: v15.drc_ledger_index_meta_before,
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v14) = UtxoJournalV14Trust::try_from_slice(bytes) {
@@ -427,6 +532,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: v14.drc_trust_line_meta_before,
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v13) = UtxoJournalV13Paychan::try_from_slice(bytes) {
@@ -451,6 +558,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v12) = UtxoJournalV12::try_from_slice(bytes) {
@@ -475,6 +584,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v11) = UtxoJournalV11::try_from_slice(bytes) {
@@ -499,6 +610,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v10) = UtxoJournalV10::try_from_slice(bytes) {
@@ -523,6 +636,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v9) = UtxoJournalV9::try_from_slice(bytes) {
@@ -547,6 +662,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v8) = UtxoJournalV8::try_from_slice(bytes) {
@@ -571,6 +688,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v7) = UtxoJournalV7::try_from_slice(bytes) {
@@ -595,6 +714,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v6) = UtxoJournalV6::try_from_slice(bytes) {
@@ -619,6 +740,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
@@ -643,6 +766,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
@@ -667,6 +792,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -691,6 +818,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -715,6 +844,8 @@ impl UtxoJournal {
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
                 drc_offer_meta_before: Vec::new(),
+                tlt_covenant_created: Vec::new(),
+                tlt_covenant_spent: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -740,6 +871,8 @@ impl UtxoJournal {
             drc_trust_line_meta_before: Vec::new(),
             drc_ledger_index_meta_before: Vec::new(),
             drc_offer_meta_before: Vec::new(),
+            tlt_covenant_created: Vec::new(),
+            tlt_covenant_spent: Vec::new(),
         })
     }
 }
@@ -981,6 +1114,39 @@ fn apply_block_batched_mode(
             .checked_add(*fee)
             .ok_or_else(|| StateError::InvalidTx("fee overflow".into()))?;
     }
+    let covenant_blue_score = application_blue_score.unwrap_or(0);
+    let covenant_median_time = crate::tlt_covenant::block_median_time_secs(store, block)?;
+    let skip_existing_coinbase = if mode == ApplyMode::Virtual {
+        let mut skip = false;
+        for tx in &block.transactions {
+            if tx.inputs.is_empty() && coinbase_outpoints_exist(store, tx)? {
+                skip = true;
+            }
+        }
+        skip
+    } else {
+        false
+    };
+    let (predicted_addresses, predicted_coinbase, v1_spent) =
+        crate::tlt_covenant::predicted_address_outputs(
+            block,
+            &transferable,
+            skip_existing_coinbase,
+        );
+    let (covenant_indexes, covenant_fees) = crate::tlt_covenant::selectable_covenant_fees(
+        store,
+        block,
+        auth,
+        covenant_blue_score,
+        covenant_median_time,
+        mode,
+        &predicted_addresses,
+        &v1_spent,
+        &predicted_coinbase,
+    )?;
+    applied_fees = applied_fees
+        .checked_add(covenant_fees)
+        .ok_or_else(|| StateError::InvalidTx("fee overflow".into()))?;
     let coinbase_budget = emission_reward
         .checked_add(applied_fees)
         .ok_or_else(|| StateError::Coinbase("reward overflow".into()))?;
@@ -1052,6 +1218,20 @@ fn apply_block_batched_mode(
     if coinbases == 0 {
         return Err(StateError::Coinbase("missing coinbase".into()));
     }
+
+    crate::tlt_covenant::apply_covenant_indexes(
+        store,
+        block,
+        &covenant_indexes,
+        auth,
+        covenant_blue_score,
+        covenant_median_time,
+        &mut batch,
+        &mut journal,
+        &mut spent_in_block,
+        &mut created_in_block,
+        &coinbase_created,
+    )?;
 
     journal.fees = applied_fees;
     journal.coinbase_total = coinbase_total;
@@ -3152,7 +3332,7 @@ fn verify_and_signer(
     }
 }
 
-fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
+pub(crate) fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
     let key = outpoint_key(op);
     let bytes = store
         .get_cf(ColumnFamily::Utxo, &key)?
@@ -3160,7 +3340,7 @@ fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
     TxOut::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))
 }
 
-fn spend_utxo(
+pub(crate) fn spend_utxo(
     batch: &mut WriteBatch,
     op: &OutPoint,
     out: &TxOut,
@@ -3320,6 +3500,7 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
             None => batch.delete_cf(ColumnFamily::Meta, key),
         }
     }
+    crate::tlt_covenant::revert_covenant_outputs(&mut batch, journal)?;
     revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
     Ok(batch)
 }
@@ -3578,6 +3759,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -3791,6 +3973,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -3913,6 +4096,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -4002,6 +4186,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -4100,6 +4285,7 @@ mod tests {
                 drc_offer_creates: vec![],
                 drc_offer_cancels: vec![],
                 drc_multisign_attachments: vec![],
+                tlt_covenants: Vec::new(),
             },
             1,
             None,
@@ -4197,6 +4383,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -4312,6 +4499,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -4409,6 +4597,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -4520,6 +4709,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -4660,6 +4850,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5321,6 +5512,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 

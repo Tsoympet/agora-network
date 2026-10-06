@@ -12,7 +12,8 @@ use agora_types::{
     DrcIssuedTransferTx, DrcLedgerObjectDescriptor, DrcLedgerObjectKind, DrcLedgerObjectPage,
     DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
     DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
-    DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OutPoint, OvlExecutionTx, Transaction, TxOut,
+    DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OutPoint, OvlExecutionTx, TltCovenantTx,
+    Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -59,6 +60,68 @@ pub struct TxLookup {
     /// Explicit acceptance status (`Accepted` / `ConflictLost` / …). Never infer from color alone.
     pub acceptance: Option<String>,
     pub transaction: Option<Transaction>,
+}
+
+/// Mempool / confirmed / missing status for `agora_getTltCovenant`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TltCovenantLookup {
+    pub tx_id: Hash,
+    pub status: TxStatus,
+    pub block_id: Option<Hash>,
+    pub index: Option<u32>,
+    pub fee: Option<u64>,
+    pub confirmations: Option<u64>,
+    pub transaction: Option<TltCovenantTx>,
+}
+
+impl TltCovenantLookup {
+    pub fn unknown(tx_id: Hash) -> Self {
+        Self {
+            tx_id,
+            status: TxStatus::Unknown,
+            block_id: None,
+            index: None,
+            fee: None,
+            confirmations: None,
+            transaction: None,
+        }
+    }
+
+    pub fn pending(tx: TltCovenantTx, fee: Option<u64>) -> Self {
+        Self {
+            tx_id: tx.tx_id(),
+            status: TxStatus::Pending,
+            block_id: None,
+            index: None,
+            fee,
+            confirmations: None,
+            transaction: Some(tx),
+        }
+    }
+
+    pub fn confirmed(tx: TltCovenantTx, block_id: Hash, index: u32, confirmations: u64) -> Self {
+        Self {
+            tx_id: tx.tx_id(),
+            status: TxStatus::Confirmed,
+            block_id: Some(block_id),
+            index: Some(index),
+            fee: None,
+            confirmations: Some(confirmations.max(1)),
+            transaction: Some(tx),
+        }
+    }
+
+    pub fn orphaned(tx: TltCovenantTx, block_id: Hash, index: u32) -> Self {
+        Self {
+            tx_id: tx.tx_id(),
+            status: TxStatus::Orphaned,
+            block_id: Some(block_id),
+            index: Some(index),
+            fee: None,
+            confirmations: None,
+            transaction: Some(tx),
+        }
+    }
 }
 
 /// One pending mempool entry for `agora_getMempool`.
@@ -182,6 +245,8 @@ pub trait RpcBackend: Send {
     /// Minimum / suggested fee for wallet coin selection.
     fn estimate_fee(&self) -> Result<FeeEstimate, RpcError>;
     fn submit_transaction(&mut self, tx: Transaction) -> Result<Hash, RpcError>;
+    fn submit_tlt_covenant(&mut self, tx: TltCovenantTx) -> Result<Hash, RpcError>;
+    fn get_tlt_covenant(&self, tx_id: &Hash) -> Result<TltCovenantLookup, RpcError>;
     fn submit_account_transfer(&mut self, tx: AccountTransfer) -> Result<Hash, RpcError>;
     fn submit_ovl_execution(&mut self, tx: OvlExecutionTx) -> Result<Hash, RpcError>;
     /// Ethereum JSON-RPC over the canonical OVL execution world.
@@ -419,8 +484,11 @@ pub struct InMemoryBackend {
     balances: HashMap<Address, Amount>,
     utxos: HashMap<OutPoint, TxOut>,
     mempool: HashMap<Hash, Transaction>,
+    covenant_mempool: HashMap<Hash, TltCovenantTx>,
     /// `tx_id` → `(block_id, index)` for confirmed txs.
     tx_index: HashMap<Hash, (Hash, u32)>,
+    /// Covenant lane index, separate from v1 `tx_index`.
+    covenant_index: HashMap<Hash, (Hash, u32)>,
     /// Canonical exact-delivery receipts keyed by signed payment id.
     drc_payment_receipts: HashMap<Hash, DrcPaymentReceipt>,
     /// Recipient-scoped invoice key → signed payment id, mirroring canonical storage.
@@ -449,7 +517,9 @@ impl Default for InMemoryBackend {
             balances: HashMap::new(),
             utxos: HashMap::new(),
             mempool: HashMap::new(),
+            covenant_mempool: HashMap::new(),
             tx_index: HashMap::new(),
+            covenant_index: HashMap::new(),
             drc_payment_receipts: HashMap::new(),
             drc_payment_invoice_index: HashMap::new(),
             drc_account_policies: HashMap::new(),
@@ -558,6 +628,11 @@ impl InMemoryBackend {
             let tx_id = tx.tx_id();
             self.tx_index.insert(tx_id, (id, index as u32));
             self.mempool.remove(&tx_id);
+        }
+        for (index, tx) in block.tlt_covenants.iter().enumerate() {
+            let tx_id = tx.tx_id();
+            self.covenant_index.insert(tx_id, (id, index as u32));
+            self.covenant_mempool.remove(&tx_id);
         }
         self.blocks.insert(id, block);
     }
@@ -671,6 +746,39 @@ impl RpcBackend for InMemoryBackend {
         let id = tx.tx_id();
         self.mempool.insert(id, tx);
         Ok(id)
+    }
+
+    fn submit_tlt_covenant(&mut self, tx: TltCovenantTx) -> Result<Hash, RpcError> {
+        if tx.inputs.is_empty() {
+            return Err(RpcError::Rejected(
+                "covenant transaction has no inputs".into(),
+            ));
+        }
+        let id = tx.tx_id();
+        self.covenant_mempool.insert(id, tx);
+        Ok(id)
+    }
+
+    fn get_tlt_covenant(&self, tx_id: &Hash) -> Result<TltCovenantLookup, RpcError> {
+        if let Some(tx) = self.covenant_mempool.get(tx_id) {
+            return Ok(TltCovenantLookup::pending(tx.clone(), None));
+        }
+        if let Some((block_id, index)) = self.covenant_index.get(tx_id).copied() {
+            if let Some(block) = self.blocks.get(&block_id) {
+                if let Some(tx) = block.tlt_covenants.get(index as usize) {
+                    return match self.tip_confirmations(&block_id) {
+                        Some(confirmations) => Ok(TltCovenantLookup::confirmed(
+                            tx.clone(),
+                            block_id,
+                            index,
+                            confirmations,
+                        )),
+                        None => Ok(TltCovenantLookup::orphaned(tx.clone(), block_id, index)),
+                    };
+                }
+            }
+        }
+        Ok(TltCovenantLookup::unknown(*tx_id))
     }
 
     fn submit_account_transfer(&mut self, _tx: AccountTransfer) -> Result<Hash, RpcError> {
@@ -1286,6 +1394,7 @@ impl RpcBackend for InMemoryBackend {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         })
     }
 
