@@ -26,6 +26,7 @@ import type { DrcTrustLineIssuerControlTx } from "./DrcTrustLineIssuerControlTx"
 import type { DrcTrustLineSetTx } from "./DrcTrustLineSetTx";
 import type { OvlExecutionTx } from "./OvlExecutionTx";
 import type { SignedStakeTx } from "./SignedStakeTx";
+import type { TltCovenantTx } from "./TltCovenantTx";
 import type { Transaction } from "./Transaction";
 
 /**
@@ -142,4 +143,8 @@ drc_issued_clawbacks: Array<DrcIssuedClawbackTx>,
 /**
  * Detached, body-root-committed DRC multisign authorization (consensus lane).
  */
-drc_multisign_attachments: Array<DrcMultisignBlockAttachment>, };
+drc_multisign_attachments: Array<DrcMultisignBlockAttachment>,
+/**
+ * TLT covenant spends. Absent from the wire when empty so v1 block bytes stay frozen.
+ */
+tlt_covenants: Array<TltCovenantTx>, };

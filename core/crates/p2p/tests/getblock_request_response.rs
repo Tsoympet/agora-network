@@ -66,6 +66,7 @@ async fn direct_getblock_returns_full_block() {
         drc_trust_line_issuer_controls: vec![],
         drc_issued_clawbacks: vec![],
         drc_multisign_attachments: vec![],
+        tlt_covenants: Vec::new(),
     };
     let hash = block.id();
 

@@ -141,6 +141,9 @@ mod staking;
 mod state_root;
 mod store;
 mod supply;
+mod tlt_covenant;
+#[cfg(test)]
+mod tlt_covenant_tests;
 mod trident_genesis;
 mod tx_index;
 mod utxo;
@@ -314,6 +317,7 @@ pub use supply::{
     put_burned_supply_into, put_issued_supply_into, put_max_supply_into, put_schema_version_into,
     verify_supply_invariants, NativeSupplyState, DRC_FEE_BURN_SCHEMA_VERSION,
 };
+pub use tlt_covenant::{load_covenant_utxo, validate_mempool_covenant, TltCovenantUtxoRecord};
 pub use trident_genesis::{
     TridentFinalityPolicy, TridentGenesisArtifact, TridentGenesisValidator,
     TridentRuntimeFinalityPolicy, TridentRuntimePolicy, TridentValidatorGenesis,
@@ -322,9 +326,10 @@ pub use trident_genesis::{
     TRIDENT_TX_SIGNING_VERSION,
 };
 pub use tx_index::{
-    decode_tx_location, encode_tx_location, index_block_transactions,
-    index_block_transactions_into, list_tx_inclusions, lookup_tx_location, set_primary_tx_location,
-    tx_inclusion_key, tx_index_key,
+    covenant_tx_inclusion_key, covenant_tx_index_key, decode_tx_location, encode_tx_location,
+    index_block_transactions, index_block_transactions_into, list_covenant_tx_inclusions,
+    list_tx_inclusions, lookup_covenant_tx_location, lookup_tx_location,
+    set_primary_covenant_tx_location, set_primary_tx_location, tx_inclusion_key, tx_index_key,
 };
 pub use utxo::{outpoint_key, outpoint_key_parts};
 pub use utxo_diff::{delete_utxo_journal, load_utxo_journal, store_utxo_journal, utxo_diff_key};

@@ -155,6 +155,7 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getBlockBinding"
             | "agora_getTltInclusionProof"
             | "agora_getTransaction"
+            | "agora_getTltCovenant"
             | "agora_getDrcPayment"
             | "agora_getDrcPaymentByInvoice"
             | "agora_getDrcAccountPolicy"
@@ -330,6 +331,8 @@ mod tests {
         assert!(!method_requires_token("agora_getBlockBinding"));
         assert!(!method_requires_token("agora_getTltInclusionProof"));
         assert!(!method_requires_token("agora_getTransaction"));
+        assert!(!method_requires_token("agora_getTltCovenant"));
+        assert!(method_requires_token("agora_submitTltCovenant"));
         assert!(!method_requires_token("agora_getDrcPayment"));
         assert!(!method_requires_token("agora_getDrcPaymentByInvoice"));
         assert!(!method_requires_token("agora_getDrcAccountPolicy"));

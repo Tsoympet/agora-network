@@ -67,6 +67,7 @@ async fn announce_triggers_getblock_and_full_serve() {
         drc_trust_line_issuer_controls: vec![],
         drc_issued_clawbacks: vec![],
         drc_multisign_attachments: vec![],
+        tlt_covenants: Vec::new(),
     };
     let hash = block.id();
 
