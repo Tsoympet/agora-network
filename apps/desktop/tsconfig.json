@@ -7,8 +7,9 @@
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "strict": true,
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["src", "../shared/light-client/**/*.ts"],
-  "exclude": ["../shared/light-client/**/*.test.ts"]
+  "include": ["src", "../shared/light-client/**/*.ts", "../shared/community/**/*.ts"],
+  "exclude": ["../shared/light-client/**/*.test.ts", "../shared/community/**/*.test.ts"]
 }
