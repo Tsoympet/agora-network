@@ -34,7 +34,7 @@ use crate::supply::native_supply_root;
 use crate::{StateError, StateStore, TRIDENT_STATE_TRANSITION_VERSION};
 
 /// Domain tag for the composed state root (versioned).
-pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v15";
+pub const STATE_ROOT_DOMAIN: &[u8] = b"agora-trident-state-root-v16";
 
 /// Deterministic UTXO-set commitment (sorted outpoint keys).
 pub fn utxo_commitment(store: &StateStore) -> Result<Hash, StateError> {
@@ -118,6 +118,7 @@ pub fn compose_trident_state_root(
     let drc_deposit_preauths = drc_deposit_preauth_root(store)?;
     let drc_payments = drc_payment_root(store)?;
     let drc_ledger_objects = drc_ledger_object_index_root(store)?;
+    let drc_offers = crate::drc_offer::drc_offer_root(store)?;
     let native_supply = native_supply_root(store)?;
     let acceptance = acceptance_root(store, tip_block)?;
     let finality_tip = finalized_tip_commitment(store)?;
@@ -140,6 +141,7 @@ pub fn compose_trident_state_root(
         drc_deposit_preauths,
         drc_payments,
         drc_ledger_objects,
+        drc_offers,
         native_supply,
         acceptance,
         finality_tip,

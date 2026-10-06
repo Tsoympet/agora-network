@@ -746,8 +746,13 @@ mod trust_line_admit;
 pub(crate) use trust_line_admit::{
     admit_drc_issued_transfer, admit_drc_trust_line_set, revalidate_trust_line_mempool,
 };
+#[path = "drc_offer_admit.rs"]
+mod drc_offer_admit;
 #[path = "issued_controls_admit.rs"]
 mod issued_controls_admit;
+pub(crate) use drc_offer_admit::{
+    admit_drc_offer_cancel, admit_drc_offer_create, drc_offer_json, revalidate_drc_offer_mempool,
+};
 pub(crate) use issued_controls_admit::{
     admit_drc_issued_asset_policy_set, admit_drc_issued_clawback,
     admit_drc_trust_line_issuer_control, get_drc_issued_asset_policy_json,
@@ -1689,6 +1694,105 @@ impl RpcBackend for NodeBackend {
         Ok(id)
     }
 
+    fn submit_drc_offer_create(
+        &mut self,
+        tx: agora_types::DrcOfferCreateTx,
+    ) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id = admit_drc_offer_create(&self.store, &self.mempool, tx.clone(), &auth, blue_score)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcOfferCreate(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn submit_drc_offer_cancel(
+        &mut self,
+        tx: agora_types::DrcOfferCancelTx,
+    ) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .next_template_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let id = admit_drc_offer_cancel(&self.store, &self.mempool, tx.clone(), &auth, blue_score)?;
+        if let Some(net) = &self.net {
+            net.publish_message(NetworkMessage::DrcOfferCancel(tx))
+                .map_err(|error| RpcError::Internal(error.to_string()))?;
+        }
+        Ok(id)
+    }
+
+    fn get_drc_offer(&self, offer_id: &Hash) -> Result<Value, RpcError> {
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .virtual_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        drc_offer_json(self.store.as_ref(), offer_id, blue_score)
+    }
+
+    fn get_drc_account_offers(
+        &self,
+        account: &agora_types::Address,
+        cursor: Option<agora_types::DrcOfferCursor>,
+        limit: Option<usize>,
+    ) -> Result<Value, RpcError> {
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .virtual_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let page = agora_state_machine::list_account_offers(
+            self.store.as_ref(),
+            account,
+            cursor,
+            limit.unwrap_or(agora_types::DRC_OFFER_PAGE_MAX),
+            blue_score,
+        )
+        .map_err(|error| RpcError::Rejected(error.to_string()))?;
+        serde_json::to_value(page).map_err(|error| RpcError::Internal(error.to_string()))
+    }
+
+    fn get_drc_book_offers(
+        &self,
+        book: &agora_types::DrcOfferBook,
+        cursor: Option<agora_types::DrcOfferBookCursor>,
+        limit: Option<usize>,
+    ) -> Result<Value, RpcError> {
+        let blue_score = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?
+            .virtual_blue_score()
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let page = agora_state_machine::list_book_offers(
+            self.store.as_ref(),
+            *book,
+            cursor,
+            limit.unwrap_or(agora_types::DRC_OFFER_PAGE_MAX),
+            blue_score,
+        )
+        .map_err(|error| RpcError::Rejected(error.to_string()))?;
+        let mut value =
+            serde_json::to_value(page).map_err(|error| RpcError::Internal(error.to_string()))?;
+        if let Some(object) = value.as_object_mut() {
+            object.insert("simulated_fill".into(), serde_json::Value::Bool(false));
+        }
+        Ok(value)
+    }
+
     fn get_drc_issued_asset_policy(
         &self,
         asset: &agora_types::IssuedAssetId,
@@ -1923,6 +2027,8 @@ impl RpcBackend for NodeBackend {
             drc_issued_asset_policy_sets,
             drc_trust_line_issuer_controls,
             drc_issued_clawbacks,
+            drc_offer_creates,
+            drc_offer_cancels,
         ) = {
             let pool = self
                 .mempool
@@ -1957,6 +2063,8 @@ impl RpcBackend for NodeBackend {
                 pool.select_drc_issued_asset_policy_sets(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_trust_line_issuer_controls(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_drc_issued_clawbacks(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_offer_creates(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_drc_offer_cancels(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         chain
@@ -1988,6 +2096,8 @@ impl RpcBackend for NodeBackend {
                     drc_issued_asset_policy_sets: &drc_issued_asset_policy_sets,
                     drc_trust_line_issuer_controls: &drc_trust_line_issuer_controls,
                     drc_issued_clawbacks: &drc_issued_clawbacks,
+                    drc_offer_creates: &drc_offer_creates,
+                    drc_offer_cancels: &drc_offer_cancels,
                     ..BlockTemplateLanes::default()
                 },
             )
@@ -2045,6 +2155,7 @@ impl RpcBackend for NodeBackend {
             let auth = self.tx_auth();
             revalidate_trust_line_mempool(self.store.as_ref(), &mut pool);
             revalidate_issued_controls_mempool(self.store.as_ref(), &mut pool, &auth);
+            revalidate_drc_offer_mempool(self.store.as_ref(), &mut pool, &auth, virtual_blue_score);
         }
         if let Some(net) = &self.net {
             // Prefer compact + announce; peers inflate from mempool or issue GetBlock.

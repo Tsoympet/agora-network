@@ -60,6 +60,11 @@ pub enum RpcMethod {
     GetDrcIssuedAssetPolicyReceipt,
     GetDrcTrustLineIssuerControlReceipt,
     GetDrcIssuedClawbackReceipt,
+    SubmitDrcOfferCreate,
+    SubmitDrcOfferCancel,
+    GetDrcOffer,
+    GetDrcAccountOffers,
+    GetDrcBookOffers,
     GetDrcObject,
     GetDrcAccountObjects,
     GetDrcOperation,
@@ -159,6 +164,11 @@ impl RpcMethod {
                 "agora_getDrcTrustLineIssuerControlReceipt"
             }
             Self::GetDrcIssuedClawbackReceipt => "agora_getDrcIssuedClawbackReceipt",
+            Self::SubmitDrcOfferCreate => "agora_submitDrcOfferCreate",
+            Self::SubmitDrcOfferCancel => "agora_submitDrcOfferCancel",
+            Self::GetDrcOffer => "agora_getDrcOffer",
+            Self::GetDrcAccountOffers => "agora_getDrcAccountOffers",
+            Self::GetDrcBookOffers => "agora_getDrcBookOffers",
             Self::GetDrcObject => "agora_getDrcObject",
             Self::GetDrcAccountObjects => "agora_getDrcAccountObjects",
             Self::GetDrcOperation => "agora_getDrcOperation",
@@ -258,6 +268,11 @@ impl RpcMethod {
                 Some(Self::GetDrcTrustLineIssuerControlReceipt)
             }
             "agora_getDrcIssuedClawbackReceipt" => Some(Self::GetDrcIssuedClawbackReceipt),
+            "agora_submitDrcOfferCreate" => Some(Self::SubmitDrcOfferCreate),
+            "agora_submitDrcOfferCancel" => Some(Self::SubmitDrcOfferCancel),
+            "agora_getDrcOffer" => Some(Self::GetDrcOffer),
+            "agora_getDrcAccountOffers" => Some(Self::GetDrcAccountOffers),
+            "agora_getDrcBookOffers" => Some(Self::GetDrcBookOffers),
             "agora_getDrcObject" => Some(Self::GetDrcObject),
             "agora_getDrcAccountObjects" => Some(Self::GetDrcAccountObjects),
             "agora_getDrcOperation" => Some(Self::GetDrcOperation),

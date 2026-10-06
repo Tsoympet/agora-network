@@ -45,6 +45,10 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_submitDrcIssuedAssetPolicySet` / `agora_submitDrcTrustLineIssuerControl` / `agora_submitDrcIssuedClawback` | Admit issued-asset authorization, freeze, or exact clawback controls |
 | `agora_getDrcIssuedAssetPolicy` | Query the live policy flags for one `(issuer, currency)` asset |
 | `agora_getDrcIssuedAssetPolicyReceipt` / `agora_getDrcTrustLineIssuerControlReceipt` / `agora_getDrcIssuedClawbackReceipt` | Exact issued-control receipt queries |
+| `agora_submitDrcOfferCreate` / `agora_submitDrcOfferCancel` | Admit a signed native order-book create or cancel. Responses set `simulated_fill` to false |
+| `agora_getDrcOffer` | Point lookup of one live offer, including currently deliverable `taker_gets_funded`, or the create receipt when the offer is absent |
+| `agora_getDrcAccountOffers` | Bounded owner page. The cursor is the last offer id |
+| `agora_getDrcBookOffers` | Bounded direct-book page in committed quality order. The cursor is the sort key, not a fill |
 | `agora_getDrcObject` | Point lookup for one deterministic common DRC live-object ID |
 | `agora_getDrcAccountObjects` | Bounded, cursor-paginated common live objects for one owner, optionally filtered by closed object kind |
 | `agora_getDrcOperation` | Canonical accepted DRC operation receipt by domain-separated operation ID |

@@ -31,6 +31,7 @@ use crate::drc_issued_controls::{
     issued_controls_meta_keys_for_issuer_control, issued_controls_meta_keys_for_policy,
 };
 use crate::drc_master_key_recovery::assert_drc_recovery_invariant;
+use crate::drc_offer::{apply_drc_offer_cancel, apply_drc_offer_create, DrcOfferApplyLimits};
 use crate::drc_payment_channel::{
     apply_drc_payment_channel_claim, apply_drc_payment_channel_close,
     apply_drc_payment_channel_create, apply_drc_payment_channel_fund,
@@ -118,6 +119,33 @@ pub struct UtxoJournal {
     pub drc_trust_line_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     /// Common DRC object/owner/accepted-operation index keys before this block.
     pub drc_ledger_index_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    /// Offer live, index, reserve, sequence, and receipt keys before Accepted offers.
+    pub drc_offer_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
+/// Journal layout before the offer lane. Trailing offer snapshots must not be
+/// required to decode blocks applied under the ledger-index schema.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct UtxoJournalV15Index {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+    fees: u64,
+    subsidy: u64,
+    coinbase_total: u64,
+    account_before: Vec<(NativeAssetId, Address, AccountState)>,
+    stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    data_availability_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_policy_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_deposit_preauth_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_regular_key_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_signer_list_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_ticket_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_escrow_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_check_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_payment_channel_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_trust_line_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_ledger_index_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -352,6 +380,30 @@ impl UtxoJournal {
         if let Ok(j) = Self::try_from_slice(bytes) {
             return Ok(j);
         }
+        if let Ok(v15) = UtxoJournalV15Index::try_from_slice(bytes) {
+            return Ok(Self {
+                spent: v15.spent,
+                created: v15.created,
+                fees: v15.fees,
+                subsidy: v15.subsidy,
+                coinbase_total: v15.coinbase_total,
+                account_before: v15.account_before,
+                stake_meta_before: v15.stake_meta_before,
+                payment_meta_before: v15.payment_meta_before,
+                data_availability_meta_before: v15.data_availability_meta_before,
+                drc_policy_meta_before: v15.drc_policy_meta_before,
+                drc_deposit_preauth_meta_before: v15.drc_deposit_preauth_meta_before,
+                drc_regular_key_meta_before: v15.drc_regular_key_meta_before,
+                drc_signer_list_meta_before: v15.drc_signer_list_meta_before,
+                drc_ticket_meta_before: v15.drc_ticket_meta_before,
+                drc_escrow_meta_before: v15.drc_escrow_meta_before,
+                drc_check_meta_before: v15.drc_check_meta_before,
+                drc_payment_channel_meta_before: v15.drc_payment_channel_meta_before,
+                drc_trust_line_meta_before: v15.drc_trust_line_meta_before,
+                drc_ledger_index_meta_before: v15.drc_ledger_index_meta_before,
+                drc_offer_meta_before: Vec::new(),
+            });
+        }
         if let Ok(v14) = UtxoJournalV14Trust::try_from_slice(bytes) {
             return Ok(Self {
                 spent: v14.spent,
@@ -373,6 +425,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: v14.drc_payment_channel_meta_before,
                 drc_trust_line_meta_before: v14.drc_trust_line_meta_before,
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v13) = UtxoJournalV13Paychan::try_from_slice(bytes) {
@@ -396,6 +449,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: v13.drc_payment_channel_meta_before,
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v12) = UtxoJournalV12::try_from_slice(bytes) {
@@ -419,6 +473,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v11) = UtxoJournalV11::try_from_slice(bytes) {
@@ -442,6 +497,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v10) = UtxoJournalV10::try_from_slice(bytes) {
@@ -465,6 +521,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v9) = UtxoJournalV9::try_from_slice(bytes) {
@@ -488,6 +545,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v8) = UtxoJournalV8::try_from_slice(bytes) {
@@ -511,6 +569,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v7) = UtxoJournalV7::try_from_slice(bytes) {
@@ -534,6 +593,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v6) = UtxoJournalV6::try_from_slice(bytes) {
@@ -557,6 +617,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
@@ -580,6 +641,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
@@ -603,6 +665,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -626,6 +689,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -649,6 +713,7 @@ impl UtxoJournal {
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
                 drc_ledger_index_meta_before: Vec::new(),
+                drc_offer_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -673,6 +738,7 @@ impl UtxoJournal {
             drc_payment_channel_meta_before: Vec::new(),
             drc_trust_line_meta_before: Vec::new(),
             drc_ledger_index_meta_before: Vec::new(),
+            drc_offer_meta_before: Vec::new(),
         })
     }
 }
@@ -1016,6 +1082,8 @@ fn apply_block_batched_mode(
         drc_issued_asset_policy_set_statuses,
         drc_trust_line_issuer_control_statuses,
         drc_issued_clawback_statuses,
+        drc_offer_create_statuses,
+        drc_offer_cancel_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -1061,6 +1129,8 @@ fn apply_block_batched_mode(
         drc_issued_asset_policy_set_statuses,
         drc_trust_line_issuer_control_statuses,
         drc_issued_clawback_statuses,
+        drc_offer_create_statuses,
+        drc_offer_cancel_statuses,
         drc_policy_statuses,
         drc_deposit_preauth_statuses,
     };
@@ -1154,6 +1224,18 @@ fn is_lane_soft_conflict(err: &StateError) -> bool {
                 || msg.contains("clawback not enabled")
                 || msg.contains("issued movement frozen")
                 || msg.contains("trust line not authorized")
+                || msg.contains("duplicate DRC offer id")
+                || msg.contains("bad DRC offer-create nonce")
+                || msg.contains("bad DRC offer-cancel nonce")
+                || msg.contains("DRC offer owner is unfunded")
+                || msg.contains("DRC offer fill-or-kill")
+                || msg.contains("DRC offer cancel submitter is not the owner")
+                || msg.contains("DRC offer match cap exceeded")
+                || msg.contains("insufficient DRC offer balance")
+                || msg.contains("DRC offer book cap exceeded")
+                || msg.contains("DRC live offer cap exceeded")
+                || msg.contains("issued balance is reserved by a DRC offer")
+                || msg.contains("DRC offer expiration is already past")
         }
         _ => false,
     }
@@ -1203,6 +1285,8 @@ fn apply_accepted_account_fee(
 
 #[allow(clippy::type_complexity)]
 type TridentLaneAcceptances = (
+    Vec<TransactionAcceptance>,
+    Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
     Vec<TransactionAcceptance>,
@@ -1279,6 +1363,8 @@ fn apply_trident_lanes(
         && block.drc_issued_asset_policy_sets.is_empty()
         && block.drc_trust_line_issuer_controls.is_empty()
         && block.drc_issued_clawbacks.is_empty()
+        && block.drc_offer_creates.is_empty()
+        && block.drc_offer_cancels.is_empty()
         && block.account_transfers.is_empty()
         && block.ovl_executions.is_empty()
         && block.drc_payments.is_empty()
@@ -1290,6 +1376,8 @@ fn apply_trident_lanes(
         && block.stake_ops.is_empty()
     {
         return Ok((
+            Vec::new(),
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -1333,6 +1421,8 @@ fn apply_trident_lanes(
         || !block.drc_issued_asset_policy_sets.is_empty()
         || !block.drc_trust_line_issuer_controls.is_empty()
         || !block.drc_issued_clawbacks.is_empty()
+        || !block.drc_offer_creates.is_empty()
+        || !block.drc_offer_cancels.is_empty()
         || !block.stake_ops.is_empty()
         || !block.ovl_executions.is_empty()
         || !block.drc_payments.is_empty()
@@ -1343,7 +1433,7 @@ fn apply_trident_lanes(
         && auth.is_none()
     {
         return Err(StateError::InvalidTx(
-            "stake/execution/payment/policy/preauthorization/regular-key/signer-list/escrow/check/payment-channel/trust-line/issued-control ops require network-bound auth"
+            "stake/execution/payment/policy/preauthorization/regular-key/signer-list/escrow/check/payment-channel/trust-line/issued-control/offer ops require network-bound auth"
                 .into(),
         ));
     }
@@ -1415,11 +1505,15 @@ fn apply_trident_lanes(
     let mut drc_trust_line_issuer_control_statuses =
         Vec::with_capacity(block.drc_trust_line_issuer_controls.len());
     let mut drc_issued_clawback_statuses = Vec::with_capacity(block.drc_issued_clawbacks.len());
+    let mut drc_offer_create_statuses = Vec::with_capacity(block.drc_offer_creates.len());
+    let mut drc_offer_cancel_statuses = Vec::with_capacity(block.drc_offer_cancels.len());
     let mut seen_trust_line_set_ids: HashSet<Hash> = HashSet::new();
     let mut seen_issued_transfer_ids: HashSet<Hash> = HashSet::new();
     let mut seen_issued_policy_set_ids: HashSet<Hash> = HashSet::new();
     let mut seen_issuer_control_ids: HashSet<Hash> = HashSet::new();
     let mut seen_issued_clawback_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_offer_create_ids: HashSet<Hash> = HashSet::new();
+    let mut seen_offer_cancel_ids: HashSet<Hash> = HashSet::new();
     let mut deleted_trust_line_assets: HashSet<(Address, Hash)> = HashSet::new();
 
     // Ticket creates observe pre-block key/list/policy auth state; minted tickets are
@@ -2608,6 +2702,109 @@ fn apply_trident_lanes(
         }
     }
 
+    if !block.drc_offer_creates.is_empty() || !block.drc_offer_cancels.is_empty() {
+        let offer_blue_score = application_blue_score.ok_or_else(|| {
+            StateError::InvalidTx(
+                "DRC offer operations require a consensus application blue score".into(),
+            )
+        })?;
+        let mut block_steps_remaining = agora_types::DRC_MAX_OFFER_MATCHES_PER_BLOCK;
+        for tx in &block.drc_offer_creates {
+            let id = tx.offer_id();
+            if seen_offer_create_ids.contains(&id) {
+                drc_offer_create_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let ctx = auth.expect("DRC offer auth checked above");
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.owner))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_offer_create(
+                &lane,
+                tx,
+                ctx,
+                offer_blue_score,
+                DrcOfferApplyLimits {
+                    block_steps_remaining,
+                },
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(applied) => {
+                    let meta_before = snapshot_meta_keys(&lane, &applied.meta_keys)?;
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_offer_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    block_steps_remaining = block_steps_remaining.saturating_sub(applied.steps);
+                    seen_offer_create_ids.insert(id);
+                    drc_offer_create_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_offer_create_ids.contains(&id) {
+                        drc_offer_create_statuses.push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_offer_create_statuses.push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        for tx in &block.drc_offer_cancels {
+            let id = tx.cancel_tx_id();
+            if seen_offer_cancel_ids.contains(&id) {
+                drc_offer_cancel_statuses.push(TransactionAcceptance::ExactDuplicate);
+                continue;
+            }
+            let ctx = auth.expect("DRC offer auth checked above");
+            let ticket_snap = snapshot_meta_keys(&lane, &drc_ticket_meta_keys(&tx.submitter))?;
+            let mut op_batch = WriteBatch::new();
+            let mut acct_journal = AccountJournal::default();
+            match apply_drc_offer_cancel(
+                &lane,
+                tx,
+                ctx,
+                offer_blue_score,
+                &mut op_batch,
+                &mut acct_journal,
+            ) {
+                Ok(applied) => {
+                    let meta_before = snapshot_meta_keys(&lane, &applied.meta_keys)?;
+                    apply_accepted_account_fee(
+                        &lane,
+                        &mut op_batch,
+                        journal,
+                        NativeAssetId::DRC,
+                        tx.fee.as_base_units(),
+                    )?;
+                    lane.write_batch(op_batch.clone())?;
+                    batch.append(op_batch);
+                    journal.account_before.extend(acct_journal.before);
+                    journal.drc_offer_meta_before.extend(meta_before);
+                    journal.drc_ticket_meta_before.extend(ticket_snap);
+                    seen_offer_cancel_ids.insert(id);
+                    drc_offer_cancel_statuses.push(TransactionAcceptance::Accepted);
+                }
+                Err(err) if mode == ApplyMode::Virtual && is_lane_soft_conflict(&err) => {
+                    if seen_offer_cancel_ids.contains(&id) {
+                        drc_offer_cancel_statuses.push(TransactionAcceptance::ExactDuplicate);
+                    } else {
+                        drc_offer_cancel_statuses.push(TransactionAcceptance::ConflictLost);
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
     if !block.data_commitments.is_empty() {
         let ctx = auth.expect("DA auth checked above");
         let fingerprint = ctx
@@ -2675,6 +2872,8 @@ fn apply_trident_lanes(
         drc_issued_asset_policy_set_statuses,
         drc_trust_line_issuer_control_statuses,
         drc_issued_clawback_statuses,
+        drc_offer_create_statuses,
+        drc_offer_cancel_statuses,
         account_statuses,
         execution_statuses,
         stake_statuses,
@@ -3090,6 +3289,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
             None => batch.delete_cf(ColumnFamily::Meta, key),
         }
     }
+    for (key, prior) in journal.drc_offer_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
     Ok(batch)
 }
@@ -3345,6 +3550,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
 
@@ -3556,6 +3763,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, emission).unwrap();
@@ -3676,6 +3885,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         apply_block(&store, &block, 0).unwrap();
@@ -3763,6 +3974,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -3859,6 +4072,8 @@ mod tests {
                 drc_issued_asset_policy_sets: vec![],
                 drc_trust_line_issuer_controls: vec![],
                 drc_issued_clawbacks: vec![],
+                drc_offer_creates: vec![],
+                drc_offer_cancels: vec![],
                 drc_multisign_attachments: vec![],
             },
             1,
@@ -3954,6 +4169,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
@@ -4067,6 +4284,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         assert!(matches!(
@@ -4162,6 +4381,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         let mut block = block;
@@ -4271,6 +4492,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -4409,6 +4632,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();
@@ -5068,6 +5293,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         block.header.tx_root = block.compute_body_root();

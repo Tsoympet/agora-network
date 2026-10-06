@@ -9,10 +9,10 @@ use crate::{
     AccountTransfer, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
     DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
     DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcMultisignAuth,
-    DrcMultisignError, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash,
-    NativeAssetId, SignedStakeTx,
+    DrcMultisignError, DrcOfferCancelTx, DrcOfferCreateTx, DrcPaymentChannelClaimTx,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx,
+    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
+    DrcTrustLineSetTx, Hash, NativeAssetId, SignedStakeTx,
 };
 
 pub const DRC_MULTISIGN_ATTACHMENT_KEY_VERSION: u32 = 1;
@@ -62,6 +62,8 @@ pub enum DrcMultisignOperationKind {
     DrcIssuedAssetPolicySet = 21,
     DrcTrustLineIssuerControl = 22,
     DrcIssuedClawback = 23,
+    DrcOfferCreate = 24,
+    DrcOfferCancel = 25,
 }
 
 impl DrcMultisignOperationKind {
@@ -90,6 +92,8 @@ impl DrcMultisignOperationKind {
             Self::DrcIssuedAssetPolicySet => "drc_issued_asset_policy_set",
             Self::DrcTrustLineIssuerControl => "drc_trust_line_issuer_control",
             Self::DrcIssuedClawback => "drc_issued_clawback",
+            Self::DrcOfferCreate => "drc_offer_create",
+            Self::DrcOfferCancel => "drc_offer_cancel",
         }
     }
 }
@@ -429,6 +433,28 @@ pub fn attachment_key_for_trust_line_issuer_control(
 ) -> DrcMultisignAttachmentKey {
     drc_multisign_attachment_key(
         DrcMultisignOperationKind::DrcTrustLineIssuerControl,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_offer_create(
+    tx: &DrcOfferCreateTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcOfferCreate,
+        &tx.signing_bytes_bound(chain_id, genesis),
+    )
+}
+
+pub fn attachment_key_for_offer_cancel(
+    tx: &DrcOfferCancelTx,
+    chain_id: &str,
+    genesis: &Hash,
+) -> DrcMultisignAttachmentKey {
+    drc_multisign_attachment_key(
+        DrcMultisignOperationKind::DrcOfferCancel,
         &tx.signing_bytes_bound(chain_id, genesis),
     )
 }

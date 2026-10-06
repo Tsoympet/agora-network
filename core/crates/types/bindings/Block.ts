@@ -14,6 +14,8 @@ import type { DrcIssuedAssetPolicySetTx } from "./DrcIssuedAssetPolicySetTx";
 import type { DrcIssuedClawbackTx } from "./DrcIssuedClawbackTx";
 import type { DrcIssuedTransferTx } from "./DrcIssuedTransferTx";
 import type { DrcMultisignBlockAttachment } from "./DrcMultisignBlockAttachment";
+import type { DrcOfferCancelTx } from "./DrcOfferCancelTx";
+import type { DrcOfferCreateTx } from "./DrcOfferCreateTx";
 import type { DrcPaymentChannelClaimTx } from "./DrcPaymentChannelClaimTx";
 import type { DrcPaymentChannelCloseTx } from "./DrcPaymentChannelCloseTx";
 import type { DrcPaymentChannelCreateTx } from "./DrcPaymentChannelCreateTx";
@@ -142,4 +144,8 @@ drc_issued_clawbacks: Array<DrcIssuedClawbackTx>,
 /**
  * Detached, body-root-committed DRC multisign authorization (consensus lane).
  */
-drc_multisign_attachments: Array<DrcMultisignBlockAttachment>, };
+drc_multisign_attachments: Array<DrcMultisignBlockAttachment>,
+/**
+ * Native order-book offers. Empty lanes stay absent from frozen pre-v18 bytes.
+ */
+drc_offer_creates: Array<DrcOfferCreateTx>, drc_offer_cancels: Array<DrcOfferCancelTx>, };

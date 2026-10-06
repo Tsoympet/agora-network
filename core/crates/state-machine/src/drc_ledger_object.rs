@@ -12,7 +12,7 @@ use agora_types::{
     Address, Block, DrcAcceptedOperationReceipt, DrcAccountPolicy, DrcAccountRegularKey,
     DrcAccountSequence, DrcAccountSignerList, DrcAccountTickets, DrcCheckLive, DrcDepositPreauth,
     DrcEscrowLive, DrcIssuedAssetPolicyLive, DrcLedgerObject, DrcLedgerObjectDescriptor,
-    DrcLedgerObjectKey, DrcLedgerObjectKind, DrcLedgerObjectPage, DrcOperation,
+    DrcLedgerObjectKey, DrcLedgerObjectKind, DrcLedgerObjectPage, DrcOfferLive, DrcOperation,
     DrcPaymentChannelLive, DrcTrustLineLive, Hash, NativeAssetId, TransactionAcceptance,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -22,6 +22,7 @@ use crate::columns::ColumnFamily;
 use crate::drc_check::check_live_key;
 use crate::drc_deposit_preauth::drc_deposit_preauth_key;
 use crate::drc_escrow::escrow_live_key;
+use crate::drc_offer::offer_live_key;
 use crate::drc_payment_channel::payment_channel_live_key;
 use crate::drc_policy::drc_account_policy_key;
 use crate::drc_regular_key::drc_regular_key_meta_key;
@@ -203,6 +204,7 @@ fn source_key(key: &DrcLedgerObjectKey) -> Vec<u8> {
         DrcLedgerObjectKey::IssuedAssetPolicy { asset } => {
             agora_types::drc_issued_asset_policy_meta_key(asset)
         }
+        DrcLedgerObjectKey::Offer { offer_id } => offer_live_key(offer_id),
     }
 }
 
@@ -284,6 +286,13 @@ fn decode_source_object(key: &[u8], bytes: &[u8]) -> Result<Option<DrcLedgerObje
             return Err(storage("DRC issued-policy source key mismatch"));
         }
         DrcLedgerObject::IssuedAssetPolicy(record)
+    } else if key.starts_with(b"offer/drc/live/") {
+        let record = DrcOfferLive::try_from_slice(bytes).map_err(storage)?;
+        record.validate().map_err(storage)?;
+        if offer_live_key(&record.offer_id) != key {
+            return Err(storage("DRC offer source key mismatch"));
+        }
+        DrcLedgerObject::Offer(record)
     } else {
         return Ok(None);
     };
@@ -521,6 +530,7 @@ fn collect_source_descriptors(
         PAYMENT_CHANNEL_LIVE_PREFIX,
         TRUST_LINE_PREFIX,
         agora_types::DRC_ISSUED_ASSET_POLICY_META_PREFIX,
+        b"offer/drc/live/",
     ] {
         for (key, value) in store.scan_prefix(ColumnFamily::Meta, prefix)? {
             let object = decode_source_object(&key, &value)?
@@ -818,6 +828,18 @@ fn collect_accepted_operations(
         "issued-clawback",
         DrcOperation::IssuedClawback,
     )?);
+    operations.extend(accepted(
+        &block.drc_offer_creates,
+        &acceptance.drc_offer_create_statuses,
+        "offer-create",
+        DrcOperation::OfferCreate,
+    )?);
+    operations.extend(accepted(
+        &block.drc_offer_cancels,
+        &acceptance.drc_offer_cancel_statuses,
+        "offer-cancel",
+        DrcOperation::OfferCancel,
+    )?);
     Ok(operations)
 }
 
@@ -960,6 +982,16 @@ fn direct_operation_object_keys(operation: &DrcOperation) -> Vec<DrcLedgerObject
                 asset: tx.asset_id(),
             }]
         }
+        DrcOperation::OfferCreate(tx) => {
+            vec![DrcLedgerObjectKey::Offer {
+                offer_id: tx.offer_id(),
+            }]
+        }
+        DrcOperation::OfferCancel(tx) => {
+            vec![DrcLedgerObjectKey::Offer {
+                offer_id: tx.offer_id,
+            }]
+        }
     }
 }
 
@@ -998,6 +1030,8 @@ fn ticket_owner_if_consumed(operation: &DrcOperation) -> Option<Address> {
             Some(tx.issuer)
         }
         DrcOperation::IssuedClawback(tx) if selected(tx.account_sequence) => Some(tx.issuer),
+        DrcOperation::OfferCreate(tx) if selected(tx.account_sequence) => Some(tx.owner),
+        DrcOperation::OfferCancel(tx) if selected(tx.account_sequence) => Some(tx.submitter),
         _ => None,
     }
 }
@@ -1016,6 +1050,7 @@ fn journal_source_snapshots(
         .chain(&journal.drc_check_meta_before)
         .chain(&journal.drc_payment_channel_meta_before)
         .chain(&journal.drc_trust_line_meta_before)
+        .chain(&journal.drc_offer_meta_before)
 }
 
 fn affected_object_keys(
@@ -1551,10 +1586,10 @@ mod tests {
     };
     use crate::supply::{put_burned_supply_into, put_schema_version_into};
     use agora_types::{
-        Amount, DrcAccountSignerList, DrcAccountTickets, DrcCheckLive, DrcEscrowLive,
-        DrcIssuedAssetPolicyLive, DrcLedgerObject, DrcPaymentChannelLive, DrcSignerListEntry,
-        DrcTrustLineLive, IssuedAmount, IssuedAssetId, IssuedCurrencyCode,
-        DRC_CHECK_LIVE_STATE_VERSION, DRC_ESCROW_LIVE_STATE_VERSION,
+        Amount, DrcAccountSignerList, DrcAccountTickets, DrcBookAsset, DrcCheckLive, DrcEscrowLive,
+        DrcIssuedAssetPolicyLive, DrcLedgerObject, DrcOfferLive, DrcPaymentChannelLive,
+        DrcSignerListEntry, DrcTrustLineLive, IssuedAmount, IssuedAssetId, IssuedCurrencyCode,
+        DRC_CHECK_LIVE_STATE_VERSION, DRC_ESCROW_LIVE_STATE_VERSION, DRC_OFFER_LIVE_STATE_VERSION,
         DRC_PAYMENT_CHANNEL_LIVE_STATE_VERSION, DRC_SIGNER_LIST_STATE_VERSION,
         DRC_TICKET_STATE_VERSION,
     };
@@ -1657,6 +1692,7 @@ mod tests {
             DrcLedgerObject::PaymentChannel(value) => borsh::to_vec(value),
             DrcLedgerObject::TrustLine(value) => borsh::to_vec(value),
             DrcLedgerObject::IssuedAssetPolicy(value) => borsh::to_vec(value),
+            DrcLedgerObject::Offer(value) => borsh::to_vec(value),
         }
         .unwrap();
         store
@@ -1747,6 +1783,22 @@ mod tests {
                 .as_v2_storage(),
             ),
             DrcLedgerObject::IssuedAssetPolicy(DrcIssuedAssetPolicyLive::default_for_asset(asset)),
+            DrcLedgerObject::Offer(DrcOfferLive {
+                version: DRC_OFFER_LIVE_STATE_VERSION,
+                offer_id: Hash([0x64; 32]),
+                owner,
+                taker_pays: DrcBookAsset::Issued(asset),
+                taker_pays_original: 10,
+                taker_pays_remaining: 10,
+                taker_gets: DrcBookAsset::NativeDrc,
+                taker_gets_original: 5,
+                taker_gets_remaining: 5,
+                fill_mode: 1,
+                book_sequence: 1,
+                create_blue_score: 1,
+                expires_after_blue_score: None,
+                native_locked: 5,
+            }),
         ]
     }
 

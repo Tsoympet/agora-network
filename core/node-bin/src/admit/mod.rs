@@ -206,6 +206,8 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_issued_asset_policy_sets: &'a [agora_types::DrcIssuedAssetPolicySetTx],
     pub drc_trust_line_issuer_controls: &'a [agora_types::DrcTrustLineIssuerControlTx],
     pub drc_issued_clawbacks: &'a [agora_types::DrcIssuedClawbackTx],
+    pub drc_offer_creates: &'a [agora_types::DrcOfferCreateTx],
+    pub drc_offer_cancels: &'a [agora_types::DrcOfferCancelTx],
 }
 
 impl ChainState {
@@ -587,6 +589,8 @@ impl ChainState {
             drc_issued_asset_policy_sets: lanes.drc_issued_asset_policy_sets.to_vec(),
             drc_trust_line_issuer_controls: lanes.drc_trust_line_issuer_controls.to_vec(),
             drc_issued_clawbacks: lanes.drc_issued_clawbacks.to_vec(),
+            drc_offer_creates: lanes.drc_offer_creates.to_vec(),
+            drc_offer_cancels: lanes.drc_offer_cancels.to_vec(),
             drc_multisign_attachments: Vec::new(),
         };
         if let Some(ctx) = self.auth.as_ref() {
@@ -1989,6 +1993,7 @@ impl ChainState {
                 drc_payment_channel_meta_before: journal.drc_payment_channel_meta_before,
                 drc_trust_line_meta_before: journal.drc_trust_line_meta_before,
                 drc_ledger_index_meta_before: journal.drc_ledger_index_meta_before,
+                drc_offer_meta_before: journal.drc_offer_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store

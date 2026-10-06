@@ -65,6 +65,9 @@ mod drc_mempool;
 mod drc_multisig_tests;
 #[cfg(test)]
 mod drc_multisign_attachment_tests;
+mod drc_offer;
+#[cfg(test)]
+mod drc_offer_tests;
 mod drc_payment_channel;
 #[cfg(test)]
 mod drc_payment_channel_auth_cutoff_tranche_tests;
@@ -216,6 +219,12 @@ pub use drc_ledger_object::{
 pub use drc_mempool::{
     drc_ticket_sequence_for_create_nonce, lookup_drc_ticket_point, plan_drc_mempool_reservation,
     DrcMempoolReservation, DrcTicketPointStatus,
+};
+pub use drc_offer::{
+    apply_drc_offer_cancel, apply_drc_offer_create, assert_issued_offer_reserve, drc_offer_root,
+    list_account_offers, list_book_offers, load_drc_offer_cancel_receipt,
+    load_drc_offer_create_receipt, load_drc_offer_live, load_issued_offer_reserve, offer_live_key,
+    DrcOfferApplyLimits, DRC_OFFER_ROOT_DOMAIN,
 };
 pub use drc_payment_channel::{
     apply_drc_payment_channel_claim, apply_drc_payment_channel_close,

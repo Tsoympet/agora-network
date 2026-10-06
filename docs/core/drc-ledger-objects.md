@@ -47,6 +47,7 @@ fields against both the deterministic ID and the canonical source record.
 | `payment_channel` | channel ID | channel owner | live native-DRC payment channel |
 | `trust_line` | holder + `IssuedAssetId` | holder | live issuer-liability trust line |
 | `issued_asset_policy` | `IssuedAssetId` | issuer | live issued-asset control policy |
+| `offer` | offer ID | offer owner | live native order-book offer |
 
 The owner index is sparse and ordered by `(kind, object_id)`. Queries seek
 directly to `owner || optional-kind || cursor`, return at most 100 entries, and
@@ -136,21 +137,22 @@ XRPL-style `AccountRoot`, issuer-liability aggregates, family-specific settled
 event receipts, governance, staking/finality records, or pending operations as
 live account objects. Those states retain their existing typed point queries.
 
-There is no `Offer` kind, Offer transaction, order-book index, path payment,
-autobridging, rippling, AMM, NFT, Hook, EVM, bytecode, deploy/call, or generic
-contract object. Native DRC remains distinct from `IssuedAssetId`, and no
-issuer control can target native DRC. The subsequent Offer engine must add a
-reviewed typed object and transition; this foundation does not claim DEX
-support or define owner-reserve economics.
+Live `offer` objects are the native order book specified in
+[`drc-native-dex.md`](drc-native-dex.md). The directory still has no path
+payment, autobridging, rippling, AMM, NFT, Hook, EVM, bytecode, deploy/call, or
+generic contract object. Native DRC remains distinct from `IssuedAssetId`, and
+no issuer control can target native DRC. Offer owner-reserve economics stay
+hard caps plus the accepted DRC fee; this is not an XRP reserve.
 
 ## Protocol profile
 
 | Surface | Value |
 | --- | --- |
-| Trident protocol | `23` |
+| Trident protocol | `24` |
 | Transaction signing profile | `agora-trident-tx-v9` |
-| State transition | `agora-trident-state-v21` |
-| State-root domain | `agora-trident-state-root-v15` |
+| State transition | `agora-trident-state-v22` |
+| State-root domain | `agora-trident-state-root-v16` |
+| Block-body wrapper when offer lanes are present | `agora-block-body-v18` |
 | Datadir schema | `21` |
 | Common-index schema | `1` |
 | Genesis | v3 draft, `UNFROZEN`; no live Trident loader |

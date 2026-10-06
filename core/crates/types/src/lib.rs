@@ -16,6 +16,7 @@ mod drc_ledger_object;
 mod drc_multisign;
 mod drc_multisign_attachment;
 mod drc_multisign_lane;
+mod drc_offer;
 mod drc_payment_channel;
 mod drc_policy;
 mod drc_regular_key;
@@ -119,7 +120,8 @@ pub use drc_multisign_attachment::{
     attachment_key_for_deposit_preauth, attachment_key_for_escrow_cancel,
     attachment_key_for_escrow_create, attachment_key_for_escrow_finish,
     attachment_key_for_issued_asset_policy_set, attachment_key_for_issued_clawback,
-    attachment_key_for_issued_transfer, attachment_key_for_payment,
+    attachment_key_for_issued_transfer, attachment_key_for_offer_cancel,
+    attachment_key_for_offer_create, attachment_key_for_payment,
     attachment_key_for_payment_channel_claim, attachment_key_for_payment_channel_close,
     attachment_key_for_payment_channel_create, attachment_key_for_payment_channel_fund,
     attachment_key_for_policy, attachment_key_for_regular_key, attachment_key_for_signer_list,
@@ -133,6 +135,19 @@ pub use drc_multisign_attachment::{
 pub use drc_multisign_lane::{
     drc_multisign_attachment_capacity, materialize_drc_multisign_attachments,
     merge_drc_multisign_attachments, validate_drc_multisign_attachment_lane,
+};
+pub use drc_offer::{
+    offer_fill_step, offer_quality_better, offers_cross, DrcBookAsset, DrcOfferBook,
+    DrcOfferBookCursor, DrcOfferBookPage, DrcOfferCancelOutcome, DrcOfferCancelReceipt,
+    DrcOfferCancelTx, DrcOfferCreateReceipt, DrcOfferCreateTx, DrcOfferCursor, DrcOfferError,
+    DrcOfferFillMode, DrcOfferLive, DrcOfferPage, DrcOfferTimeInForce, DrcOfferView,
+    DRC_MAX_LIVE_OFFERS_PER_ACCOUNT, DRC_MAX_OFFERS_PER_BOOK, DRC_MAX_OFFER_MATCHES_PER_BLOCK,
+    DRC_MAX_OFFER_MATCHES_PER_TX, DRC_OFFER_CANCEL_RECEIPT_VERSION,
+    DRC_OFFER_CANCEL_SIGNING_DOMAIN, DRC_OFFER_CANCEL_TICKET_SIGNING_DOMAIN,
+    DRC_OFFER_CANCEL_TICKET_VERSION, DRC_OFFER_CANCEL_TX_VERSION, DRC_OFFER_CREATE_RECEIPT_VERSION,
+    DRC_OFFER_CREATE_SIGNING_DOMAIN, DRC_OFFER_CREATE_TICKET_SIGNING_DOMAIN,
+    DRC_OFFER_CREATE_TICKET_VERSION, DRC_OFFER_CREATE_TX_VERSION, DRC_OFFER_LIVE_STATE_VERSION,
+    DRC_OFFER_PAGE_MAX,
 };
 pub use drc_payment_channel::{
     payment_channel_cancel_after_valid_at_create, payment_channel_claim_submitter_allowed,
@@ -326,6 +341,8 @@ mod tests {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         };
         assert_eq!(block.id(), header.hash());
@@ -363,6 +380,21 @@ mod ts_export {
         "DrcEscrowLive.ts",
         "DrcEscrowReceipt.ts",
         "DrcEscrowOutcome.ts",
+        "DrcBookAsset.ts",
+        "DrcOfferBook.ts",
+        "DrcOfferBookCursor.ts",
+        "DrcOfferBookPage.ts",
+        "DrcOfferCancelOutcome.ts",
+        "DrcOfferCancelReceipt.ts",
+        "DrcOfferCancelTx.ts",
+        "DrcOfferCreateReceipt.ts",
+        "DrcOfferCreateTx.ts",
+        "DrcOfferCursor.ts",
+        "DrcOfferFillMode.ts",
+        "DrcOfferLive.ts",
+        "DrcOfferPage.ts",
+        "DrcOfferTimeInForce.ts",
+        "DrcOfferView.ts",
         "DrcIssuedAssetPolicyAction.ts",
         "DrcIssuedAssetPolicyLive.ts",
         "DrcIssuedAssetPolicyReceipt.ts",
@@ -439,6 +471,21 @@ mod ts_export {
         DrcCheckLive::export_all().expect("export DrcCheckLive");
         DrcCheckReceipt::export_all().expect("export DrcCheckReceipt");
         DrcCheckOutcome::export_all().expect("export DrcCheckOutcome");
+        DrcBookAsset::export_all().expect("export DrcBookAsset");
+        DrcOfferBook::export_all().expect("export DrcOfferBook");
+        DrcOfferFillMode::export_all().expect("export DrcOfferFillMode");
+        DrcOfferTimeInForce::export_all().expect("export DrcOfferTimeInForce");
+        DrcOfferCancelOutcome::export_all().expect("export DrcOfferCancelOutcome");
+        DrcOfferCreateTx::export_all().expect("export DrcOfferCreateTx");
+        DrcOfferCancelTx::export_all().expect("export DrcOfferCancelTx");
+        DrcOfferLive::export_all().expect("export DrcOfferLive");
+        DrcOfferCreateReceipt::export_all().expect("export DrcOfferCreateReceipt");
+        DrcOfferCancelReceipt::export_all().expect("export DrcOfferCancelReceipt");
+        DrcOfferView::export_all().expect("export DrcOfferView");
+        DrcOfferCursor::export_all().expect("export DrcOfferCursor");
+        DrcOfferBookCursor::export_all().expect("export DrcOfferBookCursor");
+        DrcOfferPage::export_all().expect("export DrcOfferPage");
+        DrcOfferBookPage::export_all().expect("export DrcOfferBookPage");
         DrcPaymentChannelCreateTx::export_all().expect("export DrcPaymentChannelCreateTx");
         DrcPaymentChannelFundTx::export_all().expect("export DrcPaymentChannelFundTx");
         DrcPaymentChannelClaimTx::export_all().expect("export DrcPaymentChannelClaimTx");

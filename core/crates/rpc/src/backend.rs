@@ -266,6 +266,27 @@ pub trait RpcBackend: Send {
         control_tx_id: &Hash,
     ) -> Result<Value, RpcError>;
     fn get_drc_issued_clawback_receipt(&self, clawback_tx_id: &Hash) -> Result<Value, RpcError>;
+    fn submit_drc_offer_create(
+        &mut self,
+        tx: agora_types::DrcOfferCreateTx,
+    ) -> Result<Hash, RpcError>;
+    fn submit_drc_offer_cancel(
+        &mut self,
+        tx: agora_types::DrcOfferCancelTx,
+    ) -> Result<Hash, RpcError>;
+    fn get_drc_offer(&self, offer_id: &Hash) -> Result<Value, RpcError>;
+    fn get_drc_account_offers(
+        &self,
+        account: &Address,
+        cursor: Option<agora_types::DrcOfferCursor>,
+        limit: Option<usize>,
+    ) -> Result<Value, RpcError>;
+    fn get_drc_book_offers(
+        &self,
+        book: &agora_types::DrcOfferBook,
+        cursor: Option<agora_types::DrcOfferBookCursor>,
+        limit: Option<usize>,
+    ) -> Result<Value, RpcError>;
     fn get_drc_object(
         &self,
         object_id: &Hash,
@@ -994,6 +1015,57 @@ impl RpcBackend for InMemoryBackend {
         }))
     }
 
+    fn submit_drc_offer_create(
+        &mut self,
+        _tx: agora_types::DrcOfferCreateTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC offers".into(),
+        ))
+    }
+
+    fn submit_drc_offer_cancel(
+        &mut self,
+        _tx: agora_types::DrcOfferCancelTx,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit DRC offers".into(),
+        ))
+    }
+
+    fn get_drc_offer(&self, offer_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "offer_id": offer_id.to_hex(),
+            "status": "unknown",
+            "simulated_fill": false,
+        }))
+    }
+
+    fn get_drc_account_offers(
+        &self,
+        account: &Address,
+        _cursor: Option<agora_types::DrcOfferCursor>,
+        _limit: Option<usize>,
+    ) -> Result<Value, RpcError> {
+        Ok(json!({
+            "account": account.to_hex(),
+            "offers": [],
+            "simulated_fill": false,
+        }))
+    }
+
+    fn get_drc_book_offers(
+        &self,
+        _book: &agora_types::DrcOfferBook,
+        _cursor: Option<agora_types::DrcOfferBookCursor>,
+        _limit: Option<usize>,
+    ) -> Result<Value, RpcError> {
+        Ok(json!({
+            "offers": [],
+            "simulated_fill": false,
+        }))
+    }
+
     fn get_drc_issued_clawback_receipt(&self, clawback_tx_id: &Hash) -> Result<Value, RpcError> {
         Ok(json!({
             "clawback_tx_id": clawback_tx_id.to_hex(),
@@ -1203,6 +1275,8 @@ impl RpcBackend for InMemoryBackend {
             drc_issued_asset_policy_sets: vec![],
             drc_trust_line_issuer_controls: vec![],
             drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
         })
     }
