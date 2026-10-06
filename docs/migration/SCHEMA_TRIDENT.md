@@ -25,7 +25,8 @@
 | `17` | Detached DRC multisign-attachment block lane |
 | `18` | DRC master-key-disable policy with no-lockout enforcement |
 | `19` | Additive DRC ticket, escrow, check, payment-channel, trust-line, issued-control, receipt, and revert-journal key families |
-| `20` (current) | Per-asset lifetime-burn counters and accepted-only DRC fee destruction |
+| `20` | Per-asset lifetime-burn counters and accepted-only DRC fee destruction |
+| `21` (current) | Common DRC live-object/owner index, accepted-operation receipts, and transaction-to-operation lookup |
 
 Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
@@ -50,6 +51,8 @@ Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
   multisign-attachment commitments
 - DRC settlement objects: escrow, checks, payment channels, issuer-scoped trust
   lines/liabilities, issued-asset controls, and point-query receipts
+- Common DRC index: `ledger/drc/object/by-id|by-owner/…`,
+  `ledger/drc/operation/by-id|by-tx/…`, and an exact version marker
 - Governance: `governance/consensus/policy`, `governance/treasury/<id>`
 - Community: `community/v1/summary|hub|passport|grant|mission|issuer_nonce|active_issuer`
 - Data commitments: `da/v1/commitment/<source><sequence_be>`,
@@ -57,14 +60,27 @@ Meta key: `meta/schema_version` (`u32` LE). Missing key ⇒ treat as `1`.
 
 Atomic `WriteBatch` commit rules from PRs #76–#81 remain mandatory.
 
-Schema 20 does not reinterpret frozen historical block or transaction bytes.
-The later DRC objects are additive, but their body, signing, state-transition,
-and P2P versions still gate consensus compatibility. An older Experimental
-datadir needs replay/reindex (or a fresh Trident datadir) before public
-activation; no in-place migration CLI is claimed here.
+Schema 21 does not reinterpret frozen historical block or transaction bytes.
+The common descriptors and receipts are derived from existing typed DRC state,
+accepted operation lanes, and detached multisign authorization. Their
+state-transition, state-root, schema, and P2P fingerprint versions still gate
+consensus compatibility. An older Experimental datadir needs the explicit
+library migration, replay/reindex, or a fresh Trident datadir before public
+activation; no operator migration CLI is claimed here.
 
 The library-level schema 19-to-20 fee-burn migration is intentionally narrow:
 it atomically creates zero burn counters and advances the schema, without
 inferring historical fees from the mixed-provenance DRC reward pool. It refuses
 other source versions and unexpected preexisting burn keys. Operational
 activation/reindex tooling remains required before public testnet.
+
+The library-level schema 20-to-21 migration requires canonical applied-blue
+order and every non-genesis applied block's retained body, acceptance record,
+and rollback journal. It reconstructs typed accepted-operation receipts,
+rebuilds live descriptors and owner rows, and rewrites each historical journal
+with exact common-index snapshots. The complete candidate state is verified on
+a copy-on-write overlay before one atomic commit. Missing history, duplicate
+order entries, partial common-index data, ambiguous transaction IDs, or
+detached multisign blocks without the matching chain/genesis authorization
+context fail closed. A pruned schema-20 node without that history must resync;
+the migration does not infer receipts.

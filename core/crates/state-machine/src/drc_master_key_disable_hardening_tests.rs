@@ -91,6 +91,7 @@ mod tests {
     }
 
     fn snap(store: &StateStore, owner: &agora_types::Address) -> Snap {
+        crate::reindex_drc_ledger_objects(store).unwrap();
         let acct = load_account(store, NativeAssetId::DRC, owner).unwrap();
         Snap {
             nonce: acct.nonce,
@@ -147,6 +148,7 @@ mod tests {
         let mut journal = AccountJournal::default();
         apply_drc_regular_key(store, &tx, &auth(), &mut batch, &mut journal).unwrap();
         store.write_batch(batch).unwrap();
+        crate::reindex_drc_ledger_objects(store).unwrap();
     }
 
     fn install_list(store: &StateStore, master: &KeyPair, signer: &KeyPair, nonce: u64) {
@@ -161,6 +163,7 @@ mod tests {
         let mut journal = AccountJournal::default();
         apply_drc_signer_list(store, &tx, &auth(), &mut batch, &mut journal).unwrap();
         store.write_batch(batch).unwrap();
+        crate::reindex_drc_ledger_objects(store).unwrap();
     }
 
     fn disable_master(store: &StateStore, master: &KeyPair, nonce: u64) {
@@ -174,6 +177,7 @@ mod tests {
         let mut journal = AccountJournal::default();
         apply_drc_account_policy(store, &tx, &auth(), &mut batch, &mut journal).unwrap();
         store.write_batch(batch).unwrap();
+        crate::reindex_drc_ledger_objects(store).unwrap();
     }
 
     fn setup_disabled_with_both(

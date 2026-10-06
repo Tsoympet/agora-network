@@ -12,6 +12,7 @@ mod drc_check;
 mod drc_deposit_preauth;
 mod drc_escrow;
 mod drc_issued_controls;
+mod drc_ledger_object;
 mod drc_multisign;
 mod drc_multisign_attachment;
 mod drc_multisign_lane;
@@ -99,6 +100,12 @@ pub use drc_issued_controls::{
     DRC_TRUST_LINE_ISSUER_CONTROL_SIGNING_DOMAIN,
     DRC_TRUST_LINE_ISSUER_CONTROL_TICKET_SIGNING_DOMAIN,
     DRC_TRUST_LINE_ISSUER_CONTROL_TICKET_VERSION, DRC_TRUST_LINE_ISSUER_CONTROL_TX_VERSION,
+};
+pub use drc_ledger_object::{
+    DrcAcceptedOperationReceipt, DrcLedgerObject, DrcLedgerObjectDescriptor, DrcLedgerObjectKey,
+    DrcLedgerObjectKind, DrcLedgerObjectPage, DrcOperation, DrcOperationKind,
+    DRC_ACCEPTED_OPERATION_ID_DOMAIN, DRC_ACCEPTED_OPERATION_RECEIPT_VERSION,
+    DRC_LEDGER_OBJECT_DESCRIPTOR_VERSION, DRC_LEDGER_OBJECT_ID_DOMAIN,
 };
 pub use drc_multisign::{
     read_multisign_trailer, validate_exclusive_authorization, write_multisign_trailer,
@@ -476,6 +483,14 @@ mod ts_export {
         DrcIssuedClawbackTx::export_all().expect("export DrcIssuedClawbackTx");
         DrcIssuedClawbackReceipt::export_all().expect("export DrcIssuedClawbackReceipt");
         DrcMultisignOperationKind::export_all().expect("export DrcMultisignOperationKind");
+        DrcLedgerObjectKind::export_all().expect("export DrcLedgerObjectKind");
+        DrcLedgerObjectKey::export_all().expect("export DrcLedgerObjectKey");
+        DrcLedgerObject::export_all().expect("export DrcLedgerObject");
+        DrcLedgerObjectDescriptor::export_all().expect("export DrcLedgerObjectDescriptor");
+        DrcOperationKind::export_all().expect("export DrcOperationKind");
+        DrcOperation::export_all().expect("export DrcOperation");
+        DrcAcceptedOperationReceipt::export_all().expect("export DrcAcceptedOperationReceipt");
+        DrcLedgerObjectPage::export_all().expect("export DrcLedgerObjectPage");
         normalize_generated_bindings();
 
         let payment_binding = fs::read_to_string(

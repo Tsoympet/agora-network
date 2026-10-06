@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -15,10 +15,10 @@ pub struct StateStore {
 }
 
 /// In-memory backend map: `(cf, key) -> value`.
-type MemStore = Arc<Mutex<HashMap<(u8, Vec<u8>), Vec<u8>>>>;
+type MemStore = Arc<Mutex<BTreeMap<(u8, Vec<u8>), Vec<u8>>>>;
 
 /// Overlay delta: `None` means deleted relative to the base store.
-type CowDelta = Arc<Mutex<HashMap<(u8, Vec<u8>), Option<Vec<u8>>>>>;
+type CowDelta = Arc<Mutex<BTreeMap<(u8, Vec<u8>), Option<Vec<u8>>>>>;
 
 /// A key/value pair returned by prefix scans.
 pub type KvPair = (Vec<u8>, Vec<u8>);
@@ -85,7 +85,7 @@ impl StateStore {
     /// Ephemeral map — isolated unit tests and feature-less CI builds.
     pub fn open_in_memory() -> Self {
         Self {
-            inner: Inner::Memory(Arc::new(Mutex::new(HashMap::new()))),
+            inner: Inner::Memory(Arc::new(Mutex::new(BTreeMap::new()))),
         }
     }
 
@@ -97,7 +97,7 @@ impl StateStore {
         Self {
             inner: Inner::Cow {
                 base,
-                delta: Arc::new(Mutex::new(HashMap::new())),
+                delta: Arc::new(Mutex::new(BTreeMap::new())),
             },
         }
     }
@@ -269,7 +269,7 @@ impl StateStore {
                 Ok(out)
             }
             Inner::Cow { base, delta } => {
-                let mut map: HashMap<Vec<u8>, Vec<u8>> =
+                let mut map: BTreeMap<Vec<u8>, Vec<u8>> =
                     base.scan_prefix(cf, prefix)?.into_iter().collect();
                 let guard = delta
                     .lock()
@@ -286,9 +286,99 @@ impl StateStore {
                         }
                     }
                 }
-                let mut out: Vec<_> = map.into_iter().collect();
-                out.sort_by(|a, b| a.0.cmp(&b.0));
+                Ok(map.into_iter().collect())
+            }
+        }
+    }
+
+    /// Return at most `limit` prefix-matching entries strictly after `start_after`.
+    ///
+    /// RocksDB seeks directly to the prefix/cursor boundary. In-memory stores use
+    /// ordered ranges, and COW overlays only request enough base rows to account
+    /// for overlay deletions. This keeps owner pagination bounded without a
+    /// database-wide materialization.
+    pub fn scan_prefix_after_limit(
+        &self,
+        cf: ColumnFamily,
+        prefix: &[u8],
+        start_after: Option<&[u8]>,
+        limit: usize,
+    ) -> Result<Vec<KvPair>, StateError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let starts_after = |key: &[u8]| start_after.is_none_or(|cursor| key > cursor);
+        match &self.inner {
+            Inner::Memory(map) => {
+                let guard = map
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                Ok(guard
+                    .iter()
+                    .filter(|((stored_cf, key), _)| {
+                        *stored_cf == cf as u8
+                            && key.starts_with(prefix)
+                            && starts_after(key.as_slice())
+                    })
+                    .take(limit)
+                    .map(|((_, key), value)| (key.clone(), value.clone()))
+                    .collect())
+            }
+            #[cfg(feature = "rocksdb")]
+            Inner::Rocks(db) => {
+                use rocksdb::{Direction, IteratorMode};
+
+                let handle = db.cf_handle(cf.name()).ok_or(StateError::UnknownZone)?;
+                let seek = start_after.unwrap_or(prefix);
+                let iter = db.iterator_cf(handle, IteratorMode::From(seek, Direction::Forward));
+                let mut out = Vec::with_capacity(limit);
+                for item in iter {
+                    let (key, value) = item.map_err(|e| StateError::Storage(e.to_string()))?;
+                    if !key.starts_with(prefix) {
+                        break;
+                    }
+                    if !starts_after(key.as_ref()) {
+                        continue;
+                    }
+                    out.push((key.to_vec(), value.to_vec()));
+                    if out.len() == limit {
+                        break;
+                    }
+                }
                 Ok(out)
+            }
+            Inner::Cow { base, delta } => {
+                let guard = delta
+                    .lock()
+                    .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+                let relevant: Vec<(Vec<u8>, Option<Vec<u8>>)> = guard
+                    .iter()
+                    .filter(|((stored_cf, key), _)| {
+                        *stored_cf == cf as u8
+                            && key.starts_with(prefix)
+                            && starts_after(key.as_slice())
+                    })
+                    .map(|((_, key), value)| (key.clone(), value.clone()))
+                    .collect();
+                drop(guard);
+
+                let deleted = relevant.iter().filter(|(_, value)| value.is_none()).count();
+                let base_limit = limit.saturating_add(deleted);
+                let mut merged: BTreeMap<Vec<u8>, Vec<u8>> = base
+                    .scan_prefix_after_limit(cf, prefix, start_after, base_limit)?
+                    .into_iter()
+                    .collect();
+                for (key, value) in relevant {
+                    match value {
+                        Some(bytes) => {
+                            merged.insert(key, bytes);
+                        }
+                        None => {
+                            merged.remove(&key);
+                        }
+                    }
+                }
+                Ok(merged.into_iter().take(limit).collect())
             }
         }
     }
@@ -388,7 +478,7 @@ impl StateStore {
             Inner::Cow { base, delta } => {
                 // Use scan_prefix (not for_each_cf) to avoid monomorphization recursion
                 // when overlays are stacked.
-                let mut map: HashMap<Vec<u8>, Vec<u8>> =
+                let mut map: BTreeMap<Vec<u8>, Vec<u8>> =
                     base.scan_prefix(cf, &[])?.into_iter().collect();
                 let guard = delta
                     .lock()
@@ -405,11 +495,8 @@ impl StateStore {
                         }
                     }
                 }
-                let mut keys: Vec<_> = map.keys().cloned().collect();
-                keys.sort();
-                for k in keys {
-                    let v = &map[&k];
-                    f(k.as_slice(), v.as_slice())?;
+                for (key, value) in map {
+                    f(key.as_slice(), value.as_slice())?;
                 }
                 Ok(())
             }

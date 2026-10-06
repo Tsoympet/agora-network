@@ -60,6 +60,10 @@ pub enum RpcMethod {
     GetDrcIssuedAssetPolicyReceipt,
     GetDrcTrustLineIssuerControlReceipt,
     GetDrcIssuedClawbackReceipt,
+    GetDrcObject,
+    GetDrcAccountObjects,
+    GetDrcOperation,
+    GetDrcTransaction,
     GetBalance,
     GetUtxos,
     FundAddress,
@@ -155,6 +159,10 @@ impl RpcMethod {
                 "agora_getDrcTrustLineIssuerControlReceipt"
             }
             Self::GetDrcIssuedClawbackReceipt => "agora_getDrcIssuedClawbackReceipt",
+            Self::GetDrcObject => "agora_getDrcObject",
+            Self::GetDrcAccountObjects => "agora_getDrcAccountObjects",
+            Self::GetDrcOperation => "agora_getDrcOperation",
+            Self::GetDrcTransaction => "agora_getDrcTransaction",
             Self::GetBalance => "agora_getBalance",
             Self::GetUtxos => "agora_getUtxos",
             Self::FundAddress => "agora_fundAddress",
@@ -250,6 +258,10 @@ impl RpcMethod {
                 Some(Self::GetDrcTrustLineIssuerControlReceipt)
             }
             "agora_getDrcIssuedClawbackReceipt" => Some(Self::GetDrcIssuedClawbackReceipt),
+            "agora_getDrcObject" => Some(Self::GetDrcObject),
+            "agora_getDrcAccountObjects" => Some(Self::GetDrcAccountObjects),
+            "agora_getDrcOperation" => Some(Self::GetDrcOperation),
+            "agora_getDrcTransaction" => Some(Self::GetDrcTransaction),
             "agora_getBalance" => Some(Self::GetBalance),
             "agora_getUtxos" => Some(Self::GetUtxos),
             "agora_fundAddress" => Some(Self::FundAddress),

@@ -443,6 +443,7 @@ pub mod support {
         owner: &KeyPair,
         destination: &KeyPair,
     ) -> ChannelSnapshot {
+        crate::reindex_drc_ledger_objects(store).unwrap();
         ChannelSnapshot {
             owner_balance: load_account(store, NativeAssetId::DRC, &owner.address())
                 .unwrap()

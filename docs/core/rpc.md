@@ -45,6 +45,10 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_submitDrcIssuedAssetPolicySet` / `agora_submitDrcTrustLineIssuerControl` / `agora_submitDrcIssuedClawback` | Admit issued-asset authorization, freeze, or exact clawback controls |
 | `agora_getDrcIssuedAssetPolicy` | Query the live policy flags for one `(issuer, currency)` asset |
 | `agora_getDrcIssuedAssetPolicyReceipt` / `agora_getDrcTrustLineIssuerControlReceipt` / `agora_getDrcIssuedClawbackReceipt` | Exact issued-control receipt queries |
+| `agora_getDrcObject` | Point lookup for one deterministic common DRC live-object ID |
+| `agora_getDrcAccountObjects` | Bounded, cursor-paginated common live objects for one owner, optionally filtered by closed object kind |
+| `agora_getDrcOperation` | Canonical accepted DRC operation receipt by domain-separated operation ID |
+| `agora_getDrcTransaction` | Canonical accepted DRC operation receipt by the historical signed transaction ID |
 | `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
@@ -255,6 +259,43 @@ optionally wrapped as `{ "preauth": ... }`, and returns
 Pending grants/revokes do not alter the canonical read query. `"known"` and
 accepted/settled results describe the canonical virtual view, not checkpoint
 finality.
+
+### Common DRC objects and accepted operations (Experimental)
+
+`agora_getDrcObject` accepts `{ "object_id": "<64 hex>" }` and returns
+`status: "live"` with a typed descriptor, or `status: "unknown"` with
+`object: null`. `agora_getDrcAccountObjects` accepts:
+
+```json
+{
+  "account": "agora1...",
+  "kind": "escrow",
+  "limit": 50,
+  "cursor": null
+}
+```
+
+`kind` and `cursor` are optional; `limit` defaults to 50 and must be
+`1..=100`. The closed kind set is `account_policy`,
+`deposit_preauthorization`, `regular_key`, `signer_list`, `ticket_set`,
+`escrow`, `check`, `payment_channel`, `trust_line`, and
+`issued_asset_policy`. Results are stably ordered by kind then object ID.
+`next_cursor` is opaque and bound to the account and kind filter. Malformed,
+altered, foreign-account, or filter-mismatched cursors return `-32602`.
+
+`agora_getDrcOperation` accepts an `operation_id`; `agora_getDrcTransaction`
+accepts a historical signed `transaction_id`. Each returns
+`status: "accepted"` with the same typed accepted-operation receipt, or
+`status: "unknown"` with `receipt: null`. Receipts include the canonical block
+ID, application blue score, exact closed operation variant, semantic owner, and
+sorted directly affected object IDs.
+
+All four methods read only the canonical applied view. Reverting a block
+atomically removes its orphan objects and receipts; pending mempool operations
+are absent. `"live"` and `"accepted"` do not assert PoW plus both independent
+PoS finality quorums. IDs and payloads are Agora SHA-256/Borsh shapes, not XRPL
+ledger indexes, transaction hashes, wire encoding, or API parity. There is no
+Offer/DEX or generic contract object in this surface.
 
 ### DRC payment channels (Experimental)
 

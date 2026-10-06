@@ -90,11 +90,18 @@ reservations.
 Authenticated DA authorizations deliberately have no standalone mempool or
 `NetworkMessage` variant. Existing enum discriminants remain unchanged; full
 block propagation carries accepted candidates under the current Trident
-protocol v22 / state-transition v20 fingerprint. DRC account-policy,
+protocol v23 / state-transition v21 fingerprint. DRC account-policy,
 deposit-preauthorization, contract-free settlement, trust-line, and
 issued-control gossip use appended enum variants without changing prior
 discriminants. The current node leaves DA activation disabled until a reviewed
 TLT base-fee/sponsorship policy exists, so there is no free public gossip path.
+
+The v23 state transition adds no new `NetworkMessage` or block-body field.
+Nodes derive identical common DRC object/owner indexes and accepted-operation
+receipts from the existing full typed block. Detached multisign receipts use
+the reconstructed authorized envelope while retaining the relayed block ID.
+The two-node escrow relay test compares object roots, owner pages, operation
+receipts, and transaction receipts after independent apply.
 
 ## Runtime
 

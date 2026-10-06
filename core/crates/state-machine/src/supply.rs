@@ -174,9 +174,9 @@ pub fn burn_drc_fee_into(
     fee: u64,
 ) -> Result<(), StateError> {
     let schema = load_schema_version(store)?;
-    if schema != DRC_FEE_BURN_SCHEMA_VERSION {
+    if !(DRC_FEE_BURN_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&schema) {
         return Err(StateError::InvalidTx(format!(
-            "DRC fee burning requires datadir schema 20, found {schema}"
+            "DRC fee burning requires a supported schema in {DRC_FEE_BURN_SCHEMA_VERSION}..={SCHEMA_VERSION}, found {schema}"
         )));
     }
     if fee == 0 {
@@ -228,6 +228,9 @@ pub fn put_schema_version_into(batch: &mut WriteBatch, version: u32) {
         meta_keys::SCHEMA_VERSION,
         &version.to_le_bytes(),
     );
+    if version >= crate::drc_ledger_object::DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+        crate::drc_ledger_object::initialize_drc_ledger_index_into(batch);
+    }
 }
 
 pub fn load_schema_version(store: &StateStore) -> Result<u32, StateError> {
@@ -248,19 +251,24 @@ pub fn load_schema_version(store: &StateStore) -> Result<u32, StateError> {
 /// every lifetime counter at zero and never infers prior fees.
 pub fn migrate_drc_fee_burn_schema(store: &StateStore) -> Result<(), StateError> {
     let version = load_schema_version(store)?;
-    if version == DRC_FEE_BURN_SCHEMA_VERSION {
+    if (DRC_FEE_BURN_SCHEMA_VERSION..=SCHEMA_VERSION).contains(&version) {
         for asset in NativeAssetId::ALL {
             if store
                 .get_cf(ColumnFamily::Meta, &burned_supply_key(asset))?
                 .is_none()
             {
                 return Err(StateError::Storage(format!(
-                    "schema 20 is missing the {} burned-supply counter",
+                    "schema {version} is missing the {} burned-supply counter",
                     asset.ticker()
                 )));
             }
         }
         return verify_supply_invariants(store);
+    }
+    if version > SCHEMA_VERSION {
+        return Err(StateError::Storage(format!(
+            "unsupported future datadir schema {version}"
+        )));
     }
     if version != DRC_FEE_BURN_SCHEMA_VERSION - 1 {
         return Err(StateError::Storage(format!(
@@ -425,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn active_schema_requires_counters_and_exact_version() {
+    fn active_schema_requires_counters_and_supported_version() {
         let store = StateStore::open_in_memory();
         let mut batch = WriteBatch::new();
         put_schema_version_into(&mut batch, DRC_FEE_BURN_SCHEMA_VERSION);
@@ -434,14 +442,14 @@ mod tests {
 
         let store = StateStore::open_in_memory();
         let mut batch = WriteBatch::new();
-        put_schema_version_into(&mut batch, DRC_FEE_BURN_SCHEMA_VERSION + 1);
+        put_schema_version_into(&mut batch, SCHEMA_VERSION + 1);
         put_issued_supply_into(&mut batch, NativeAssetId::DRC, 1);
         put_burned_supply_into(&mut batch, NativeAssetId::DRC, 0);
         store.write_batch(batch).unwrap();
         let mut burn = WriteBatch::new();
         assert!(matches!(
             burn_drc_fee_into(&store, &mut burn, 0),
-            Err(StateError::InvalidTx(message)) if message.contains("found 21")
+            Err(StateError::InvalidTx(message)) if message.contains("found 22")
         ));
     }
 }

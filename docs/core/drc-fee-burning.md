@@ -48,11 +48,14 @@ precision.
 
 ## Activation and migration
 
-- Trident protocol: `22`
-- State transition: `agora-trident-state-v20`
+- Fee-burn activation protocol: `22`
+- Fee-burn activation state transition: `agora-trident-state-v20`
 - Transaction signing profile: unchanged `agora-trident-tx-v9`
-- State-root domain: `agora-trident-state-root-v14`
-- Datadir schema: `20`
+- Fee-burn activation state-root domain: `agora-trident-state-root-v14`
+- Fee-burn activation datadir schema: `20`
+- Current aggregate profile: protocol `23`, state transition
+  `agora-trident-state-v21`, state-root domain
+  `agora-trident-state-root-v15`, datadir schema `21`
 
 Fresh genesis initializes every burned counter to zero. The explicit schema
 19-to-20 library migration also initializes zero atomically and refuses other

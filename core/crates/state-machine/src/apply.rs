@@ -1,5 +1,6 @@
 //! Apply / revert consensus-ordered blocks against multi-lane Trident state.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use agora_crypto::{address_from_pubkey, signer_address, verify_transaction_bound, PublicKeyBytes};
@@ -115,6 +116,8 @@ pub struct UtxoJournal {
     pub drc_check_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     pub drc_payment_channel_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     pub drc_trust_line_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    /// Common DRC object/owner/accepted-operation index keys before this block.
+    pub drc_ledger_index_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Pre-v2 journal (spent + created only) for load migration.
@@ -321,10 +324,56 @@ struct UtxoJournalV13Paychan {
     drc_payment_channel_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
+/// Schema-20 journal before the common DRC ledger-object index.
+#[derive(Debug, Clone, BorshDeserialize)]
+struct UtxoJournalV14Trust {
+    spent: Vec<(OutPoint, TxOut)>,
+    created: Vec<OutPoint>,
+    fees: u64,
+    subsidy: u64,
+    coinbase_total: u64,
+    account_before: Vec<(NativeAssetId, Address, AccountState)>,
+    stake_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    payment_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    data_availability_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_policy_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_deposit_preauth_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_regular_key_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_signer_list_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_ticket_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_escrow_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_check_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_payment_channel_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    drc_trust_line_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+}
+
 impl UtxoJournal {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, StateError> {
         if let Ok(j) = Self::try_from_slice(bytes) {
             return Ok(j);
+        }
+        if let Ok(v14) = UtxoJournalV14Trust::try_from_slice(bytes) {
+            return Ok(Self {
+                spent: v14.spent,
+                created: v14.created,
+                fees: v14.fees,
+                subsidy: v14.subsidy,
+                coinbase_total: v14.coinbase_total,
+                account_before: v14.account_before,
+                stake_meta_before: v14.stake_meta_before,
+                payment_meta_before: v14.payment_meta_before,
+                data_availability_meta_before: v14.data_availability_meta_before,
+                drc_policy_meta_before: v14.drc_policy_meta_before,
+                drc_deposit_preauth_meta_before: v14.drc_deposit_preauth_meta_before,
+                drc_regular_key_meta_before: v14.drc_regular_key_meta_before,
+                drc_signer_list_meta_before: v14.drc_signer_list_meta_before,
+                drc_ticket_meta_before: v14.drc_ticket_meta_before,
+                drc_escrow_meta_before: v14.drc_escrow_meta_before,
+                drc_check_meta_before: v14.drc_check_meta_before,
+                drc_payment_channel_meta_before: v14.drc_payment_channel_meta_before,
+                drc_trust_line_meta_before: v14.drc_trust_line_meta_before,
+                drc_ledger_index_meta_before: Vec::new(),
+            });
         }
         if let Ok(v13) = UtxoJournalV13Paychan::try_from_slice(bytes) {
             return Ok(Self {
@@ -346,6 +395,7 @@ impl UtxoJournal {
                 drc_check_meta_before: v13.drc_check_meta_before,
                 drc_payment_channel_meta_before: v13.drc_payment_channel_meta_before,
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v12) = UtxoJournalV12::try_from_slice(bytes) {
@@ -368,6 +418,7 @@ impl UtxoJournal {
                 drc_check_meta_before: v12.drc_check_meta_before,
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v11) = UtxoJournalV11::try_from_slice(bytes) {
@@ -390,6 +441,7 @@ impl UtxoJournal {
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v10) = UtxoJournalV10::try_from_slice(bytes) {
@@ -412,6 +464,7 @@ impl UtxoJournal {
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v9) = UtxoJournalV9::try_from_slice(bytes) {
@@ -434,6 +487,7 @@ impl UtxoJournal {
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v8) = UtxoJournalV8::try_from_slice(bytes) {
@@ -456,6 +510,7 @@ impl UtxoJournal {
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v7) = UtxoJournalV7::try_from_slice(bytes) {
@@ -478,6 +533,7 @@ impl UtxoJournal {
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v6) = UtxoJournalV6::try_from_slice(bytes) {
@@ -500,6 +556,7 @@ impl UtxoJournal {
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
@@ -522,6 +579,7 @@ impl UtxoJournal {
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
@@ -544,6 +602,7 @@ impl UtxoJournal {
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -566,6 +625,7 @@ impl UtxoJournal {
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -588,6 +648,7 @@ impl UtxoJournal {
                 drc_check_meta_before: Vec::new(),
                 drc_payment_channel_meta_before: Vec::new(),
                 drc_trust_line_meta_before: Vec::new(),
+                drc_ledger_index_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -611,6 +672,7 @@ impl UtxoJournal {
             drc_check_meta_before: Vec::new(),
             drc_payment_channel_meta_before: Vec::new(),
             drc_trust_line_meta_before: Vec::new(),
+            drc_ledger_index_meta_before: Vec::new(),
         })
     }
 }
@@ -973,37 +1035,48 @@ fn apply_block_batched_mode(
         &mut journal,
     )?;
 
+    let acceptance = BlockAcceptanceRecord {
+        block_hash: block.id(),
+        statuses,
+        account_statuses,
+        stake_statuses,
+        execution_statuses,
+        payment_statuses,
+        data_commitment_statuses,
+        drc_regular_key_statuses,
+        drc_signer_list_statuses,
+        drc_ticket_create_statuses,
+        drc_escrow_create_statuses,
+        drc_escrow_finish_statuses,
+        drc_escrow_cancel_statuses,
+        drc_check_create_statuses,
+        drc_check_cash_statuses,
+        drc_check_cancel_statuses,
+        drc_payment_channel_create_statuses,
+        drc_payment_channel_fund_statuses,
+        drc_payment_channel_claim_statuses,
+        drc_payment_channel_close_statuses,
+        drc_trust_line_set_statuses,
+        drc_issued_transfer_statuses,
+        drc_issued_asset_policy_set_statuses,
+        drc_trust_line_issuer_control_statuses,
+        drc_issued_clawback_statuses,
+        drc_policy_statuses,
+        drc_deposit_preauth_statuses,
+    };
+    crate::drc_ledger_object::index_accepted_drc_operations_with_auth_into(
+        store,
+        block,
+        &acceptance,
+        application_blue_score,
+        auth,
+        &mut batch,
+        &mut journal,
+    )?;
+
     Ok(BlockApplyResult {
         journal,
-        acceptance: BlockAcceptanceRecord {
-            block_hash: Hash::ZERO, // filled by caller with block id
-            statuses,
-            account_statuses,
-            stake_statuses,
-            execution_statuses,
-            payment_statuses,
-            data_commitment_statuses,
-            drc_regular_key_statuses,
-            drc_signer_list_statuses,
-            drc_ticket_create_statuses,
-            drc_escrow_create_statuses,
-            drc_escrow_finish_statuses,
-            drc_escrow_cancel_statuses,
-            drc_check_create_statuses,
-            drc_check_cash_statuses,
-            drc_check_cancel_statuses,
-            drc_payment_channel_create_statuses,
-            drc_payment_channel_fund_statuses,
-            drc_payment_channel_claim_statuses,
-            drc_payment_channel_close_statuses,
-            drc_trust_line_set_statuses,
-            drc_issued_transfer_statuses,
-            drc_issued_asset_policy_set_statuses,
-            drc_trust_line_issuer_control_statuses,
-            drc_issued_clawback_statuses,
-            drc_policy_statuses,
-            drc_deposit_preauth_statuses,
-        },
+        acceptance,
         batch,
     })
 }
@@ -1167,6 +1240,29 @@ fn apply_trident_lanes(
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
 ) -> Result<TridentLaneAcceptances, StateError> {
+    // Validate the detached lane even when no typed operation is present. This
+    // prevents orphan or cross-kind authorization bytes from becoming inert,
+    // consensus-accepted block data.
+    let working_block = if let Some(ctx) = auth {
+        agora_types::validate_drc_multisign_attachment_lane(block, &ctx.chain_id, &ctx.genesis)
+            .map_err(|e| StateError::InvalidTx(e.to_string()))?;
+        if block.drc_multisign_attachments.is_empty() {
+            Cow::Borrowed(block)
+        } else {
+            agora_types::merge_drc_multisign_attachments(block.clone(), &ctx.chain_id, &ctx.genesis)
+                .map(Cow::Owned)
+                .map_err(|e| StateError::InvalidTx(e.to_string()))?
+        }
+    } else {
+        if !block.drc_multisign_attachments.is_empty() {
+            return Err(StateError::InvalidTx(
+                "DRC multisign attachment lane requires network-bound auth".into(),
+            ));
+        }
+        Cow::Borrowed(block)
+    };
+    let block = working_block.as_ref();
+
     if block.drc_ticket_creates.is_empty()
         && block.drc_escrow_creates.is_empty()
         && block.drc_escrow_finishes.is_empty()
@@ -1263,25 +1359,6 @@ fn apply_trident_lanes(
             agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK
         )));
     }
-
-    let working_block = if let Some(ctx) = auth {
-        agora_types::validate_drc_multisign_attachment_lane(block, &ctx.chain_id, &ctx.genesis)
-            .map_err(|e| StateError::InvalidTx(e.to_string()))?;
-        if block.drc_multisign_attachments.is_empty() {
-            block.clone()
-        } else {
-            agora_types::merge_drc_multisign_attachments(block.clone(), &ctx.chain_id, &ctx.genesis)
-                .map_err(|e| StateError::InvalidTx(e.to_string()))?
-        }
-    } else {
-        if !block.drc_multisign_attachments.is_empty() {
-            return Err(StateError::InvalidTx(
-                "DRC multisign attachment lane requires network-bound auth".into(),
-            ));
-        }
-        block.clone()
-    };
-    let block = &working_block;
 
     // Sequential visibility without committing the consensus batch early.
     let lane = store.cow_overlay();
@@ -3007,6 +3084,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
             None => batch.delete_cf(ColumnFamily::Meta, key),
         }
     }
+    for (key, prior) in journal.drc_ledger_index_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
     Ok(batch)
 }
@@ -4651,6 +4734,7 @@ mod tests {
         let mut journal = AccountJournal::default();
         apply_drc_deposit_preauth(&store, &dormant_grant, &auth, &mut batch, &mut journal).unwrap();
         store.write_batch(batch).unwrap();
+        crate::reindex_drc_ledger_objects(&store).unwrap();
 
         let mut enable = DrcAccountPolicyTx::set_deposit_auth_required(
             owner.address(),

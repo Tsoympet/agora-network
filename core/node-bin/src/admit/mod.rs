@@ -27,10 +27,13 @@ use agora_consensus::{
 };
 use agora_state_machine::{
     apply_block_batched_virtual_at_blue_score, ghostdag_key, index_block_transactions_into,
-    list_tx_inclusions, load_ghostdag_record, load_header, load_utxo_journal, lookup_tx_location,
-    meta_keys, revert_journal_batched, set_primary_tx_location, store_ghostdag_record,
-    store_header, store_header_into, sum_transfer_fees, utxo_diff_key, ColumnFamily,
-    GhostdagRecord, StateStore, TxAuthContext, WriteBatch,
+    list_tx_inclusions, load_ghostdag_record, load_header, load_schema_version, load_utxo_journal,
+    lookup_tx_location, meta_keys, migrate_drc_fee_burn_schema,
+    migrate_drc_ledger_object_index_schema_with_auth, revert_journal_batched,
+    set_primary_tx_location, store_ghostdag_record, store_header, store_header_into,
+    sum_transfer_fees, utxo_diff_key, verify_drc_ledger_object_index, ColumnFamily, GhostdagRecord,
+    StateStore, TxAuthContext, WriteBatch, DRC_FEE_BURN_SCHEMA_VERSION,
+    DRC_LEDGER_INDEX_DATADIR_SCHEMA,
 };
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 use thiserror::Error;
@@ -272,8 +275,10 @@ impl ChainState {
             let tip = chain.select_virtual_tip()?.unwrap_or(genesis);
             chain.persist_virtual_tip(tip)?;
         }
+        chain.migrate_drc_fee_burn()?;
         // Crash recovery: finish any in-flight virtual reorg before serving.
         chain.recover_pending_virtual()?;
+        chain.migrate_drc_ledger_index()?;
         // Repair pre-PR-79 journals that persisted subsidy=0 so reorg accounting matches.
         chain.migrate_legacy_journal_subsidies()?;
         Ok(chain)
@@ -1866,6 +1871,45 @@ fn template_extranonce(timestamp_ms: u64) -> u32 {
 }
 
 impl ChainState {
+    fn migrate_drc_fee_burn(&self) -> Result<(), AdmitError> {
+        let schema = load_schema_version(self.store.as_ref())
+            .map_err(|error| AdmitError::Storage(error.to_string()))?;
+        if schema == DRC_FEE_BURN_SCHEMA_VERSION - 1 {
+            migrate_drc_fee_burn_schema(self.store.as_ref())
+                .map_err(|error| AdmitError::Storage(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn migrate_drc_ledger_index(&self) -> Result<(), AdmitError> {
+        let schema = load_schema_version(self.store.as_ref())
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        if schema == DRC_LEDGER_INDEX_DATADIR_SCHEMA - 1 {
+            let tip = self.virtual_tip()?;
+            let order = self.applied_blues(tip)?;
+            let applied: Vec<(Hash, u64)> = order
+                .into_iter()
+                .map(|hash| (hash, self.ghostdag.blue_score(&hash).unwrap_or(0)))
+                .collect();
+            migrate_drc_ledger_object_index_schema_with_auth(
+                self.store.as_ref(),
+                &applied,
+                self.auth.as_ref(),
+            )
+            .map_err(|e| AdmitError::Storage(e.to_string()))?;
+            return Ok(());
+        }
+        if schema == DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+            verify_drc_ledger_object_index(self.store.as_ref())
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        } else if schema > DRC_LEDGER_INDEX_DATADIR_SCHEMA {
+            return Err(AdmitError::Storage(format!(
+                "unsupported future datadir schema {schema}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Rewrite legacy journals that loaded with `subsidy = 0` using block bodies.
     ///
     /// Only repairs journals whose `created` set includes the block's coinbase
@@ -1944,6 +1988,7 @@ impl ChainState {
                 drc_check_meta_before: journal.drc_check_meta_before,
                 drc_payment_channel_meta_before: journal.drc_payment_channel_meta_before,
                 drc_trust_line_meta_before: journal.drc_trust_line_meta_before,
+                drc_ledger_index_meta_before: journal.drc_ledger_index_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store
@@ -1995,7 +2040,15 @@ fn load_or_init_difficulty(
 mod tests {
     use super::*;
     use agora_consensus::RandomXPowHasher;
-    use agora_state_machine::GenesisBuilder;
+    use agora_crypto::{sign_drc_escrow_create_bound, KeyPair};
+    use agora_state_machine::{
+        credit_account_into, load_drc_ledger_object, load_drc_operation, load_drc_transaction,
+        put_issued_supply_into, store_utxo_journal, GenesisBuilder,
+    };
+    use agora_types::{
+        DrcEscrowCreateTx, DrcLedgerObjectKey, DrcOperation, NativeAssetId,
+        DRC_ESCROW_CREATE_TX_VERSION,
+    };
 
     #[test]
     fn rejects_wrong_bits_and_persists_difficulty() {
@@ -2121,6 +2174,135 @@ mod tests {
         assert!(reloaded.tips().unwrap().contains(&id));
         let child = reloaded.block_template(Address::ZERO, &[]).unwrap();
         assert!(child.header.parents.contains(&id));
+    }
+
+    #[test]
+    fn bootstrap_migrates_schema20_objects_receipts_and_rollback_journal() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let boot = ChainBootConfig {
+            chain_id: "agora-dev".into(),
+            ..ChainBootConfig::default()
+        };
+        let mut chain = ChainState::bootstrap_with(
+            store.clone(),
+            genesis,
+            boot.clone(),
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        let owner = KeyPair::from_secret_bytes(&[0x71; 32]).unwrap();
+        let recipient = KeyPair::from_secret_bytes(&[0x72; 32]).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &owner.address(),
+            Amount::from_base_units(1_000),
+        )
+        .unwrap();
+        put_issued_supply_into(&mut funding, NativeAssetId::DRC, 1_000);
+        store.write_batch(funding).unwrap();
+
+        let mut create = DrcEscrowCreateTx {
+            version: DRC_ESCROW_CREATE_TX_VERSION,
+            owner: owner.address(),
+            recipient: recipient.address(),
+            amount: Amount::from_base_units(10),
+            fee: Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            finish_after_blue_score: None,
+            cancel_after_blue_score: Some(100),
+            nonce: 0,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: None,
+        };
+        sign_drc_escrow_create_bound(&mut create, &owner, "agora-dev", &genesis).unwrap();
+        let operation = DrcOperation::EscrowCreate(create.clone());
+        let object_id = DrcLedgerObjectKey::Escrow {
+            escrow_id: create.escrow_id(),
+        }
+        .object_id();
+        let mut block = chain
+            .block_template_lanes(
+                owner.address(),
+                BlockTemplateLanes {
+                    drc_escrow_creates: std::slice::from_ref(&create),
+                    ..BlockTemplateLanes::default()
+                },
+            )
+            .unwrap();
+        block.header.nonce = 1;
+        let block_id = chain.admit_block(block).unwrap();
+        assert!(load_drc_ledger_object(&store, &object_id)
+            .unwrap()
+            .is_some());
+        assert!(load_drc_operation(&store, &operation.operation_id())
+            .unwrap()
+            .is_some());
+
+        let mut legacy_journal = load_utxo_journal(&store, &block_id)
+            .unwrap()
+            .expect("applied block journal");
+        legacy_journal.drc_ledger_index_meta_before.clear();
+        store_utxo_journal(&store, &block_id, &legacy_journal).unwrap();
+        let mut downgrade = WriteBatch::new();
+        for (key, _) in store
+            .scan_prefix(ColumnFamily::Meta, b"ledger/drc/")
+            .unwrap()
+        {
+            downgrade.delete_cf(ColumnFamily::Meta, &key);
+        }
+        downgrade.put_cf(
+            ColumnFamily::Meta,
+            meta_keys::SCHEMA_VERSION,
+            &(DRC_LEDGER_INDEX_DATADIR_SCHEMA - 1).to_le_bytes(),
+        );
+        store.write_batch(downgrade).unwrap();
+        drop(chain);
+
+        let restarted = ChainState::bootstrap_with(
+            store.clone(),
+            genesis,
+            boot.clone(),
+            StoragePolicy::default(),
+        )
+        .unwrap();
+        assert_eq!(restarted.virtual_tip().unwrap(), block_id);
+        let receipt = load_drc_transaction(&store, &operation.historical_transaction_id())
+            .unwrap()
+            .expect("migrated transaction receipt");
+        assert_eq!(receipt.operation, operation);
+        assert_eq!(receipt.canonical_block_id, block_id);
+        assert!(load_drc_ledger_object(&store, &object_id)
+            .unwrap()
+            .is_some());
+        let migrated_journal = load_utxo_journal(&store, &block_id)
+            .unwrap()
+            .expect("rewritten journal");
+        assert!(!migrated_journal.drc_ledger_index_meta_before.is_empty());
+        drop(restarted);
+
+        let reopened =
+            ChainState::bootstrap_with(store.clone(), genesis, boot, StoragePolicy::default())
+                .unwrap();
+        assert_eq!(reopened.virtual_tip().unwrap(), block_id);
+        drop(reopened);
+
+        store
+            .write_batch(revert_journal_batched(&migrated_journal).unwrap())
+            .unwrap();
+        assert!(load_drc_ledger_object(&store, &object_id)
+            .unwrap()
+            .is_none());
+        assert!(load_drc_operation(&store, &receipt.operation_id)
+            .unwrap()
+            .is_none());
     }
 
     fn sync_coinbase_commitment(block: &mut Block) {

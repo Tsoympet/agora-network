@@ -244,6 +244,7 @@ pub mod support {
         owner: &KeyPair,
         destination: &KeyPair,
     ) -> CheckSnapshot {
+        crate::reindex_drc_ledger_objects(store).unwrap();
         CheckSnapshot {
             owner_balance: load_account(store, NativeAssetId::DRC, &owner.address())
                 .unwrap()
