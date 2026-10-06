@@ -28,7 +28,9 @@ const info = await client.getNodeInfo();
 ```
 
 RPC methods: `agora_getDagTips`, `agora_getBlock`, `agora_getTransaction`,
-`agora_getMempool`, `agora_getNodeInfo`, `agora_getBalance`, `agora_getUtxos`,
+`agora_getMempool`, `agora_getNodeInfo`, `agora_getBalance`,
+`agora_getAccountBalances`, `agora_getTltCovenant`, `agora_getDrcOffer`,
+`agora_getDrcAccountOffers`, `agora_getDrcBookOffers`, `agora_getUtxos`,
 `agora_submitTransaction`.
 
 Addresses: Bech32m HRPs `agora` / `agoratest` / `agoradev` preferred; 40-char
