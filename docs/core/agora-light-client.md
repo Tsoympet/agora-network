@@ -1,5 +1,7 @@
 # Agora Network light client
 
+Index: [AGORA_LIGHT_CLIENT.md](AGORA_LIGHT_CLIENT.md). Security boundary: [AGORA_LIGHT_CLIENT_SECURITY_MODEL.md](AGORA_LIGHT_CLIENT_SECURITY_MODEL.md).
+
 **Maturity: Single-node prototype.**
 
 The desktop (Tauri) and phone (Expo) wallets share one verifier in

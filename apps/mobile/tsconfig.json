@@ -11,6 +11,7 @@
   },
   "include": [
     "App.tsx",
+    "DocsAboutPanel.tsx",
     "LightClientPanel.tsx",
     "PairingPanel.tsx",
     "global.d.ts",

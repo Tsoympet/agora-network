@@ -47,6 +47,7 @@ import {
   type TipSyncSnapshot,
   type WatchOnlyWallet,
 } from "../shared/light-client";
+import { DocsAboutPanel } from "./DocsAboutPanel";
 import { FeatureSurfacesPanel } from "./FeatureSurfacesPanel";
 import { LightClientPanel } from "./LightClientPanel";
 import { PairingPanel } from "./PairingPanel";
@@ -588,6 +589,8 @@ export default function App() {
           drcHex={watchWallet?.drcAccount ?? receiveHex ?? null}
           watchWallet={watchWallet}
         />
+
+        <DocsAboutPanel />
 
         {snap.updatedAt ? (
           <Text style={styles.footer}>

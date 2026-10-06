@@ -34,6 +34,7 @@ import {
   type TipSyncSnapshot,
   type WatchOnlyWallet,
 } from "../../shared/light-client";
+import { DocsAboutPanel } from "./components/DocsAboutPanel";
 import { FeatureSurfacesPanel } from "./components/FeatureSurfacesPanel";
 import { GovernancePanel } from "./components/GovernancePanel";
 import { LightClientPanel } from "./components/LightClientPanel";
@@ -654,6 +655,8 @@ export function App() {
         spendMnemonic={mnemonic}
         watchWallet={watchWallet}
       />
+
+      <DocsAboutPanel />
 
       <section
         className="agora-rise agora-rise-delay-3"
