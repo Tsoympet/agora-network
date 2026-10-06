@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { agoraBrand } from "../../shared/brand/tokens";
+import type { LightProtocolTreasuries } from "../../shared/light-client";
 import {
   advanceDrcPay,
   broadcastDrcPay,
@@ -12,7 +13,6 @@ import {
   preferChainTreasuries,
   proposalBadge,
   recordLessonProgress,
-  reportForumPost,
   searchHubs,
   signDrcPayIntent,
   transitionMission,
@@ -270,12 +270,14 @@ export function MobileModule({
   address,
   notifications,
   onNotifications,
+  chainTreasuries = null,
 }: {
   lane: string;
   client: CommunityClient;
   address: string | null;
   notifications: NotificationPrefs;
   onNotifications: (next: NotificationPrefs) => void;
+  chainTreasuries?: LightProtocolTreasuries | null;
 }) {
   const [lines, setLines] = useState<string[]>([]);
   const [label, setLabel] = useState("Loading…");
@@ -347,8 +349,8 @@ export function MobileModule({
       } else if (lane === "TREASURY") {
         const view = await client.treasury();
         if (cancelled) return;
-        const rows = preferChainTreasuries(view.data ?? [], null);
-        setLabel(view.label);
+        const rows = preferChainTreasuries(view.data ?? [], chainTreasuries);
+        setLabel(chainTreasuries ? "full node agora_getProtocolTreasuries · not a header proof" : view.label);
         setLines(rows.map((row) => `${row.asset} ${row.balance} · ${row.source}`));
       } else if (lane === "SETTINGS") {
         const sample = notificationBody("Mission", "Update ready, payout 3 DRC");
@@ -377,7 +379,7 @@ export function MobileModule({
     return () => {
       cancelled = true;
     };
-  }, [lane, client, address, notifications, region]);
+  }, [lane, client, address, notifications, region, chainTreasuries]);
 
   return (
     <View style={styles.block}>
@@ -395,9 +397,14 @@ export function MobileModule({
           <Pressable
             style={styles.btn}
             onPress={() => {
-              void client.forum().then((view) => {
-                const posts = reportForumPost(view.data ?? [], view.data?.[0]?.id ?? "");
-                setLines((current) => [...current, `Reports ${posts[0]?.reportCount ?? 0}`]);
+              void client.forum().then(async (view) => {
+                const postId = view.data?.[0]?.id;
+                if (!postId) {
+                  setLines((current) => [...current, "No post to report."]);
+                  return;
+                }
+                const report = await client.reportForum(postId, "community report");
+                setLines((current) => [...current, report.label]);
               });
             }}
           >
@@ -409,13 +416,20 @@ export function MobileModule({
         <Pressable
           style={styles.btn}
           onPress={() => {
-            setLines((current) =>
-              current.map((line) => {
-                if (!line.startsWith("AVAILABLE")) return line;
-                const next = transitionMission("AVAILABLE", "ACCEPTED");
-                return line.replace("AVAILABLE", next);
-              }),
-            );
+            void client.missions().then(async (view) => {
+              const mission = (view.data ?? []).find((row) => row.state === "AVAILABLE");
+              if (!mission) {
+                setLines((current) => [...current, "No available mission."]);
+                return;
+              }
+              const result = await client.advanceMission(mission.id, "ACCEPTED");
+              setLines((current) => [...current, result.label]);
+              if (!result.data?.recorded) return;
+              const next = transitionMission(mission.state, "ACCEPTED");
+              setLines((current) =>
+                current.map((line) => (line.startsWith("AVAILABLE") ? line.replace("AVAILABLE", next) : line)),
+              );
+            });
           }}
         >
           <Text style={styles.btnLabel}>Accept an available mission</Text>

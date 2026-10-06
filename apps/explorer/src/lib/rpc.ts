@@ -12,6 +12,8 @@ import {
   type RpcStatus,
 } from "../../../shared/light-client";
 
+export { infrastructureClient } from "./infrastructureClient";
+
 export type ExplorerBlock = LightBlock;
 export type {
   LightMempool,

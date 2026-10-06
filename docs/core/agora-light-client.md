@@ -200,7 +200,9 @@ Passport, missions, academy, grants, and the other community modules live in
 `apps/shared/community` and are documented in
 [`agora-community.md`](agora-community.md). They are a light-client surface:
 headers and wallet signatures stay on the device, and community records are
-not treated as consensus. The PC nav and the phone nav both open those
+not treated as consensus. Which of those records live on the device, in
+infrastructure, or on chain is
+[`AGORA_DATA_PLANE_SPLIT.md`](AGORA_DATA_PLANE_SPLIT.md). The PC nav and the phone nav both open those
 screens. A community session token is not a seed, and a watch-only wallet
 still cannot sign a spend.
 

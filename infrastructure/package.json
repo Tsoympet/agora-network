@@ -1,0 +1,5 @@
+{
+  "name": "@agora/infrastructure",
+  "private": true,
+  "type": "module"
+}

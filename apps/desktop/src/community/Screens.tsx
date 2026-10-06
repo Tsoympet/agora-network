@@ -10,7 +10,6 @@ import {
   preferChainTreasuries,
   proposalBadge,
   recordLessonProgress,
-  reportForumPost,
   searchHubs,
   signDrcPayIntent,
   transitionMission,
@@ -354,11 +353,15 @@ export function CommunityScreens({
                     const order = ["AVAILABLE", "ACCEPTED", "IN_PROGRESS", "SUBMITTED", "COMPLETED"] as const;
                     const next = order[order.indexOf(mission.state) + 1];
                     if (!next) return;
-                    setMissions((rows) =>
-                      rows.map((row) =>
-                        row.id === mission.id ? { ...row, state: transitionMission(row.state, next) } : row,
-                      ),
-                    );
+                    void client.advanceMission(mission.id, next).then((result) => {
+                      setMissionLabel(result.label);
+                      if (!result.data?.recorded) return;
+                      setMissions((rows) =>
+                        rows.map((row) =>
+                          row.id === mission.id ? { ...row, state: transitionMission(row.state, next) } : row,
+                        ),
+                      );
+                    });
                   }}
                 >
                   Advance
@@ -479,7 +482,7 @@ function ModuleScreen({
         const view = await client.treasury();
         if (cancelled) return;
         const rows = preferChainTreasuries(view.data ?? [], chainTreasuries);
-        setLabel(chainTreasuries ? "indexed from agora_getProtocolTreasuries · not a header proof" : view.label);
+        setLabel(chainTreasuries ? "full node agora_getProtocolTreasuries · not a header proof" : view.label);
         setBody(rows.map((row) => `${row.id} · ${row.asset} ${row.balance} · ${row.source} · ${row.note}`));
       } else if (lane === "SETTINGS") {
         setLabel("notification preferences stay on device");
@@ -564,9 +567,14 @@ function ForumReports({ client }: { client: CommunityClient }) {
       type="button"
       style={btnStyle}
       onClick={() => {
-        void client.forum().then((view) => {
-          const posts = reportForumPost(view.data ?? [], view.data?.[0]?.id ?? "");
-          setNote(`Reports on first post: ${posts[0]?.reportCount ?? 0}. ${posts[0]?.source ?? "community submitted"}.`);
+        void client.forum().then(async (view) => {
+          const postId = view.data?.[0]?.id;
+          if (!postId) {
+            setNote("No post to report.");
+            return;
+          }
+          const report = await client.reportForum(postId, "community report");
+          setNote(report.label);
         });
       }}
     >

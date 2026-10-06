@@ -1,3 +1,4 @@
+import type { DataPlane } from "../data-plane/planes.ts";
 import type {
   AcademyCatalog,
   AcademyProgress,
@@ -31,6 +32,8 @@ export type OfflineView<T> = {
   fromCache: boolean;
   confirmed: false;
   label: string;
+  /** Which plane produced `data`. */
+  plane: DataPlane;
 };
 
 export function defaultNotificationPrefs(): NotificationPrefs {
@@ -89,12 +92,18 @@ export async function saveCache(storage: CacheStorage, blob: CommunityCacheBlob)
   await storage.set(COMMUNITY_CACHE_KEY, JSON.stringify(blob));
 }
 
-export function presentCached<T>(online: boolean, data: T | null, fromCache: boolean): OfflineView<T> {
+export function presentCached<T>(
+  online: boolean,
+  data: T | null,
+  fromCache: boolean,
+  plane: DataPlane,
+): OfflineView<T> {
   return {
     data,
     online,
     fromCache,
     confirmed: false,
+    plane,
     label: online
       ? "live community read · not a consensus confirmation"
       : "cached view · not confirmed",
