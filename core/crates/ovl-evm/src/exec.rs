@@ -75,6 +75,7 @@ pub fn apply_raw_transaction(world: &mut OvlEvmWorld, raw: &[u8]) -> Result<EvmR
             .output()
             .map(|bytes| bytes.to_vec())
             .unwrap_or_default(),
+        raw: raw.to_vec(),
     };
     world.receipts.push(receipt.clone());
     world.check_supply()?;

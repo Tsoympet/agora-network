@@ -147,6 +147,12 @@ pub fn enforce_rpc_bind_policy(bind: &str, token_set: bool) {
 /// Read-only methods that stay public when `AGORA_RPC_TOKEN` is configured
 /// (explorer tip sync / hydrate). Wallet writes and mining control require the token.
 pub fn method_requires_token(method: &str) -> bool {
+    if method == "eth_sendRawTransaction" {
+        return true;
+    }
+    if method == "web3_clientVersion" || method.starts_with("net_") || method.starts_with("eth_") {
+        return false;
+    }
     !matches!(
         method,
         "agora_getDagTips"
@@ -351,6 +357,13 @@ mod tests {
         assert!(method_requires_token("agora_getUtxos"));
         assert!(method_requires_token("agora_castGovVote"));
         assert!(method_requires_token("agora_submitProposal"));
+        assert!(!method_requires_token("eth_chainId"));
+        assert!(!method_requires_token("eth_getBalance"));
+        assert!(!method_requires_token("eth_call"));
+        assert!(!method_requires_token("eth_getLogs"));
+        assert!(!method_requires_token("net_version"));
+        assert!(!method_requires_token("web3_clientVersion"));
+        assert!(method_requires_token("eth_sendRawTransaction"));
     }
 
     #[test]

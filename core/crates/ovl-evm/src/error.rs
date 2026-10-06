@@ -6,6 +6,8 @@ use thiserror::Error;
 pub enum EvmError {
     #[error("{0}")]
     Rejected(String),
+    #[error("method not found: {0}")]
+    MethodNotFound(String),
 }
 
 impl EvmError {

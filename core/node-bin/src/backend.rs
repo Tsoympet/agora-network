@@ -972,6 +972,45 @@ impl NodeBackend {
         save_civic(self.store.as_ref(), &snap)?;
         Ok(out)
     }
+
+    fn eth_node_view(&self) -> agora_ovl_evm::EthNodeView {
+        agora_ovl_evm::EthNodeView {
+            listening: self.net.is_some(),
+            peer_count: u64::from(self.connected_peers.load(Ordering::Relaxed)),
+            // This node has no IBD cursor. `None` is Ethereum `false`, not a
+            // synthetic starting/current/highest triple.
+            syncing: None,
+            accept_raw_transactions: !self.network.eq_ignore_ascii_case("mainnet"),
+        }
+    }
+
+    /// Place process-local raw envelopes on this node's own template.
+    ///
+    /// They are not admitted to the Agora-signed mempool and are not published
+    /// as transactions. Public raw-EVM gossip remains PLANNED.
+    fn append_local_evm_executions(&self, executions: &mut Vec<OvlExecutionTx>) {
+        if self.network.eq_ignore_ascii_case("mainnet") {
+            return;
+        }
+        let Ok(world) = agora_state_machine::load_ovl_evm_world(&self.store) else {
+            return;
+        };
+        if !world.active {
+            return;
+        }
+        let Ok(pending) = self.pending_evm.lock() else {
+            return;
+        };
+        for tx in pending.values() {
+            if executions.len() >= DEFAULT_TEMPLATE_TX_LIMIT {
+                break;
+            }
+            if agora_ovl_evm::measure_shanghai_gas(&world, &tx.raw).is_err() {
+                continue;
+            }
+            executions.push(OvlExecutionTx::raw_ethereum(tx.raw.clone()));
+        }
+    }
 }
 
 impl RpcBackend for NodeBackend {
@@ -1203,8 +1242,14 @@ impl RpcBackend for NodeBackend {
             .pending_evm
             .lock()
             .map_err(|_| RpcError::Internal("OVL EVM pending lock poisoned".into()))?;
-        agora_ovl_evm::dispatch(&world, &mut pending, method, params)
-            .map_err(|err| RpcError::Rejected(err.to_string()))
+        pending.retain(|hash, _| world.receipts.iter().all(|receipt| receipt.hash != *hash));
+        let view = self.eth_node_view();
+        agora_ovl_evm::dispatch_with_view(&world, &mut pending, &view, method, params).map_err(
+            |err| match err {
+                agora_ovl_evm::EvmError::MethodNotFound(method) => RpcError::MethodNotFound(method),
+                agora_ovl_evm::EvmError::Rejected(message) => RpcError::Rejected(message),
+            },
+        )
     }
 
     fn submit_drc_payment(&mut self, tx: DrcPaymentTx) -> Result<Hash, RpcError> {
@@ -2139,7 +2184,7 @@ impl RpcBackend for NodeBackend {
             transfers,
             account_transfers,
             stake_ops,
-            ovl_executions,
+            mut ovl_executions,
             drc_payments,
             drc_account_policies,
             drc_deposit_preauths,
@@ -2203,6 +2248,7 @@ impl RpcBackend for NodeBackend {
                 pool.select_covenants(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
+        self.append_local_evm_executions(&mut ovl_executions);
         chain
             .block_template_lanes(
                 self.miner_address,
@@ -2293,6 +2339,16 @@ impl RpcBackend for NodeBackend {
             revalidate_trust_line_mempool(self.store.as_ref(), &mut pool);
             revalidate_issued_controls_mempool(self.store.as_ref(), &mut pool, &auth);
             revalidate_drc_offer_mempool(self.store.as_ref(), &mut pool, &auth, virtual_blue_score);
+        }
+        if let Ok(mut pending) = self.pending_evm.lock() {
+            for tx in &block.ovl_executions {
+                if tx.version != agora_types::OVL_EXECUTION_RAW_EVM_VERSION {
+                    continue;
+                }
+                if let Ok(parsed) = agora_ovl_evm::parse_raw_transaction(&tx.data) {
+                    pending.remove(&parsed.hash);
+                }
+            }
         }
         if let Some(net) = &self.net {
             // Prefer compact + announce; peers inflate from mempool or issue GetBlock.
@@ -2920,6 +2976,269 @@ mod tests {
         let template = backend.get_block_template().unwrap();
         assert_eq!(template.ovl_executions, vec![tx]);
         assert_eq!(template.header.tx_root, template.compute_body_root());
+    }
+
+    #[test]
+    fn public_ethereum_rpc_reads_stored_world_and_keeps_drc_and_tlt() {
+        use agora_rpc::{RpcDispatcher, RpcRequest};
+        use agora_state_machine::{load_account, load_ovl_evm_world, put_ovl_evm_world_into};
+        use agora_types::OvlWei;
+        use serde_json::json;
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let drc_addr = Address([4; 20]);
+        let tlt_addr = Address([5; 20]);
+        let tlt_out = TxOut {
+            value: Amount::from_base_units(40),
+            address: tlt_addr,
+        };
+        let mut utxo_key = vec![0x71; 32];
+        utxo_key.extend_from_slice(&0u32.to_le_bytes());
+        let utxo_val = borsh::to_vec(&tlt_out).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &drc_addr,
+            Amount::from_base_units(25),
+        )
+        .unwrap();
+        funding.put_cf(ColumnFamily::Utxo, &utxo_key, &utxo_val);
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mempool = Arc::new(Mutex::new(Mempool::new(8)));
+        let mut config = backend_config(genesis);
+        config.connected_peers = Arc::new(AtomicU32::new(4));
+        let backend = NodeBackend::new(chain, store.clone(), mempool, config);
+        let mut rpc = RpcDispatcher::new(backend);
+
+        let inactive = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "eth_chainId".into(),
+            params: json!([]),
+        });
+        assert_eq!(inactive.jsonrpc, "2.0");
+        assert!(inactive.result.is_none());
+        assert!(inactive.error.unwrap().message.contains("dev gate"));
+
+        let proof = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getProof", &json!([]))
+            .unwrap_err();
+        assert!(matches!(proof, RpcError::MethodNotFound(_)));
+
+        let key = agora_ovl_evm::dev_signing_key();
+        let caller = agora_ovl_evm::ethereum_address_from_signing_key(&key);
+        let caller_hex = format!("0x{}", hex_bytes(&caller));
+        let mut world = agora_ovl_evm::OvlEvmWorld::dev();
+        let funded = OvlWei::from_u128(10u128.pow(18));
+        world.fund(caller, funded).unwrap();
+        let mut activate = WriteBatch::new();
+        put_ovl_evm_world_into(&mut activate, &world);
+        store.write_batch(activate).unwrap();
+        let subroot = load_ovl_evm_world(&store).unwrap().execution_subroot();
+
+        let chain_id = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "eth_chainId".into(),
+            params: json!([]),
+        });
+        assert_eq!(chain_id.result.unwrap(), json!("0x12110"));
+        let balance = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getBalance", &json!([&caller_hex, "latest"]))
+            .unwrap();
+        assert_eq!(
+            balance,
+            json!(format!("0x{}", hex_bytes(&funded.to_be_bytes())))
+        );
+        let code = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getCode", &json!([&caller_hex, "0x0"]))
+            .unwrap();
+        assert_eq!(code, json!("0x"));
+        let storage = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getStorageAt", &json!([&caller_hex, "0x0", "latest"]))
+            .unwrap();
+        assert_eq!(storage, json!(format!("0x{}", "00".repeat(32))));
+        let nonce = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getTransactionCount", &json!([&caller_hex]))
+            .unwrap();
+        assert_eq!(nonce, json!("0x0"));
+        let call = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc(
+                "eth_call",
+                &json!([{ "from": &caller_hex, "to": "0x000000000000000000000000000000000000000a", "data": "0x" }]),
+            )
+            .unwrap();
+        assert_eq!(call, json!("0x"));
+        let gas = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc(
+                "eth_estimateGas",
+                &json!([{ "from": &caller_hex, "to": "0x000000000000000000000000000000000000000a" }]),
+            )
+            .unwrap();
+        assert_eq!(gas, json!("0x5208"));
+        assert_eq!(
+            rpc.backend_mut()
+                .ovl_ethereum_rpc("net_peerCount", &json!([]))
+                .unwrap(),
+            json!("0x4")
+        );
+        assert_eq!(
+            rpc.backend_mut()
+                .ovl_ethereum_rpc("net_listening", &json!([]))
+                .unwrap(),
+            json!(false)
+        );
+        assert_eq!(
+            rpc.backend_mut()
+                .ovl_ethereum_rpc("eth_syncing", &json!([]))
+                .unwrap(),
+            json!(false)
+        );
+        let version = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("web3_clientVersion", &json!([]))
+            .unwrap();
+        assert!(version.as_str().unwrap().contains("OVL-EVM-v1"));
+        let history = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_feeHistory", &json!([8, "latest", []]))
+            .unwrap();
+        assert_eq!(history["gasUsedRatio"].as_array().unwrap().len(), 1);
+        assert!(rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_call", &json!([{ "asset": "DRC" }]))
+            .unwrap_err()
+            .to_string()
+            .contains("DRC"));
+        assert!(rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getBalance", &json!([{ "asset": "TLT" }]))
+            .unwrap_err()
+            .to_string()
+            .contains("TLT"));
+        assert!(rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_sendRawTransaction", &json!(["0x03"]))
+            .unwrap_err()
+            .to_string()
+            .contains("blob"));
+        assert!(rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getBalance", &json!([&caller_hex, "0x5"]))
+            .unwrap_err()
+            .to_string()
+            .contains("historical"));
+        assert!(rpc
+            .backend_mut()
+            .ovl_ethereum_rpc("eth_getBlockByNumber", &json!(["0x9", false]))
+            .unwrap()
+            .is_null());
+
+        let raw = agora_ovl_evm::sign_eip1559(
+            &key,
+            world.chain_id,
+            0,
+            0,
+            u128::from(world.block.base_fee),
+            21_000,
+            Some([0x44; 20]),
+            {
+                let mut value = [0u8; 32];
+                value[31] = 1;
+                value
+            },
+            &[],
+            &[],
+        );
+        let sent = rpc
+            .backend_mut()
+            .ovl_ethereum_rpc(
+                "eth_sendRawTransaction",
+                &json!([format!("0x{}", hex_bytes(&raw))]),
+            )
+            .unwrap();
+        assert!(sent.as_str().unwrap().starts_with("0x"));
+        assert_eq!(
+            load_ovl_evm_world(&store).unwrap().execution_subroot(),
+            subroot
+        );
+        assert!(rpc
+            .backend()
+            .mempool
+            .lock()
+            .unwrap()
+            .select_ovl_executions(8)
+            .is_empty());
+        let template = rpc.backend().get_block_template().unwrap();
+        assert_eq!(template.ovl_executions.len(), 1);
+        assert_eq!(template.ovl_executions[0].version, 2);
+        assert_eq!(template.ovl_executions[0].data, raw);
+        assert_eq!(
+            rpc.backend_mut()
+                .ovl_ethereum_rpc(
+                    "eth_getBalance",
+                    &json!([format!("0x{}", hex_bytes(&drc_addr.0)), "latest"]),
+                )
+                .unwrap(),
+            json!(format!("0x{}", "00".repeat(32)))
+        );
+        assert_eq!(
+            rpc.backend_mut()
+                .ovl_ethereum_rpc(
+                    "eth_getBalance",
+                    &json!([format!("0x{}", hex_bytes(&tlt_addr.0)), "latest"]),
+                )
+                .unwrap(),
+            json!(format!("0x{}", "00".repeat(32)))
+        );
+        assert_eq!(
+            load_account(store.as_ref(), NativeAssetId::DRC, &drc_addr)
+                .unwrap()
+                .balance,
+            25
+        );
+        assert_eq!(
+            store
+                .get_cf(ColumnFamily::Utxo, &utxo_key)
+                .unwrap()
+                .unwrap(),
+            utxo_val
+        );
+
+        let mut mainnet_config = backend_config(genesis);
+        mainnet_config.network = "mainnet".into();
+        let mut mainnet = NodeBackend::new(
+            rpc.backend().chain.clone(),
+            rpc.backend().store.clone(),
+            Arc::new(Mutex::new(Mempool::new(4))),
+            mainnet_config,
+        );
+        let rejected = mainnet
+            .ovl_ethereum_rpc("eth_sendRawTransaction", &json!(["0x02c0"]))
+            .unwrap_err();
+        assert!(rejected.to_string().contains("dev and test"));
+    }
+
+    fn hex_bytes(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
     #[test]

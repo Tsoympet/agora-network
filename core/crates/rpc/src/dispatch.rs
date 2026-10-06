@@ -1366,6 +1366,21 @@ mod tests {
     };
 
     #[test]
+    fn ethereum_methods_are_not_invented_without_an_execution_world() {
+        let mut dispatcher = RpcDispatcher::new(InMemoryBackend::default());
+        let response = dispatcher.handle(RpcRequest {
+            id: Some(json!(7)),
+            method: "eth_getBalance".into(),
+            params: json!(["0x0000000000000000000000000000000000000001", "latest"]),
+        });
+        assert_eq!(response.jsonrpc, "2.0");
+        assert!(response.result.is_none());
+        let error = response.error.expect("missing world");
+        assert_eq!(error.code, -32601);
+        assert!(error.message.contains("eth_getBalance"));
+    }
+
+    #[test]
     fn common_drc_object_and_operation_queries_are_typed_and_closed() {
         let owner = Address([0x31; 20]);
         let source = Address([0x32; 20]);

@@ -329,8 +329,14 @@ pub struct RpcRequest {
     pub params: Value,
 }
 
+fn jsonrpc_version() -> String {
+    "2.0".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcResponse {
+    #[serde(default = "jsonrpc_version")]
+    pub jsonrpc: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -348,6 +354,7 @@ pub struct RpcErrorBody {
 impl RpcResponse {
     pub fn ok(id: Option<Value>, result: Value) -> Self {
         Self {
+            jsonrpc: jsonrpc_version(),
             id,
             result: Some(result),
             error: None,
@@ -356,6 +363,7 @@ impl RpcResponse {
 
     pub fn err(id: Option<Value>, err: &RpcError) -> Self {
         Self {
+            jsonrpc: jsonrpc_version(),
             id,
             result: None,
             error: Some(RpcErrorBody {
