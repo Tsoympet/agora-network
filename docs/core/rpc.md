@@ -8,6 +8,10 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | --- | --- |
 | `agora_getDagTips` | Current DAG tips (hex hashes) |
 | `agora_getBlock` | Block by hash |
+| `agora_getLightHeaders` | Selected-parent header window (newest toward genesis) plus explicit OVL/DRC stake totals. Truncated windows set `reaches_genesis: false`. No RandomX check |
+| `agora_getBlockBinding` | Canonical body-root binding for one stored block. Errors if the body is missing or `header.tx_root` does not match |
+| `agora_getTltInclusionProof` | TLT Merkle proof plus that block's body binding. Pending/unknown return `proof: null` |
+| `agora_getNativeBalances` | TLT UTXO sum plus OVL and DRC account balances. `header_proven` is false; token-gated like `agora_getBalance` |
 | `agora_getTransaction` | Lookup by `tx_id`: `pending` (mempool) / `confirmed` (indexed) / `unknown` |
 | `agora_getMempool` | Pending pool snapshot (`count` + fee-ordered `transactions`, optional `limit`) |
 | `agora_getNodeInfo` | Operator snapshot: peer id, connected peers, tips, mempool, PoW, archival / hot window, `min_relay_fee` |

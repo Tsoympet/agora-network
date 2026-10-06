@@ -380,6 +380,40 @@ pub trait RpcBackend: Send {
     fn ack_constitution(&mut self, address: Address, slot: u64) -> Result<Value, RpcError>;
     fn sponsor_proposal(&mut self, id: u64, who: Address) -> Result<Value, RpcError>;
     fn assent_proposal(&mut self, id: u64, who: Address) -> Result<Value, RpcError>;
+
+    /// Selected-parent header window plus tip finality totals.
+    ///
+    /// Backends without a chain fail closed instead of returning a placeholder spine.
+    fn get_light_headers(&self, tip: Option<Hash>, limit: usize) -> Result<Value, RpcError> {
+        let _ = (tip, limit);
+        Err(RpcError::Internal(
+            "light header spine is unavailable on this backend".into(),
+        ))
+    }
+
+    /// Header body-root binding for one stored block.
+    fn get_block_binding(&self, hash: &Hash) -> Result<Value, RpcError> {
+        let _ = hash;
+        Err(RpcError::Internal(
+            "block binding is unavailable on this backend".into(),
+        ))
+    }
+
+    /// TLT Merkle inclusion plus the block body binding. Missing proofs stay null.
+    fn get_tlt_inclusion_proof(&self, tx_id: &Hash) -> Result<Value, RpcError> {
+        let _ = tx_id;
+        Err(RpcError::Internal(
+            "TLT inclusion proof is unavailable on this backend".into(),
+        ))
+    }
+
+    /// TLT UTXO balance plus OVL and DRC account balances. Not a header proof.
+    fn get_native_balances(&self, address: &Address) -> Result<Value, RpcError> {
+        let _ = address;
+        Err(RpcError::Internal(
+            "native balances are unavailable on this backend".into(),
+        ))
+    }
 }
 
 /// In-memory ledger used by unit tests and the local faucet scaffold.

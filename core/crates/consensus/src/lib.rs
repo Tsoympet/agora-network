@@ -9,6 +9,7 @@ mod error;
 mod evidence;
 mod finality;
 mod ghostdag;
+mod light_headers;
 mod limits;
 mod pow;
 mod quorum;
@@ -27,6 +28,10 @@ pub use finality::{
     pow_work_met, refresh_certificate, FinalityPowPolicy,
 };
 pub use ghostdag::{Ghostdag, GhostdagConfig, GhostdagData, GhostdagSnapshot, OrderedBlock};
+pub use light_headers::{
+    compare_light_spines, verify_light_header_spine, LightHeaderError, ReportedLightHeader,
+    SpineRelation,
+};
 pub use limits::{
     ConsensusLimits, COINBASE_MATURITY, MAX_BLOCK_BYTES, MAX_BLOCK_PARENTS, MAX_BLOCK_TRANSACTIONS,
     MAX_DATA_COMMITMENTS_PER_BLOCK, MAX_TIMESTAMP_AHEAD_MS, MAX_TX_BYTES, MAX_TX_INPUTS,

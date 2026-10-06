@@ -301,6 +301,16 @@ impl ChainState {
             .ok_or_else(|| AdmitError::Consensus(format!("uncolored {}", tip.to_hex())))
     }
 
+    /// GHOSTDAG selected parent recorded for `hash`, if the block is colored.
+    pub fn selected_parent_of(&self, hash: &Hash) -> Option<Hash> {
+        self.ghostdag.selected_parent(hash)
+    }
+
+    /// GHOSTDAG blue score recorded for `hash`.
+    pub fn blue_score_of(&self, hash: &Hash) -> Option<u64> {
+        self.ghostdag.blue_score(hash)
+    }
+
     /// Exact GHOSTDAG blue score a template over the current parent set will receive.
     pub fn next_template_blue_score(&self) -> Result<u64, AdmitError> {
         let parents = self.select_template_parents()?;

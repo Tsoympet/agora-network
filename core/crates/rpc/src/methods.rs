@@ -8,6 +8,10 @@ use crate::error::RpcError;
 pub enum RpcMethod {
     GetDagTips,
     GetBlock,
+    GetLightHeaders,
+    GetBlockBinding,
+    GetTltInclusionProof,
+    GetNativeBalances,
     GetTransaction,
     GetMempool,
     GetNodeInfo,
@@ -105,6 +109,10 @@ impl RpcMethod {
         match self {
             Self::GetDagTips => "agora_getDagTips",
             Self::GetBlock => "agora_getBlock",
+            Self::GetLightHeaders => "agora_getLightHeaders",
+            Self::GetBlockBinding => "agora_getBlockBinding",
+            Self::GetTltInclusionProof => "agora_getTltInclusionProof",
+            Self::GetNativeBalances => "agora_getNativeBalances",
             Self::GetTransaction => "agora_getTransaction",
             Self::GetMempool => "agora_getMempool",
             Self::GetNodeInfo => "agora_getNodeInfo",
@@ -202,6 +210,10 @@ impl RpcMethod {
         match name {
             "agora_getDagTips" => Some(Self::GetDagTips),
             "agora_getBlock" => Some(Self::GetBlock),
+            "agora_getLightHeaders" => Some(Self::GetLightHeaders),
+            "agora_getBlockBinding" => Some(Self::GetBlockBinding),
+            "agora_getTltInclusionProof" => Some(Self::GetTltInclusionProof),
+            "agora_getNativeBalances" => Some(Self::GetNativeBalances),
             "agora_getTransaction" => Some(Self::GetTransaction),
             "agora_getMempool" => Some(Self::GetMempool),
             "agora_getNodeInfo" => Some(Self::GetNodeInfo),
