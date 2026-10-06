@@ -11,18 +11,22 @@ export type TltTxMerkleProof = {
   siblings: Uint8Array[];
 };
 
+function cloneBytes(bytes: Uint8Array): Uint8Array {
+  return new Uint8Array(bytes);
+}
+
 function hashPair(left: Uint8Array, right: Uint8Array): Uint8Array {
   const buf = new Uint8Array(64);
   buf.set(left, 0);
   buf.set(right, 32);
-  return sha256(buf);
+  return cloneBytes(sha256(buf));
 }
 
 export function tltTxMerkleRoot(txIds: Uint8Array[]): Uint8Array {
   if (txIds.length === 0) return new Uint8Array(32);
-  let level = txIds.map((id) => id.slice());
+  let level: Uint8Array[] = txIds.map(cloneBytes);
   while (level.length > 1) {
-    if (level.length % 2 === 1) level.push(level[level.length - 1].slice());
+    if (level.length % 2 === 1) level.push(cloneBytes(level[level.length - 1]));
     const next: Uint8Array[] = [];
     for (let i = 0; i < level.length; i += 2) {
       next.push(hashPair(level[i], level[i + 1]));
@@ -38,11 +42,11 @@ export function proveTltTxMerkle(
 ): TltTxMerkleProof | null {
   if (index < 0 || index >= txIds.length) return null;
   let idx = index;
-  let level = txIds.map((id) => id.slice());
+  let level: Uint8Array[] = txIds.map(cloneBytes);
   const siblings: Uint8Array[] = [];
   while (level.length > 1) {
-    if (level.length % 2 === 1) level.push(level[level.length - 1].slice());
-    siblings.push(level[idx ^ 1].slice());
+    if (level.length % 2 === 1) level.push(cloneBytes(level[level.length - 1]));
+    siblings.push(cloneBytes(level[idx ^ 1]));
     const next: Uint8Array[] = [];
     for (let i = 0; i < level.length; i += 2) {
       next.push(hashPair(level[i], level[i + 1]));
@@ -50,11 +54,11 @@ export function proveTltTxMerkle(
     level = next;
     idx = Math.floor(idx / 2);
   }
-  return { index, txId: txIds[index].slice(), siblings };
+  return { index, txId: cloneBytes(txIds[index]), siblings };
 }
 
 export function verifyTltTxMerkle(root: Uint8Array, proof: TltTxMerkleProof): boolean {
-  let hash = proof.txId.slice();
+  let hash = cloneBytes(proof.txId);
   let idx = proof.index;
   for (const sibling of proof.siblings) {
     hash = idx % 2 === 0 ? hashPair(hash, sibling) : hashPair(sibling, hash);

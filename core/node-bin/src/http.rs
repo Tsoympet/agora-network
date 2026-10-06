@@ -147,20 +147,49 @@ pub fn enforce_rpc_bind_policy(bind: &str, token_set: bool) {
 /// Read-only methods that stay public when `AGORA_RPC_TOKEN` is configured
 /// (explorer tip sync / hydrate). Wallet writes and mining control require the token.
 pub fn method_requires_token(method: &str) -> bool {
+    if method == "eth_sendRawTransaction" {
+        return true;
+    }
+    if method == "web3_clientVersion" || method.starts_with("net_") || method.starts_with("eth_") {
+        return false;
+    }
     !matches!(
         method,
         "agora_getDagTips"
             | "agora_getBlock"
             | "agora_getTransaction"
+            | "agora_getTltCovenant"
             | "agora_getDrcPayment"
             | "agora_getDrcPaymentByInvoice"
             | "agora_getDrcAccountPolicy"
             | "agora_getDrcDepositPreauth"
             | "agora_getDrcAccountKeys"
+            | "agora_getDrcAccountSignerList"
+            | "agora_getDrcTicket"
+            | "agora_getDrcEscrow"
+            | "agora_getDrcEscrowReceipt"
+            | "agora_getDrcCheck"
+            | "agora_getDrcCheckReceipt"
+            | "agora_getDrcPaymentChannel"
+            | "agora_getDrcPaymentChannelReceipt"
+            | "agora_getDrcPaymentChannelFundEvent"
+            | "agora_getDrcPaymentChannelClaimEvent"
+            | "agora_getDrcPaymentChannelScheduleEvent"
+            | "agora_verifyDrcPaymentChannelClaim"
+            | "agora_getDrcTrustLine"
+            | "agora_getDrcIssuerLiability"
+            | "agora_getDrcIssuedTransferReceipt"
+            | "agora_getDrcIssuedAssetPolicy"
+            | "agora_getDrcIssuedAssetPolicyReceipt"
+            | "agora_getDrcTrustLineIssuerControlReceipt"
+            | "agora_getDrcIssuedClawbackReceipt"
             | "agora_getDrcObject"
             | "agora_getDrcAccountObjects"
             | "agora_getDrcOperation"
             | "agora_getDrcTransaction"
+            | "agora_getDrcOffer"
+            | "agora_getDrcAccountOffers"
+            | "agora_getDrcBookOffers"
             | "agora_getMempool"
             | "agora_getNodeInfo"
             | "agora_estimateFee"
@@ -324,15 +353,32 @@ mod tests {
         assert!(!method_requires_token("agora_getDagTips"));
         assert!(!method_requires_token("agora_getBlock"));
         assert!(!method_requires_token("agora_getTransaction"));
+        assert!(!method_requires_token("agora_getTltCovenant"));
+        assert!(method_requires_token("agora_submitTltCovenant"));
         assert!(!method_requires_token("agora_getDrcPayment"));
         assert!(!method_requires_token("agora_getDrcPaymentByInvoice"));
         assert!(!method_requires_token("agora_getDrcAccountPolicy"));
         assert!(!method_requires_token("agora_getDrcDepositPreauth"));
         assert!(!method_requires_token("agora_getDrcAccountKeys"));
+        assert!(!method_requires_token("agora_getDrcAccountSignerList"));
+        assert!(!method_requires_token("agora_getDrcTicket"));
+        assert!(!method_requires_token("agora_getDrcEscrow"));
+        assert!(!method_requires_token("agora_getDrcEscrowReceipt"));
+        assert!(!method_requires_token("agora_getDrcCheck"));
+        assert!(!method_requires_token("agora_getDrcCheckReceipt"));
+        assert!(!method_requires_token("agora_getDrcPaymentChannel"));
+        assert!(!method_requires_token("agora_getDrcPaymentChannelReceipt"));
+        assert!(!method_requires_token("agora_verifyDrcPaymentChannelClaim"));
+        assert!(!method_requires_token("agora_getDrcTrustLine"));
+        assert!(!method_requires_token("agora_getDrcIssuerLiability"));
+        assert!(!method_requires_token("agora_getDrcIssuedAssetPolicy"));
         assert!(!method_requires_token("agora_getDrcObject"));
         assert!(!method_requires_token("agora_getDrcAccountObjects"));
         assert!(!method_requires_token("agora_getDrcOperation"));
         assert!(!method_requires_token("agora_getDrcTransaction"));
+        assert!(!method_requires_token("agora_getDrcOffer"));
+        assert!(!method_requires_token("agora_getDrcAccountOffers"));
+        assert!(!method_requires_token("agora_getDrcBookOffers"));
         assert!(!method_requires_token("agora_getMempool"));
         assert!(!method_requires_token("agora_getNodeInfo"));
         assert!(!method_requires_token("agora_estimateFee"));
@@ -345,9 +391,17 @@ mod tests {
         assert!(method_requires_token("agora_getBlockTemplate"));
         assert!(method_requires_token("agora_fundAddress"));
         assert!(method_requires_token("agora_getBalance"));
+        assert!(method_requires_token("agora_getAccountBalances"));
         assert!(method_requires_token("agora_getUtxos"));
         assert!(method_requires_token("agora_castGovVote"));
         assert!(method_requires_token("agora_submitProposal"));
+        assert!(!method_requires_token("eth_chainId"));
+        assert!(!method_requires_token("eth_getBalance"));
+        assert!(!method_requires_token("eth_call"));
+        assert!(!method_requires_token("eth_getLogs"));
+        assert!(!method_requires_token("net_version"));
+        assert!(!method_requires_token("web3_clientVersion"));
+        assert!(method_requires_token("eth_sendRawTransaction"));
     }
 
     #[test]

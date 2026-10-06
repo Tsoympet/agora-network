@@ -12,6 +12,9 @@ use crate::{StateError, StateStore};
 
 const TX_INDEX_PREFIX: &[u8] = b"tx/";
 const TX_INCL_PREFIX: &[u8] = b"txi/";
+/// Covenant ids stay off `tx/` so a script spend cannot be treated as a v1 coinbase.
+const TXC_INDEX_PREFIX: &[u8] = b"txc/";
+const TXC_INCL_PREFIX: &[u8] = b"txci/";
 
 pub fn tx_index_key(tx_id: &Hash) -> Vec<u8> {
     let mut key = Vec::with_capacity(TX_INDEX_PREFIX.len() + 32);
@@ -68,6 +71,16 @@ pub fn index_block_transactions_into(batch: &mut WriteBatch, block: &Block) {
         // Primary pointer — caller should refresh from virtual tip after reorg.
         batch.put_cf(ColumnFamily::Warm, &tx_index_key(&tx_id), &value);
     }
+    for (index, tx) in block.tlt_covenants.iter().enumerate() {
+        let tx_id = tx.tx_id();
+        let value = encode_tx_location(&block_id, index as u32);
+        batch.put_cf(
+            ColumnFamily::Warm,
+            &covenant_tx_inclusion_key(&tx_id, &block_id),
+            &value,
+        );
+        batch.put_cf(ColumnFamily::Warm, &covenant_tx_index_key(&tx_id), &value);
+    }
 }
 
 /// Point the primary `tx/` pointer at `block_id` when that inclusion exists.
@@ -95,6 +108,59 @@ pub fn list_tx_inclusions(
 ) -> Result<Vec<(Hash, u32)>, StateError> {
     let mut prefix = Vec::with_capacity(TX_INCL_PREFIX.len() + 32);
     prefix.extend_from_slice(TX_INCL_PREFIX);
+    prefix.extend_from_slice(tx_id.as_bytes());
+    let pairs = store.scan_prefix(ColumnFamily::Warm, &prefix)?;
+    let mut out = Vec::new();
+    for (_k, v) in pairs {
+        if let Some(loc) = decode_tx_location(&v) {
+            out.push(loc);
+        }
+    }
+    Ok(out)
+}
+
+pub fn covenant_tx_index_key(tx_id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(TXC_INDEX_PREFIX.len() + 32);
+    key.extend_from_slice(TXC_INDEX_PREFIX);
+    key.extend_from_slice(tx_id.as_bytes());
+    key
+}
+
+pub fn covenant_tx_inclusion_key(tx_id: &Hash, block_id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(TXC_INCL_PREFIX.len() + 64);
+    key.extend_from_slice(TXC_INCL_PREFIX);
+    key.extend_from_slice(tx_id.as_bytes());
+    key.extend_from_slice(block_id.as_bytes());
+    key
+}
+
+pub fn set_primary_covenant_tx_location(
+    batch: &mut WriteBatch,
+    tx_id: &Hash,
+    block_id: &Hash,
+    index: u32,
+) {
+    let value = encode_tx_location(block_id, index);
+    batch.put_cf(ColumnFamily::Warm, &covenant_tx_index_key(tx_id), &value);
+}
+
+pub fn lookup_covenant_tx_location(
+    store: &StateStore,
+    tx_id: &Hash,
+) -> Result<Option<(Hash, u32)>, StateError> {
+    let key = covenant_tx_index_key(tx_id);
+    let Some(bytes) = store.get_cf(ColumnFamily::Warm, &key)? else {
+        return Ok(None);
+    };
+    Ok(decode_tx_location(&bytes))
+}
+
+pub fn list_covenant_tx_inclusions(
+    store: &StateStore,
+    tx_id: &Hash,
+) -> Result<Vec<(Hash, u32)>, StateError> {
+    let mut prefix = Vec::with_capacity(TXC_INCL_PREFIX.len() + 32);
+    prefix.extend_from_slice(TXC_INCL_PREFIX);
     prefix.extend_from_slice(tx_id.as_bytes());
     let pairs = store.scan_prefix(ColumnFamily::Warm, &prefix)?;
     let mut out = Vec::new();

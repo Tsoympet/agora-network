@@ -1,12 +1,12 @@
 # TLT covenant script
 
-**Maturity:** Experimental. The interpreter is a tested library. It is not activated on the live v1 UTXO lane.
+**Maturity:** Experimental. Covenant programs are admitted on the block covenant lane. The live v1 transfer wire is unchanged.
 
 ## Why this is separate from v1 transfers
 
 Live Talanton transfers are address-locked. `Transaction` version 1 borsh is `version`, outpoints, `value ‖ address` outputs, `nonce`, compressed pubkey, and a 64-byte secp256k1 signature. That encoding is the frozen testnet transaction id preimage. Adding locktime or script bytes to it would change every existing transaction id.
 
-`TltCovenantTx` (version 2, domain `agora-tlt-covenant-v1`) carries per-input `sequence`, `script_sig`, output `script_pubkey`, and `lock_time`. It is not a block-body field. Block admission still applies v1 transfers only.
+`TltCovenantTx` (version 2, domain `agora-tlt-covenant-v1`) carries per-input `sequence`, `script_sig`, output `script_pubkey`, and `lock_time`. A non-empty `tlt_covenants` lane is appended after native DRC offer vectors and wrapped into the body root as `agora-block-body-v19`. Offer-only bodies keep `agora-block-body-v18`. Empty offer and covenant lanes are omitted, so frozen v1 block bytes stay the same.
 
 `nonce` stays on the covenant transaction so Agora replay binding remains available.
 
@@ -34,8 +34,14 @@ CHECKSIG uses `KeyPair::verify` (secp256k1 over SHA-256 of the sighash preimage)
 - `CHECKSEQUENCEVERIFY` uses bit 31 as the disable flag, bit 22 as the time flag, and the low 16 bits as the magnitude. Relative time steps by 512 unix seconds.
 - v1 `Transaction::effective_sequence` is `0xFFFFFFFF` and `effective_lock_time` is 0. v1 transactions do not signal replace-by-fee.
 
+## Block admission
+
+Consensus evaluates each covenant input with `sighash_preimage_bound` when a chain id is configured. P2PKH-style outputs are stored as ordinary `TxOut` records so `balance_of` and v1 spends still see them. Other scripts are stored under `tlt/covenant/utxo/` and restored from the UTXO journal on reorg. Covenant fees join the coinbase budget. `agora_submitTltCovenant` and `agora_getTltCovenant` are the relay and query methods. Submit publishes `NetworkMessage::TltCovenant` on the transaction topic. v1 Merkle proofs still use the pairwise transaction-id root, which is not the wrapped header root once a covenant is present.
+
 ## What this module does not do
 
-- It does not replace RandomX, GHOSTDAG, or the address-locked UTXO set.
-- It does not move TLT into an account, an ERC-20, or a wrapped asset.
-- It does not activate covenant spends in `apply_block`.
+- It does not replace RandomX, GHOSTDAG, or the address-locked v1 wire.
+- It does not put locktime or sequence on v1 `Transaction` bytes.
+- It does not move TLT into an account, an ERC-20, or a wrapped asset. Wrapped TLT is not implemented.
+- Compact-block short ids stay UTXO-only. A block that carries covenants uses the full body until a lane-kind compact format exists.
+- Script-locked value is not included in `balance_of`. Legacy address outputs have origin blue score 0, so relative locks against them are not meaningful.

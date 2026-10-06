@@ -42,7 +42,8 @@ use crate::backend::{
     admit_drc_payment_channel_close, admit_drc_payment_channel_create,
     admit_drc_payment_channel_fund, admit_drc_regular_key, admit_drc_signer_list,
     admit_drc_ticket_create, admit_drc_trust_line_issuer_control, admit_drc_trust_line_set,
-    admit_ovl_execution, admit_stake_tx, admit_transaction, NodeBackend, NodeBackendConfig,
+    admit_ovl_execution, admit_stake_tx, admit_tlt_covenant, admit_transaction, NodeBackend,
+    NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
 use crate::startup::{p2p_identity_path, prepare_legacy_datadir};
@@ -1447,6 +1448,16 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "DRC offer cancel gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::TltCovenant(tx) => {
+                        match admit_tlt_covenant(store.as_ref(), &chain, &mempool, tx, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, covenant = %id.to_hex(), "TLT covenant gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "TLT covenant gossip rejected");
                             }
                         }
                     }

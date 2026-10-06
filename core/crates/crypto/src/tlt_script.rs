@@ -4,7 +4,8 @@
 //! with SHA-256 before ECDSA. This is the same audited path as v1 transfers.
 
 use agora_types::{
-    eval_covenant_input, SigChecker, TltCovenantTx, TltOutputOrigin, TltScriptError,
+    eval_covenant_input, eval_covenant_input_preimage, SigChecker, TltCovenantTx, TltOutputOrigin,
+    TltScriptError,
 };
 
 use crate::{CryptoError, KeyPair};
@@ -40,6 +41,28 @@ pub fn verify_tlt_covenant_input(
         spend_blue_score,
         median_time_past_secs,
         origin,
+        &SecpChecker,
+    )
+}
+
+/// Verify one input against an explicit sighash preimage (chain-bound or unbound).
+pub fn verify_tlt_covenant_input_preimage(
+    tx: &TltCovenantTx,
+    input_index: usize,
+    script_pubkey: &[u8],
+    spend_blue_score: u64,
+    median_time_past_secs: u64,
+    origin: TltOutputOrigin,
+    preimage: &[u8],
+) -> Result<(), TltScriptError> {
+    eval_covenant_input_preimage(
+        tx,
+        input_index,
+        script_pubkey,
+        spend_blue_score,
+        median_time_past_secs,
+        origin,
+        preimage.to_vec(),
         &SecpChecker,
     )
 }

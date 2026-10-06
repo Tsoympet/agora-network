@@ -1,0 +1,201 @@
+# Trident repository audit
+
+**Maturity:** Scaffold (snapshot of live code and docs; not a production audit).  
+**Status line:** `TRIDENT L1 FUNCTIONAL COMPLETENESS — INCOMPLETE`  
+**Not** public-testnet ready. **Not** mainnet ready.
+
+This document is a whole-repo inventory of what is wired on the current
+three-lane BlockDAG branch versus what remains unfinished, unwired, or
+honestly incomplete. It does not claim XRPL, Ethereum, or Bitcoin
+equivalence.
+
+Canonical design remains [`TRIDENT_L1.md`](TRIDENT_L1.md) and
+[`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md). Asset-specific
+parity files keep their own `INCOMPLETE` status lines.
+
+---
+
+## Snapshot constants
+
+| Constant | Value | Notes |
+| --- | --- | --- |
+| `TRIDENT_PROTOCOL_VERSION` | 24 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis |
+| Datadir `SCHEMA_VERSION` | 22 | Experimental; `OVL_EVM_SCHEMA_VERSION` is also 22 |
+| DRC fee-burn schema | 20 | Lifetime burned counters |
+| DRC ledger-index datadir | 21 | Common live-object / receipt rebuild |
+| Combined body v18 | offer create/cancel only | Empty history keeps the frozen root |
+| Combined body v19 | TLT covenants wrap v18 | Empty covenants stay off the empty wire |
+| DA body wrap | v5 | Empty `data_commitments` keep the v4 root |
+| Consensus / tx signing | secp256k1 | No custom crypto |
+| Outer encoding | Borsh | JSON-RPC is a convenience surface |
+
+---
+
+## What is live on one BlockDAG
+
+Finality is still **TLT PoW work threshold ∧ ≥⅔ OVL stake ∧ ≥⅔ DRC stake**.
+Independent quorums; no price-oracle mixing.
+
+| Lane | Consensus | Gossip | Mempool / template | RPC | Client |
+| --- | --- | --- | --- | --- | --- |
+| TLT UTXO + RandomX | Wired | `NetworkMessage::Transaction` / `Block` / compact | Wired | `agora_submitTransaction`, `agora_getBalance` (UTXO only), `agora_getUtxos` | Desktop / mobile send + explorer |
+| TLT covenants v2 | Wired (Experimental) | `NetworkMessage::TltCovenant` (appended after offer cancel) | Wired; compact falls back to full body | `agora_submitTltCovenant`, `agora_getTltCovenant` | Shared light-client query wrapper |
+| OVL account transfer | Wired | `AccountTransfer` | Wired | `agora_submitAccountTransfer` | No typed wallet builder |
+| OVL execution (intrinsic gas) | Wired | `OvlExecution` | Wired | `agora_submitOvlExecution` | No typed wallet builder |
+| OVL-EVM-v1 (`revm` Shanghai) | Experimental, genesis-gated | **Not** on the Agora-signed gossip topic | Process-local pending inbox → local template only | Canonical `eth_*` / `net_*` / `web3_clientVersion`; `eth_sendRawTransaction` is local | No light-client `eth_*` wrapper |
+| DRC payments + XRPL-like objects | Wired (Experimental) | Typed envelopes through offer cancel | Wired; family reservations | Typed submit/get methods | Object/operation queries + DEX queries; native balance via `agora_getAccountBalances` |
+| DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared light-client query wrappers |
+| Dual-PoS finality / staking | Wired (Experimental) | `CheckpointAttestation`, `StakeTx` | Wired | Validator / pool / `agora_submitStakeTx` | Light-client reads exist |
+| Protocol treasuries / community registry | Genesis + library | No mutation gossip | No block lane | Read RPCs | Light-client reads exist |
+| DA commitments | Apply + journal | Full block only | **No** mempool / template selection | **No** submit / lookup RPC | None |
+
+`agora_getBalance` remains the TLT UTXO sum. Native OVL/DRC account
+balances and shared nonces are `agora_getAccountBalances`. Ethereum
+`eth_getBalance` is OVL-EVM wei and is a different ledger.
+
+---
+
+## P2P and compact blocks
+
+`NetworkMessage` Borsh discriminants are append-only through
+`TltCovenant`. There is no DA, community, or raw-EVM gossip variant.
+
+`compact_from_block` is UTXO-only. Any nonempty account, stake, OVL,
+DRC, DA, offer, or covenant lane forces a full `Block` envelope. That
+is intentional until a versioned compact format can name lane kinds.
+
+IBD (`GetBlock`, orphan pool, headers-first catch-up) is wired for
+stored blocks. Compact misses follow the same full-body path.
+
+---
+
+## RPC surface
+
+The dispatcher in `agora-rpc` is the canonical method list. Node HTTP
+auth (`AGORA_RPC_TOKEN`) leaves public chain/object reads open and
+gates wallet, mining, faucet, and submit paths.
+
+**Wired and token-gated (wallet / operator):** TLT UTXO
+`agora_getBalance` / `agora_getUtxos` / `agora_getAccountBalances`,
+submits, mining template, faucet, civic write RPCs.
+
+**Wired and public:** DAG/block/tx/mempool/node/fee, TLT covenant
+lookup, every implemented DRC `Get*` family method (payments through
+DEX offers, objects, receipts, channels, trust lines, issued controls),
+finality/validator/supply/treasury/registry, constitution board reads.
+Ethereum JSON-RPC reads are public; `eth_sendRawTransaction` requires a
+token.
+
+Wallet-sensitive `agora_getBalance` / `agora_getAccountBalances` /
+`agora_getUtxos` stay token-gated.
+
+There is no `agora_submitDataCommitment`, `agora_getDataCommitment`,
+`agora_submitDrcExecution`, or generic `agora_submitExecution`.
+
+---
+
+## Clients
+
+| Surface | What it does | Honest gap |
+| --- | --- | --- |
+| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, canonical `eth_*` reads | Keys stay on device. No RandomX recompute. No typed DRC/OVL builders. No DA wrapper |
+| Desktop / mobile wallets | TLT UTXO send + native OVL/DRC balance display | No typed DRC payment/DEX or OVL execution builders |
+| Explorer | DAG, tx lookup, protocol-lane reads, mempool, node, governance panel | No DEX book order-entry UI |
+| `agora-layers` HTTP | Historical lab; loopback | Non-canonical; mixed unauthenticated mutations |
+
+Light clients stay light: they call JSON-RPC; they do not embed
+infrastructure servers or store operator keys.
+
+---
+
+## Community, governance, treasuries
+
+| Component | Maturity | Wiring |
+| --- | --- | --- |
+| Civic constitution / forum / Ecclesia prototype | Experimental administrative RPC | Local snapshot; not a consensus community lane |
+| Canonical Hub / Passport / Grant / Mission registry | Scaffold | Genesis records + `agora_getCommunityRegistry`; library APIs only; no block mutation lane |
+| Protocol treasuries | Scaffold / Experimental reads | `agora_getProtocolTreasuries`; signed disbursement is later |
+| Merchant / Passport / Grants docs | Scaffold | Specs, not consensus |
+
+Community Definition of Done remains **INCOMPLETE**. On-chain state is
+limited to balances, txs, governance, treasuries, and justified
+attestations. Infrastructure (indexers, relays, sequencers) stays off
+the device.
+
+---
+
+## Data availability
+
+`Block.data_commitments` and the atomic apply/journal path exist.
+There is no mempool admission, no gossip envelope, no RPC, and no
+public district submission. Lab `recordDa` is an in-process assertion.
+See [`../core/data-availability.md`](../core/data-availability.md).
+
+---
+
+## Asset parity (do not upgrade these lines)
+
+| Asset | Canonical status | Highest honest claim |
+| --- | --- | --- |
+| TLT | `TALANTON BITCOIN FUNCTIONAL PARITY — INCOMPLETE` | Live UTXO/RandomX/GHOSTDAG is Multi-node devnet. Covenants are Experimental. No wrapped TLT, no v1 locktime/sequence, no 5-node production audit |
+| OVL | `OVOLOS ETHEREUM FUNCTIONAL PARITY — INCOMPLETE` | Shanghai-gated OVL-EVM-v1 + 100% base-fee burn is Experimental. Public raw-EVM gossip is PLANNED. Not Ethereum-equivalent |
+| DRC | XRPL capability profile: Experimental / Partial | Contract-free closed operations plus native DEX. No paths, AMM, rippling, Hooks, or XRPL wire parity |
+
+DRC never receives a VM, bytecode, Hook, or user-defined program. OVL
+is the only programmable domain.
+
+---
+
+## Persistence, genesis, CI
+
+- Testnet genesis v2 is frozen in-repo. Trident v3 draft remains
+  **UNFROZEN**. Mainnet is not bootable.
+- Schema migrations exist as library helpers. A full operator
+  migrate/reindex CLI is still pending
+  ([`../migration/SCHEMA_TRIDENT.md`](../migration/SCHEMA_TRIDENT.md)).
+- Fast CI excludes `agora-node`, `agora-consensus`, `agora-p2p`,
+  miner sidecar, stratum, seeder, and faucet. Node tests with default
+  RocksDB features require `librocksdb-sys` native headers.
+
+---
+
+## Remaining high-confidence gaps
+
+These are real unfinished paths, not parity slogans:
+
+1. **DA submit / gossip / RPC** — consensus lane without a public
+   admission path.
+2. **OVL raw-EVM public mempool** — fingerprint has no raw-EVM topic;
+   version 2 is rejected by the Agora-signed pool.
+3. **Compact-block multi-lane encoding** — full bodies for every
+   non-UTXO lane. `Block::requires_full_body_gossip` is the single
+   fail-closed gate so new lanes cannot silently enter UTXO compact ids.
+4. **Community consensus lanes** — registry is genesis + library only.
+5. **Wallet construction UX** — desktop/mobile still send TLT UTXO only;
+   they now display native OVL/DRC balances. Typed DRC payment/DEX and
+   OVL execution builders remain unwired.
+6. **Operator schema CLI** — replay/rebuild is documented, not shipped
+   as a first-class binary.
+
+Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
+OVL/DRC, price-oracle stake mixing, silent kHeavyHash public PoW
+fallback, embedding infra servers in light clients.
+
+---
+
+## This snapshot's wiring
+
+This audit close-out adds:
+
+- `agora_getAccountBalances` — TLT UTXO sum plus native OVL/DRC
+  account balance and nonce, without changing `agora_getBalance`.
+- Shared light-client wrappers for that method, TLT covenants, DRC
+  DEX/escrow/check/ticket/trust-line reads, submit helpers, and
+  canonical `eth_chainId` / `eth_blockNumber` / `eth_getBalance`.
+- Public (no-token) access for every implemented DRC `Get*` family
+  method, including escrow, Checks, channels, trust lines, issued
+  controls, and DEX offer pages.
+- Explorer protocol-lane panel and desktop/mobile native OVL/DRC
+  balance display.
+- `Block::requires_full_body_gossip` so compact gossip cannot forget a
+  typed lane.

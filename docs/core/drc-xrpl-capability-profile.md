@@ -83,11 +83,10 @@ Protocol v23 also resolves the earlier common-index gap with ten closed live
 object kinds, deterministic IDs, bounded owner pagination, and canonical
 accepted-operation lookup. Remaining material gaps are:
 
-- no generic DRC account balance/sequence query comparable to `account_info`;
-- generated types exist, but shared/desktop/mobile wallets cannot construct,
-  sign, submit, or query most DRC operations;
-- later DRC read methods are not all in the token-authenticated HTTP server's
-  public read allowlist;
+- native three-asset balances exist as `agora_getAccountBalances`; that is not
+  XRPL `account_info` and does not change TLT `agora_getBalance`;
+- generated types exist, but shared/desktop/mobile wallets still cannot
+  construct or sign most DRC operations;
 - no frozen Trident genesis, live v3 loader, in-place schema migration CLI, or
   invariant-verification command; and
 - no DEX settlement convergence suite.
@@ -101,7 +100,7 @@ public-testnet readiness or XRPL parity.
 | --- | --- | --- | --- |
 | Canonical ledger | DRC account, stake, authorization, and settlement state is applied beside TLT/OVL and composed into one state root | BlockDAG ordering and Trident roots, not XRPL ledgers or SHAMap | Executable · Experimental |
 | Validator/finality | DRC validators sign the same checkpoints as OVL validators; finality requires PoW + both independent quorums | No UNL/Ripple consensus; no stake price mixing or admin bypass | Executable · Experimental |
-| Native accounts | `(DRC, address)` balance and shared nonce; recipients can acquire account state through transfer | No XRP reserve/account-delete model; no public balance+sequence account query | Executable core · Experimental; RPC gap |
+| Native accounts | `(DRC, address)` balance and shared nonce; recipients can acquire account state through transfer | No XRP reserve/account-delete model; public native balances are `agora_getAccountBalances`, not XRPL `account_info` | Executable core · Experimental |
 | Native transfer/payment | Exact amount, explicit DRC fee, secp256k1 auth, duplicate/replay checks, deterministic receipt/outbox | Full delivery only; no paths or partial payment | Executable · Experimental |
 | Fee disposition | Accepted signed DRC fees increment lifetime burned supply; all non-accepted results burn zero | Reward pool retains historical mixed-provenance funds and still receives reserve drips/slashes; TLT/OVL behavior is unchanged | Executable · Experimental |
 | Sequence/replay | Shared nonce across DRC account families; network-bound chain/genesis signing | `u64` Agora sequence model, not XRPL `UInt32` wire encoding | Executable · Experimental |
@@ -121,7 +120,7 @@ public-testnet readiness or XRPL parity.
 | Ledger-object directory | Ten closed live-object kinds have domain-separated IDs, validated descriptors, point lookup, and bounded owner/kind pagination | Agora Borsh/SHA-256 IDs and semantic owners; no XRPL key/hash or reserve parity | Executable · Experimental |
 | Public submission RPC | Typed submit methods exist for implemented DRC families | Agora JSON over Borsh-shaped types; no `submit` wire parity | Executable · Experimental |
 | Public query RPC | Family point queries, common object/account-object/operation/transaction reads, plus account-offer and book-offer pages | Agora response shapes, not XRPL `account_offers` / `book_offers` parity; funded size is not a simulated fill | Executable reads · Experimental |
-| Wallet/client | Generated object/operation types and shared light-client query methods exist | No DRC balance query, broad typed construction/signing/submission, or object-query UX | Partial · Experimental |
+| Wallet/client | Generated types plus shared light-client queries for native balances, TLT covenants, DEX offers, escrow/check/ticket/trust-line reads, and OVL `eth_*` reads; explorer and wallets display those reads | No broad typed construction/signing/submission UX | Partial · Experimental |
 | Mempool/template | Shared nonce/Ticket and family-specific object reservations; deterministic lane order; full-body templates | Same-block dependencies are often intentionally fail-closed in public admission | Executable · Experimental |
 | P2P/IBD | Typed operation gossip and full multi-lane block relay; compact blocks fall back to full body | No XRPL peer/wire protocol | Executable · Experimental |
 | Reorg/restart | Common objects and accepted receipts share the atomic journal; orphan receipts disappear and exact resubmission/reapply is deterministic | Included typed operations generally require explicit resubmission after reorg | Executable core · Experimental |

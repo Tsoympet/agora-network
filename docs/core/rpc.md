@@ -53,7 +53,8 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_getDrcAccountObjects` | Bounded, cursor-paginated common live objects for one owner, optionally filtered by closed object kind |
 | `agora_getDrcOperation` | Canonical accepted DRC operation receipt by domain-separated operation ID |
 | `agora_getDrcTransaction` | Canonical accepted DRC operation receipt by the historical signed transaction ID |
-| `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
+| `agora_getBalance` | Address TLT UTXO balance (sum of live `cf_utxo`) |
+| `agora_getAccountBalances` | TLT UTXO sum plus native OVL/DRC account balance and nonce. Missing accounts read as zeros. Does not change `agora_getBalance` and is not EVM wei |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
 | `agora_getBlockTemplate` | Mining template block (tips as parents + coinbase) |
@@ -83,11 +84,28 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 
 ## Execution boundary
 
-`agora_submitOvlExecution` is the only programmable-execution submission
-method. Its `OvlExecutionTx` is intrinsically OVL-denominated and has no asset
-selector. Unknown fields such as `"asset": "DRC"` are rejected rather than
-ignored. There is no generic `agora_submitExecution`, DRC deploy/call, DRC VM,
-or contract-facing DRC method.
+`agora_submitOvlExecution` is the only Agora-signed programmable-execution
+submission method. Its `OvlExecutionTx` is intrinsically OVL-denominated and has
+no asset selector. Unknown fields such as `"asset": "DRC"` are rejected rather
+than ignored. There is no generic `agora_submitExecution`, DRC deploy/call, DRC
+VM, or contract-facing DRC method.
+
+## OVL Ethereum JSON-RPC
+
+`eth_*`, `net_*`, and `web3_clientVersion` are dispatched to
+`RpcBackend::ovl_ethereum_rpc`. The default implementation is method-not-found.
+`agora-node` loads the canonical OVL-EVM-v1 world and answers from it. Responses
+use a JSON-RPC 2.0 envelope.
+
+Public reads when `AGORA_RPC_TOKEN` is set include `web3_clientVersion`,
+`net_version`, `net_listening`, `net_peerCount`, `eth_chainId`, `eth_syncing`,
+`eth_blockNumber`, `eth_gasPrice`, `eth_maxPriorityFeePerGas`,
+`eth_getBalance`, `eth_getTransactionCount`, `eth_getCode`, `eth_getStorageAt`,
+`eth_call`, `eth_estimateGas`, `eth_feeHistory`, `eth_getTransactionByHash`,
+`eth_getTransactionReceipt`, `eth_getBlockByNumber`, `eth_getBlockByHash`,
+`eth_getLogs`, the block transaction-count methods, and the transaction-by-index
+methods. `eth_sendRawTransaction` requires the token and the dev/test gate.
+`eth_getProof` is not implemented. See [`ovl-evm.md`](ovl-evm.md).
 
 DRC payment, escrow, Check, payment-channel, trust-line, issued-asset,
 freeze/clawback, multisign, regular-key, and Ticket methods submit closed typed
@@ -150,7 +168,8 @@ When unset, JSON-RPC stays open (safe with the default loopback bind). When set:
 | Always public | Token required |
 | --- | --- |
 | `GET /health` | `agora_submitTransaction` / `agora_submitBlock` |
-| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` / DRC payment, policy, and preauthorization reads | `agora_getBlockTemplate` / `agora_fundAddress` |
+| `agora_getDagTips` / `agora_getBlock` / `agora_getTransaction` / `agora_getTltCovenant` / DRC family reads (payments through DEX offers, objects, receipts, channels, trust lines, issued controls) | `agora_getBlockTemplate` / `agora_fundAddress` |
+| `web3_clientVersion`, `net_*`, and `eth_*` reads | `eth_sendRawTransaction` |
 | `agora_getMempool` / `agora_getNodeInfo` / `agora_estimateFee` | `agora_getBalance` / `agora_getUtxos` |
 | `agora_getConstitution` / `agora_getGovernance` | `agora_submitProposal` / `agora_castGovVote` / … |
 | `agora_listProposals` / `agora_getProposal` / `agora_listOffices` | `agora_depositProposal` / tally / execute / forum post |
@@ -325,10 +344,10 @@ The live backend (`NodeBackend`) reads tips/blocks/UTXOs from `StateStore`, admi
 
 ## Light clients
 
-`apps/shared/light-client` provides `createLightClient` + `startTipSync` / `watchTransaction` (optional `minConfirmations`) plus wallet helpers (`getBalance`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) used by:
+`apps/shared/light-client` provides `createLightClient` + `startTipSync` / `watchTransaction` (optional `minConfirmations`) plus wallet helpers (`getBalance`, `getAccountBalances`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) and query wrappers for TLT covenants, DRC DEX/escrow/check/ticket/trust-line reads, and canonical `eth_chainId` / `eth_blockNumber` / `eth_getBalance` used by:
 
-- `apps/explorer` (live DAG + tx lookup + mempool + node status + pending watch)
-- `apps/desktop` (tip sync, UTXO lookup, signed send + confirmation poll)
+- `apps/explorer` (live DAG + tx lookup + protocol-lane reads + mempool + node status + pending watch)
+- `apps/desktop` (tip sync, UTXO lookup, native OVL/DRC balance display, signed send + confirmation poll)
 - `apps/mobile` (tip sync, UTXO lookup, signed send + confirmation poll)
 
 Default endpoint: `http://127.0.0.1:8545/rpc` (explorer/desktop may proxy `/rpc`).

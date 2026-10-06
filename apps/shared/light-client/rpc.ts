@@ -45,6 +45,35 @@ export type LightBalance = {
   balance: number;
 };
 
+export type LightAccountBalances = {
+  address: string;
+  tlt: { balance: LightAmount };
+  ovl: { balance: LightAmount; nonce: number };
+  drc: { balance: LightAmount; nonce: number };
+};
+
+export type LightTltCovenantLookup = {
+  tx_id: string;
+  status: LightTxStatus;
+  block_id: string | null;
+  index: number | null;
+  fee: number | null;
+  confirmations: number | null;
+  transaction: unknown | null;
+};
+
+export type LightDrcOfferLookup = {
+  offer_id?: string;
+  status?: string;
+  [key: string]: unknown;
+};
+
+export type LightDrcOfferPage = {
+  offers?: unknown[];
+  next_cursor?: unknown;
+  [key: string]: unknown;
+};
+
 export type LightUtxoSet = {
   address: string;
   utxos: LightUtxo[];
@@ -337,9 +366,42 @@ export type LightClient = {
   }>;
   estimateFee: () => Promise<FeeEstimate>;
   getBalance: (address: string) => Promise<LightBalance>;
+  getAccountBalances: (address: string) => Promise<LightAccountBalances>;
+  getTltCovenant: (txId: string) => Promise<LightTltCovenantLookup>;
+  getDrcOffer: (offerId: string) => Promise<LightDrcOfferLookup>;
+  getDrcAccountOffers: (args: {
+    account: string;
+    limit?: number;
+    cursor?: unknown;
+  }) => Promise<LightDrcOfferPage>;
+  getDrcBookOffers: (args: {
+    book: unknown;
+    limit?: number;
+    cursor?: unknown;
+  }) => Promise<LightDrcOfferPage>;
+  getDrcEscrow: (escrowId: string) => Promise<unknown>;
+  getDrcCheck: (checkId: string) => Promise<unknown>;
+  getDrcTicket: (args: {
+    owner: string;
+    ticket_sequence: number;
+  }) => Promise<unknown>;
+  getDrcTrustLine: (args: {
+    holder: string;
+    issuer: string;
+    currency: unknown;
+  }) => Promise<unknown>;
+  getEthChainId: () => Promise<unknown>;
+  getEthBlockNumber: () => Promise<unknown>;
+  getEthBalance: (address: string, blockTag?: string) => Promise<unknown>;
   getUtxos: (address: string) => Promise<LightUtxoSet>;
   /** Submit a signed transaction JSON body (native serde / byte-array hashes). */
   submitTransaction: (tx: unknown) => Promise<SubmitTxResult>;
+  submitTltCovenant: (tx: unknown) => Promise<{ tx_id: string }>;
+  submitDrcOfferCreate: (tx: unknown) => Promise<{
+    offer_id: string;
+    simulated_fill: boolean;
+  }>;
+  submitDrcOfferCancel: (tx: unknown) => Promise<{ cancel_tx_id: string }>;
   getConstitution: () => Promise<LightConstitution>;
   getGovernance: () => Promise<LightGovernance>;
   listProposals: (limit?: number) => Promise<LightProposalList>;
@@ -456,10 +518,59 @@ export function createLightClient(config: LightClientConfig): LightClient {
     estimateFee: () => call<FeeEstimate>("agora_estimateFee", []),
     getBalance: (address: string) =>
       call<LightBalance>("agora_getBalance", { address }),
+    getAccountBalances: (address: string) =>
+      call<LightAccountBalances>("agora_getAccountBalances", { address }),
+    getTltCovenant: (txId: string) =>
+      call<LightTltCovenantLookup>("agora_getTltCovenant", { tx_id: txId }),
+    getDrcOffer: (offerId: string) =>
+      call<LightDrcOfferLookup>("agora_getDrcOffer", { offer_id: offerId }),
+    getDrcAccountOffers: (args) =>
+      call<LightDrcOfferPage>("agora_getDrcAccountOffers", {
+        account: args.account,
+        ...(args.limit === undefined ? {} : { limit: args.limit }),
+        ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
+      }),
+    getDrcBookOffers: (args) =>
+      call<LightDrcOfferPage>("agora_getDrcBookOffers", {
+        ...(typeof args.book === "object" && args.book !== null
+          ? (args.book as Record<string, unknown>)
+          : { book: args.book }),
+        ...(args.limit === undefined ? {} : { limit: args.limit }),
+        ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
+      }),
+    getDrcEscrow: (escrowId) =>
+      call("agora_getDrcEscrow", { escrow_id: escrowId }),
+    getDrcCheck: (checkId) => call("agora_getDrcCheck", { check_id: checkId }),
+    getDrcTicket: (args) =>
+      call("agora_getDrcTicket", {
+        owner: args.owner,
+        ticket_sequence: args.ticket_sequence,
+      }),
+    getDrcTrustLine: (args) =>
+      call("agora_getDrcTrustLine", {
+        holder: args.holder,
+        issuer: args.issuer,
+        currency: args.currency,
+      }),
+    getEthChainId: () => call("eth_chainId", []),
+    getEthBlockNumber: () => call("eth_blockNumber", []),
+    getEthBalance: (address, blockTag = "latest") =>
+      call("eth_getBalance", [address, blockTag]),
     getUtxos: (address: string) =>
       call<LightUtxoSet>("agora_getUtxos", { address }),
     submitTransaction: (tx: unknown) =>
       call<SubmitTxResult>("agora_submitTransaction", { tx }),
+    submitTltCovenant: (tx) =>
+      call<{ tx_id: string }>("agora_submitTltCovenant", { covenant: tx }),
+    submitDrcOfferCreate: (tx) =>
+      call<{ offer_id: string; simulated_fill: boolean }>(
+        "agora_submitDrcOfferCreate",
+        { offer_create: tx },
+      ),
+    submitDrcOfferCancel: (tx) =>
+      call<{ cancel_tx_id: string }>("agora_submitDrcOfferCancel", {
+        offer_cancel: tx,
+      }),
     getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
     getGovernance: () => call<LightGovernance>("agora_getGovernance", []),
     listProposals: (limit = 64) =>

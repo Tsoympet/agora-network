@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use agora_types::{
-    resolve_drc_account_sequence, AccountTransfer, Address, Block, DrcAccountPolicyTx,
-    DrcAccountSequence, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
+    resolve_drc_account_sequence, sequence_signals_rbf, AccountTransfer, Address, Block,
+    DrcAccountPolicyTx, DrcAccountSequence, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
     DrcDepositPreauthAction, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
     DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx,
     DrcOfferCancelTx, DrcOfferCreateTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
     DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash,
-    NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, Transaction,
+    NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, TltCovenantTx, Transaction,
     ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
     DRC_CHECK_CANCEL_TICKET_VERSION, DRC_CHECK_CASH_TICKET_VERSION,
     DRC_CHECK_CREATE_TICKET_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
@@ -44,6 +44,8 @@ pub const TLT_RBF_MIN_FEE_INCREASE: u64 = DEFAULT_MIN_RELAY_FEE;
 #[derive(Debug, Default)]
 pub struct Mempool {
     txs: HashMap<Hash, Transaction>,
+    /// TLT covenant spends. They reserve the same outpoints as v1 transfers.
+    covenant_txs: HashMap<Hash, TltCovenantTx>,
     /// Implicit fee (`in − out`) recorded at admit for fee-ordered selection.
     fees: HashMap<Hash, u64>,
     /// TLT transactions admitted with an explicit replace-by-fee opt-in.
@@ -128,6 +130,7 @@ impl Mempool {
     pub fn new(max_size: usize) -> Self {
         Self {
             txs: HashMap::new(),
+            covenant_txs: HashMap::new(),
             fees: HashMap::new(),
             rbf_opt_in: HashSet::new(),
             reserved: HashSet::new(),
@@ -186,6 +189,7 @@ impl Mempool {
 
     pub fn len(&self) -> usize {
         self.txs.len()
+            + self.covenant_txs.len()
             + self.account_txs.len()
             + self.stake_txs.len()
             + self.ovl_execution_txs.len()
@@ -213,6 +217,7 @@ impl Mempool {
 
     pub fn contains(&self, tx_id: &Hash) -> bool {
         self.txs.contains_key(tx_id)
+            || self.covenant_txs.contains_key(tx_id)
             || self.account_txs.contains_key(tx_id)
             || self.stake_txs.contains_key(tx_id)
             || self.ovl_execution_txs.contains_key(tx_id)
@@ -410,6 +415,200 @@ impl Mempool {
             self.rbf_opt_in.insert(id);
         }
         Ok(id)
+    }
+
+    /// Admit a covenant spend that the caller already validated against the UTXO set.
+    pub fn admit_covenant(&mut self, tx: TltCovenantTx, fee: u64) -> Result<Hash, P2pError> {
+        self.insert_covenant(tx, fee, false)
+    }
+
+    /// Replace covenant spends that signal replace-by-fee.
+    ///
+    /// v1 transfers are not evicted here. A covenant that conflicts with a v1
+    /// mempool entry is rejected so the first blue spend is still the only
+    /// consensus rule, and relay does not let a script spend jump a signed v1 tx.
+    pub fn replace_covenant(&mut self, tx: TltCovenantTx, fee: u64) -> Result<Hash, P2pError> {
+        if !tx
+            .inputs
+            .iter()
+            .any(|input| sequence_signals_rbf(input.sequence))
+        {
+            return Err(P2pError::MempoolRejected(
+                "covenant replacement does not signal replace-by-fee".into(),
+            ));
+        }
+        let id = tx.tx_id();
+        if self.covenant_txs.contains_key(&id) {
+            return Err(P2pError::MempoolRejected(
+                "covenant transaction is already in the mempool".into(),
+            ));
+        }
+        let mut new_inputs = HashSet::new();
+        for input in &tx.inputs {
+            if !new_inputs.insert(input.previous_outpoint) {
+                return Err(P2pError::MempoolRejected(
+                    "duplicate input in replacement".into(),
+                ));
+            }
+        }
+        if self.txs.values().any(|existing| {
+            existing
+                .inputs
+                .iter()
+                .any(|input| new_inputs.contains(&input.previous_outpoint))
+        }) {
+            return Err(P2pError::MempoolRejected(
+                "covenant replacement conflicts with a v1 mempool transaction".into(),
+            ));
+        }
+        let mut conflicts: Vec<Hash> = self
+            .covenant_txs
+            .iter()
+            .filter(|(_, existing)| {
+                existing
+                    .inputs
+                    .iter()
+                    .any(|input| new_inputs.contains(&input.previous_outpoint))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        conflicts.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+        if conflicts.is_empty() {
+            return Err(P2pError::MempoolRejected(
+                "replacement does not conflict with the mempool".into(),
+            ));
+        }
+        if conflicts.len() > TLT_RBF_MAX_REPLACEMENTS {
+            return Err(P2pError::MempoolRejected(
+                "replacement evicts too many transactions".into(),
+            ));
+        }
+        if conflicts.iter().any(|conflict| {
+            self.covenant_txs.get(conflict).is_some_and(|existing| {
+                !existing
+                    .inputs
+                    .iter()
+                    .any(|input| sequence_signals_rbf(input.sequence))
+            })
+        }) {
+            return Err(P2pError::MempoolRejected(
+                "conflicting covenant did not signal replace-by-fee".into(),
+            ));
+        }
+        let conflict_set: HashSet<Hash> = conflicts.iter().copied().collect();
+        if self.descendant_spends_covenant(&conflict_set) {
+            return Err(P2pError::MempoolRejected(
+                "replacement would orphan a mempool descendant".into(),
+            ));
+        }
+        let mut replaced_fee = 0u64;
+        for conflict in &conflicts {
+            let part = self.fees.get(conflict).copied().unwrap_or(0);
+            replaced_fee = replaced_fee
+                .checked_add(part)
+                .ok_or_else(|| P2pError::MempoolRejected("replaced fee overflow".into()))?;
+        }
+        let needed = replaced_fee
+            .checked_add(TLT_RBF_MIN_FEE_INCREASE)
+            .ok_or_else(|| {
+                P2pError::MempoolRejected("replacement fee threshold overflow".into())
+            })?;
+        if fee < needed {
+            return Err(P2pError::MempoolRejected(format!(
+                "replacement fee {fee} is below {needed}"
+            )));
+        }
+        for conflict in &conflicts {
+            self.remove_covenant(conflict);
+        }
+        self.insert_covenant(tx, fee, true)
+    }
+
+    fn descendant_spends_covenant(&self, conflict_set: &HashSet<Hash>) -> bool {
+        let spends = |tx_id: &Hash| conflict_set.contains(tx_id);
+        self.txs.values().any(|tx| {
+            tx.inputs
+                .iter()
+                .any(|input| spends(&input.previous_outpoint.tx_id))
+        }) || self.covenant_txs.iter().any(|(id, tx)| {
+            !conflict_set.contains(id)
+                && tx
+                    .inputs
+                    .iter()
+                    .any(|input| spends(&input.previous_outpoint.tx_id))
+        })
+    }
+
+    fn insert_covenant(
+        &mut self,
+        tx: TltCovenantTx,
+        fee: u64,
+        _signaled_rbf: bool,
+    ) -> Result<Hash, P2pError> {
+        if tx.inputs.is_empty() {
+            return Err(P2pError::MempoolRejected(
+                "covenant transaction has no inputs".into(),
+            ));
+        }
+        let id = tx.tx_id();
+        if self.covenant_txs.contains_key(&id) {
+            return Ok(id);
+        }
+        if self.len() >= self.max_size && !self.evict_lowest_below(fee) {
+            return Err(P2pError::MempoolRejected(
+                "mempool full; fee too low to evict".into(),
+            ));
+        }
+        let mut claimed = HashSet::new();
+        for input in &tx.inputs {
+            let op = input.previous_outpoint;
+            if !claimed.insert(op) || self.reserved.contains(&op) {
+                return Err(P2pError::MempoolRejected(format!(
+                    "double spend {}:{}",
+                    op.tx_id.to_hex(),
+                    op.index
+                )));
+            }
+        }
+        for op in &claimed {
+            self.reserved.insert(*op);
+        }
+        self.fees.insert(id, fee);
+        self.covenant_txs.insert(id, tx);
+        Ok(id)
+    }
+
+    pub fn get_covenant(&self, tx_id: &Hash) -> Option<&TltCovenantTx> {
+        self.covenant_txs.get(tx_id)
+    }
+
+    pub fn remove_covenant(&mut self, tx_id: &Hash) -> Option<TltCovenantTx> {
+        let tx = self.covenant_txs.remove(tx_id)?;
+        self.fees.remove(tx_id);
+        for input in &tx.inputs {
+            self.reserved.remove(&input.previous_outpoint);
+        }
+        Some(tx)
+    }
+
+    /// Fee-ordered covenant selection for mining templates.
+    pub fn select_covenants(&self, max: usize) -> Vec<TltCovenantTx> {
+        let mut entries: Vec<(TltCovenantTx, u64)> = self
+            .covenant_txs
+            .values()
+            .map(|tx| {
+                let fee = self.fees.get(&tx.tx_id()).copied().unwrap_or(0);
+                (tx.clone(), fee)
+            })
+            .collect();
+        entries.sort_by(|(a, fa), (b, fb)| {
+            fb.cmp(fa)
+                .then_with(|| a.tx_id().as_bytes().cmp(b.tx_id().as_bytes()))
+        });
+        if entries.len() > max {
+            entries.truncate(max);
+        }
+        entries.into_iter().map(|(tx, _)| tx).collect()
     }
 
     /// True when `tx_id` was admitted with replace-by-fee opt-in.
@@ -1220,7 +1419,9 @@ impl Mempool {
             .map(|(id, f)| (*id, *f));
         match victim {
             Some((id, low)) if low < fee => {
-                let _ = self.remove(&id);
+                if self.remove(&id).is_none() {
+                    self.remove_covenant(&id);
+                }
                 true
             }
             _ => false,
@@ -1445,6 +1646,12 @@ impl Mempool {
         let mut included = HashSet::new();
         let mut consumed_account_nonces = HashSet::new();
         for tx in &block.transactions {
+            included.insert(tx.tx_id());
+            for input in &tx.inputs {
+                spent.insert(input.previous_outpoint);
+            }
+        }
+        for tx in &block.tlt_covenants {
             included.insert(tx.tx_id());
             for input in &tx.inputs {
                 spent.insert(input.previous_outpoint);
@@ -1718,6 +1925,21 @@ impl Mempool {
             .collect();
         for id in drop {
             let _ = self.remove(&id);
+        }
+        let drop_covenants: Vec<Hash> = self
+            .covenant_txs
+            .iter()
+            .filter(|(id, tx)| {
+                included.contains(*id)
+                    || tx
+                        .inputs
+                        .iter()
+                        .any(|input| spent.contains(&input.previous_outpoint))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        for id in drop_covenants {
+            self.remove_covenant(&id);
         }
     }
 
@@ -2039,6 +2261,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -2122,6 +2345,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));
@@ -2945,6 +3169,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.pending_check_create(&id));
@@ -2998,5 +3223,71 @@ mod tests {
         let mut pool = Mempool::new(8);
         let err = pool.admit_ovl_execution(tx).unwrap_err();
         assert!(err.to_string().contains("not admitted"));
+    }
+
+    fn covenant(index: u32, sequence: u32, nonce: u64) -> agora_types::TltCovenantTx {
+        agora_types::TltCovenantTx {
+            version: agora_types::TLT_COVENANT_TX_VERSION,
+            inputs: vec![agora_types::TltCovenantInput {
+                previous_outpoint: OutPoint {
+                    tx_id: Hash([9; 32]),
+                    index,
+                },
+                sequence,
+                script_sig: vec![1],
+            }],
+            outputs: vec![agora_types::TltCovenantOutput {
+                value: Amount::from_base_units(1),
+                script_pubkey: vec![2],
+            }],
+            lock_time: 0,
+            nonce,
+        }
+    }
+
+    #[test]
+    fn covenant_relay_orders_by_fee_and_replaces_only_signaled_conflicts() {
+        let mut pool = Mempool::new(8);
+        let low = covenant(0, agora_types::TLT_SEQUENCE_FINAL - 1, 1);
+        let high = covenant(1, agora_types::TLT_SEQUENCE_FINAL, 2);
+        pool.admit_covenant(low.clone(), 1).unwrap();
+        pool.admit_covenant(high.clone(), 5).unwrap();
+        let selected = pool.select_covenants(2);
+        assert_eq!(selected[0].tx_id(), high.tx_id());
+        assert_eq!(selected[1].tx_id(), low.tx_id());
+        assert!(pool.contains(&low.tx_id()));
+
+        let replacement = covenant(0, agora_types::TLT_SEQUENCE_FINAL - 1, 3);
+        assert!(pool.replace_covenant(replacement.clone(), 1).is_err());
+        pool.replace_covenant(replacement.clone(), 1 + TLT_RBF_MIN_FEE_INCREASE)
+            .unwrap();
+        assert!(pool.get_covenant(&low.tx_id()).is_none());
+        assert!(pool.get_covenant(&replacement.tx_id()).is_some());
+
+        let quiet = covenant(1, agora_types::TLT_SEQUENCE_FINAL, 4);
+        assert!(pool.replace_covenant(quiet, 100).is_err());
+
+        let mut v1_pool = Mempool::new(8);
+        let v1 = signed_spend(7, 1);
+        v1_pool.admit_priced(v1, 1).unwrap();
+        let conflicting = agora_types::TltCovenantTx {
+            version: agora_types::TLT_COVENANT_TX_VERSION,
+            inputs: vec![agora_types::TltCovenantInput {
+                previous_outpoint: OutPoint {
+                    tx_id: Hash::ZERO,
+                    index: 7,
+                },
+                sequence: agora_types::TLT_SEQUENCE_FINAL - 1,
+                script_sig: vec![1],
+            }],
+            outputs: vec![agora_types::TltCovenantOutput {
+                value: Amount::from_base_units(1),
+                script_pubkey: vec![2],
+            }],
+            lock_time: 0,
+            nonce: 9,
+        };
+        assert!(v1_pool.replace_covenant(conflicting, 10).is_err());
+        assert_eq!(v1_pool.len(), 1);
     }
 }

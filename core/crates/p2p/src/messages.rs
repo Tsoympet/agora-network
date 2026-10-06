@@ -81,6 +81,8 @@ pub enum NetworkMessage {
     DrcOfferCreate(agora_types::DrcOfferCreateTx),
     /// Appended in Trident protocol v24; native order-book offer cancel.
     DrcOfferCancel(agora_types::DrcOfferCancelTx),
+    /// Appended after offer gossip; TLT covenant spends on the transaction topic.
+    TltCovenant(agora_types::TltCovenantTx),
 }
 
 impl NetworkMessage {
@@ -97,41 +99,13 @@ impl NetworkMessage {
     /// Multi-lane blocks use the full body until a versioned compact format can
     /// commit lane kinds without ambiguity.
     pub fn compact_from_block(block: &Block) -> Self {
-        if block.account_transfers.is_empty()
-            && block.stake_ops.is_empty()
-            && block.ovl_executions.is_empty()
-            && block.drc_payments.is_empty()
-            && block.data_commitments.is_empty()
-            && block.drc_account_policies.is_empty()
-            && block.drc_deposit_preauths.is_empty()
-            && block.drc_regular_keys.is_empty()
-            && block.drc_signer_lists.is_empty()
-            && block.drc_ticket_creates.is_empty()
-            && block.drc_escrow_creates.is_empty()
-            && block.drc_escrow_finishes.is_empty()
-            && block.drc_escrow_cancels.is_empty()
-            && block.drc_check_creates.is_empty()
-            && block.drc_check_cashes.is_empty()
-            && block.drc_check_cancels.is_empty()
-            && block.drc_payment_channel_creates.is_empty()
-            && block.drc_payment_channel_funds.is_empty()
-            && block.drc_payment_channel_claims.is_empty()
-            && block.drc_payment_channel_closes.is_empty()
-            && block.drc_trust_line_sets.is_empty()
-            && block.drc_issued_transfers.is_empty()
-            && block.drc_issued_asset_policy_sets.is_empty()
-            && block.drc_trust_line_issuer_controls.is_empty()
-            && block.drc_issued_clawbacks.is_empty()
-            && block.drc_multisign_attachments.is_empty()
-            && block.drc_offer_creates.is_empty()
-            && block.drc_offer_cancels.is_empty()
-        {
+        if block.requires_full_body_gossip() {
+            Self::Block(block.clone())
+        } else {
             Self::CompactBlock {
                 header: block.header.clone(),
                 short_ids: short_ids_for_block(block),
             }
-        } else {
-            Self::Block(block.clone())
         }
     }
 }
@@ -364,5 +338,100 @@ mod tests {
         block.header.tx_root = block.compute_body_root();
         let full = NetworkMessage::compact_from_block(&block);
         assert_eq!(full, NetworkMessage::Block(block));
+    }
+
+    #[test]
+    fn tlt_covenant_gossip_is_appended_and_forces_full_block() {
+        let tx = agora_types::TltCovenantTx {
+            version: agora_types::TLT_COVENANT_TX_VERSION,
+            inputs: vec![agora_types::TltCovenantInput {
+                previous_outpoint: agora_types::OutPoint {
+                    tx_id: Hash([9; 32]),
+                    index: 0,
+                },
+                sequence: agora_types::TLT_SEQUENCE_FINAL,
+                script_sig: vec![1],
+            }],
+            outputs: vec![agora_types::TltCovenantOutput {
+                value: agora_types::Amount::from_base_units(1),
+                script_pubkey: vec![2],
+            }],
+            lock_time: 0,
+            nonce: 1,
+        };
+        let gossip = NetworkMessage::TltCovenant(tx.clone());
+        assert_eq!(gossip.encode()[0], 32);
+        assert_eq!(NetworkMessage::decode(&gossip.encode()).unwrap(), gossip);
+
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 1,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.tlt_covenants.push(tx);
+        block.header.tx_root = block.compute_body_root();
+        let full = NetworkMessage::compact_from_block(&block);
+        assert_eq!(full, NetworkMessage::Block(block));
+    }
+
+    #[test]
+    fn drc_offer_lane_forces_full_block() {
+        use agora_types::{
+            Address, Amount, DrcBookAsset, DrcOfferCreateTx, IssuedAssetId, IssuedCurrencyCode,
+            DRC_OFFER_CREATE_TX_VERSION,
+        };
+
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 1,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.drc_offer_creates.push(DrcOfferCreateTx {
+            version: DRC_OFFER_CREATE_TX_VERSION,
+            owner: Address([1; 20]),
+            taker_pays: DrcBookAsset::NativeDrc,
+            taker_pays_amount: 2,
+            taker_gets: DrcBookAsset::Issued(IssuedAssetId {
+                issuer: Address([2; 20]),
+                currency: IssuedCurrencyCode([3u8; 20]),
+            }),
+            taker_gets_amount: 1,
+            fill_mode: 0,
+            time_in_force: 0,
+            fee: Amount::from_base_units(1),
+            expires_after_blue_score: None,
+            nonce: 0,
+            account_sequence: None,
+            public_key: vec![],
+            signature: vec![],
+            multisign: None,
+        });
+        block.header.tx_root = block.compute_body_root();
+        let full = NetworkMessage::compact_from_block(&block);
+        assert_eq!(full, NetworkMessage::Block(block));
+        let empty = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        assert!(!empty.requires_full_body_gossip());
     }
 }

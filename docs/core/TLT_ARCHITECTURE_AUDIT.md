@@ -2,7 +2,7 @@
 
 **Status line:** `TALANTON BITCOIN FUNCTIONAL PARITY — INCOMPLETE`
 
-**Maturity:** Live TLT UTXO, RandomX, and GHOSTDAG path is **Multi-node devnet** (testnet genesis v2 is frozen in-repo; mainnet is not bootable). The covenant script library is **Experimental** and is not block-activated.
+**Maturity:** Live TLT UTXO, RandomX, and GHOSTDAG path is **Multi-node devnet** (testnet genesis v2 is frozen in-repo; mainnet is not bootable). Covenant programs are **Experimental** and are accepted on the block covenant lane. Overall Bitcoin-class parity stays **INCOMPLETE**.
 
 **Base inspected:** `cursor/drc-ledger-object-index-cdcf` (PR #149). No OVL/EVM branch was stacked on that head during this audit. This work does not edit the OVL execution lane.
 
@@ -14,7 +14,7 @@ The spendable set is RocksDB column family `cf_utxo`, keyed by `tx_id ‖ index`
 
 Balances are the sum of unspent outputs for a 20-byte address (`balance_of`). There is no account nonce on the UTXO lane. The transaction `nonce` is a replay-binding field inside the signature, not a Bitcoin sequence number.
 
-**Conflict kept:** Bitcoin's UTXO value is a scriptPubKey. TLT v1 outputs are address locks. The covenant library adds script programs without rewriting stored `TxOut` bytes.
+**Conflict kept:** Bitcoin's UTXO value is a scriptPubKey. TLT v1 outputs are address locks. Covenant P2PKH-style outputs are stored as those same `TxOut` bytes. Every other script is stored beside the UTXO set and is not part of `balance_of`.
 
 ## Balances and supply accounting
 
@@ -24,11 +24,11 @@ Balances are the sum of unspent outputs for a 20-byte address (`balance_of`). Th
 
 v1 `Transaction` fields: `version`, inputs (outpoint only), outputs (`value`, `address`), `nonce`, 33-byte pubkey, 64-byte signature. The id is SHA-256 of the borsh encoding. Signatures cover `agora-tx-v1` plus optional chain id and genesis (`signing_bytes_bound`). A unit test locks the v1 byte layout so locktime and sequence stay off that wire.
 
-Missing on the live wire, present on `TltCovenantTx`: per-input sequence, locktime, scriptSig, scriptPubKey. See `docs/core/tlt-script.md`.
+v1 still has no on-wire locktime or sequence. `TltCovenantTx` carries sequence, locktime, scriptSig, and scriptPubKey on the `tlt_covenants` lane. See `docs/core/tlt-script.md`.
 
 ## Issuance
 
-Only the genesis premine and later TLT coinbase outputs create TLT. `apply_block` requires exactly one coinbase (empty inputs). Its outputs must total at most `emission + transfer fees`. No RPC, contract, or governance path may mint TLT on mainnet. `agora_fundAddress` is a dev/testnet faucet and is permanently disabled on mainnet.
+Only the genesis premine and later TLT coinbase outputs create TLT. `apply_block` requires exactly one coinbase (empty inputs). Its outputs must total at most `emission + v1 transfer fees + covenant fees`. No RPC, contract, or governance path may mint TLT on mainnet. `agora_fundAddress` is a dev/testnet faucet and is permanently disabled on mainnet.
 
 ## Mining, PoW, rewards
 

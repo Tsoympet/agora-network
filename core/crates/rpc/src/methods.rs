@@ -13,6 +13,8 @@ pub enum RpcMethod {
     GetNodeInfo,
     EstimateFee,
     SubmitTransaction,
+    SubmitTltCovenant,
+    GetTltCovenant,
     SubmitAccountTransfer,
     SubmitOvlExecution,
     SubmitDrcPayment,
@@ -70,6 +72,7 @@ pub enum RpcMethod {
     GetDrcOperation,
     GetDrcTransaction,
     GetBalance,
+    GetAccountBalances,
     GetUtxos,
     FundAddress,
     GetBlockTemplate,
@@ -115,6 +118,8 @@ impl RpcMethod {
             Self::GetNodeInfo => "agora_getNodeInfo",
             Self::EstimateFee => "agora_estimateFee",
             Self::SubmitTransaction => "agora_submitTransaction",
+            Self::SubmitTltCovenant => "agora_submitTltCovenant",
+            Self::GetTltCovenant => "agora_getTltCovenant",
             Self::SubmitAccountTransfer => "agora_submitAccountTransfer",
             Self::SubmitOvlExecution => "agora_submitOvlExecution",
             Self::SubmitDrcPayment => "agora_submitDrcPayment",
@@ -174,6 +179,7 @@ impl RpcMethod {
             Self::GetDrcOperation => "agora_getDrcOperation",
             Self::GetDrcTransaction => "agora_getDrcTransaction",
             Self::GetBalance => "agora_getBalance",
+            Self::GetAccountBalances => "agora_getAccountBalances",
             Self::GetUtxos => "agora_getUtxos",
             Self::FundAddress => "agora_fundAddress",
             Self::GetBlockTemplate => "agora_getBlockTemplate",
@@ -217,6 +223,8 @@ impl RpcMethod {
             "agora_getNodeInfo" => Some(Self::GetNodeInfo),
             "agora_estimateFee" => Some(Self::EstimateFee),
             "agora_submitTransaction" => Some(Self::SubmitTransaction),
+            "agora_submitTltCovenant" => Some(Self::SubmitTltCovenant),
+            "agora_getTltCovenant" => Some(Self::GetTltCovenant),
             "agora_submitAccountTransfer" => Some(Self::SubmitAccountTransfer),
             "agora_submitOvlExecution" => Some(Self::SubmitOvlExecution),
             "agora_submitDrcPayment" => Some(Self::SubmitDrcPayment),
@@ -278,6 +286,7 @@ impl RpcMethod {
             "agora_getDrcOperation" => Some(Self::GetDrcOperation),
             "agora_getDrcTransaction" => Some(Self::GetDrcTransaction),
             "agora_getBalance" => Some(Self::GetBalance),
+            "agora_getAccountBalances" => Some(Self::GetAccountBalances),
             "agora_getUtxos" => Some(Self::GetUtxos),
             "agora_fundAddress" => Some(Self::FundAddress),
             "agora_getBlockTemplate" => Some(Self::GetBlockTemplate),
@@ -323,8 +332,14 @@ pub struct RpcRequest {
     pub params: Value,
 }
 
+fn jsonrpc_version() -> String {
+    "2.0".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcResponse {
+    #[serde(default = "jsonrpc_version")]
+    pub jsonrpc: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -342,6 +357,7 @@ pub struct RpcErrorBody {
 impl RpcResponse {
     pub fn ok(id: Option<Value>, result: Value) -> Self {
         Self {
+            jsonrpc: jsonrpc_version(),
             id,
             result: Some(result),
             error: None,
@@ -350,6 +366,7 @@ impl RpcResponse {
 
     pub fn err(id: Option<Value>, err: &RpcError) -> Self {
         Self {
+            jsonrpc: jsonrpc_version(),
             id,
             result: None,
             error: Some(RpcErrorBody {
@@ -366,6 +383,10 @@ mod tests {
 
     #[test]
     fn programmable_execution_rpc_is_ovl_only() {
+        assert_eq!(
+            RpcMethod::parse("agora_getAccountBalances"),
+            Some(RpcMethod::GetAccountBalances)
+        );
         assert_eq!(
             RpcMethod::parse("agora_submitOvlExecution"),
             Some(RpcMethod::SubmitOvlExecution)

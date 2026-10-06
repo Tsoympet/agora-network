@@ -20,5 +20,6 @@
       "@brand/*": ["../shared/brand/*"]
     }
   },
-  "include": ["src", "../shared/light-client/**/*.ts"]
+  "include": ["src", "../shared/light-client/**/*.ts"],
+  "exclude": ["../shared/light-client/**/*.test.ts"]
 }

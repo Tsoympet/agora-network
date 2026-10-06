@@ -122,7 +122,9 @@ Caps, all fail-closed before the transaction mutates state:
 
 Offer lanes are appended after the multisign attachment lane. Empty lanes are
 omitted from Borsh so earlier bodies still decode. A non-empty lane commits
-`agora-block-body-v18`. The offer root `agora-drc-offer-root-v1` is a
+`agora-block-body-v18`. A later non-empty TLT covenant lane wraps that inner
+root as `agora-block-body-v19` so the two experimental trailing slots cannot
+collide. The offer root `agora-drc-offer-root-v1` is a
 component of `agora-trident-state-root-v16`. Protocol version is 24 and the
 state transition is `agora-trident-state-v22`. The datadir schema stays 21
 because the new object kind fits the existing ledger-object index.

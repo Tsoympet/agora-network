@@ -92,23 +92,47 @@ chain or finality.
 Schema 22 folds `agora-ovl-evm-commitment-v1` into the Trident state root. The
 execution subroot is SHA-256 over a domain-separated Borsh image of accounts,
 receipts, supply, and the EVM block. It is not an Ethereum Merkle-Patricia
-state root, and `eth_getProof` is not implemented.
+state root, and `eth_getProof` is not implemented. Node bootstrap accepts
+schema 22 and still verifies the schema-21 DRC ledger-object index. A newer
+datadir schema is rejected.
 
 Contract-verification notes may sit on the world record and are excluded from
 the subroot. There is no verification submit API.
 
 ## RPC and index
 
-`eth_*`, `net_*`, and `web3_clientVersion` are answered from the stored world
-by one dispatcher. `eth_sendRawTransaction` validates and stores a process-local
-pending inbox. Receipts appear only after the block lane applies the raw
-transaction. `eth_syncing` false means this executor is not reporting a sync
-gap. `net_listening` is false and `net_peerCount` is zero in this adapter.
-`eth_maxPriorityFeePerGas` returns `0x1` as a read suggestion, not a consensus
-override.
+`agora-rpc` forwards `eth_*`, `net_*`, and `web3_clientVersion` to the node.
+The node loads `meta/ovl/evm/v1/world` and answers from that record. An inactive
+gate returns an error. Backends with no execution world return method-not-found
+rather than a stand-in balance. HTTP reads stay public when `AGORA_RPC_TOKEN`
+is set. `eth_sendRawTransaction` requires the token.
+
+`eth_sendRawTransaction` validates a legacy, type-1, or type-2 envelope and
+stores it in a process-local inbox. It does not commit the world. A dev or
+test node whose gate is active may place inbox envelopes that pass the Shanghai
+preflight onto its own block template. Mainnet labels reject submission. Public
+gossip of those raw envelopes is **PLANNED**. Version 2 is rejected by the
+Agora-signed mempool, and the existing P2P fingerprint has no separate raw-EVM
+topic, so publishing them on the signed-execution topic would only be dropped.
+
+`eth_syncing` is `false` while the node has no IBD cursor. It is not a
+synthetic progress object. `net_listening` follows whether this process has a
+network handle. `net_peerCount` is the connected-peer count. `eth_gasPrice` is
+the stored base fee plus the smallest tip already in the open block, or 1 wei
+when that block has no receipts. `eth_feeHistory` returns that one retained
+block and the next base fee from the consensus formula. Older blocks are not
+copied from the head.
+
+State reads accept `latest` and the current block number or hash. `pending`
+does not overlay balances, code, or storage. `earliest`, `safe`, and
+`finalized` are not historical aliases. Account state for any other block is
+not retained. Block getters return null for a number or hash that is not the
+open block. `eth_getProof` is method-not-found. Receipts keep the raw envelope
+so transaction objects use the stored nonce, value, and gas limit.
 
 The receipt indexer rebuilds ERC-20, ERC-721, and ERC-1155 transfer logs from
 canonical receipts. That is not a wallet certification and not an explorer UI.
+`logsBloom`, `v`/`r`/`s`, batch requests, and `eth_subscribe` are not served.
 
 ## Oracles, applications, and bridges
 

@@ -143,6 +143,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         }
     }
 

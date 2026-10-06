@@ -4,7 +4,7 @@ use agora_types::{
     DrcIssuedTransferTx, DrcLedgerObjectKind, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OvlExecutionTx,
-    Transaction,
+    TltCovenantTx, Transaction,
 };
 use serde_json::{json, Value};
 
@@ -97,6 +97,22 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
                 let id = self.backend.submit_transaction(tx)?;
                 Ok(json!({ "tx_id": id.to_hex() }))
+            }
+            RpcMethod::SubmitTltCovenant => {
+                let raw = req
+                    .params
+                    .get("covenant")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let tx: TltCovenantTx = serde_json::from_value(raw)
+                    .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+                let id = self.backend.submit_tlt_covenant(tx)?;
+                Ok(json!({ "tx_id": id.to_hex() }))
+            }
+            RpcMethod::GetTltCovenant => {
+                let tx_id = param_hash(&req.params, "tx_id")?;
+                let lookup = self.backend.get_tlt_covenant(&tx_id)?;
+                Ok(covenant_lookup_to_json(&lookup))
             }
             RpcMethod::SubmitAccountTransfer => {
                 let raw = req
@@ -679,6 +695,16 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     "balance": bal.as_base_units(),
                 }))
             }
+            RpcMethod::GetAccountBalances => {
+                let address = param_address(&req.params, "address")?;
+                let balances = self.backend.get_account_balances(&address)?;
+                Ok(json!({
+                    "address": address.to_bech32(),
+                    "tlt": { "balance": balances.tlt },
+                    "ovl": { "balance": balances.ovl, "nonce": balances.ovl_nonce },
+                    "drc": { "balance": balances.drc, "nonce": balances.drc_nonce },
+                }))
+            }
             RpcMethod::GetUtxos => {
                 let address = param_address(&req.params, "address")?;
                 let utxos = self.backend.get_utxos(&address)?;
@@ -870,6 +896,7 @@ fn block_to_explorer_json(block: &Block) -> Value {
         "id": id,
         "header": header_to_explorer_json(&block.header, Some(id)),
         "tx_count": block.transactions.len(),
+        "tlt_covenant_count": block.tlt_covenants.len(),
         "account_transfer_count": block.account_transfers.len(),
         "stake_op_count": block.stake_ops.len(),
         "ovl_execution_count": block.ovl_executions.len(),
@@ -894,6 +921,20 @@ fn tx_to_explorer_json(tx: &Transaction) -> Value {
         })).collect::<Vec<_>>(),
         "nonce": tx.nonce,
         "is_coinbase": tx.inputs.is_empty(),
+    })
+}
+
+fn covenant_lookup_to_json(lookup: &crate::backend::TltCovenantLookup) -> Value {
+    json!({
+        "tx_id": lookup.tx_id.to_hex(),
+        "status": lookup.status.as_str(),
+        "block_id": lookup.block_id.map(|h| h.to_hex()),
+        "index": lookup.index,
+        "fee": lookup.fee,
+        "confirmations": lookup.confirmations,
+        "transaction": lookup.transaction.as_ref().map(|tx| {
+            serde_json::to_value(tx).unwrap_or(Value::Null)
+        }),
     })
 }
 
@@ -1335,6 +1376,21 @@ mod tests {
     };
 
     #[test]
+    fn ethereum_methods_are_not_invented_without_an_execution_world() {
+        let mut dispatcher = RpcDispatcher::new(InMemoryBackend::default());
+        let response = dispatcher.handle(RpcRequest {
+            id: Some(json!(7)),
+            method: "eth_getBalance".into(),
+            params: json!(["0x0000000000000000000000000000000000000001", "latest"]),
+        });
+        assert_eq!(response.jsonrpc, "2.0");
+        assert!(response.result.is_none());
+        let error = response.error.expect("missing world");
+        assert_eq!(error.code, -32601);
+        assert!(error.message.contains("eth_getBalance"));
+    }
+
+    #[test]
     fn common_drc_object_and_operation_queries_are_typed_and_closed() {
         let owner = Address([0x31; 20]);
         let source = Address([0x32; 20]);
@@ -1549,6 +1605,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -1579,6 +1636,19 @@ mod tests {
         let bal_res = bal.result.unwrap();
         assert_eq!(bal_res["balance"], json!(500));
         assert_eq!(bal_res["address"], json!(addr.to_bech32()));
+
+        rpc.backend_mut().set_ovl_account(addr, 7, 2);
+        rpc.backend_mut().set_drc_account(addr, 9, 3);
+        let accounts = rpc.handle(RpcRequest {
+            id: Some(json!(22)),
+            method: "agora_getAccountBalances".into(),
+            params: json!({"address": addr.to_bech32()}),
+        });
+        let accounts_res = accounts.result.unwrap();
+        assert_eq!(accounts_res["address"], json!(addr.to_bech32()));
+        assert_eq!(accounts_res["tlt"]["balance"], json!(500));
+        assert_eq!(accounts_res["ovl"], json!({"balance": 7, "nonce": 2}));
+        assert_eq!(accounts_res["drc"], json!({"balance": 9, "nonce": 3}));
 
         let utxos = rpc.handle(RpcRequest {
             id: Some(json!(21)),
@@ -1701,6 +1771,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -1755,6 +1826,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {
@@ -2374,6 +2446,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2444,6 +2517,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2513,6 +2587,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2583,6 +2658,7 @@ mod tests {
             drc_offer_creates: vec![],
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2633,5 +2709,44 @@ mod tests {
             params: json!({"channel_id": Hash::ZERO.to_hex()}),
         });
         assert_eq!(zero.error.as_ref().unwrap().code, -32602);
+    }
+
+    #[test]
+    fn submit_and_query_tlt_covenant() {
+        let tx = agora_types::TltCovenantTx {
+            version: agora_types::TLT_COVENANT_TX_VERSION,
+            inputs: vec![agora_types::TltCovenantInput {
+                previous_outpoint: agora_types::OutPoint {
+                    tx_id: Hash([4; 32]),
+                    index: 0,
+                },
+                sequence: agora_types::TLT_SEQUENCE_FINAL - 1,
+                script_sig: vec![9],
+            }],
+            outputs: vec![agora_types::TltCovenantOutput {
+                value: Amount::from_base_units(1),
+                script_pubkey: vec![0x76],
+            }],
+            lock_time: 0,
+            nonce: 4,
+        };
+        let mut rpc = RpcDispatcher::new(InMemoryBackend::new());
+        let submitted = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_submitTltCovenant".into(),
+            params: json!({ "covenant": tx }),
+        });
+        assert!(submitted.error.is_none(), "{submitted:?}");
+        let body = submitted.result.unwrap();
+        assert_eq!(body["tx_id"], tx.tx_id().to_hex());
+        let queried = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getTltCovenant".into(),
+            params: json!({ "tx_id": tx.tx_id().to_hex() }),
+        });
+        let found = queried.result.unwrap();
+        assert_eq!(found["status"], "pending");
+        assert_eq!(found["tx_id"], tx.tx_id().to_hex());
+        assert!(RpcMethod::parse("agora_submitTltCovenant").is_some());
     }
 }

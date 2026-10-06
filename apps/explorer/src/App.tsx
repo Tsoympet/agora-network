@@ -6,6 +6,7 @@ import { MempoolPanel } from "./components/MempoolPanel";
 import { NetworkBadge } from "./components/NetworkBadge";
 import { NodeStatus } from "./components/NodeStatus";
 import { TridentOverview } from "./components/TridentOverview";
+import { ProtocolLanes } from "./components/ProtocolLanes";
 import { TxLookup } from "./components/TxLookup";
 
 export default function App() {
@@ -36,6 +37,9 @@ export default function App() {
           </a>
           <a href="#tx" className="agora-btn agora-btn-ghost text-sm">
             Tx lookup
+          </a>
+          <a href="#lanes" className="agora-btn agora-btn-ghost text-sm">
+            Lanes
           </a>
           <a href="#mempool" className="agora-btn agora-btn-ghost text-sm">
             Mempool
@@ -99,6 +103,13 @@ export default function App() {
           className="relative border-t border-[var(--agora-line)] px-6 py-20 md:px-10"
         >
           <TxLookup />
+        </section>
+
+        <section
+          id="lanes"
+          className="relative border-t border-[var(--agora-line)] px-6 py-20 md:px-10"
+        >
+          <ProtocolLanes />
         </section>
 
         <section

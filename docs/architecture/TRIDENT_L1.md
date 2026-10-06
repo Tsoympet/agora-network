@@ -5,7 +5,7 @@
 
 Agora Trident L1 is a single hybrid Layer 1 BlockDAG with three protocol-native assets and a community ecosystem. It replaces the layered assumption that OVL exists only on L2 and DRC only on L3.
 
-For the Phase 0 audit, gap analysis, impact map, PR sequence, and risk register see [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md).
+For the Phase 0 audit, gap analysis, impact map, PR sequence, and risk register see [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md). For a live-code unfinished/unwired inventory see [`TRIDENT_REPO_AUDIT.md`](TRIDENT_REPO_AUDIT.md).
 
 ---
 

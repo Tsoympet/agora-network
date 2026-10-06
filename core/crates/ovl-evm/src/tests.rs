@@ -6,7 +6,7 @@ use k256::ecdsa::SigningKey;
 
 use crate::exec::{apply_raw_transaction, eth_call, measure_shanghai_gas};
 use crate::index::index_receipts;
-use crate::rpc::{dispatch, PendingTx};
+use crate::rpc::{dispatch, dispatch_with_view, EthNodeView, EthSyncStatus, PendingTx};
 use crate::tx::{
     dev_signing_key, ethereum_address_from_signing_key, parse_raw_transaction, sign_eip1559,
     sign_legacy,
@@ -613,6 +613,30 @@ fn rpc_reads_canonical_state_and_pending_does_not_commit() {
     .unwrap();
     assert_eq!(world.execution_subroot(), before);
     assert!(sent.as_str().unwrap().starts_with("0x"));
+    let pending_nonce = dispatch(
+        &world,
+        &mut pending,
+        "eth_getTransactionCount",
+        &serde_json::json!([format!("0x{}", hex::encode(caller)), "pending"]),
+    )
+    .unwrap();
+    assert_eq!(pending_nonce, "0x1");
+    let pending_balance = dispatch(
+        &world,
+        &mut pending,
+        "eth_getBalance",
+        &serde_json::json!([format!("0x{}", hex::encode(caller)), "pending"]),
+    );
+    assert!(pending_balance.unwrap_err().to_string().contains("pending"));
+    let looked_up = dispatch(
+        &world,
+        &mut pending,
+        "eth_getTransactionByHash",
+        &serde_json::json!([sent.as_str().unwrap()]),
+    )
+    .unwrap();
+    assert!(looked_up.get("blockNumber").unwrap().is_null());
+    assert_eq!(looked_up["gas"], "0x5208");
     let receipt = apply_raw_transaction(&mut world, &raw).unwrap();
     let mut pending = std::collections::BTreeMap::new();
     let chain = dispatch(&world, &mut pending, "eth_chainId", &serde_json::json!([])).unwrap();
@@ -673,13 +697,65 @@ fn rpc_reads_canonical_state_and_pending_does_not_commit() {
         &serde_json::json!([1, "latest", []]),
     )
     .unwrap();
-    let _ = dispatch(
+    let head = dispatch(
         &world,
         &mut pending,
         "eth_getBlockByNumber",
         &serde_json::json!(["latest", false]),
     )
     .unwrap();
+    assert!(head.get("number").is_some());
+    let missing = dispatch(
+        &world,
+        &mut pending,
+        "eth_getBlockByNumber",
+        &serde_json::json!(["0x99", false]),
+    )
+    .unwrap();
+    assert!(missing.is_null());
+    let history = dispatch(
+        &world,
+        &mut pending,
+        "eth_feeHistory",
+        &serde_json::json!([4, "latest", [50]]),
+    )
+    .unwrap();
+    assert_eq!(history["gasUsedRatio"].as_array().unwrap().len(), 1);
+    assert_eq!(history["baseFeePerGas"].as_array().unwrap().len(), 2);
+    assert_eq!(history["reward"].as_array().unwrap().len(), 1);
+    let proof = dispatch(&world, &mut pending, "eth_getProof", &serde_json::json!([])).unwrap_err();
+    assert!(matches!(proof, crate::EvmError::MethodNotFound(_)));
+    let blob = dispatch(
+        &world,
+        &mut pending,
+        "eth_sendRawTransaction",
+        &serde_json::json!(["0x03"]),
+    );
+    assert!(blob.unwrap_err().to_string().contains("blob"));
+    let tlt = dispatch(
+        &world,
+        &mut pending,
+        "eth_getCode",
+        &serde_json::json!([{ "asset": "TLT" }]),
+    );
+    assert!(tlt.unwrap_err().to_string().contains("TLT"));
+    let caller_hex = format!("0x{}", hex::encode(caller));
+    let code = dispatch(
+        &world,
+        &mut pending,
+        "eth_getCode",
+        &serde_json::json!([&caller_hex, "0x0"]),
+    )
+    .unwrap();
+    assert_eq!(code, serde_json::json!("0x"));
+    let slot = dispatch(
+        &world,
+        &mut pending,
+        "eth_getStorageAt",
+        &serde_json::json!([&caller_hex, "0x0", "latest"]),
+    )
+    .unwrap();
+    assert_eq!(slot, serde_json::json!(format!("0x{}", "00".repeat(32))));
     let _ = dispatch(
         &world,
         &mut pending,
@@ -694,6 +770,76 @@ fn rpc_reads_canonical_state_and_pending_does_not_commit() {
         &serde_json::json!([]),
     )
     .unwrap();
+}
+
+#[test]
+fn node_view_reports_real_peers_and_refuses_raw_submission_when_closed() {
+    let (world, key, _) = funded();
+    let mut pending = std::collections::BTreeMap::new();
+    let view = EthNodeView {
+        listening: true,
+        peer_count: 3,
+        syncing: Some(EthSyncStatus {
+            starting_block: 1,
+            current_block: 2,
+            highest_block: 4,
+        }),
+        accept_raw_transactions: false,
+    };
+    let syncing = dispatch_with_view(
+        &world,
+        &mut pending,
+        &view,
+        "eth_syncing",
+        &serde_json::json!([]),
+    )
+    .unwrap();
+    assert_eq!(syncing["startingBlock"], "0x1");
+    assert_eq!(syncing["currentBlock"], "0x2");
+    assert_eq!(syncing["highestBlock"], "0x4");
+    assert_eq!(
+        dispatch_with_view(
+            &world,
+            &mut pending,
+            &view,
+            "net_peerCount",
+            &serde_json::json!([])
+        )
+        .unwrap(),
+        "0x3"
+    );
+    assert_eq!(
+        dispatch_with_view(
+            &world,
+            &mut pending,
+            &view,
+            "net_listening",
+            &serde_json::json!([])
+        )
+        .unwrap(),
+        true
+    );
+    let raw = sign_eip1559(
+        &key,
+        world.chain_id,
+        0,
+        0,
+        1,
+        21_000,
+        Some([0x11; 20]),
+        [0u8; 32],
+        &[],
+        &[],
+    );
+    let rejected = dispatch_with_view(
+        &world,
+        &mut pending,
+        &view,
+        "eth_sendRawTransaction",
+        &serde_json::json!([format!("0x{}", hex::encode(raw))]),
+    );
+    assert!(rejected.unwrap_err().to_string().contains("dev and test"));
+    assert!(pending.is_empty());
 }
 
 #[test]

@@ -154,3 +154,4 @@ jobs:
           cd apps/shared
           npm ci
           node light-client/signing-vector.test.mjs
+          node --experimental-strip-types light-client/rpc-query.test.ts

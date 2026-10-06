@@ -68,6 +68,7 @@ async fn direct_getblock_returns_full_block() {
         drc_offer_creates: vec![],
         drc_offer_cancels: vec![],
         drc_multisign_attachments: vec![],
+        tlt_covenants: Vec::new(),
     };
     let hash = block.id();
 

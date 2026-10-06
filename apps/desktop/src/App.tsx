@@ -19,6 +19,7 @@ import {
   startTipSync,
   walletNetworkFromNode,
   watchTransaction,
+  type LightAccountBalances,
   type LightNodeInfo,
   type LightTxLookup,
   type LightUtxo,
@@ -70,6 +71,8 @@ export function App() {
   const [nodeInfo, setNodeInfo] = useState<LightNodeInfo | null>(null);
   const [address, setAddress] = useState("");
   const [balance, setBalance] = useState<number | null>(null);
+  const [accountBalances, setAccountBalances] =
+    useState<LightAccountBalances | null>(null);
   const [utxos, setUtxos] = useState<LightUtxo[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletBusy, setWalletBusy] = useState(false);
@@ -170,20 +173,24 @@ export function App() {
       );
       setBalance(null);
       setUtxos([]);
+      setAccountBalances(null);
       return;
     }
     setWalletBusy(true);
     setWalletError(null);
     try {
-      const [bal, set] = await Promise.all([
+      const [bal, set, accounts] = await Promise.all([
         client.getBalance(resolved),
         client.getUtxos(resolved),
+        client.getAccountBalances(resolved),
       ]);
       setBalance(bal.balance);
       setUtxos(set.utxos);
+      setAccountBalances(accounts);
     } catch (err) {
       setBalance(null);
       setUtxos([]);
+      setAccountBalances(null);
       setWalletError(err instanceof Error ? err.message : "lookup failed");
     } finally {
       setWalletBusy(false);
@@ -335,12 +342,14 @@ export function App() {
       setReceiveBech32(built.fromBech32);
       setReceiveHex(built.from);
       setAddress(built.fromBech32);
-      const [bal, set] = await Promise.all([
+      const [bal, set, accounts] = await Promise.all([
         client.getBalance(built.from),
         client.getUtxos(built.from),
+        client.getAccountBalances(built.from),
       ]);
       setBalance(bal.balance);
       setUtxos(set.utxos);
+      setAccountBalances(accounts);
     } catch (err) {
       setSendError(err instanceof Error ? err.message : "send failed");
     } finally {
@@ -606,11 +615,18 @@ export function App() {
         ) : null}
         {balance !== null ? (
           <p style={{ marginTop: "0.85rem", fontSize: "0.95rem" }}>
-            Balance{" "}
+            TLT{" "}
             <span style={{ color: "var(--agora-cyan)", fontFamily: "ui-monospace, monospace" }}>
               {balance}
             </span>{" "}
             base units · {utxos.length} UTXO{utxos.length === 1 ? "" : "s"}
+          </p>
+        ) : null}
+        {accountBalances ? (
+          <p style={{ marginTop: "0.45rem", fontSize: "0.85rem", color: "var(--agora-ink-muted)" }}>
+            OVL {String(accountBalances.ovl.balance)} nonce {accountBalances.ovl.nonce}
+            {" · "}
+            DRC {String(accountBalances.drc.balance)} nonce {accountBalances.drc.nonce}
           </p>
         ) : null}
         {utxos.length > 0 ? (
