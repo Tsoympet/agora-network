@@ -12,6 +12,7 @@ mod ghostdag;
 mod limits;
 mod pow;
 mod quorum;
+mod tlt_light;
 
 pub use daa::{
     median_time_past, next_difficulty, next_difficulty_weighted, work_from_bits, DaaConfig,
@@ -36,3 +37,4 @@ pub use pow::{
     PowVerifier, RandomXPowHasher, Sha256PowHasher, RANDOMX_EPOCH_BLOCKS, RANDOMX_EPOCH_MS,
 };
 pub use quorum::has_two_thirds_quorum;
+pub use tlt_light::{verify_trident_light_check, TridentLightCheck, TridentLightError};

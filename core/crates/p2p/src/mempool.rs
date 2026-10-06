@@ -31,12 +31,24 @@ pub const DEFAULT_TEMPLATE_TX_LIMIT: usize = 128;
 /// Default minimum implicit fee (base units) for relay / template admission.
 pub const DEFAULT_MIN_RELAY_FEE: u64 = 1;
 
+/// Maximum number of opted-in TLT transactions one replacement may evict.
+pub const TLT_RBF_MAX_REPLACEMENTS: usize = 16;
+
+/// Minimum fee increase, in base units, over the sum of replaced fees.
+pub const TLT_RBF_MIN_FEE_INCREASE: u64 = DEFAULT_MIN_RELAY_FEE;
+
 /// Local mempool with signature-gated admission and outpoint reservation.
 #[derive(Debug, Default)]
 pub struct Mempool {
     txs: HashMap<Hash, Transaction>,
     /// Implicit fee (`in − out`) recorded at admit for fee-ordered selection.
     fees: HashMap<Hash, u64>,
+    /// TLT transactions admitted with an explicit replace-by-fee opt-in.
+    ///
+    /// v1 transaction bytes have no sequence field, so the live wire format
+    /// cannot carry a sequence signal. Opt-in is relay policy stored beside the
+    /// transaction and does not change consensus validity.
+    rbf_opt_in: HashSet<Hash>,
     /// Outpoints spent by txs currently in the pool (conflict detection).
     reserved: HashSet<OutPoint>,
     account_txs: HashMap<Hash, AccountTransfer>,
@@ -109,6 +121,7 @@ impl Mempool {
         Self {
             txs: HashMap::new(),
             fees: HashMap::new(),
+            rbf_opt_in: HashSet::new(),
             reserved: HashSet::new(),
             account_txs: HashMap::new(),
             stake_txs: HashMap::new(),
@@ -364,6 +377,125 @@ impl Mempool {
         self.fees.insert(id, fee);
         self.txs.insert(id, tx);
         Ok(id)
+    }
+
+    /// Admit a TLT transfer and record whether the caller opted into replacement.
+    ///
+    /// The opt-in flag is relay policy. Consensus still applies the first valid
+    /// spend in GHOSTDAG blue order.
+    pub fn admit_priced_opt_in(
+        &mut self,
+        tx: Transaction,
+        fee: u64,
+        rbf_opt_in: bool,
+    ) -> Result<Hash, P2pError> {
+        let already = self.txs.contains_key(&tx.tx_id());
+        let id = self.admit_priced(tx, fee)?;
+        if rbf_opt_in && !already {
+            self.rbf_opt_in.insert(id);
+        }
+        Ok(id)
+    }
+
+    /// True when `tx_id` was admitted with replace-by-fee opt-in.
+    pub fn tlt_rbf_opt_in(&self, tx_id: &Hash) -> bool {
+        self.rbf_opt_in.contains(tx_id)
+    }
+
+    /// Replace opted-in conflicting TLT mempool transactions with `tx`.
+    ///
+    /// Policy rules: every conflicting transaction opted in, the new fee is at
+    /// least the replaced fee sum plus [`TLT_RBF_MIN_FEE_INCREASE`], and no
+    /// remaining mempool transaction spends an output of a replaced transaction.
+    /// Transactions that lose this policy check stay valid for consensus.
+    pub fn replace_by_fee(&mut self, tx: Transaction, fee: u64) -> Result<Hash, P2pError> {
+        if tx.inputs.is_empty() {
+            return Err(P2pError::MempoolRejected(
+                "coinbase not allowed in mempool".into(),
+            ));
+        }
+        if tx.public_key.len() != 33 || tx.signature.len() != 64 {
+            return Err(P2pError::MempoolRejected(
+                "transaction missing secp256k1 auth".into(),
+            ));
+        }
+        let id = tx.tx_id();
+        if self.txs.contains_key(&id) {
+            return Err(P2pError::MempoolRejected(
+                "transaction is already in the mempool".into(),
+            ));
+        }
+        let mut new_inputs = HashSet::new();
+        for input in &tx.inputs {
+            if !new_inputs.insert(input.previous_outpoint) {
+                return Err(P2pError::MempoolRejected(
+                    "duplicate input in replacement".into(),
+                ));
+            }
+        }
+        let mut conflicts: Vec<Hash> = self
+            .txs
+            .iter()
+            .filter(|(_, existing)| {
+                existing
+                    .inputs
+                    .iter()
+                    .any(|input| new_inputs.contains(&input.previous_outpoint))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        conflicts.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+        if conflicts.is_empty() {
+            return Err(P2pError::MempoolRejected(
+                "replacement does not conflict with the mempool".into(),
+            ));
+        }
+        if conflicts.len() > TLT_RBF_MAX_REPLACEMENTS {
+            return Err(P2pError::MempoolRejected(
+                "replacement evicts too many transactions".into(),
+            ));
+        }
+        if conflicts.iter().any(|id| !self.rbf_opt_in.contains(id)) {
+            return Err(P2pError::MempoolRejected(
+                "conflicting transaction did not opt into replace-by-fee".into(),
+            ));
+        }
+        let conflict_set: HashSet<Hash> = conflicts.iter().copied().collect();
+        for (other_id, other) in &self.txs {
+            if conflict_set.contains(other_id) {
+                continue;
+            }
+            if other
+                .inputs
+                .iter()
+                .any(|input| conflict_set.contains(&input.previous_outpoint.tx_id))
+            {
+                return Err(P2pError::MempoolRejected(
+                    "replacement would orphan a mempool descendant".into(),
+                ));
+            }
+        }
+        let mut replaced_fee = 0u64;
+        for conflict in &conflicts {
+            let part = self.fees.get(conflict).copied().unwrap_or(0);
+            replaced_fee = replaced_fee
+                .checked_add(part)
+                .ok_or_else(|| P2pError::MempoolRejected("replaced fee overflow".into()))?;
+        }
+        let needed = replaced_fee
+            .checked_add(TLT_RBF_MIN_FEE_INCREASE)
+            .ok_or_else(|| {
+                P2pError::MempoolRejected("replacement fee threshold overflow".into())
+            })?;
+        if fee < needed {
+            return Err(P2pError::MempoolRejected(format!(
+                "replacement fee {fee} is below {needed}"
+            )));
+        }
+        for conflict in &conflicts {
+            let _ = self.remove(conflict);
+        }
+        self.admit_priced_opt_in(tx, fee, true)
     }
 
     /// Admit a pre-validated OVL/DRC account transfer.
@@ -1106,6 +1238,7 @@ impl Mempool {
     pub fn remove(&mut self, tx_id: &Hash) -> Option<Transaction> {
         let tx = self.txs.remove(tx_id)?;
         self.fees.remove(tx_id);
+        self.rbf_opt_in.remove(tx_id);
         for input in &tx.inputs {
             self.reserved.remove(&input.previous_outpoint);
         }
@@ -1657,6 +1790,24 @@ mod tests {
         tx
     }
 
+    fn signed_spend_from(tx_id: Hash, index: u32, nonce: u64) -> Transaction {
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let kp = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let mut tx = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint { tx_id, index },
+            }],
+            vec![TxOut {
+                value: Amount::from_base_units(1),
+                address: kp.address(),
+            }],
+            nonce,
+        );
+        sign_transaction(&mut tx, &kp).unwrap();
+        tx
+    }
+
     #[test]
     fn admits_valid_signed_tx() {
         let tx = signed_spend(0, 1);
@@ -1747,6 +1898,48 @@ mod tests {
         let capped = pool.select_transfers(2);
         assert_eq!(capped.len(), 2);
         assert_eq!(capped[0].tx_id(), high.tx_id());
+    }
+
+    #[test]
+    fn replace_by_fee_requires_opt_in_and_a_higher_fee() {
+        let mut pool = Mempool::new(8);
+        let original = signed_spend(0, 1);
+        let replacement = signed_spend(0, 2);
+        pool.admit_priced_opt_in(original.clone(), 10, true)
+            .unwrap();
+        assert!(pool.replace_by_fee(replacement.clone(), 10).is_err());
+        assert!(pool.contains(&original.tx_id()));
+        let id = pool.replace_by_fee(replacement.clone(), 11).unwrap();
+        assert_eq!(id, replacement.tx_id());
+        assert!(!pool.contains(&original.tx_id()));
+        assert!(pool.tlt_rbf_opt_in(&id));
+        assert!(pool.reserved().contains(&OutPoint {
+            tx_id: Hash::ZERO,
+            index: 0,
+        }));
+
+        let pinned = signed_spend(1, 3);
+        let challenger = signed_spend(1, 4);
+        pool.admit_priced(pinned.clone(), 10).unwrap();
+        assert!(pool.replace_by_fee(challenger, 50).is_err());
+        assert!(pool.contains(&pinned.tx_id()));
+    }
+
+    #[test]
+    fn replace_by_fee_refuses_to_orphan_a_descendant() {
+        let mut pool = Mempool::new(8);
+        let parent = signed_spend(0, 1);
+        pool.admit_priced_opt_in(parent.clone(), 10, true).unwrap();
+        let child = signed_spend_from(parent.tx_id(), 0, 2);
+        pool.admit_priced_opt_in(child.clone(), 10, true).unwrap();
+        let replacement = signed_spend(0, 3);
+        let err = pool
+            .replace_by_fee(replacement, 40)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("descendant"), "{err}");
+        assert!(pool.contains(&parent.tx_id()));
+        assert!(pool.contains(&child.tx_id()));
     }
 
     #[test]

@@ -60,6 +60,22 @@ export {
   type AgoraNetworkId,
 } from "./network";
 export {
+  selectTltCoins,
+  TLT_COINSELECT_EXHAUSTIVE_CAP,
+  type TltSpendCoin,
+} from "./coinselect";
+export {
+  proveTltTxMerkle,
+  tltTxMerkleRoot,
+  verifyTltTxMerkle,
+  type TltTxMerkleProof,
+} from "./tltMerkle";
+export {
+  tridentLightState,
+  verifyTridentLight,
+  type TridentLightState,
+} from "./tridentLight";
+export {
   addressBech32FromMnemonic,
   addressFromMnemonic,
   buildSignedTransfer,
