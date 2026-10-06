@@ -355,10 +355,11 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
     assert_eq!(receipt_a, receipt_b);
     assert_eq!(receipt_a.operation, submitted_operation);
     assert_eq!(receipt_a.canonical_block_id, hash);
-    assert_ne!(
+    assert!(block.drc_escrow_creates[0].multisign.is_none());
+    assert_eq!(
         submitted_transaction_id,
         block.drc_escrow_creates[0].escrow_id(),
-        "detached block bytes must remain distinct from the reconstructed transaction"
+        "consensus transaction ids omit the detached multisign trailer"
     );
 
     let mut tampered = received;

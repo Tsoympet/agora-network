@@ -12,10 +12,11 @@ use crate::{
     DrcAccountSignerList, DrcAccountTickets, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
     DrcCheckLive, DrcDepositPreauth, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
     DrcEscrowFinishTx, DrcEscrowLive, DrcIssuedAssetPolicyLive, DrcIssuedAssetPolicySetTx,
-    DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentChannelLive, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
-    DrcTrustLineLive, DrcTrustLineSetTx, Hash, IssuedAssetId, SignedStakeTx,
+    DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcMultisignAuth, DrcPaymentChannelClaimTx,
+    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx,
+    DrcPaymentChannelLive, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
+    DrcTrustLineIssuerControlTx, DrcTrustLineLive, DrcTrustLineSetTx, Hash, IssuedAssetId,
+    SignedStakeTx,
 };
 
 pub const DRC_LEDGER_OBJECT_DESCRIPTOR_VERSION: u32 = 1;
@@ -473,11 +474,69 @@ impl DrcOperation {
             self.historical_transaction_id(),
         ))
     }
+
+    /// Detached authorization omitted from consensus transaction Borsh.
+    ///
+    /// Receipts persist this separately so lookup can return the signed envelope
+    /// without changing frozen lane or block bytes.
+    pub fn multisign(&self) -> Option<&DrcMultisignAuth> {
+        match self {
+            Self::AccountTransfer(value) => value.multisign.as_ref(),
+            Self::Stake(value) => value.multisign.as_ref(),
+            Self::Payment(value) => value.multisign.as_ref(),
+            Self::AccountPolicy(value) => value.multisign.as_ref(),
+            Self::DepositPreauthorization(value) => value.multisign.as_ref(),
+            Self::RegularKey(value) => value.multisign.as_ref(),
+            Self::SignerList(value) => value.multisign.as_ref(),
+            Self::TicketCreate(value) => value.multisign.as_ref(),
+            Self::EscrowCreate(value) => value.multisign.as_ref(),
+            Self::EscrowFinish(value) => value.multisign.as_ref(),
+            Self::EscrowCancel(value) => value.multisign.as_ref(),
+            Self::CheckCreate(value) => value.multisign.as_ref(),
+            Self::CheckCash(value) => value.multisign.as_ref(),
+            Self::CheckCancel(value) => value.multisign.as_ref(),
+            Self::PaymentChannelCreate(value) => value.multisign.as_ref(),
+            Self::PaymentChannelFund(value) => value.multisign.as_ref(),
+            Self::PaymentChannelClaim(value) => value.multisign.as_ref(),
+            Self::PaymentChannelClose(value) => value.multisign.as_ref(),
+            Self::TrustLineSet(value) => value.multisign.as_ref(),
+            Self::IssuedTransfer(value) => value.multisign.as_ref(),
+            Self::IssuedAssetPolicySet(value) => value.multisign.as_ref(),
+            Self::TrustLineIssuerControl(value) => value.multisign.as_ref(),
+            Self::IssuedClawback(value) => value.multisign.as_ref(),
+        }
+    }
+
+    pub fn set_multisign(&mut self, auth: Option<DrcMultisignAuth>) {
+        match self {
+            Self::AccountTransfer(value) => value.multisign = auth,
+            Self::Stake(value) => value.multisign = auth,
+            Self::Payment(value) => value.multisign = auth,
+            Self::AccountPolicy(value) => value.multisign = auth,
+            Self::DepositPreauthorization(value) => value.multisign = auth,
+            Self::RegularKey(value) => value.multisign = auth,
+            Self::SignerList(value) => value.multisign = auth,
+            Self::TicketCreate(value) => value.multisign = auth,
+            Self::EscrowCreate(value) => value.multisign = auth,
+            Self::EscrowFinish(value) => value.multisign = auth,
+            Self::EscrowCancel(value) => value.multisign = auth,
+            Self::CheckCreate(value) => value.multisign = auth,
+            Self::CheckCash(value) => value.multisign = auth,
+            Self::CheckCancel(value) => value.multisign = auth,
+            Self::PaymentChannelCreate(value) => value.multisign = auth,
+            Self::PaymentChannelFund(value) => value.multisign = auth,
+            Self::PaymentChannelClaim(value) => value.multisign = auth,
+            Self::PaymentChannelClose(value) => value.multisign = auth,
+            Self::TrustLineSet(value) => value.multisign = auth,
+            Self::IssuedTransfer(value) => value.multisign = auth,
+            Self::IssuedAssetPolicySet(value) => value.multisign = auth,
+            Self::TrustLineIssuerControl(value) => value.multisign = auth,
+            Self::IssuedClawback(value) => value.multisign = auth,
+        }
+    }
 }
 
-#[derive(
-    Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
-)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct DrcAcceptedOperationReceipt {
     pub version: u32,
@@ -523,6 +582,50 @@ impl DrcAcceptedOperationReceipt {
             && self.owner == self.operation.owner()
             && self.kind == self.operation.kind()
             && canonical_ids == self.affected_object_ids
+    }
+}
+
+impl BorshSerialize for DrcAcceptedOperationReceipt {
+    fn serialize<W: borsh::io::Write>(&self, writer: &mut W) -> Result<(), borsh::io::Error> {
+        BorshSerialize::serialize(&self.version, writer)?;
+        BorshSerialize::serialize(&self.operation_id, writer)?;
+        BorshSerialize::serialize(&self.historical_transaction_id, writer)?;
+        BorshSerialize::serialize(&self.owner, writer)?;
+        BorshSerialize::serialize(&self.kind, writer)?;
+        BorshSerialize::serialize(&self.canonical_block_id, writer)?;
+        BorshSerialize::serialize(&self.application_blue_score, writer)?;
+        // Inner transaction Borsh intentionally drops the multisign trailer.
+        BorshSerialize::serialize(&self.operation, writer)?;
+        BorshSerialize::serialize(&self.affected_object_ids, writer)?;
+        BorshSerialize::serialize(&self.operation.multisign(), writer)?;
+        Ok(())
+    }
+}
+
+impl BorshDeserialize for DrcAcceptedOperationReceipt {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let version = u32::deserialize_reader(reader)?;
+        let operation_id = Hash::deserialize_reader(reader)?;
+        let historical_transaction_id = Hash::deserialize_reader(reader)?;
+        let owner = Address::deserialize_reader(reader)?;
+        let kind = DrcOperationKind::deserialize_reader(reader)?;
+        let canonical_block_id = Hash::deserialize_reader(reader)?;
+        let application_blue_score = Option::<u64>::deserialize_reader(reader)?;
+        let mut operation = DrcOperation::deserialize_reader(reader)?;
+        let affected_object_ids = Vec::<Hash>::deserialize_reader(reader)?;
+        let authorization = Option::<DrcMultisignAuth>::deserialize_reader(reader)?;
+        operation.set_multisign(authorization);
+        Ok(Self {
+            version,
+            operation_id,
+            historical_transaction_id,
+            owner,
+            kind,
+            canonical_block_id,
+            application_blue_score,
+            operation,
+            affected_object_ids,
+        })
     }
 }
 
@@ -637,5 +740,41 @@ mod tests {
         for forbidden in ["offer", "evm", "contract", "bytecode", "hook"] {
             assert_eq!(DrcLedgerObjectKind::parse(forbidden), None);
         }
+    }
+
+    #[test]
+    fn receipt_borsh_preserves_detached_multisign() {
+        let auth = crate::DrcMultisignAuth {
+            version: 1,
+            signing_for: Address([9; 20]),
+            signatures: vec![crate::DrcMultisignEntry {
+                signer: Address([4; 20]),
+                public_key: vec![2; 33],
+                signature: vec![3; 64],
+            }],
+        };
+        let operation = DrcOperation::EscrowCreate(crate::DrcEscrowCreateTx {
+            version: 1,
+            owner: Address([9; 20]),
+            recipient: Address([8; 20]),
+            amount: crate::Amount::from_base_units(10),
+            fee: crate::Amount::from_base_units(1),
+            destination_tag: None,
+            source_tag: None,
+            invoice_id: Hash::ZERO,
+            finish_after_blue_score: None,
+            cancel_after_blue_score: Some(50),
+            nonce: 1,
+            account_sequence: None,
+            public_key: Vec::new(),
+            signature: Vec::new(),
+            multisign: Some(auth),
+        });
+        let receipt = DrcAcceptedOperationReceipt::new(Hash([1; 32]), Some(4), operation, vec![]);
+        let encoded = borsh::to_vec(&receipt).unwrap();
+        let decoded = DrcAcceptedOperationReceipt::try_from_slice(&encoded).unwrap();
+        assert_eq!(decoded, receipt);
+        assert!(decoded.operation.multisign().is_some());
+        assert!(decoded.is_consistent());
     }
 }
