@@ -14,8 +14,8 @@ use agora_p2p::{
     Mempool, NetworkHandle, NetworkMessage, DEFAULT_MIN_RELAY_FEE, DEFAULT_TEMPLATE_TX_LIMIT,
 };
 use agora_rpc::{
-    DrcDepositPreauthStatus, FeeEstimate, MempoolEntry, NodeInfo, RpcBackend, RpcError,
-    TltCovenantLookup, TxLookup, UtxoEntry,
+    AccountBalances, DrcDepositPreauthStatus, FeeEstimate, MempoolEntry, NodeInfo, RpcBackend,
+    RpcError, TltCovenantLookup, TxLookup, UtxoEntry,
 };
 use agora_state_machine::{
     apply_account_transfer, apply_drc_account_policy, apply_drc_check_cancel, apply_drc_check_cash,
@@ -25,9 +25,9 @@ use agora_state_machine::{
     apply_signed_stake_tx, build_snapshot, canonical_community_root, governance_treasury_root,
     list_drc_account_objects, list_grants as list_canonical_grants,
     list_hubs as list_canonical_hubs, list_missions as list_canonical_missions,
-    list_passport_attestations, load_canonical_community_summary, load_canonical_governance_policy,
-    load_drc_account_policy, load_drc_check_receipt, load_drc_deposit_preauth,
-    load_drc_escrow_receipt, load_drc_issued_asset_policy_receipt,
+    list_passport_attestations, load_account, load_canonical_community_summary,
+    load_canonical_governance_policy, load_drc_account_policy, load_drc_check_receipt,
+    load_drc_deposit_preauth, load_drc_escrow_receipt, load_drc_issued_asset_policy_receipt,
     load_drc_issued_clawback_receipt, load_drc_issued_transfer_receipt, load_drc_ledger_object,
     load_drc_operation, load_drc_payment_by_invoice, load_drc_payment_channel_claim_event,
     load_drc_payment_channel_fund_event, load_drc_payment_channel_live,
@@ -2129,6 +2129,21 @@ impl RpcBackend for NodeBackend {
         self.utxo_balance(address).unwrap_or(Amount::ZERO)
     }
 
+    fn get_account_balances(&self, address: &Address) -> Result<AccountBalances, RpcError> {
+        let tlt = self.utxo_balance(address)?.as_base_units();
+        let ovl = load_account(self.store.as_ref(), NativeAssetId::OVL, address)
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        let drc = load_account(self.store.as_ref(), NativeAssetId::DRC, address)
+            .map_err(|error| RpcError::Internal(error.to_string()))?;
+        Ok(AccountBalances {
+            tlt,
+            ovl: ovl.balance,
+            ovl_nonce: ovl.nonce,
+            drc: drc.balance,
+            drc_nonce: drc.nonce,
+        })
+    }
+
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError> {
         self.list_utxos(address)
     }
@@ -3559,6 +3574,73 @@ mod tests {
         assert_ne!(id, genesis);
         assert!(backend.dag_tips().contains(&id));
         assert_eq!(backend.get_balance(&miner), reward);
+    }
+
+    #[test]
+    fn account_balance_rpc_reads_tlt_utxo_and_ovl_drc_accounts() {
+        use agora_rpc::{RpcDispatcher, RpcRequest};
+        use serde_json::json;
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let addr = Address([6; 20]);
+        let tlt_out = TxOut {
+            value: Amount::from_base_units(40),
+            address: addr,
+        };
+        let mut utxo_key = vec![0x71; 32];
+        utxo_key.extend_from_slice(&0u32.to_le_bytes());
+        let utxo_val = borsh::to_vec(&tlt_out).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::OVL,
+            &addr,
+            Amount::from_base_units(11),
+        )
+        .unwrap();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::DRC,
+            &addr,
+            Amount::from_base_units(25),
+        )
+        .unwrap();
+        funding.put_cf(ColumnFamily::Utxo, &utxo_key, &utxo_val);
+        store.write_batch(funding).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let mempool = Arc::new(Mutex::new(Mempool::new(8)));
+        let backend = NodeBackend::new(chain, store, mempool, backend_config(genesis));
+        let mut rpc = RpcDispatcher::new(backend);
+
+        let tlt_only = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getBalance".into(),
+            params: json!({"address": addr.to_bech32()}),
+        });
+        assert_eq!(tlt_only.result.unwrap()["balance"], json!(40));
+
+        let accounts = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getAccountBalances".into(),
+            params: json!({"address": addr.to_bech32()}),
+        });
+        let accounts_res = accounts.result.unwrap();
+        assert_eq!(accounts_res["address"], json!(addr.to_bech32()));
+        assert_eq!(accounts_res["tlt"]["balance"], json!(40));
+        assert_eq!(accounts_res["ovl"], json!({"balance": 11, "nonce": 0}));
+        assert_eq!(accounts_res["drc"], json!({"balance": 25, "nonce": 0}));
     }
 
     #[test]

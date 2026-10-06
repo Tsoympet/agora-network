@@ -11,8 +11,8 @@ pub use drc_trust_line_params::{
 };
 
 pub use backend::{
-    DrcDepositPreauthStatus, FeeEstimate, InMemoryBackend, MempoolEntry, NodeInfo, RpcBackend,
-    TltCovenantLookup, TxLookup, TxStatus, UtxoEntry,
+    AccountBalances, DrcDepositPreauthStatus, FeeEstimate, InMemoryBackend, MempoolEntry, NodeInfo,
+    RpcBackend, TltCovenantLookup, TxLookup, TxStatus, UtxoEntry,
 };
 pub use dispatch::RpcDispatcher;
 pub use error::RpcError;

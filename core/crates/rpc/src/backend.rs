@@ -26,6 +26,20 @@ pub struct UtxoEntry {
     pub value: Amount,
 }
 
+/// Native three-asset snapshot for `agora_getAccountBalances`.
+///
+/// `tlt` is the live UTXO sum. `ovl` / `drc` are account-module balances and
+/// shared nonces; a missing account reads as zeros. This is not EVM wei and
+/// does not change `agora_getBalance`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountBalances {
+    pub tlt: u64,
+    pub ovl: u64,
+    pub ovl_nonce: u64,
+    pub drc: u64,
+    pub drc_nonce: u64,
+}
+
 /// Mempool / confirmed / missing status for `agora_getTransaction`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TxStatus {
@@ -408,6 +422,8 @@ pub trait RpcBackend: Send {
         invoice_id: &Hash,
     ) -> Result<Option<DrcPaymentReceipt>, RpcError>;
     fn get_balance(&self, address: &Address) -> Amount;
+    /// TLT UTXO sum plus native OVL/DRC account balance and nonce.
+    fn get_account_balances(&self, address: &Address) -> Result<AccountBalances, RpcError>;
     /// Live UTXO set for wallet coin selection.
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError>;
     /// Testnet / faucet credit path. Production node backends may reject this.
@@ -482,6 +498,8 @@ pub struct InMemoryBackend {
     tips: Vec<Hash>,
     blocks: HashMap<Hash, Block>,
     balances: HashMap<Address, Amount>,
+    ovl_accounts: HashMap<Address, (u64, u64)>,
+    drc_accounts: HashMap<Address, (u64, u64)>,
     utxos: HashMap<OutPoint, TxOut>,
     mempool: HashMap<Hash, Transaction>,
     covenant_mempool: HashMap<Hash, TltCovenantTx>,
@@ -515,6 +533,8 @@ impl Default for InMemoryBackend {
             tips: Vec::new(),
             blocks: HashMap::new(),
             balances: HashMap::new(),
+            ovl_accounts: HashMap::new(),
+            drc_accounts: HashMap::new(),
             utxos: HashMap::new(),
             mempool: HashMap::new(),
             covenant_mempool: HashMap::new(),
@@ -615,6 +635,14 @@ impl InMemoryBackend {
     ) {
         self.drc_deposit_preauths
             .insert((owner, authorized_source), status);
+    }
+
+    pub fn set_ovl_account(&mut self, address: Address, balance: u64, nonce: u64) {
+        self.ovl_accounts.insert(address, (balance, nonce));
+    }
+
+    pub fn set_drc_account(&mut self, address: Address, balance: u64, nonce: u64) {
+        self.drc_accounts.insert(address, (balance, nonce));
     }
 
     pub fn insert_block(&mut self, block: Block) {
@@ -1315,6 +1343,18 @@ impl RpcBackend for InMemoryBackend {
 
     fn get_balance(&self, address: &Address) -> Amount {
         self.balances.get(address).copied().unwrap_or(Amount::ZERO)
+    }
+
+    fn get_account_balances(&self, address: &Address) -> Result<AccountBalances, RpcError> {
+        let (ovl, ovl_nonce) = self.ovl_accounts.get(address).copied().unwrap_or((0, 0));
+        let (drc, drc_nonce) = self.drc_accounts.get(address).copied().unwrap_or((0, 0));
+        Ok(AccountBalances {
+            tlt: self.get_balance(address).as_base_units(),
+            ovl,
+            ovl_nonce,
+            drc,
+            drc_nonce,
+        })
     }
 
     fn get_utxos(&self, address: &Address) -> Result<Vec<UtxoEntry>, RpcError> {

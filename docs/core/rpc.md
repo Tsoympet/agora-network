@@ -53,7 +53,8 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_getDrcAccountObjects` | Bounded, cursor-paginated common live objects for one owner, optionally filtered by closed object kind |
 | `agora_getDrcOperation` | Canonical accepted DRC operation receipt by domain-separated operation ID |
 | `agora_getDrcTransaction` | Canonical accepted DRC operation receipt by the historical signed transaction ID |
-| `agora_getBalance` | Address balance (sum of live `cf_utxo`) |
+| `agora_getBalance` | Address TLT UTXO balance (sum of live `cf_utxo`) |
+| `agora_getAccountBalances` | TLT UTXO sum plus native OVL/DRC account balance and nonce. Missing accounts read as zeros. Does not change `agora_getBalance` and is not EVM wei |
 | `agora_getUtxos` | Spendable outpoints for an address (`tx_id`, `index`, `value`) |
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
 | `agora_getBlockTemplate` | Mining template block (tips as parents + coinbase) |
@@ -343,7 +344,7 @@ The live backend (`NodeBackend`) reads tips/blocks/UTXOs from `StateStore`, admi
 
 ## Light clients
 
-`apps/shared/light-client` provides `createLightClient` + `startTipSync` / `watchTransaction` (optional `minConfirmations`) plus wallet helpers (`getBalance`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) used by:
+`apps/shared/light-client` provides `createLightClient` + `startTipSync` / `watchTransaction` (optional `minConfirmations`) plus wallet helpers (`getBalance`, `getAccountBalances`, `getUtxos`, `submitTransaction`, BIP-39 `sendTransfer`) and query wrappers for TLT covenants and DRC DEX offers used by:
 
 - `apps/explorer` (live DAG + tx lookup + mempool + node status + pending watch)
 - `apps/desktop` (tip sync, UTXO lookup, signed send + confirmation poll)

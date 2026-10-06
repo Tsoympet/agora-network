@@ -168,6 +168,9 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getDrcAccountObjects"
             | "agora_getDrcOperation"
             | "agora_getDrcTransaction"
+            | "agora_getDrcOffer"
+            | "agora_getDrcAccountOffers"
+            | "agora_getDrcBookOffers"
             | "agora_getMempool"
             | "agora_getNodeInfo"
             | "agora_estimateFee"
@@ -342,6 +345,9 @@ mod tests {
         assert!(!method_requires_token("agora_getDrcAccountObjects"));
         assert!(!method_requires_token("agora_getDrcOperation"));
         assert!(!method_requires_token("agora_getDrcTransaction"));
+        assert!(!method_requires_token("agora_getDrcOffer"));
+        assert!(!method_requires_token("agora_getDrcAccountOffers"));
+        assert!(!method_requires_token("agora_getDrcBookOffers"));
         assert!(!method_requires_token("agora_getMempool"));
         assert!(!method_requires_token("agora_getNodeInfo"));
         assert!(!method_requires_token("agora_estimateFee"));
@@ -354,6 +360,7 @@ mod tests {
         assert!(method_requires_token("agora_getBlockTemplate"));
         assert!(method_requires_token("agora_fundAddress"));
         assert!(method_requires_token("agora_getBalance"));
+        assert!(method_requires_token("agora_getAccountBalances"));
         assert!(method_requires_token("agora_getUtxos"));
         assert!(method_requires_token("agora_castGovVote"));
         assert!(method_requires_token("agora_submitProposal"));

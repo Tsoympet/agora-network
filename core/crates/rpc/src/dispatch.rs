@@ -695,6 +695,16 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     "balance": bal.as_base_units(),
                 }))
             }
+            RpcMethod::GetAccountBalances => {
+                let address = param_address(&req.params, "address")?;
+                let balances = self.backend.get_account_balances(&address)?;
+                Ok(json!({
+                    "address": address.to_bech32(),
+                    "tlt": { "balance": balances.tlt },
+                    "ovl": { "balance": balances.ovl, "nonce": balances.ovl_nonce },
+                    "drc": { "balance": balances.drc, "nonce": balances.drc_nonce },
+                }))
+            }
             RpcMethod::GetUtxos => {
                 let address = param_address(&req.params, "address")?;
                 let utxos = self.backend.get_utxos(&address)?;
@@ -1626,6 +1636,19 @@ mod tests {
         let bal_res = bal.result.unwrap();
         assert_eq!(bal_res["balance"], json!(500));
         assert_eq!(bal_res["address"], json!(addr.to_bech32()));
+
+        rpc.backend_mut().set_ovl_account(addr, 7, 2);
+        rpc.backend_mut().set_drc_account(addr, 9, 3);
+        let accounts = rpc.handle(RpcRequest {
+            id: Some(json!(22)),
+            method: "agora_getAccountBalances".into(),
+            params: json!({"address": addr.to_bech32()}),
+        });
+        let accounts_res = accounts.result.unwrap();
+        assert_eq!(accounts_res["address"], json!(addr.to_bech32()));
+        assert_eq!(accounts_res["tlt"]["balance"], json!(500));
+        assert_eq!(accounts_res["ovl"], json!({"balance": 7, "nonce": 2}));
+        assert_eq!(accounts_res["drc"], json!({"balance": 9, "nonce": 3}));
 
         let utxos = rpc.handle(RpcRequest {
             id: Some(json!(21)),

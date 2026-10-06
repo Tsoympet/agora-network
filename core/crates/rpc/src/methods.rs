@@ -72,6 +72,7 @@ pub enum RpcMethod {
     GetDrcOperation,
     GetDrcTransaction,
     GetBalance,
+    GetAccountBalances,
     GetUtxos,
     FundAddress,
     GetBlockTemplate,
@@ -178,6 +179,7 @@ impl RpcMethod {
             Self::GetDrcOperation => "agora_getDrcOperation",
             Self::GetDrcTransaction => "agora_getDrcTransaction",
             Self::GetBalance => "agora_getBalance",
+            Self::GetAccountBalances => "agora_getAccountBalances",
             Self::GetUtxos => "agora_getUtxos",
             Self::FundAddress => "agora_fundAddress",
             Self::GetBlockTemplate => "agora_getBlockTemplate",
@@ -284,6 +286,7 @@ impl RpcMethod {
             "agora_getDrcOperation" => Some(Self::GetDrcOperation),
             "agora_getDrcTransaction" => Some(Self::GetDrcTransaction),
             "agora_getBalance" => Some(Self::GetBalance),
+            "agora_getAccountBalances" => Some(Self::GetAccountBalances),
             "agora_getUtxos" => Some(Self::GetUtxos),
             "agora_fundAddress" => Some(Self::FundAddress),
             "agora_getBlockTemplate" => Some(Self::GetBlockTemplate),
@@ -380,6 +383,10 @@ mod tests {
 
     #[test]
     fn programmable_execution_rpc_is_ovl_only() {
+        assert_eq!(
+            RpcMethod::parse("agora_getAccountBalances"),
+            Some(RpcMethod::GetAccountBalances)
+        );
         assert_eq!(
             RpcMethod::parse("agora_submitOvlExecution"),
             Some(RpcMethod::SubmitOvlExecution)
