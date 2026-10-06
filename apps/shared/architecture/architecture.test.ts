@@ -91,9 +91,30 @@ function draftGrant(): Grant {
 }
 
 async function main(): Promise<void> {
-  assert.equal(CLIENT_MODULES.length, 23);
-  assert.ok(CLIENT_MODULES.includes("community"));
-  assert.ok(CLIENT_MODULES.includes("lightclient"));
+  assert.deepEqual(CLIENT_MODULES, [
+    "core",
+    "wallet",
+    "lightclient",
+    "drc",
+    "ovl",
+    "tlt",
+    "passport",
+    "community",
+    "missions",
+    "academy",
+    "grants",
+    "bounties",
+    "guilds",
+    "merchants",
+    "events",
+    "assembly",
+    "treasury",
+    "forum",
+    "notifications",
+    "explorer",
+    "security",
+    "settings",
+  ]);
 
   assert.equal(placementFor("mnemonic"), "USER_PRIVATE");
   assert.equal(placementFor("tlt.merkle"), "BLOCKCHAIN");
@@ -293,18 +314,18 @@ async function main(): Promise<void> {
   });
   assert.equal(preview.signed, false);
   assert.equal(preview.submitted, false);
-  let signed = false;
+  let previewSigned = false;
   await assert.rejects(
     signAfterPreview(preview, { confirmed: false }, async () => {
-      signed = true;
+      previewSigned = true;
     }),
     /not confirmed/,
   );
-  assert.equal(signed, false);
+  assert.equal(previewSigned, false);
   await signAfterPreview(preview, { confirmed: true, id: preview.id }, async () => {
-    signed = true;
+    previewSigned = true;
   });
-  assert.equal(signed, true);
+  assert.equal(previewSigned, true);
 
   const pin = createPinRecord("1234");
   assert.equal(pin.holdsSeed, false);
