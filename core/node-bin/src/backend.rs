@@ -2447,6 +2447,47 @@ impl RpcBackend for NodeBackend {
             Ok(json!({ "proposal_id": id, "assented": true }))
         })
     }
+
+    fn get_light_headers(&self, tip: Option<Hash>, limit: usize) -> Result<Value, RpcError> {
+        let chain = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?;
+        crate::light_rpc::light_headers_json(&chain, &self.network, self.genesis_hash, tip, limit)
+    }
+
+    fn get_block_binding(&self, hash: &Hash) -> Result<Value, RpcError> {
+        let chain = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?;
+        crate::light_rpc::block_binding_json(&chain, hash)
+    }
+
+    fn get_tlt_inclusion_proof(&self, tx_id: &Hash) -> Result<Value, RpcError> {
+        let lookup = self.get_transaction(tx_id)?;
+        let chain = self
+            .chain
+            .lock()
+            .map_err(|_| RpcError::Internal("chain lock poisoned".into()))?;
+        crate::light_rpc::tlt_inclusion_json(
+            &chain,
+            tx_id,
+            lookup.status.as_str(),
+            lookup.block_id,
+            lookup.status.as_str() == "confirmed",
+        )
+    }
+
+    fn get_native_balances(&self, address: &Address) -> Result<Value, RpcError> {
+        let tlt = self.get_balance(address).as_base_units();
+        crate::light_rpc::native_balances_json(
+            self.store.as_ref(),
+            address,
+            address.to_bech32(),
+            tlt,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -2478,6 +2519,98 @@ mod tests {
             network: "dev".into(),
             genesis_hash,
         }
+    }
+
+    #[test]
+    fn light_client_reads_genesis_spine_and_isolated_balances() {
+        use agora_consensus::{verify_light_header_spine, ReportedLightHeader};
+        use agora_types::{Amount, BlockHeader, NativeAssetId};
+
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let chain = Arc::new(Mutex::new(
+            ChainState::bootstrap(
+                store.clone(),
+                genesis,
+                PowAlgorithm::RandomX,
+                0,
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        ));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let owner = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let mut funding = WriteBatch::new();
+        credit_account_into(
+            &mut funding,
+            &store,
+            NativeAssetId::OVL,
+            &owner.address(),
+            Amount::from_base_units(50),
+        )
+        .unwrap();
+        store.write_batch(funding).unwrap();
+        let backend = NodeBackend::new(
+            chain,
+            store,
+            Arc::new(Mutex::new(Mempool::new(8))),
+            backend_config(genesis),
+        );
+
+        let headers = backend.get_light_headers(None, 8).unwrap();
+        assert_eq!(headers["genesis"], genesis.to_hex());
+        assert_eq!(headers["reaches_genesis"], true);
+        assert_eq!(headers["pow_checked_by"], "full_node");
+        assert_eq!(headers["finality"]["stake_fields_present"], false);
+        let rows = headers["headers"].as_array().unwrap();
+        assert!(!rows.is_empty());
+        let parsed: Vec<ReportedLightHeader> = rows
+            .iter()
+            .map(|row| ReportedLightHeader {
+                header: BlockHeader {
+                    version: row["header"]["version"].as_u64().unwrap() as u16,
+                    parents: row["header"]["parents"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|parent| Hash::from_hex(parent.as_str().unwrap()).unwrap())
+                        .collect(),
+                    timestamp_ms: row["header"]["timestamp_ms"].as_u64().unwrap(),
+                    bits: row["header"]["bits"].as_u64().unwrap() as u32,
+                    nonce: row["header"]["nonce"].as_u64().unwrap(),
+                    tx_root: Hash::from_hex(row["header"]["tx_root"].as_str().unwrap()).unwrap(),
+                },
+                selected_parent: row["selected_parent"]
+                    .as_str()
+                    .map(|parent| Hash::from_hex(parent).unwrap()),
+                blue_score: row["blue_score"].as_u64().unwrap(),
+            })
+            .collect();
+        assert_eq!(
+            verify_light_header_spine(&parsed, &genesis).unwrap(),
+            Hash::from_hex(rows[0]["hash"].as_str().unwrap()).unwrap()
+        );
+
+        let binding = backend.get_block_binding(&genesis).unwrap();
+        assert_eq!(binding["hash"], genesis.to_hex());
+        assert!(binding["binding"].as_array().is_some());
+        assert_eq!(binding["programmable_lane"], "OVL");
+        assert_eq!(binding["drc_contract_lane"], false);
+
+        let missing = backend.get_tlt_inclusion_proof(&Hash([9u8; 32])).unwrap();
+        assert_eq!(missing["status"], "unknown");
+        assert!(missing["proof"].is_null());
+
+        let balances = backend.get_native_balances(&owner.address()).unwrap();
+        assert_eq!(balances["assets"]["TLT"]["balance"], "0");
+        assert_eq!(balances["assets"]["TLT"]["module"], "utxo");
+        assert_eq!(balances["assets"]["OVL"]["balance"], "50");
+        assert_eq!(balances["assets"]["OVL"]["module"], "account");
+        assert_eq!(balances["assets"]["DRC"]["balance"], "0");
+        assert_eq!(balances["assets"]["DRC"]["record"], "absent");
+        assert_eq!(balances["assets"]["TLT"]["header_proven"], false);
+        assert_eq!(balances["assets"]["OVL"]["header_proven"], false);
+        assert_eq!(balances["assets"]["DRC"]["header_proven"], false);
     }
 
     #[test]

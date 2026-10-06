@@ -76,6 +76,27 @@ export {
   type TridentLightState,
 } from "./tridentLight";
 export {
+  assertExpectedNetwork,
+  compareHeaderSpines,
+  foldBodyBinding,
+  hashLightHeader,
+  readNativeBalances,
+  verifyDrcObjectHeaderProof,
+  verifyIncomingTlt,
+  verifyLaneId,
+  verifyReportedFinality,
+  verifySelectedParentSpine,
+  type BodyBindingStep,
+  type LightHeaderChain,
+  type LightHeaderFields,
+  type LightHeaderRecord,
+  type NativeAssetBalance,
+  type NativeBalances,
+  type SpineRelation,
+  type TltInclusionProof,
+  type TltInclusionResponse,
+} from "./agoraLight";
+export {
   addressBech32FromMnemonic,
   addressFromMnemonic,
   buildSignedTransfer,
@@ -93,6 +114,44 @@ export {
   type BuiltTransfer,
   type WalletAccount,
 } from "./wallet";
+export {
+  AGORA_ACCOUNT_PATH,
+  assertXpubWatchOnly,
+  derivePublicAccount,
+  exportAccountXpub,
+  type PublicAccount,
+} from "./wallet";
+export {
+  PAIRING_GUIDE_STEPS,
+  PAIRING_VERSION,
+  RESTORE_KIND,
+  WATCH_KIND,
+  buildRestorePairing,
+  buildWatchPairing,
+  pairingImportBlocker,
+  parsePairingPayload,
+  serializePairing,
+  signSpend,
+  watchWithRpc,
+  type ParsedPairing,
+  type RestorePairing,
+  type SpendSession,
+  type WalletSession,
+  type WatchOnlyWallet,
+} from "./pairing";
+export { qrMatrix, type QrMatrix } from "./qrMatrix";
+export {
+  RPC_ENDPOINT_STORAGE_KEY,
+  RPC_TOKEN_STORAGE_KEY,
+  classifyRpcReach,
+  loadRpcEndpoint,
+  loadRpcToken,
+  rpcTrustWarning,
+  saveRpcEndpoint,
+  saveRpcToken,
+  validateRpcUrl,
+  type RpcReach,
+} from "./rpcEndpoint";
 export {
   clearPersistedVault,
   DEFAULT_VAULT_STORAGE_KEY,

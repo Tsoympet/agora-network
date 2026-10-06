@@ -9,5 +9,6 @@
     "strict": true,
     "noEmit": true
   },
-  "include": ["src", "../shared/light-client/**/*.ts"]
+  "include": ["src", "../shared/light-client/**/*.ts"],
+  "exclude": ["../shared/light-client/**/*.test.ts"]
 }

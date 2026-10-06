@@ -61,6 +61,23 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                     .ok_or_else(|| RpcError::NotFound(hash.to_hex()))?;
                 Ok(block_to_explorer_json(&block))
             }
+            RpcMethod::GetLightHeaders => {
+                let tip = optional_hash(&req.params, "hash")?;
+                let limit = optional_limit(&req.params, 64)?;
+                self.backend.get_light_headers(tip, limit)
+            }
+            RpcMethod::GetBlockBinding => {
+                let hash = param_hash(&req.params, "hash")?;
+                self.backend.get_block_binding(&hash)
+            }
+            RpcMethod::GetTltInclusionProof => {
+                let tx_id = param_hash(&req.params, "tx_id")?;
+                self.backend.get_tlt_inclusion_proof(&tx_id)
+            }
+            RpcMethod::GetNativeBalances => {
+                let address = param_address(&req.params, "address")?;
+                self.backend.get_native_balances(&address)
+            }
             RpcMethod::GetTransaction => {
                 let tx_id = param_hash(&req.params, "tx_id")?;
                 let lookup = self.backend.get_transaction(&tx_id)?;
@@ -1047,6 +1064,16 @@ fn block_param(params: &Value) -> Result<Value, RpcError> {
     single_or_named(params, "block")
 }
 
+fn optional_hash(params: &Value, key: &str) -> Result<Option<Hash>, RpcError> {
+    let Some(obj) = params.as_object() else {
+        return Ok(None);
+    };
+    match obj.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => parse_hash_value(value, key).map(Some),
+    }
+}
+
 fn param_hash(params: &Value, key: &str) -> Result<Hash, RpcError> {
     let v = single_or_named(params, key)?;
     parse_hash_value(&v, key)
@@ -1380,6 +1407,34 @@ mod tests {
                 params: Value::Object(params),
             });
             assert_eq!(rejected.error.unwrap().code, -32602, "{method}");
+        }
+    }
+
+    #[test]
+    fn light_queries_fail_closed_without_a_chain() {
+        let mut rpc = RpcDispatcher::new(InMemoryBackend::new());
+        for method in [
+            "agora_getLightHeaders",
+            "agora_getBlockBinding",
+            "agora_getTltInclusionProof",
+            "agora_getNativeBalances",
+        ] {
+            let params = if method == "agora_getNativeBalances" {
+                json!({ "address": "00".repeat(20) })
+            } else if method == "agora_getLightHeaders" {
+                json!({})
+            } else if method == "agora_getTltInclusionProof" {
+                json!({ "tx_id": "11".repeat(32) })
+            } else {
+                json!({ "hash": "11".repeat(32) })
+            };
+            let response = rpc.handle(RpcRequest {
+                id: Some(json!(1)),
+                method: method.into(),
+                params,
+            });
+            assert!(response.result.is_none(), "{method}");
+            assert!(response.error.is_some(), "{method}");
         }
     }
 

@@ -18,6 +18,8 @@ import {
   createLightClient,
   generateMnemonic,
   keyValueVault,
+  loadRpcEndpoint,
+  loadRpcToken,
   loadSealedVault,
   networkAccent,
   networkHrpHint,
@@ -25,20 +27,32 @@ import {
   openVault,
   parseAddress,
   persistSealedVault,
+  RPC_ENDPOINT_STORAGE_KEY,
+  RPC_TOKEN_STORAGE_KEY,
   sealVault,
   sendTransfer,
   shortAddress,
+  readNativeBalances,
+  saveRpcEndpoint,
+  saveRpcToken,
   shortHash,
+  signSpend,
   startTipSync,
   walletNetworkFromNode,
   watchTransaction,
   type LightNodeInfo,
   type LightTxLookup,
   type LightUtxo,
+  type NativeBalances,
   type TipSyncSnapshot,
+  type WatchOnlyWallet,
 } from "../shared/light-client";
+import { LightClientPanel } from "./LightClientPanel";
+import { PairingPanel } from "./PairingPanel";
 
 const vaultStorage = keyValueVault(SecureStore);
+const rpcStorage = keyValueVault(SecureStore, RPC_ENDPOINT_STORAGE_KEY);
+const rpcTokenStorage = keyValueVault(SecureStore, RPC_TOKEN_STORAGE_KEY);
 
 function env(name: string): string | undefined {
   try {
@@ -50,11 +64,18 @@ function env(name: string): string | undefined {
   }
 }
 
-const RPC_URL = env("EXPO_PUBLIC_AGORA_RPC_URL") || "http://127.0.0.1:8545/rpc";
+const DEFAULT_RPC_URL = env("EXPO_PUBLIC_AGORA_RPC_URL") || "http://127.0.0.1:8545/rpc";
+const DEFAULT_RPC_TOKEN = env("EXPO_PUBLIC_AGORA_RPC_TOKEN") || "";
 const POLL_MS = Number(env("EXPO_PUBLIC_AGORA_POLL_MS")) || 2000;
 
 export default function App() {
-  const client = useMemo(() => createLightClient({ rpcUrl: RPC_URL }), []);
+  const [rpcUrl, setRpcUrl] = useState(DEFAULT_RPC_URL);
+  const [rpcToken, setRpcToken] = useState(DEFAULT_RPC_TOKEN);
+  const [rpcHydrated, setRpcHydrated] = useState(false);
+  const client = useMemo(
+    () => createLightClient({ rpcUrl, rpcToken: rpcToken.trim() || undefined }),
+    [rpcUrl, rpcToken],
+  );
   const [snap, setSnap] = useState<TipSyncSnapshot>({
     status: "idle",
     tips: [],
@@ -65,11 +86,13 @@ export default function App() {
   const [nodeInfo, setNodeInfo] = useState<LightNodeInfo | null>(null);
   const [address, setAddress] = useState("");
   const [balance, setBalance] = useState<number | null>(null);
+  const [nativeBalances, setNativeBalances] = useState<NativeBalances | null>(null);
   const [utxos, setUtxos] = useState<LightUtxo[]>([]);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [walletBusy, setWalletBusy] = useState(false);
 
   const [mnemonic, setMnemonic] = useState("");
+  const [mnemonicVisible, setMnemonicVisible] = useState(true);
   const [vaultPassword, setVaultPassword] = useState("");
   const [vaultHasBlob, setVaultHasBlob] = useState(false);
   const [vaultUnlocked, setVaultUnlocked] = useState(false);
@@ -84,11 +107,51 @@ export default function App() {
   const [txLookup, setTxLookup] = useState<LightTxLookup | null>(null);
   const [receiveBech32, setReceiveBech32] = useState<string | null>(null);
   const [receiveHex, setReceiveHex] = useState<string | null>(null);
+  const [changeBalance, setChangeBalance] = useState<number | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  const [watchWallet, setWatchWallet] = useState<WatchOnlyWallet | null>(null);
 
-  useEffect(() => startTipSync({ client, pollMs: POLL_MS, onUpdate: setSnap }), [
-    client,
-  ]);
+  useEffect(() => {
+    if (!rpcHydrated) return;
+    return startTipSync({ client, pollMs: POLL_MS, onUpdate: setSnap });
+  }, [client, rpcHydrated]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const saved = await loadRpcEndpoint(rpcStorage);
+        const token = await loadRpcToken(rpcTokenStorage);
+        if (cancelled) return;
+        if (saved) setRpcUrl(saved);
+        if (token) setRpcToken(token);
+      } catch {
+        // A corrupt saved URL stays off the wire; the env default remains.
+      } finally {
+        if (!cancelled) setRpcHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const doc = (
+      globalThis as {
+        document?: {
+          createElement: (tag: string) => { rel: string; href: string };
+          head: { appendChild: (node: unknown) => void };
+        };
+      }
+    ).document;
+    if (!doc) return;
+    const link = doc.createElement("link");
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600&display=swap";
+    doc.head.appendChild(link);
+  }, []);
 
   useEffect(() => {
     void loadSealedVault(vaultStorage).then((sealed) => {
@@ -106,13 +169,14 @@ export default function App() {
         // Retain last successful nodeInfo / network across transient failures.
       }
     }
+    if (!rpcHydrated) return;
     void pollNode();
     const id = setInterval(pollNode, Math.max(POLL_MS, 4000));
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [client]);
+  }, [client, rpcHydrated]);
 
   useEffect(() => {
     if (!lastTxId) {
@@ -164,21 +228,33 @@ export default function App() {
           : "Enter a network-matching Bech32 or 40-character hex address",
       );
       setBalance(null);
+      setNativeBalances(null);
       setUtxos([]);
+      setChangeBalance(null);
       return;
     }
     setWalletBusy(true);
     setWalletError(null);
     try {
-      const [bal, set] = await Promise.all([
+      const [bal, set, native] = await Promise.all([
         client.getBalance(resolved),
         client.getUtxos(resolved),
+        client.getNativeBalances(resolved),
       ]);
       setBalance(bal.balance);
+      setNativeBalances(readNativeBalances(native));
       setUtxos(set.utxos);
+      if (watchWallet && resolved === watchWallet.tltReceiveHex) {
+        const change = await client.getUtxos(watchWallet.tltChangeHex);
+        setChangeBalance(change.utxos.reduce((sum, utxo) => sum + utxo.value, 0));
+      } else {
+        setChangeBalance(null);
+      }
     } catch (err) {
       setBalance(null);
+      setNativeBalances(null);
       setUtxos([]);
+      setChangeBalance(null);
       setWalletError(err instanceof Error ? err.message : "lookup failed");
     } finally {
       setWalletBusy(false);
@@ -211,7 +287,9 @@ export default function App() {
       return;
     }
     const phrase = generateMnemonic(128);
+    setWatchWallet(null);
     setMnemonic(phrase);
+    setMnemonicVisible(true);
     setVaultUnlocked(true);
     try {
       const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
@@ -255,7 +333,9 @@ export default function App() {
       const sealed = await loadSealedVault(vaultStorage);
       if (!sealed) throw new Error("no vault on this device");
       const phrase = await openVault(sealed, vaultPassword);
+      setWatchWallet(null);
       setMnemonic(phrase);
+      setMnemonicVisible(true);
       setVaultUnlocked(true);
       const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
       setReceiveBech32(bech32);
@@ -300,7 +380,66 @@ export default function App() {
     }
   }
 
+  function onImportWatch(watch: WatchOnlyWallet) {
+    setWatchWallet(watch);
+    setMnemonic("");
+    setVaultUnlocked(false);
+    setReceiveBech32(watch.tltReceive);
+    setReceiveHex(watch.tltReceiveHex);
+    setAddress(watch.tltReceive);
+    setSendError(null);
+    setVaultMsg("Watch-only. This phone cannot spend. The sealed vault, if any, is unchanged.");
+  }
+
+  function onImportRestore(phrase: string) {
+    setWatchWallet(null);
+    setMnemonic(phrase);
+    setMnemonicVisible(false);
+    setVaultUnlocked(true);
+    setVaultMsg(
+      "Mnemonic restored in memory and hidden. Anyone with these words can spend. Save the vault on this phone.",
+    );
+    if (!walletNetwork) return;
+    try {
+      const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
+      setReceiveBech32(bech32);
+      setReceiveHex(parseAddress(bech32));
+      setAddress(bech32);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "invalid mnemonic");
+    }
+  }
+
+  async function onSaveRpc(url: string, token: string) {
+    const saved = await saveRpcEndpoint(rpcStorage, url);
+    await saveRpcToken(rpcTokenStorage, token);
+    setRpcUrl(saved);
+    setRpcToken(token.trim());
+    setNodeInfo(null);
+  }
+
+  async function copyPayload(text: string): Promise<boolean> {
+    try {
+      await Clipboard.setStringAsync(text);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function onSend() {
+    if (watchWallet) {
+      try {
+        await signSpend(watchWallet, async () => {
+          throw new Error("unreachable");
+        });
+      } catch (err) {
+        setSendError(
+          err instanceof Error ? err.message : "watch-only wallet cannot sign or spend",
+        );
+      }
+      return;
+    }
     if (!walletNetwork) {
       setSendError("Waiting for node network…");
       return;
@@ -369,8 +508,9 @@ export default function App() {
           ) : null}
         </View>
         <Text style={styles.lede}>
-          Mobile wallet: Bech32 receive, BIP-39 send, and live DAG tip sync over
-          HTTP JSON-RPC.
+          Phone wallet for the whole Agora Network. Pair from a PC with a
+          watch-only code or a reveal-once mnemonic restore. Away from home,
+          this phone queries its own RPC.
         </Text>
 
         <Text style={styles.eyebrow}>Node</Text>
@@ -421,6 +561,25 @@ export default function App() {
             <Text style={styles.meta}>No tips yet</Text>
           ) : null}
         </View>
+
+        <PairingPanel
+          network={nodeInfo?.network ?? null}
+          genesisHash={nodeInfo?.genesis_hash ?? null}
+          rpcUrl={rpcUrl}
+          rpcToken={rpcToken}
+          onSaveRpc={onSaveRpc}
+          spendMnemonic={mnemonic}
+          watchWallet={watchWallet}
+          onImportWatch={onImportWatch}
+          onImportRestore={onImportRestore}
+          copyText={copyPayload}
+        />
+
+        <LightClientPanel
+          client={client}
+          network={nodeInfo?.network ?? null}
+          genesisHash={nodeInfo?.genesis_hash ?? null}
+        />
 
         {snap.updatedAt ? (
           <Text style={styles.footer}>
@@ -486,8 +645,12 @@ export default function App() {
         {walletError ? <Text style={styles.error}>{walletError}</Text> : null}
         {balance !== null ? (
           <Text style={styles.meta}>
-            Balance {balance} base units · {utxos.length} UTXO
-            {utxos.length === 1 ? "" : "s"}
+            TLT {nativeBalances?.assets.TLT.balance ?? balance} · UTXO · node-reported ·{" "}
+            {utxos.length} output{utxos.length === 1 ? "" : "s"}
+            {nativeBalances
+              ? `\nOVL ${nativeBalances.assets.OVL.balance} · account · node-reported\nDRC ${nativeBalances.assets.DRC.balance} · account · node-reported`
+              : ""}
+            {changeBalance !== null ? `\nTLT change chain ${changeBalance} · watch-only · node-reported` : ""}
           </Text>
         ) : null}
         <View style={styles.tipList}>
@@ -501,6 +664,7 @@ export default function App() {
         <Text style={styles.eyebrow}>Send</Text>
         <Text style={styles.meta}>
           BIP-39 vault (AES-GCM + SecureStore) · m/44&apos;/8888&apos;/0&apos;/0/0 · fee ≥ 1
+          {watchWallet ? " · watch-only cannot sign or spend" : ""}
         </Text>
         <TextInput
           value={vaultPassword}
@@ -551,15 +715,22 @@ export default function App() {
               : "No vault — generate then Save")}
         </Text>
         <TextInput
-          value={mnemonic}
+          value={mnemonicVisible ? mnemonic : ""}
           onChangeText={(v) => {
+            if (!mnemonicVisible) return;
             setMnemonic(v);
-            if (v.trim()) setVaultUnlocked(true);
+            if (v.trim()) {
+              setVaultUnlocked(true);
+              setWatchWallet(null);
+            }
           }}
+          editable={mnemonicVisible || mnemonic.length === 0}
           placeholder={
-            vaultHasBlob && !vaultUnlocked
-              ? "unlock vault to load mnemonic"
-              : "mnemonic"
+            mnemonic && !mnemonicVisible
+              ? "Mnemonic hidden. Show words only if you need to read them."
+              : vaultHasBlob && !vaultUnlocked
+                ? "unlock vault to load mnemonic"
+                : "mnemonic"
           }
           placeholderTextColor={agoraBrand.colors.inkMuted}
           autoCapitalize="none"
@@ -582,6 +753,16 @@ export default function App() {
           >
             <Text style={styles.lookupLabel}>Derive address</Text>
           </Pressable>
+          {mnemonic ? (
+            <Pressable
+              onPress={() => setMnemonicVisible((visible) => !visible)}
+              style={styles.lookupBtn}
+            >
+              <Text style={styles.lookupLabel}>
+                {mnemonicVisible ? "Hide mnemonic" : "Show mnemonic"}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
         {receiveBech32 && networkReady ? (
           <Text style={styles.tipRow} numberOfLines={1}>
@@ -622,7 +803,7 @@ export default function App() {
         </View>
         <Pressable
           onPress={onSend}
-          disabled={sendBusy || !networkReady}
+          disabled={sendBusy || !networkReady || watchWallet !== null}
           style={styles.lookupBtn}
         >
           <Text style={styles.lookupLabel}>
@@ -666,6 +847,7 @@ const styles = StyleSheet.create({
   brand: {
     marginTop: 18,
     color: agoraBrand.colors.gold,
+    fontFamily: "Cinzel",
     fontSize: 34,
     fontWeight: "700",
     letterSpacing: 1,
@@ -699,6 +881,7 @@ const styles = StyleSheet.create({
   lede: {
     marginTop: 12,
     color: agoraBrand.colors.inkMuted,
+    fontFamily: "Inter",
     fontSize: 16,
     lineHeight: 24,
     maxWidth: 420,
@@ -706,6 +889,7 @@ const styles = StyleSheet.create({
   eyebrow: {
     marginTop: 36,
     color: agoraBrand.colors.goldSoft,
+    fontFamily: "Cinzel",
     fontSize: 12,
     letterSpacing: 2,
     textTransform: "uppercase",

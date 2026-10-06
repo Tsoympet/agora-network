@@ -302,6 +302,10 @@ export type LightClient = {
   getTransaction: (txId: string) => Promise<LightTxLookup>;
   getMempool: (limit?: number) => Promise<LightMempool>;
   getNodeInfo: () => Promise<LightNodeInfo>;
+  getLightHeaders: (args?: { hash?: string; limit?: number }) => Promise<import("./agoraLight").LightHeaderChain>;
+  getBlockBinding: (hash: string) => Promise<import("./agoraLight").TltInclusionProof>;
+  getTltInclusionProof: (txId: string) => Promise<import("./agoraLight").TltInclusionResponse>;
+  getNativeBalances: (address: string) => Promise<import("./agoraLight").NativeBalances>;
   getFinality: (blockHash: string) => Promise<LightFinality>;
   getFinalizedTip: () => Promise<{ blue_score: number }>;
   getValidatorSet: (
@@ -411,6 +415,16 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getMempool: (limit = 128) =>
       call<LightMempool>("agora_getMempool", { limit }),
     getNodeInfo: () => call<LightNodeInfo>("agora_getNodeInfo", []),
+    getLightHeaders: (args) =>
+      call("agora_getLightHeaders", {
+        ...(args?.hash === undefined ? {} : { hash: args.hash }),
+        ...(args?.limit === undefined ? {} : { limit: args.limit }),
+      }),
+    getBlockBinding: (hash) => call("agora_getBlockBinding", { hash }),
+    getTltInclusionProof: (txId) =>
+      call("agora_getTltInclusionProof", { tx_id: txId }),
+    getNativeBalances: (address) =>
+      call("agora_getNativeBalances", { address }),
     getFinality: (blockHash: string) =>
       call<LightFinality>("agora_getFinality", { hash: blockHash }),
     getFinalizedTip: () =>

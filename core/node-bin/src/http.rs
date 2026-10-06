@@ -151,6 +151,9 @@ pub fn method_requires_token(method: &str) -> bool {
         method,
         "agora_getDagTips"
             | "agora_getBlock"
+            | "agora_getLightHeaders"
+            | "agora_getBlockBinding"
+            | "agora_getTltInclusionProof"
             | "agora_getTransaction"
             | "agora_getDrcPayment"
             | "agora_getDrcPaymentByInvoice"
@@ -323,6 +326,9 @@ mod tests {
     fn public_reads_skip_token() {
         assert!(!method_requires_token("agora_getDagTips"));
         assert!(!method_requires_token("agora_getBlock"));
+        assert!(!method_requires_token("agora_getLightHeaders"));
+        assert!(!method_requires_token("agora_getBlockBinding"));
+        assert!(!method_requires_token("agora_getTltInclusionProof"));
         assert!(!method_requires_token("agora_getTransaction"));
         assert!(!method_requires_token("agora_getDrcPayment"));
         assert!(!method_requires_token("agora_getDrcPaymentByInvoice"));
@@ -345,6 +351,7 @@ mod tests {
         assert!(method_requires_token("agora_getBlockTemplate"));
         assert!(method_requires_token("agora_fundAddress"));
         assert!(method_requires_token("agora_getBalance"));
+        assert!(method_requires_token("agora_getNativeBalances"));
         assert!(method_requires_token("agora_getUtxos"));
         assert!(method_requires_token("agora_castGovVote"));
         assert!(method_requires_token("agora_submitProposal"));

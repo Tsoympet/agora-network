@@ -11,19 +11,25 @@ export type TltTxMerkleProof = {
   siblings: Uint8Array[];
 };
 
-function hashPair(left: Uint8Array, right: Uint8Array): Uint8Array {
+function copyBytes(source: Uint8Array): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(source.length);
+  out.set(source);
+  return out;
+}
+
+function hashPair(left: Uint8Array, right: Uint8Array): Uint8Array<ArrayBuffer> {
   const buf = new Uint8Array(64);
   buf.set(left, 0);
   buf.set(right, 32);
-  return sha256(buf);
+  return copyBytes(sha256(buf));
 }
 
-export function tltTxMerkleRoot(txIds: Uint8Array[]): Uint8Array {
+export function tltTxMerkleRoot(txIds: Uint8Array[]): Uint8Array<ArrayBuffer> {
   if (txIds.length === 0) return new Uint8Array(32);
-  let level = txIds.map((id) => id.slice());
+  let level = txIds.map((id) => copyBytes(id));
   while (level.length > 1) {
-    if (level.length % 2 === 1) level.push(level[level.length - 1].slice());
-    const next: Uint8Array[] = [];
+    if (level.length % 2 === 1) level.push(copyBytes(level[level.length - 1]));
+    const next: Uint8Array<ArrayBuffer>[] = [];
     for (let i = 0; i < level.length; i += 2) {
       next.push(hashPair(level[i], level[i + 1]));
     }
@@ -38,23 +44,23 @@ export function proveTltTxMerkle(
 ): TltTxMerkleProof | null {
   if (index < 0 || index >= txIds.length) return null;
   let idx = index;
-  let level = txIds.map((id) => id.slice());
-  const siblings: Uint8Array[] = [];
+  let level = txIds.map((id) => copyBytes(id));
+  const siblings: Uint8Array<ArrayBuffer>[] = [];
   while (level.length > 1) {
-    if (level.length % 2 === 1) level.push(level[level.length - 1].slice());
-    siblings.push(level[idx ^ 1].slice());
-    const next: Uint8Array[] = [];
+    if (level.length % 2 === 1) level.push(copyBytes(level[level.length - 1]));
+    siblings.push(copyBytes(level[idx ^ 1]));
+    const next: Uint8Array<ArrayBuffer>[] = [];
     for (let i = 0; i < level.length; i += 2) {
       next.push(hashPair(level[i], level[i + 1]));
     }
     level = next;
     idx = Math.floor(idx / 2);
   }
-  return { index, txId: txIds[index].slice(), siblings };
+  return { index, txId: copyBytes(txIds[index]), siblings };
 }
 
 export function verifyTltTxMerkle(root: Uint8Array, proof: TltTxMerkleProof): boolean {
-  let hash = proof.txId.slice();
+  let hash: Uint8Array<ArrayBuffer> = copyBytes(proof.txId);
   let idx = proof.index;
   for (const sibling of proof.siblings) {
     hash = idx % 2 === 0 ? hashPair(hash, sibling) : hashPair(sibling, hash);

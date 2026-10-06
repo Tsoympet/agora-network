@@ -234,6 +234,99 @@ export function deriveAccount(
   };
 }
 
+/** Account node `m/44'/8888'/0'`. Child keys below this are not hardened. */
+export const AGORA_ACCOUNT_PATH = `m/44'/${AGORA_COIN_TYPE}'/0'`;
+
+export type PublicAccount = {
+  index: number;
+  addressHex: string;
+  addressBech32: string;
+  publicKey: Uint8Array;
+};
+
+/**
+ * Neutered account xpub. The private key is wiped before the string is returned
+ * so a watch-only payload cannot carry spend material from this helper.
+ */
+export function exportAccountXpub(mnemonic: string, passphrase = ""): string {
+  const phrase = mnemonic.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!validateMnemonic(phrase)) {
+    throw new Error("invalid BIP-39 mnemonic");
+  }
+  const seed = mnemonicToSeedSync(phrase, passphrase);
+  const account = HDKey.fromMasterSeed(seed).derive(AGORA_ACCOUNT_PATH);
+  const xpub = account.publicExtendedKey;
+  account.wipePrivateData();
+  if (!xpub.startsWith("xpub")) {
+    throw new Error("account export was not a public key");
+  }
+  return xpub;
+}
+
+/** Receive (`change` 0) or change (`change` 1) address from an account xpub. */
+export function derivePublicAccount(
+  xpub: string,
+  index = 0,
+  network = "mainnet",
+  change: 0 | 1 = 0,
+): PublicAccount {
+  assertXpubWatchOnly(xpub);
+  if (!Number.isInteger(index) || index < 0 || index > 20) {
+    throw new Error("account index out of range");
+  }
+  const child = HDKey.fromExtendedKey(xpub).derive(`m/${change}/${index}`);
+  if (!child.publicKey || child.privateKey) {
+    throw new Error("watch-only derivation failed");
+  }
+  const addressHex = addressFromPubkey(child.publicKey);
+  const hrp = addressHrpForNetwork(network) || ADDRESS_HRP;
+  return {
+    index,
+    addressHex,
+    addressBech32: encodeAddress(addressHex, hrp),
+    publicKey: child.publicKey,
+  };
+}
+
+/** Fail closed when an extended key can sign or serialize a private key. */
+export function assertXpubWatchOnly(xpub: string): void {
+  if (typeof xpub !== "string" || !xpub.startsWith("xpub")) {
+    throw new Error("watch-only wallet cannot sign or spend");
+  }
+  let hd: HDKey;
+  try {
+    hd = HDKey.fromExtendedKey(xpub);
+  } catch {
+    throw new Error("malformed pairing payload");
+  }
+  if (hd.privateKey) {
+    throw new Error("watch-only wallet cannot sign or spend");
+  }
+  let signed = false;
+  try {
+    hd.sign(new Uint8Array(32).fill(1));
+    signed = true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    if (!/private/i.test(message)) {
+      throw new Error("watch-only wallet cannot sign or spend");
+    }
+  }
+  if (signed) {
+    throw new Error("watch-only wallet cannot sign or spend");
+  }
+  try {
+    void hd.privateExtendedKey;
+    throw new Error("watch-only wallet cannot sign or spend");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    if (message === "watch-only wallet cannot sign or spend") throw err;
+    if (!/private/i.test(message)) {
+      throw new Error("watch-only wallet cannot sign or spend");
+    }
+  }
+}
+
 export async function signTransactionBody(
   secretKey: Uint8Array,
   bodyBytes: Uint8Array,

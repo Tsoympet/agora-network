@@ -27,6 +27,7 @@ mod execution;
 mod finality;
 mod hash;
 mod hrp;
+mod light_witness;
 mod passport;
 mod payment;
 mod stake;
@@ -213,6 +214,9 @@ pub use hash::Hash;
 pub use hrp::{
     address_hrp_for_network, is_known_address_hrp, ADDRESS_HRP, ADDRESS_HRP_DEV,
     ADDRESS_HRP_MAINNET, ADDRESS_HRP_TESTNET,
+};
+pub use light_witness::{
+    binding_contains_id, fold_body_binding, tlt_body_binding, BodyBindingError, BodyBindingStep,
 };
 pub use passport::{PassportAttestation, PassportCategory, PASSPORT_ATTESTATION_DOMAIN};
 pub use payment::{

@@ -9,6 +9,7 @@ mod backend;
 mod civic;
 mod genesis_cli;
 mod http;
+mod light_rpc;
 mod startup;
 mod storage_policy;
 
