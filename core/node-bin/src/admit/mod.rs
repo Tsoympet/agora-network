@@ -3403,7 +3403,11 @@ mod tests {
         use agora_types::TransactionAcceptance;
 
         let store = Arc::new(StateStore::open_in_memory());
-        let genesis = GenesisBuilder::default().ignite(store.as_ref()).unwrap();
+        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(operator.address())
+            .ignite(store.as_ref())
+            .unwrap();
         let fingerprint = Hash([9; 32]);
         let boot = ChainBootConfig {
             initial_bits: 0,
@@ -3418,7 +3422,6 @@ mod tests {
             StoragePolicy::default(),
         )
         .unwrap();
-        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
         let first = signed_da_authorization(&operator, &genesis, &fingerprint, 4, 0, 11);
         let conflict = signed_da_authorization(&operator, &genesis, &fingerprint, 4, 0, 12);
 
