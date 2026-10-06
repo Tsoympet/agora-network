@@ -12,6 +12,7 @@
   "include": [
     "App.tsx",
     "LightClientPanel.tsx",
+    "PairingPanel.tsx",
     "global.d.ts",
     "../shared/light-client/**/*.ts",
     "../shared/brand/tokens.ts"

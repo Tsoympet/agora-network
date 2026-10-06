@@ -100,6 +100,64 @@ npm start
 calls SecureStore's async methods (`getItemAsync`, `setItemAsync`,
 `deleteItemAsync`).
 
+## Checking the same wallet away from home
+
+Pairing is device-to-device. The PC and the phone do not share a cloud Agora
+account, an iCloud keychain, or a bridge. After pairing, each device talks to
+a full node on its own. The PC can be off.
+
+Both wallets show the same short guide: use the same network, compare genesis
+before import, let the phone recompute the selected-parent spine to that
+genesis, and set a reachable RPC when you leave the house.
+
+### Watch-only (recommended for travel)
+
+1. On the PC, unlock or create the wallet and wait until the node reports a
+   genesis hash.
+2. If the PC RPC is `127.0.0.1`, open **Pair with another device**, set an
+   `http` or `https` URL the phone can reach, and save it. Localhost is left
+   out of the pairing code.
+3. Show the watch-only code, or copy the payload. It contains the TLT receive
+   address, the TLT change address, the OVL account id, the DRC account id,
+   the account xpub at `m/44'/8888'/0'`, the network, and the genesis. It does
+   not contain a mnemonic, an xprv, or the node token.
+4. On the phone, scan the code or paste the payload. Import stays disabled
+   until the phone's node reports the same network and the same genesis.
+5. Look up balances. TLT, OVL, and DRC figures are node-reported. Confirmed TLT
+   inclusion is still checked on the phone. **Sign & send** fails closed:
+   `watch-only wallet cannot sign or spend`.
+
+### Same-spend restore
+
+1. On the PC, unlock the spend wallet.
+2. Acknowledge that anyone with the mnemonic can spend, then show the
+   reveal-once code or copy the payload. Hide it as soon as the phone has it.
+   The words are not written to logs.
+3. On the phone, scan, paste, or type the same BIP-39 words into the mnemonic
+   field. Import of the payload waits for a matching genesis.
+4. Save a password vault on the phone if it should keep the words. After that,
+   the phone derives the same `m/44'/8888'/0'/0/0` address and can sign without
+   the PC being online.
+
+The restore payload is versioned JSON (`agora-light-restore-v1`) with the
+mnemonic, network, and genesis only. The BIP-39 passphrase is empty, matching
+the current vault. A non-empty BIP-39 passphrase is not part of this prototype.
+
+### RPC away from a home node
+
+The desktop and phone both persist a user-chosen RPC URL
+(`agora.light.rpc.v1`) and an optional node bearer token
+(`agora.light.rpc.token.v1`). The token never enters a pairing payload.
+
+- `http` and `https` are accepted. Anything else, and URLs with embedded
+  usernames or passwords, are rejected.
+- Plain HTTP warns that path attackers can alter what the device is shown.
+- Localhost warns that another device cannot use that endpoint.
+- A LAN address works on the same network and does not follow you off that
+  network.
+- Node-reported balances trust that endpoint. Proof-checked TLT inclusion is
+  still recomputed on the device.
+
 ## Threat model
 
 An attacker who serves the wallet's RPC can:
@@ -113,3 +171,15 @@ mismatches the genesis hash, or omits quorum fields is rejected on the device.
 
 Private keys are not an RPC feature. Submit paths take an already signed
 transaction.
+
+Pairing adds these cases:
+
+- A watch-only payload cannot sign. An xprv, a mnemonic field, a localhost
+  RPC, or an address that does not match the xpub is rejected.
+- The account xpub lets the holder derive later receive and change addresses.
+  That is visibility, not spend authority.
+- A restore code or a photo of it is the spend key. Hiding the screen does not
+  help after someone has copied it. Prefer watch-only for travel.
+- A node that matches the expected genesis can still lie about balances and
+  about which spine is the network's. The genesis check stops a random chain.
+  It does not stop a node that replays the real genesis and then forks.

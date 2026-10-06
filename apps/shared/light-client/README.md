@@ -29,7 +29,9 @@ const info = await client.getNodeInfo();
 
 Network light checks (`agoraLight.ts`) recompute header hashes, selected-parent
 links, TLT Merkle proofs, and body-root bindings. They fail closed when a
-proof or quorum total is missing. See [`docs/core/agora-light-client.md`](../../../docs/core/agora-light-client.md).
+proof or quorum total is missing. Device pairing (`pairing.ts`) is either a
+public watch-only payload or a reveal-once BIP-39 restore. See
+[`docs/core/agora-light-client.md`](../../../docs/core/agora-light-client.md).
 
 RPC methods: `agora_getDagTips`, `agora_getBlock`, `agora_getLightHeaders`,
 `agora_getBlockBinding`, `agora_getTltInclusionProof`, `agora_getNativeBalances`,

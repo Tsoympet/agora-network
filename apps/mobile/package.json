@@ -20,6 +20,7 @@
     "@scure/bip32": "^1.7.0",
     "@scure/bip39": "^1.6.0",
     "expo": "^52.0.0",
+    "expo-camera": "~16.0.18",
     "expo-clipboard": "~7.0.1",
     "expo-secure-store": "~14.0.0",
     "expo-status-bar": "~2.0.0",

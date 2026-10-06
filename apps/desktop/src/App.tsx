@@ -4,6 +4,8 @@ import {
   clearPersistedVault,
   createLightClient,
   generateMnemonic,
+  loadRpcEndpoint,
+  loadRpcToken,
   loadSealedVault,
   localStorageVault,
   networkAccent,
@@ -12,11 +14,16 @@ import {
   openVault,
   parseAddress,
   persistSealedVault,
+  RPC_ENDPOINT_STORAGE_KEY,
+  RPC_TOKEN_STORAGE_KEY,
   sealVault,
   sendTransfer,
   shortAddress,
   readNativeBalances,
+  saveRpcEndpoint,
+  saveRpcToken,
   shortHash,
+  signSpend,
   startTipSync,
   walletNetworkFromNode,
   watchTransaction,
@@ -25,11 +32,15 @@ import {
   type LightUtxo,
   type NativeBalances,
   type TipSyncSnapshot,
+  type WatchOnlyWallet,
 } from "../../shared/light-client";
 import { GovernancePanel } from "./components/GovernancePanel";
 import { LightClientPanel } from "./components/LightClientPanel";
+import { PairingPanel } from "./components/PairingPanel";
 
 const vaultStorage = localStorageVault();
+const rpcStorage = localStorageVault(RPC_ENDPOINT_STORAGE_KEY);
+const rpcTokenStorage = localStorageVault(RPC_TOKEN_STORAGE_KEY);
 
 function resolveRpcUrl(): string {
   return (
@@ -55,13 +66,16 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 export function App() {
+  const [rpcUrl, setRpcUrl] = useState(resolveRpcUrl);
+  const [rpcToken, setRpcToken] = useState(resolveRpcToken() ?? "");
+  const [rpcHydrated, setRpcHydrated] = useState(false);
   const client = useMemo(
     () =>
       createLightClient({
-        rpcUrl: resolveRpcUrl(),
-        rpcToken: resolveRpcToken(),
+        rpcUrl,
+        rpcToken: rpcToken.trim() || undefined,
       }),
-    [],
+    [rpcUrl, rpcToken],
   );
   const [snap, setSnap] = useState<TipSyncSnapshot>({
     status: "idle",
@@ -79,6 +93,7 @@ export function App() {
   const [walletBusy, setWalletBusy] = useState(false);
 
   const [mnemonic, setMnemonic] = useState("");
+  const [mnemonicVisible, setMnemonicVisible] = useState(true);
   const [vaultPassword, setVaultPassword] = useState("");
   const [vaultHasBlob, setVaultHasBlob] = useState(false);
   const [vaultUnlocked, setVaultUnlocked] = useState(false);
@@ -93,9 +108,34 @@ export function App() {
   const [txLookup, setTxLookup] = useState<LightTxLookup | null>(null);
   const [receiveBech32, setReceiveBech32] = useState<string | null>(null);
   const [receiveHex, setReceiveHex] = useState<string | null>(null);
+  const [changeBalance, setChangeBalance] = useState<number | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  const [watchWallet, setWatchWallet] = useState<WatchOnlyWallet | null>(null);
 
-  useEffect(() => startTipSync({ client, pollMs, onUpdate: setSnap }), [client]);
+  useEffect(() => {
+    if (!rpcHydrated) return;
+    return startTipSync({ client, pollMs, onUpdate: setSnap });
+  }, [client, rpcHydrated]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const saved = await loadRpcEndpoint(rpcStorage);
+        const token = await loadRpcToken(rpcTokenStorage);
+        if (cancelled) return;
+        if (saved) setRpcUrl(saved);
+        if (token) setRpcToken(token);
+      } catch {
+        // A corrupt saved URL stays off the wire; the env default remains.
+      } finally {
+        if (!cancelled) setRpcHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     void loadSealedVault(vaultStorage).then((sealed) => {
@@ -113,13 +153,14 @@ export function App() {
         // Retain last successful nodeInfo / network across transient failures.
       }
     }
+    if (!rpcHydrated) return;
     void pollNode();
     const id = window.setInterval(pollNode, Math.max(pollMs, 4000));
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [client]);
+  }, [client, rpcHydrated]);
 
   useEffect(() => {
     if (!lastTxId) {
@@ -175,6 +216,7 @@ export function App() {
       setBalance(null);
       setNativeBalances(null);
       setUtxos([]);
+      setChangeBalance(null);
       return;
     }
     setWalletBusy(true);
@@ -188,10 +230,17 @@ export function App() {
       setBalance(bal.balance);
       setNativeBalances(readNativeBalances(native));
       setUtxos(set.utxos);
+      if (watchWallet && resolved === watchWallet.tltReceiveHex) {
+        const change = await client.getUtxos(watchWallet.tltChangeHex);
+        setChangeBalance(change.utxos.reduce((sum, utxo) => sum + utxo.value, 0));
+      } else {
+        setChangeBalance(null);
+      }
     } catch (err) {
       setBalance(null);
       setNativeBalances(null);
       setUtxos([]);
+      setChangeBalance(null);
       setWalletError(err instanceof Error ? err.message : "lookup failed");
     } finally {
       setWalletBusy(false);
@@ -224,7 +273,9 @@ export function App() {
       return;
     }
     const phrase = generateMnemonic(128);
+    setWatchWallet(null);
     setMnemonic(phrase);
+    setMnemonicVisible(true);
     setVaultUnlocked(true);
     try {
       const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
@@ -270,7 +321,9 @@ export function App() {
         throw new Error("no vault on this device");
       }
       const phrase = await openVault(sealed, vaultPassword);
+      setWatchWallet(null);
       setMnemonic(phrase);
+      setMnemonicVisible(true);
       setVaultUnlocked(true);
       const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
       setReceiveBech32(bech32);
@@ -311,8 +364,58 @@ export function App() {
     setCopyHint(ok ? "Copied Bech32 address" : "Clipboard unavailable");
   }
 
+  function onImportWatch(watch: WatchOnlyWallet) {
+    setWatchWallet(watch);
+    setMnemonic("");
+    setVaultUnlocked(false);
+    setReceiveBech32(watch.tltReceive);
+    setReceiveHex(watch.tltReceiveHex);
+    setAddress(watch.tltReceive);
+    setSendError(null);
+    setVaultMsg("Watch-only. This device cannot spend. The sealed vault, if any, is unchanged.");
+  }
+
+  function onImportRestore(phrase: string) {
+    setWatchWallet(null);
+    setMnemonic(phrase);
+    setMnemonicVisible(false);
+    setVaultUnlocked(true);
+    setVaultMsg(
+      "Mnemonic restored in memory and hidden. Anyone with these words can spend. Save the vault on this device.",
+    );
+    if (!walletNetwork) return;
+    try {
+      const bech32 = addressBech32FromMnemonic(phrase, 0, "", walletNetwork);
+      setReceiveBech32(bech32);
+      setReceiveHex(parseAddress(bech32));
+      setAddress(bech32);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "invalid mnemonic");
+    }
+  }
+
+  async function onSaveRpc(url: string, token: string) {
+    const saved = await saveRpcEndpoint(rpcStorage, url);
+    await saveRpcToken(rpcTokenStorage, token);
+    setRpcUrl(saved);
+    setRpcToken(token.trim());
+    setNodeInfo(null);
+  }
+
   async function onSend(e: FormEvent) {
     e.preventDefault();
+    if (watchWallet) {
+      try {
+        await signSpend(watchWallet, async () => {
+          throw new Error("unreachable");
+        });
+      } catch (err) {
+        setSendError(
+          err instanceof Error ? err.message : "watch-only wallet cannot sign or spend",
+        );
+      }
+      return;
+    }
     if (!walletNetwork) {
       setSendError("Waiting for node network…");
       return;
@@ -415,9 +518,9 @@ export function App() {
         className="agora-lede agora-rise agora-rise-delay-2"
         style={{ marginTop: "0.85rem" }}
       >
-        Desktop wallet for the whole Agora Network: create or restore a BIP-39
-        vault, read TLT, OVL, and DRC balances, verify TLT inclusion, and submit
-        signed transactions without running a full node.
+        Desktop wallet for the whole Agora Network. Pair a phone with a watch-only
+        code or a reveal-once mnemonic restore. Balances and header checks then
+        run on each device.
       </p>
 
       <section
@@ -518,6 +621,19 @@ export function App() {
           </p>
         ) : null}
       </section>
+
+      <PairingPanel
+        network={nodeInfo?.network ?? null}
+        genesisHash={nodeInfo?.genesis_hash ?? null}
+        rpcUrl={rpcUrl}
+        rpcToken={rpcToken}
+        onSaveRpc={onSaveRpc}
+        spendMnemonic={mnemonic}
+        watchWallet={watchWallet}
+        onImportWatch={onImportWatch}
+        onImportRestore={onImportRestore}
+        copyText={copyText}
+      />
 
       <LightClientPanel
         client={client}
@@ -647,6 +763,15 @@ export function App() {
                 </p>
               </>
             ) : null}
+            {changeBalance !== null ? (
+              <p>
+                TLT change chain{" "}
+                <span style={{ color: "var(--agora-cyan)", fontFamily: "ui-monospace, monospace" }}>
+                  {changeBalance}
+                </span>{" "}
+                · watch-only · node-reported
+              </p>
+            ) : null}
           </div>
         ) : null}
         {utxos.length > 0 ? (
@@ -683,6 +808,7 @@ export function App() {
         <p style={{ marginTop: "0.55rem", fontSize: "0.85rem", color: "var(--agora-ink-muted)" }}>
           BIP-39 → m/44&apos;/8888&apos;/0&apos;/0/0. Password vault seals the mnemonic with
           AES-256-GCM (localStorage). Fee to miner (min relay 1).
+          {watchWallet ? " Watch-only cannot sign or spend." : ""}
         </p>
         <form
           onSubmit={onSend}
@@ -742,18 +868,26 @@ export function App() {
             </p>
           )}
           <textarea
-            value={mnemonic}
+            value={mnemonicVisible ? mnemonic : ""}
             onChange={(e) => {
+              if (!mnemonicVisible) return;
               setMnemonic(e.target.value);
-              if (e.target.value.trim()) setVaultUnlocked(true);
+              if (e.target.value.trim()) {
+                setVaultUnlocked(true);
+                setWatchWallet(null);
+              }
             }}
+            readOnly={!mnemonicVisible && mnemonic.length > 0}
             placeholder={
-              vaultHasBlob && !vaultUnlocked
-                ? "unlock vault to load mnemonic"
-                : "twelve or twenty-four word mnemonic"
+              mnemonic && !mnemonicVisible
+                ? "Mnemonic hidden. Show words only if you need to read them."
+                : vaultHasBlob && !vaultUnlocked
+                  ? "unlock vault to load mnemonic"
+                  : "twelve or twenty-four word mnemonic"
             }
             aria-label="Mnemonic"
             rows={3}
+            spellCheck={false}
             style={{ ...fieldStyle, resize: "vertical" as const }}
           />
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
@@ -773,6 +907,15 @@ export function App() {
             >
               Derive address
             </button>
+            {mnemonic ? (
+              <button
+                type="button"
+                onClick={() => setMnemonicVisible((visible) => !visible)}
+                style={btnStyle}
+              >
+                {mnemonicVisible ? "Hide mnemonic" : "Show mnemonic"}
+              </button>
+            ) : null}
             {receiveBech32 && networkReady ? (
               <span
                 style={{
@@ -820,7 +963,7 @@ export function App() {
           </div>
           <button
             type="submit"
-            disabled={sendBusy || !networkReady}
+            disabled={sendBusy || !networkReady || watchWallet !== null}
             style={{ ...btnStyle, cursor: sendBusy ? "wait" : "pointer" }}
           >
             {sendBusy ? "Signing…" : "Sign & send"}
