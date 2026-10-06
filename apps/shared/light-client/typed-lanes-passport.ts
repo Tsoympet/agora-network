@@ -9,7 +9,6 @@ import {
   accountFromMnemonic,
   bytesToHex,
   concat,
-  encodeBoundEnvelope,
   encodeOptionU64,
   hexToBytes,
   jsonAddress,
