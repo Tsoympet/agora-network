@@ -13,11 +13,11 @@ Empty active sets never satisfy quorum (no admin bypass). Stake is never price-c
 ## State root
 
 `compose_trident_state_root` (current domain
-`agora-trident-state-root-v14`) commits the UTXO set, OVL/DRC accounts and stake
+`agora-trident-state-root-v15`) commits the UTXO set, OVL/DRC accounts and stake
 snapshots, versioned DRC authorization/settlement state, native issued/burned/net
-supply accounting, tip acceptance, finalized tip, governance/treasuries,
-canonical community state, and
-authenticated DA state.
+supply accounting, common DRC live-object descriptors and accepted-operation
+receipts, tip acceptance, finalized tip, governance/treasuries, canonical
+community state, and authenticated DA state.
 
 Checkpoint bodies bind this root (no longer provisional zero).
 

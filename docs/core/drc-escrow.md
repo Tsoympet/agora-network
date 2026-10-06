@@ -59,5 +59,5 @@ Same-block create→finish/cancel is allowed deterministically via the overlay (
 
 - Submit: `agora_submitDrcEscrowCreate`, `agora_submitDrcEscrowFinish`, `agora_submitDrcEscrowCancel`
 - Point query: `agora_getDrcEscrow` → `live` | `unknown`; `agora_getDrcEscrowReceipt` → settled outcome or absent
-
-No enumeration RPC.
+- Common query: `agora_getDrcAccountObjects` provides bounded owner pagination
+  for live escrows; settled escrow history remains point-query only.

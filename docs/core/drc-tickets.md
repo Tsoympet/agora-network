@@ -64,10 +64,13 @@ Multisign attachments (consensus lane, after body lanes in block encoding) inclu
 | Ticket spend | One pending consumer per `(owner, ticket_sequence)`; ticket must be **live on canonical state** |
 | Same-block create→use via public paths | **Rejected** — spend before create confirms returns mempool error; miners may still pair create+use in one **consensus** block |
 | RPC submit | `agora_submitDrcTicketCreate` with param `ticket_create` (Borsh/JSON envelope) |
-| RPC lookup | `agora_getDrcTicket(owner, ticket_sequence)` → `status`: `live` or `unknown` (consumed vs never-created not distinguished); malformed params → JSON-RPC `-32602` |
+| RPC lookup | `agora_getDrcTicket(owner, ticket_sequence)` → `status`: `live` or `unknown` (consumed vs never-created not distinguished); `agora_getDrcAccountObjects` can return the owner's one live `ticket_set` object with bounded pagination; malformed params → JSON-RPC `-32602` |
 | Gossip | `NetworkMessage::DrcTicketCreate` (Trident protocol **v15** mesh) |
 
-**Exclusions (unchanged):** no batch create, cancel, expiry, or ticket enumeration.
+**Exclusions (unchanged):** no batch create, cancel, expiry, or dedicated
+per-ticket enumeration RPC. The schema-21 common directory exposes the bounded
+per-owner `ticket_set` object; it does not add a transaction or alter Ticket
+semantics.
 
 ### Deviations from rippled
 
@@ -80,3 +83,6 @@ Multisign attachments (consensus lane, after body lanes in block encoding) inclu
 
 - Trident protocol **v15**, tx signing **v9**, state transition **`agora-trident-state-v16`**, body **v12**  
 - `UtxoJournal` migration **v9** adds `drc_ticket_meta_before` for reorg rollback
+- Current aggregate protocol **v23** / state transition
+  **`agora-trident-state-v21`** adds the common object mirror and accepted
+  operation receipt without changing Ticket bytes.

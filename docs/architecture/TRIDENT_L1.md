@@ -74,7 +74,9 @@ Details: [`../consensus/HYBRID_POW_DUAL_POS.md`](../consensus/HYBRID_POW_DUAL_PO
 **Mixed model:** TLT remains UTXO; OVL and DRC use native account modules
 (balances, nonces, staking, vesting, and treasuries), with an OVL-only
 execution substate and closed DRC payment/settlement substates. All commit
-atomically into one state root.
+atomically into one state root. Live DRC protocol objects also share a
+domain-separated identity and owner index; see
+[`../core/drc-ledger-objects.md`](../core/drc-ledger-objects.md).
 
 Rationale: preserve consensus-hardening on the TLT UTXO path (PRs #76–#81); align OVL execution and DRC payments with account semantics without maintaining two OVL balance definitions.
 
@@ -180,6 +182,7 @@ PR sequence: [`TRIDENT_PHASE0_AUDIT.md`](TRIDENT_PHASE0_AUDIT.md) §8.
 - [`../assets/NATIVE_ASSETS.md`](../assets/NATIVE_ASSETS.md)
 - [`../core/drc-xrpl-capability-profile.md`](../core/drc-xrpl-capability-profile.md)
 - [`../core/drc-fee-burning.md`](../core/drc-fee-burning.md)
+- [`../core/drc-ledger-objects.md`](../core/drc-ledger-objects.md)
 - [`../assets/MONETARY_POLICY.md`](../assets/MONETARY_POLICY.md)
 - [`../staking/OVL_STAKING.md`](../staking/OVL_STAKING.md)
 - [`../staking/DRC_STAKING.md`](../staking/DRC_STAKING.md)

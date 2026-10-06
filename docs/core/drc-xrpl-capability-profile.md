@@ -1,7 +1,7 @@
 # DRC / XRPL capability profile
 
-**Audited code baseline:** `bb3abe4` (`cursor/drc-contract-free-boundary-cdcf`)  
-**Current profile:** Trident protocol v22 accepted-only DRC fee burning
+**Audited lineage:** reconciled contract-free DRC stack through protocol v22 fee burning
+**Current profile:** Trident protocol v23 common ledger-object identity and accepted-operation index
 **Audit date:** 2026-10-05  
 **Canonical DRC maturity:** Experimental  
 **Purpose:** executable capability inventory and dependency-ordered verification plan
@@ -68,8 +68,9 @@ roadmap described:
   generated TypeScript bindings, and adversarial tests; and
 - independent DRC staking and the Trident triple-conjunction finality gadget.
 
-The audit confirmed both starting assumptions. Protocol v22 now resolves the
-first; the second remains:
+The audit confirmed both starting assumptions. Protocol v22 resolved the
+first; protocol v23 supplies the dependency required before addressing the
+second:
 
 1. On the audited v21 baseline, accepted DRC fees credited
    `stake/reward_pool/DRC`. Protocol v22 replaces that attribution with exact
@@ -77,11 +78,11 @@ first; the second remains:
 2. No canonical Offer object, OfferCreate/OfferCancel transaction, order-book
    index, crossing engine, order-book RPC, or wallet integration exists.
 
-Other material gaps are:
+Protocol v23 also resolves the earlier common-index gap with ten closed live
+object kinds, deterministic IDs, bounded owner pagination, and canonical
+accepted-operation lookup. Remaining material gaps are:
 
-- no common typed ledger-object ID/index or `account_objects`-style enumeration;
 - no generic DRC account balance/sequence query comparable to `account_info`;
-- no canonical lookup for every typed DRC transaction and acceptance/receipt;
 - generated types exist, but shared/desktop/mobile wallets cannot construct,
   sign, submit, or query most DRC operations;
 - later DRC read methods are not all in the token-authenticated HTTP server's
@@ -103,7 +104,7 @@ public-testnet readiness or XRPL parity.
 | Native transfer/payment | Exact amount, explicit DRC fee, secp256k1 auth, duplicate/replay checks, deterministic receipt/outbox | Full delivery only; no paths or partial payment | Executable · Experimental |
 | Fee disposition | Accepted signed DRC fees increment lifetime burned supply; all non-accepted results burn zero | Reward pool retains historical mixed-provenance funds and still receives reserve drips/slashes; TLT/OVL behavior is unchanged | Executable · Experimental |
 | Sequence/replay | Shared nonce across DRC account families; network-bound chain/genesis signing | `u64` Agora sequence model, not XRPL `UInt32` wire encoding | Executable · Experimental |
-| Tickets | One ticket created per operation, 32-ticket cap, one-use nonce alternative, ticket-aware operation versions | No batch create, reserve, cancellation, expiry, or enumeration | Executable · Experimental / Single-node prototype |
+| Tickets | One ticket created per operation, 32-ticket cap, one-use nonce alternative, ticket-aware operation versions; the common owner directory exposes the live Ticket set | No batch create, reserve, cancellation, expiry, or dedicated per-ticket enumeration RPC | Executable · Experimental / Single-node prototype |
 | Regular key | One rotatable secp256k1 regular key | No Ed25519 | Executable · Experimental |
 | Master disable | Master-only enable with alternate recovery required; regular/multisign clear; no-lockout enforcement | DRC-scoped typed policy, not XRPL account flags/wire | Executable · Single-node prototype |
 | Multisign | Ordered weighted list, quorum, up to 32 secp256k1 signers; detached body-root-committed attachments | No XRPL multisign encoding or signer fee scaling | Executable · Single-node prototype |
@@ -116,26 +117,50 @@ public-testnet readiness or XRPL parity.
 | Trust lines | Holder limit, fixed-width currency, issuer liability, exact issue/redeem/transfer | Issuer-scoped one-sided model; no rippling, quality, transfer rate, or reserve | Executable · Single-node prototype |
 | Issuer controls | Per-asset RequireAuth/global freeze/no-freeze/clawback and per-line auth/freeze/deep-freeze | Never applies to native DRC; policy is per issued asset rather than issuer account-wide | Executable · Single-node prototype |
 | Offer/order-book DEX | None | Required target is typed, integer-only native DRC/issued-asset order books | Missing |
-| Ledger-object directory | Per-family typed live objects and point indexes | No common object header/ID registry, owner directory, pagination, or account enumeration | Partial internals · Experimental |
+| Ledger-object directory | Ten closed live-object kinds have domain-separated IDs, validated descriptors, point lookup, and bounded owner/kind pagination | Agora Borsh/SHA-256 IDs and semantic owners; no XRPL key/hash or reserve parity | Executable · Experimental |
 | Public submission RPC | Typed submit methods exist for implemented DRC families | Agora JSON over Borsh-shaped types; no `submit` wire parity | Executable · Experimental |
-| Public query RPC | Family-specific point queries and receipts exist | No `account_info`, `account_objects`, `account_offers`, `book_offers`, or all-family tx lookup | Partial · Experimental |
-| Wallet/client | Generated TypeScript types exist; finality/reward-pool reads exist in shared light client | No DRC balance, typed construction/signing/submission, object query, or receipt UX | Missing |
+| Public query RPC | Family point queries plus common object, account-object, operation, and historical-transaction receipt lookup | No `account_info`, `account_offers`, or `book_offers`; Agora response shapes, not XRPL API parity | Executable reads · Experimental |
+| Wallet/client | Generated object/operation types and shared light-client query methods exist | No DRC balance query, broad typed construction/signing/submission, or object-query UX | Partial · Experimental |
 | Mempool/template | Shared nonce/Ticket and family-specific object reservations; deterministic lane order; full-body templates | Same-block dependencies are often intentionally fail-closed in public admission | Executable · Experimental |
 | P2P/IBD | Typed operation gossip and full multi-lane block relay; compact blocks fall back to full body | No XRPL peer/wire protocol | Executable · Experimental |
-| Reorg/restart | Account/object/root snapshots revert atomically; RocksDB paths and family tests exist | Included typed operations generally require explicit resubmission after reorg | Executable core · Experimental |
-| Genesis/migration | Draft v3 commits versions/policy; schema v20 initializes burn counters; an explicit 19→20 library migration initializes zero | Draft is unfrozen, loader is disabled, and no migration/reindex/verify CLI exists | Scaffold / Experimental |
+| Reorg/restart | Common objects and accepted receipts share the atomic journal; orphan receipts disappear and exact resubmission/reapply is deterministic | Included typed operations generally require explicit resubmission after reorg | Executable core · Experimental |
+| Genesis/migration | Draft v3 commits versions/policy; schema 19→20 initializes burn counters and 20→21 rebuilds objects/receipts and rewrites historical journals | Draft is unfrozen; schema-20 migration requires retained canonical bodies/acceptance/journals; no operator CLI exists | Experimental |
 | Smart contracts | DRC selectors/payloads/generic execution routes reject; OVL execution remains separate | Permanent exclusion | Enforced |
+
+## Protocol v23 ledger-object foundation
+
+The common directory covers exactly account policy, address deposit
+preauthorization, regular key, signer list, outstanding Ticket set, live
+escrow, live Check, live payment channel, holder trust line, and issued-asset
+policy. IDs hash a domain-separated typed key; descriptors redundantly validate
+kind, owner, key, payload, and source identity. Owner rows are sorted by kind
+then ID and use owner/filter-bound integrity-checked cursors with a hard page
+limit of 100.
+
+Every accepted DRC lane operation has a closed typed receipt indexed by both
+domain-separated operation ID and its historical signed transaction ID.
+Detached multisign receipts reconstruct the authorization committed in the
+block attachment lane while retaining the original canonical block ID.
+Rollback removes orphan objects and receipts atomically; schema 20→21 migration
+rebuilds canonical history and rewrites journals or fails closed when required
+history is unavailable.
+
+This is an Agora semantic adaptation, not XRPL `LedgerIndex`,
+`account_objects`, transaction hash, wire, or response parity. Exact coverage,
+storage and migration behavior, RPCs, and exclusions are specified in
+[`drc-ledger-objects.md`](drc-ledger-objects.md). In particular, Offer objects
+and DEX support remain absent.
 
 ## Current protocol profile
 
 | Surface | Current value |
 | --- | --- |
-| Trident protocol | `22` |
+| Trident protocol | `23` |
 | Transaction signing profile | `agora-trident-tx-v9` |
-| State transition | `agora-trident-state-v20` |
+| State transition | `agora-trident-state-v21` |
 | Highest DRC block-body wrapper | `agora-block-body-v17` |
-| Composed state-root domain | `agora-trident-state-root-v14` |
-| Datadir schema | `20` |
+| Composed state-root domain | `agora-trident-state-root-v15` |
+| Datadir schema | `21` |
 | Genesis | v3 draft, `UNFROZEN`; not bootable as a live Trident network |
 | DRC exchange | none |
 | DRC fee sink | lifetime burned-supply counter |
@@ -163,10 +188,12 @@ Known cross-cutting limitations:
 - The 1 MB block-byte limit bounds aggregate DRC work, and object families have
   selected owner/index caps, but there is no uniform per-lane operation cap.
   Offer crossing needs explicit per-operation and per-block match limits.
-- `agora_getTransaction` indexes only the TLT `transactions` vector. Typed DRC
-  lane operation IDs do not have one common canonical transaction lookup.
-- Point-query key families are not a common owner/object directory and cannot
-  support complete wallet synchronization.
+- `agora_getTransaction` remains the TLT UTXO-vector method. DRC typed lanes use
+  `agora_getDrcOperation` and `agora_getDrcTransaction`; the APIs are not merged.
+- The common owner directory covers the ten live kinds documented in
+  [`drc-ledger-objects.md`](drc-ledger-objects.md). It intentionally excludes
+  balance/sequence `AccountRoot`, settled event history, and pending operations,
+  so it is not complete wallet synchronization by itself.
 - State-root composition now commits maximum, issued, burned, and checked net
   native supply. Full balance/lock/stake/pool conservation scanning remains
   unavailable.
@@ -318,9 +345,10 @@ execution path working.
 2. Completed: accepted-only DRC fee burn, lifetime counter, net-supply
    invariant, state-root/version/schema/fingerprint activation, journal/reorg,
    genesis/migration initialization, RPC, client read support, and tests.
-3. Next: common DRC ledger-object identity/owner index and canonical typed operation
-   lookup, without adding a generic mutation API.
-4. Native order-book Offer objects plus OfferCreate/OfferCancel and deterministic
+3. Completed: common DRC ledger-object identity/owner index, bounded
+   `account_objects`-style reads, and canonical typed accepted-operation lookup,
+   without a generic mutation API.
+4. Next: native order-book Offer objects plus OfferCreate/OfferCancel and deterministic
    crossing.
 5. Public account/object/offer/book/transaction/receipt RPCs with bounded
    pagination.
