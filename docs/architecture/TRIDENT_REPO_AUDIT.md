@@ -43,7 +43,7 @@ Independent quorums; no price-oracle mixing.
 | OVL account transfer | Wired | `AccountTransfer` | Wired | `agora_submitAccountTransfer` | Shared builder + desktop/mobile send |
 | OVL execution (intrinsic gas) | Wired | `OvlExecution` | Wired | `agora_submitOvlExecution` | Shared v1 builder (empty calldata) + desktop/mobile send |
 | OVL-EVM-v1 (`revm` Shanghai) | Experimental, genesis-gated | `NetworkMessage::OvlRawExecution` (v26); not on the Agora-signed topic | Separate raw pool + process-local inbox → template | Canonical `eth_*` / `net_*` / `web3_clientVersion`; `eth_sendRawTransaction` gossips raw | Canonical `eth_*` reads; no raw-EVM wallet builder |
-| DRC payments + XRPL-like objects | Wired (Experimental) | Typed envelopes through offer cancel | Wired; family reservations | Typed submit/get methods | Shared v4 payment builder + desktop/mobile send |
+| DRC payments + XRPL-like objects | Wired (Experimental) | Typed envelopes through offer cancel | Wired; family reservations | Typed submit/get methods | Shared builders for payment, DEX, escrow, Checks, channels, tickets, regular key, signer list, deposit preauth, account policy, trust lines, issued controls |
 | DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared builders + desktop/mobile native-DRC-vs-issued send |
 | Dual-PoS finality / staking | Wired (Experimental) | `CheckpointAttestation`, `StakeTx` | Wired | Validator / pool / `agora_submitStakeTx` | Light-client reads exist |
 | Protocol treasuries / community registry | Genesis + library | No mutation gossip | No block lane | Read RPCs | Light-client reads exist |
@@ -101,8 +101,8 @@ There is no `agora_submitDrcExecution` or generic `agora_submitExecution`.
 
 | Surface | What it does | Honest gap |
 | --- | --- | --- |
-| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders (DRC payment/offer, TLT covenant P2PKH, OVL transfer/execution v1), Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads | Keys stay on device. No RandomX recompute. No raw-EVM builder |
-| Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel | No DEX book browser. Offer create is native DRC vs one issued asset |
+| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders for every admitted DRC family plus TLT covenant P2PKH and OVL transfer/execution v1, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads | Keys stay on device. No RandomX recompute. No raw-EVM builder |
+| Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel, DRC ticket create via shared `DRC_FAMILY_SENDERS` | No DEX book browser. Offer create is native DRC vs one issued asset. Remaining DRC families are library-complete, not per-family screens |
 | Explorer | DAG, tx lookup, protocol-lane reads, mempool, node, governance panel | No DEX book order-entry UI |
 | `agora-layers` HTTP | Historical lab; loopback | Non-canonical; mixed unauthenticated mutations |
 
@@ -204,10 +204,13 @@ This audit close-out adds:
   inclusion-fee debit (`DA_INCLUSION_FEE_TLT`), and
   `agora_submitDataCommitment` / `agora_getDataCommitment` with honest
   pending/accepted/confirmed/finalized statuses.
-- Device-local typed-lane builders (`typed-lanes.ts`) for DRC payment v4,
-  DRC offer create/cancel, TLT covenant P2PKH, OVL account transfer, and
-  Agora-signed OVL execution v1. Desktop/mobile submit those envelopes
-  without embedding a node. Raw EVM is not built in the wallet.
+- Device-local typed-lane builders (`typed-lanes.ts` + `typed-lanes-drc.ts`)
+  for DRC payment v4, DRC offer create/cancel, remaining DRC families
+  (escrow, Checks, payment channels, tickets, regular key, signer list,
+  deposit preauth, account policy, trust lines, issued controls), TLT
+  covenant P2PKH, OVL account transfer, and Agora-signed OVL execution v1.
+  Desktop/mobile submit those envelopes without embedding a node. Raw EVM
+  is not built in the Agora mnemonic vault.
 - `agora-node schema report|migrate|reindex` for supported library
   rebuilds. Community consensus mutation stays unwired until a signed
   envelope exists.

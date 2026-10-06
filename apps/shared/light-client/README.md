@@ -34,12 +34,16 @@ RPC methods: `agora_getDagTips`, `agora_getBlock`, `agora_getTransaction`,
 `eth_chainId`, `eth_blockNumber`, `eth_getBalance`, `agora_getUtxos`,
 `agora_submitTransaction`, `agora_submitTltCovenant`,
 `agora_submitAccountTransfer`, `agora_submitOvlExecution`,
-`agora_submitDrcPayment`, `agora_submitDrcOfferCreate`.
+`agora_submitDrcPayment`, `agora_submitDrcOfferCreate`, remaining DRC family
+submits (`agora_submitDrcEscrowCreate`, `agora_submitDrcTicketCreate`, Checks,
+channels, trust lines, issued controls, tickets, keys, policy).
 
-Device-local builders (`typed-lanes.ts`) construct Agora-signed DRC payments,
-DRC native/issued offers, TLT P2PKH covenants, OVL account transfers, and
+Device-local builders (`typed-lanes.ts`, `typed-lanes-drc.ts`) construct
+Agora-signed DRC payments, native/issued offers, escrow, Checks, payment
+channels, tickets, regular key, signer list, deposit preauth, account policy,
+trust lines, issued controls, TLT P2PKH covenants, OVL account transfers, and
 OVL execution v1 (empty calldata). Keys stay on the device. Raw Ethereum
-envelopes are not built here.
+envelopes are not built from the Agora mnemonic vault.
 
 Addresses: Bech32m HRPs `agora` / `agoratest` / `agoradev` preferred; 40-char
 hex stays network-neutral. Pass the node network to `parseAddress(input, network)`
