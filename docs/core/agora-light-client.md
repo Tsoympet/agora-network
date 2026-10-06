@@ -196,6 +196,16 @@ mismatches the genesis hash, or omits quorum fields is rejected on the device.
 Private keys are not an RPC feature. Submit paths take an already signed
 transaction.
 
+## Community
+
+Passport, missions, academy, grants, and the other community modules live in
+`apps/shared/community` and are documented in
+[`agora-community.md`](agora-community.md). They are a light-client surface:
+headers and wallet signatures stay on the device, and community records are
+not treated as consensus. The PC nav and the phone nav both open those
+screens. A community session token is not a seed, and a watch-only wallet
+still cannot sign a spend.
+
 Pairing adds these cases:
 
 - A watch-only payload cannot sign. An xprv, a mnemonic field, a localhost

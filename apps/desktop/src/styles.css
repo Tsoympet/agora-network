@@ -34,3 +34,96 @@
   text-transform: none;
   opacity: 0.75;
 }
+
+.agora-frame {
+  display: flex;
+  min-height: 100vh;
+  align-items: stretch;
+}
+
+.agora-nav {
+  width: 11.5rem;
+  flex-shrink: 0;
+  padding: 1.25rem 0.75rem;
+  border-right: 1px solid color-mix(in srgb, var(--agora-gold) 35%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: auto;
+}
+
+.agora-nav button {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--agora-ink-muted);
+  font-family: var(--agora-ui, Inter, sans-serif);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  padding: 0.28rem 0.4rem;
+  cursor: pointer;
+}
+
+.agora-nav button.is-active {
+  color: var(--agora-gold);
+}
+
+.agora-frame .agora-shell {
+  flex: 1;
+  justify-content: flex-start;
+  max-width: none;
+}
+
+.agora-block {
+  margin-top: 2rem;
+  max-width: 720px;
+}
+
+.agora-block h2 {
+  font-family: var(--agora-display, Cinzel, serif);
+  color: var(--agora-gold);
+  font-size: 1.6rem;
+  margin: 0.4rem 0 0;
+}
+
+.agora-meta,
+.agora-source {
+  color: var(--agora-ink-muted);
+  font-size: 0.85rem;
+}
+
+.agora-source {
+  color: var(--agora-cyan);
+  margin-left: 0.35rem;
+}
+
+.agora-mono {
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}
+
+.agora-list {
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.agora-form,
+.agora-actions,
+.agora-grid {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.8rem;
+}
+
+.agora-role-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 1.25rem;
+  color: var(--agora-gold);
+  letter-spacing: 0.04em;
+}

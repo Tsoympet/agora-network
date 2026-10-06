@@ -7,6 +7,7 @@
     "moduleResolution": "bundler",
     "skipLibCheck": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["react"]
   },
   "include": [
@@ -14,9 +15,12 @@
     "DocsAboutPanel.tsx",
     "LightClientPanel.tsx",
     "PairingPanel.tsx",
+    "FeatureSurfacesPanel.tsx",
+    "community/**/*.tsx",
     "global.d.ts",
     "../shared/light-client/**/*.ts",
+    "../shared/community/**/*.ts",
     "../shared/brand/tokens.ts"
   ],
-  "exclude": ["../shared/light-client/**/*.test.ts"]
+  "exclude": ["../shared/light-client/**/*.test.ts", "../shared/community/**/*.test.ts"]
 }

@@ -51,6 +51,25 @@ import { DocsAboutPanel } from "./DocsAboutPanel";
 import { FeatureSurfacesPanel } from "./FeatureSurfacesPanel";
 import { LightClientPanel } from "./LightClientPanel";
 import { PairingPanel } from "./PairingPanel";
+import { defaultNotificationPrefs } from "../shared/community";
+import { DrcPayFlow, MobileModule, PassportCard, useCommunityClient } from "./community/Screens";
+
+const PRIMARY_LANES = ["HOME", "WALLET", "COMMUNITY", "ACTIVITY", "PASSPORT"] as const;
+const SECONDARY_LANES = [
+  "DRC",
+  "OVL",
+  "TLT",
+  "SWAP",
+  "MISSIONS",
+  "ACADEMY",
+  "MERCHANTS",
+  "EVENTS",
+  "ASSEMBLY",
+  "GRANTS",
+  "GUILDS",
+  "BOUNTIES",
+  "SETTINGS",
+] as const;
 
 const vaultStorage = keyValueVault(SecureStore);
 const rpcStorage = keyValueVault(SecureStore, RPC_ENDPOINT_STORAGE_KEY);
@@ -112,6 +131,10 @@ export default function App() {
   const [changeBalance, setChangeBalance] = useState<number | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
   const [watchWallet, setWatchWallet] = useState<WatchOnlyWallet | null>(null);
+  const [lane, setLane] = useState<(typeof PRIMARY_LANES)[number] | (typeof SECONDARY_LANES)[number]>("HOME");
+  const [notifications, setNotifications] = useState(defaultNotificationPrefs);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const community = useCommunityClient(env("EXPO_PUBLIC_AGORA_COMMUNITY_URL") || null);
 
   useEffect(() => {
     if (!rpcHydrated) return;
@@ -485,10 +508,36 @@ export default function App() {
     }
   }
 
+  const show = (...lanes: string[]) => lanes.includes(lane);
+
   return (
     <View style={styles.shell}>
       <StatusBar style="light" />
       <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.navRow}>
+          {PRIMARY_LANES.map((item) => (
+            <Pressable key={item} onPress={() => setLane(item)} style={styles.navBtn}>
+              <Text style={[styles.navLabel, item === lane && styles.navOn]}>{item}</Text>
+            </Pressable>
+          ))}
+          <Pressable onPress={() => setMoreOpen((open) => !open)} style={styles.navBtn}>
+            <Text style={styles.navLabel}>{moreOpen ? "LESS" : "MORE"}</Text>
+          </Pressable>
+        </View>
+        {moreOpen ? (
+          <View style={styles.navRow}>
+            {SECONDARY_LANES.map((item) => (
+              <Pressable key={item} onPress={() => setLane(item)} style={styles.navBtn}>
+                <Text style={[styles.navLabel, item === lane && styles.navOn]}>{item}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        {show("HOME", "PASSPORT") ? (
+          <PassportCard client={community} address={receiveBech32 || address || null} />
+        ) : null}
+        {show("HOME", "ACTIVITY") ? (
+        <>
         <Image source={require("./assets/icon.png")} style={styles.icon} />
         <Text style={styles.brand}>Agora Network</Text>
         <View
@@ -563,7 +612,10 @@ export default function App() {
             <Text style={styles.meta}>No tips yet</Text>
           ) : null}
         </View>
+        </>
+        ) : null}
 
+        {show("HOME", "SETTINGS") ? (
         <PairingPanel
           network={nodeInfo?.network ?? null}
           genesisHash={nodeInfo?.genesis_hash ?? null}
@@ -576,29 +628,37 @@ export default function App() {
           onImportRestore={onImportRestore}
           copyText={copyPayload}
         />
+        ) : null}
 
+        {show("TLT") ? (
         <LightClientPanel
           client={client}
           network={nodeInfo?.network ?? null}
           genesisHash={nodeInfo?.genesis_hash ?? null}
         />
+        ) : null}
 
+        {show("WALLET", "DRC", "OVL", "TLT") ? (
+        <>
+        <Text style={styles.meta}>DRC PAY · move value · OVL BUILD · contracts · TLT SECURE · PoW/UTXO</Text>
         <FeatureSurfacesPanel
           client={client}
           genesisHash={nodeInfo?.genesis_hash ?? null}
           drcHex={watchWallet?.drcAccount ?? receiveHex ?? null}
           watchWallet={watchWallet}
         />
+        </>
+        ) : null}
 
-        <DocsAboutPanel />
-
-        {snap.updatedAt ? (
+        {show("HOME", "ACTIVITY") && snap.updatedAt ? (
           <Text style={styles.footer}>
             Updated {new Date(snap.updatedAt).toLocaleTimeString()} · poll{" "}
             {POLL_MS}ms
           </Text>
         ) : null}
 
+        {show("WALLET") ? (
+        <>
         <Text style={styles.eyebrow}>Receive</Text>
         <Text style={styles.meta}>
           {networkReady
@@ -834,6 +894,34 @@ export default function App() {
             {txLookup?.fee != null ? ` · fee ${txLookup.fee}` : ""}
           </Text>
         ) : null}
+        </>
+        ) : null}
+        {show("DRC") ? <DrcPayFlow client={community} /> : null}
+        {show(
+          "HOME",
+          "COMMUNITY",
+          "MISSIONS",
+          "ACADEMY",
+          "GRANTS",
+          "GUILDS",
+          "MERCHANTS",
+          "EVENTS",
+          "ASSEMBLY",
+          "TREASURY",
+          "SETTINGS",
+          "OVL",
+          "TLT",
+          "SWAP",
+          "BOUNTIES",
+        ) ? (
+          <MobileModule
+            lane={lane === "HOME" ? "COMMUNITY" : lane}
+            client={community}
+            address={receiveBech32 || address || null}
+            notifications={notifications}
+            onNotifications={setNotifications}
+          />
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -846,9 +934,29 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
-    justifyContent: "center",
-    paddingHorizontal: 28,
-    paddingVertical: 48,
+    paddingHorizontal: 20,
+    paddingVertical: 28,
+    paddingBottom: 48,
+  },
+  navRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 8,
+  },
+  navBtn: {
+    borderWidth: 1,
+    borderColor: "rgba(197, 152, 53, 0.45)",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  navLabel: {
+    color: agoraBrand.colors.inkMuted,
+    fontSize: 11,
+    letterSpacing: 0.6,
+  },
+  navOn: {
+    color: agoraBrand.colors.gold,
   },
   icon: {
     width: 72,

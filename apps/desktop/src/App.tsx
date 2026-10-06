@@ -38,7 +38,38 @@ import { DocsAboutPanel } from "./components/DocsAboutPanel";
 import { FeatureSurfacesPanel } from "./components/FeatureSurfacesPanel";
 import { GovernancePanel } from "./components/GovernancePanel";
 import { LightClientPanel } from "./components/LightClientPanel";
+import {
+  CommunityScreens,
+  initialNotificationPrefs,
+  useCommunityClient,
+} from "./community/Screens";
+import type { LightProtocolTreasuries } from "../../shared/light-client";
 import { PairingPanel } from "./components/PairingPanel";
+
+const DESKTOP_LANES = [
+  "HOME",
+  "WALLET",
+  "DRC",
+  "OVL",
+  "TLT",
+  "SWAP",
+  "ACTIVITY",
+  "PASSPORT",
+  "COMMUNITY",
+  "MISSIONS",
+  "ACADEMY",
+  "GRANTS",
+  "BOUNTIES",
+  "GUILDS",
+  "MERCHANTS",
+  "EVENTS",
+  "ASSEMBLY",
+  "TREASURY",
+  "EXPLORER",
+  "SETTINGS",
+] as const;
+
+type DesktopLane = (typeof DESKTOP_LANES)[number];
 
 const vaultStorage = localStorageVault();
 const rpcStorage = localStorageVault(RPC_ENDPOINT_STORAGE_KEY);
@@ -112,6 +143,12 @@ export function App() {
   const [receiveHex, setReceiveHex] = useState<string | null>(null);
   const [changeBalance, setChangeBalance] = useState<number | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  const [lane, setLane] = useState<DesktopLane>("HOME");
+  const [chainTreasuries, setChainTreasuries] = useState<LightProtocolTreasuries | null>(null);
+  const [notifications, setNotifications] = useState(initialNotificationPrefs);
+  const community = useCommunityClient(
+    (import.meta.env.VITE_AGORA_COMMUNITY_URL as string | undefined) || null,
+  );
   const [watchWallet, setWatchWallet] = useState<WatchOnlyWallet | null>(null);
 
   useEffect(() => {
@@ -163,6 +200,21 @@ export function App() {
       window.clearInterval(id);
     };
   }, [client, rpcHydrated]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void client
+      .getProtocolTreasuries()
+      .then((rows) => {
+        if (!cancelled) setChainTreasuries(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setChainTreasuries(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
 
   useEffect(() => {
     if (!lastTxId) {
@@ -481,8 +533,44 @@ export function App() {
     letterSpacing: "0.04em",
   };
 
+  const show = (...lanes: DesktopLane[]) => lanes.includes(lane);
+  const communityLane = [
+    "HOME",
+    "DRC",
+    "OVL",
+    "TLT",
+    "SWAP",
+    "PASSPORT",
+    "COMMUNITY",
+    "MISSIONS",
+    "ACADEMY",
+    "GRANTS",
+    "BOUNTIES",
+    "GUILDS",
+    "MERCHANTS",
+    "EVENTS",
+    "ASSEMBLY",
+    "TREASURY",
+    "SETTINGS",
+  ].includes(lane);
+
   return (
+    <div className="agora-frame">
+      <nav className="agora-nav" aria-label="Primary">
+        {DESKTOP_LANES.map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={item === lane ? "is-active" : undefined}
+            onClick={() => setLane(item)}
+          >
+            {item}
+          </button>
+        ))}
+      </nav>
     <main className="agora-shell">
+      {show("HOME", "ACTIVITY") ? (
+      <>
       <img
         src="/agora-network.png"
         alt="Agora Network"
@@ -623,7 +711,12 @@ export function App() {
           </p>
         ) : null}
       </section>
+      </>
+      ) : (
+        <p className="agora-eyebrow">{lane}</p>
+      )}
 
+      {show("HOME", "SETTINGS") ? (
       <PairingPanel
         network={nodeInfo?.network ?? null}
         genesisHash={nodeInfo?.genesis_hash ?? null}
@@ -636,13 +729,23 @@ export function App() {
         onImportRestore={onImportRestore}
         copyText={copyText}
       />
+      ) : null}
 
+      {show("TLT", "EXPLORER") ? (
       <LightClientPanel
         client={client}
         network={nodeInfo?.network ?? null}
         genesisHash={nodeInfo?.genesis_hash ?? null}
       />
+      ) : null}
+      {lane === "EXPLORER" ? (
+        <p className="agora-meta">
+          Header checks run in this light client. The web explorer remains a separate app.
+          <span className="agora-source"> indexed</span>
+        </p>
+      ) : null}
 
+      {show("HOME", "WALLET", "DRC", "OVL", "TLT") ? (
       <FeatureSurfacesPanel
         client={client}
         network={nodeInfo?.network ?? null}
@@ -655,9 +758,17 @@ export function App() {
         spendMnemonic={mnemonic}
         watchWallet={watchWallet}
       />
+      ) : null}
 
-      <DocsAboutPanel />
+      {show("WALLET", "DRC", "OVL", "TLT") ? (
+      <p className="agora-role-row">
+        <span>DRC PAY · move value</span>
+        <span>OVL BUILD · contracts</span>
+        <span>TLT SECURE · PoW/UTXO</span>
+      </p>
+      ) : null}
 
+      {show("WALLET") ? (
       <section
         className="agora-rise agora-rise-delay-3"
         style={{ marginTop: "2.75rem", maxWidth: 520 }}
@@ -715,7 +826,9 @@ export function App() {
           </p>
         )}
       </section>
+      ) : null}
 
+      {show("WALLET", "DRC", "OVL", "TLT") ? (
       <section
         className="agora-rise agora-rise-delay-3"
         style={{ marginTop: "2.75rem", maxWidth: 520 }}
@@ -816,7 +929,9 @@ export function App() {
           </ul>
         ) : null}
       </section>
+      ) : null}
 
+      {show("WALLET", "TLT") ? (
       <section
         className="agora-rise agora-rise-delay-3"
         style={{ marginTop: "2.75rem", maxWidth: 520 }}
@@ -1013,12 +1128,29 @@ export function App() {
           </p>
         ) : null}
       </section>
+      ) : null}
+      {lane === "ACTIVITY" && !lastTxId ? (
+        <p className="agora-meta">No signed broadcast yet. A cached screen is not a confirmation.</p>
+      ) : null}
 
+      {show("ASSEMBLY") ? (
       <GovernancePanel
         client={client}
         voterAddress={receiveBech32 || (address ? address : null)}
         balance={balance}
       />
+      ) : null}
+      {communityLane ? (
+        <CommunityScreens
+          lane={lane}
+          client={community}
+          address={receiveBech32 || address || null}
+          chainTreasuries={chainTreasuries}
+          notifications={notifications}
+          onNotifications={setNotifications}
+        />
+      ) : null}
     </main>
+    </div>
   );
 }
