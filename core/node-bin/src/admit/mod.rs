@@ -233,6 +233,9 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_offer_cancels: &'a [agora_types::DrcOfferCancelTx],
     pub tlt_covenants: &'a [agora_types::TltCovenantTx],
     pub passport_attestations: &'a [agora_types::PassportAttestation],
+    pub hub_registrations: &'a [agora_types::HubRegistration],
+    pub grant_registrations: &'a [agora_types::GrantRegistration],
+    pub mission_registrations: &'a [agora_types::MissionRegistration],
 }
 
 impl ChainState {
@@ -638,6 +641,9 @@ impl ChainState {
             drc_multisign_attachments: Vec::new(),
             tlt_covenants: included_covenants.to_vec(),
             passport_attestations: lanes.passport_attestations.to_vec(),
+            hub_registrations: lanes.hub_registrations.to_vec(),
+            grant_registrations: lanes.grant_registrations.to_vec(),
+            mission_registrations: lanes.mission_registrations.to_vec(),
         };
         if let Some(ctx) = self.auth.as_ref() {
             agora_types::materialize_drc_multisign_attachments(

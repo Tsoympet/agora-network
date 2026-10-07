@@ -8,9 +8,10 @@ use agora_types::{
     DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcMultisignBlockAttachment, DrcOfferCancelTx,
     DrcOfferCreateTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash,
-    NativeAssetId, OutPoint, OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx,
-    Transaction, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
+    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx,
+    GrantRegistration, Hash, HubRegistration, MissionRegistration, NativeAssetId, OutPoint,
+    OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx, Transaction,
+    ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
     DRC_CHECK_CANCEL_TICKET_VERSION, DRC_CHECK_CASH_TICKET_VERSION,
     DRC_CHECK_CREATE_TICKET_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
     DRC_ESCROW_CANCEL_TICKET_VERSION, DRC_ESCROW_CREATE_TICKET_VERSION,
@@ -20,6 +21,8 @@ use agora_types::{
 
 use crate::P2pError;
 
+#[path = "community_lane.rs"]
+mod community_lane;
 #[path = "da_lane.rs"]
 mod da_lane;
 #[path = "issued_controls_lane.rs"]
@@ -111,6 +114,12 @@ pub struct Mempool {
     /// Signed Hub-coordinator passport attestations.
     passport_attestations: HashMap<Hash, PassportAttestation>,
     reserved_passport_issuers: HashMap<Address, Hash>,
+    hub_registrations: HashMap<Hash, HubRegistration>,
+    reserved_hub_coordinators: HashMap<Address, Hash>,
+    grant_registrations: HashMap<Hash, GrantRegistration>,
+    reserved_grant_registrars: HashMap<Address, Hash>,
+    mission_registrations: HashMap<Hash, MissionRegistration>,
+    reserved_mission_sponsors: HashMap<Address, Hash>,
     pending_native_offer_lock: HashMap<Address, u64>,
     pending_issued_offer_reserve: HashMap<(Address, Hash), u64>,
     reserved_asset_policy_assets: HashMap<Hash, Hash>,
@@ -200,6 +209,12 @@ impl Mempool {
             drc_multisign_attachments: HashMap::new(),
             passport_attestations: HashMap::new(),
             reserved_passport_issuers: HashMap::new(),
+            hub_registrations: HashMap::new(),
+            reserved_hub_coordinators: HashMap::new(),
+            grant_registrations: HashMap::new(),
+            reserved_grant_registrars: HashMap::new(),
+            mission_registrations: HashMap::new(),
+            reserved_mission_sponsors: HashMap::new(),
             pending_native_offer_lock: HashMap::new(),
             pending_issued_offer_reserve: HashMap::new(),
             reserved_asset_policy_assets: HashMap::new(),
@@ -246,6 +261,9 @@ impl Mempool {
             + self.data_commitment_maps_len()
             + self.drc_multisign_attachments.len()
             + self.passport_attestations.len()
+            + self.hub_registrations.len()
+            + self.grant_registrations.len()
+            + self.mission_registrations.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1514,8 +1532,9 @@ impl Mempool {
             COMPACT_LANE_DRC_OFFER_CANCEL, COMPACT_LANE_DRC_OFFER_CREATE, COMPACT_LANE_DRC_PAYMENT,
             COMPACT_LANE_DRC_POLICY, COMPACT_LANE_DRC_PREAUTH, COMPACT_LANE_DRC_REGULAR_KEY,
             COMPACT_LANE_DRC_SIGNER_LIST, COMPACT_LANE_DRC_TICKET, COMPACT_LANE_DRC_TRUST_LINE,
-            COMPACT_LANE_OVL_EXECUTION, COMPACT_LANE_PASSPORT, COMPACT_LANE_STAKE,
-            COMPACT_LANE_TLT_COVENANT, COMPACT_LANE_UTXO,
+            COMPACT_LANE_GRANT, COMPACT_LANE_HUB, COMPACT_LANE_MISSION, COMPACT_LANE_OVL_EXECUTION,
+            COMPACT_LANE_PASSPORT, COMPACT_LANE_STAKE, COMPACT_LANE_TLT_COVENANT,
+            COMPACT_LANE_UTXO,
         };
         match kind {
             COMPACT_LANE_UTXO => map_by_short_id(&self.txs, short_id)
@@ -1634,6 +1653,15 @@ impl Mempool {
             COMPACT_LANE_PASSPORT => map_by_short_id(&self.passport_attestations, short_id)
                 .cloned()
                 .map(Item::Passport),
+            COMPACT_LANE_HUB => map_by_short_id(&self.hub_registrations, short_id)
+                .cloned()
+                .map(Item::Hub),
+            COMPACT_LANE_GRANT => map_by_short_id(&self.grant_registrations, short_id)
+                .cloned()
+                .map(Item::Grant),
+            COMPACT_LANE_MISSION => map_by_short_id(&self.mission_registrations, short_id)
+                .cloned()
+                .map(Item::Mission),
             _ => None,
         }
     }
@@ -1966,6 +1994,7 @@ impl Mempool {
         self.evict_data_commitment_lanes_from_block(block);
         self.evict_drc_multisign_attachments_from_block(block);
         self.evict_passport_attestations_from_block(block);
+        self.evict_community_registrations_from_block(block);
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
             let id = tx.policy_tx_id();
@@ -2449,6 +2478,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -2534,6 +2566,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));
@@ -3359,6 +3394,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.pending_check_create(&id));

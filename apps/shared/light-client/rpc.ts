@@ -367,6 +367,33 @@ export type LightClient = {
     issuer: string;
     nonce: number;
   }>;
+  getHubRegistration: (registrationId: string) => Promise<{
+    registration_id: string;
+    status: string;
+    hub: unknown | null;
+  }>;
+  getHubCoordinatorNonce: (coordinator: string) => Promise<{
+    coordinator: string;
+    nonce: number;
+  }>;
+  getGrantRegistration: (registrationId: string) => Promise<{
+    registration_id: string;
+    status: string;
+    grant: unknown | null;
+  }>;
+  getGrantRegistrarNonce: (registrar: string) => Promise<{
+    registrar: string;
+    nonce: number;
+  }>;
+  getMissionRegistration: (registrationId: string) => Promise<{
+    registration_id: string;
+    status: string;
+    mission: unknown | null;
+  }>;
+  getMissionSponsorNonce: (sponsor: string) => Promise<{
+    sponsor: string;
+    nonce: number;
+  }>;
   getDrcObject: (objectId: string) => Promise<{
     object_id: string;
     status: "live" | "unknown";
@@ -462,6 +489,15 @@ export type LightClient = {
   submitDrcIssuedClawback: (tx: unknown) => Promise<{ clawback_tx_id: string }>;
   submitPassportAttestation: (attestation: unknown) => Promise<{
     attestation_id: string;
+  }>;
+  submitHubRegistration: (registration: unknown) => Promise<{
+    registration_id: string;
+  }>;
+  submitGrantRegistration: (registration: unknown) => Promise<{
+    registration_id: string;
+  }>;
+  submitMissionRegistration: (registration: unknown) => Promise<{
+    registration_id: string;
   }>;
   getConstitution: () => Promise<LightConstitution>;
   getGovernance: () => Promise<LightGovernance>;
@@ -561,6 +597,39 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<{ issuer: string; nonce: number }>(
         "agora_getPassportIssuerNonce",
         { issuer },
+      ),
+    getHubRegistration: (registrationId) =>
+      call<{
+        registration_id: string;
+        status: string;
+        hub: unknown | null;
+      }>("agora_getHubRegistration", { registration_id: registrationId }),
+    getHubCoordinatorNonce: (coordinator) =>
+      call<{ coordinator: string; nonce: number }>(
+        "agora_getHubCoordinatorNonce",
+        { coordinator },
+      ),
+    getGrantRegistration: (registrationId) =>
+      call<{
+        registration_id: string;
+        status: string;
+        grant: unknown | null;
+      }>("agora_getGrantRegistration", { registration_id: registrationId }),
+    getGrantRegistrarNonce: (registrar) =>
+      call<{ registrar: string; nonce: number }>(
+        "agora_getGrantRegistrarNonce",
+        { registrar },
+      ),
+    getMissionRegistration: (registrationId) =>
+      call<{
+        registration_id: string;
+        status: string;
+        mission: unknown | null;
+      }>("agora_getMissionRegistration", { registration_id: registrationId }),
+    getMissionSponsorNonce: (sponsor) =>
+      call<{ sponsor: string; nonce: number }>(
+        "agora_getMissionSponsorNonce",
+        { sponsor },
       ),
     getDrcObject: (objectId) =>
       call<{
@@ -753,6 +822,18 @@ export function createLightClient(config: LightClientConfig): LightClient {
     submitPassportAttestation: (attestation) =>
       call<{ attestation_id: string }>("agora_submitPassportAttestation", {
         attestation,
+      }),
+    submitHubRegistration: (registration) =>
+      call<{ registration_id: string }>("agora_submitHubRegistration", {
+        registration,
+      }),
+    submitGrantRegistration: (registration) =>
+      call<{ registration_id: string }>("agora_submitGrantRegistration", {
+        registration,
+      }),
+    submitMissionRegistration: (registration) =>
+      call<{ registration_id: string }>("agora_submitMissionRegistration", {
+        registration,
       }),
     getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
     getGovernance: () => call<LightGovernance>("agora_getGovernance", []),

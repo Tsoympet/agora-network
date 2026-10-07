@@ -465,6 +465,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         }
     }
 

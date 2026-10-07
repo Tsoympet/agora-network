@@ -46,6 +46,13 @@ try {
   await client.submitPassportAttestation({ version: 1 });
   await client.getPassportAttestation("ee".repeat(32));
   await client.getPassportIssuerNonce("agoradev1qqqq");
+  await client.submitHubRegistration({ version: 1 });
+  await client.getHubRegistration("ff".repeat(32));
+  await client.getHubCoordinatorNonce("agoradev1qqqq");
+  await client.submitGrantRegistration({ version: 1 });
+  await client.getGrantRegistrarNonce("agoradev1qqqq");
+  await client.submitMissionRegistration({ version: 1 });
+  await client.getMissionSponsorNonce("agoradev1qqqq");
 
   assert.deepEqual(
     calls.map((call) => call.method),
@@ -71,6 +78,13 @@ try {
       "agora_submitPassportAttestation",
       "agora_getPassportAttestation",
       "agora_getPassportIssuerNonce",
+      "agora_submitHubRegistration",
+      "agora_getHubRegistration",
+      "agora_getHubCoordinatorNonce",
+      "agora_submitGrantRegistration",
+      "agora_getGrantRegistrarNonce",
+      "agora_submitMissionRegistration",
+      "agora_getMissionSponsorNonce",
     ],
   );
   assert.deepEqual(calls[0].params, { address: "agoradev1qqqq" });

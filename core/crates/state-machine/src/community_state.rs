@@ -3,9 +3,18 @@
 //! Records are append-only in v1. A compact summary keeps root reads O(1), while
 //! the individual records remain available through deterministic prefix scans.
 
-use agora_crypto::verify_passport_attestation_bound;
-use agora_governance::{GrantRecord, HubAccreditationStatus, HubRecord, MissionRecord};
-use agora_types::{Address, Amount, Hash, PassportAttestation, TreasuryId};
+use agora_crypto::{
+    verify_grant_registration_bound, verify_hub_registration_bound,
+    verify_mission_registration_bound, verify_passport_attestation_bound,
+};
+use agora_governance::{
+    GrantKind, GrantMilestone, GrantRecord, HubAccreditationStatus, HubRecord, MilestoneStatus,
+    MissionRecord, MissionStatus,
+};
+use agora_types::{
+    Address, Amount, CommunityGrantKind, GrantRegistration, Hash, HubRegistration,
+    MissionRegistration, PassportAttestation, TreasuryId,
+};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::columns::ColumnFamily;
@@ -19,6 +28,9 @@ const PASSPORT_PREFIX: &[u8] = b"community/v1/passport/";
 const GRANT_PREFIX: &[u8] = b"community/v1/grant/";
 const MISSION_PREFIX: &[u8] = b"community/v1/mission/";
 const ISSUER_NONCE_PREFIX: &[u8] = b"community/v1/issuer_nonce/";
+const HUB_NONCE_PREFIX: &[u8] = b"community/v1/hub_nonce/";
+const GRANT_NONCE_PREFIX: &[u8] = b"community/v1/grant_nonce/";
+const SPONSOR_NONCE_PREFIX: &[u8] = b"community/v1/sponsor_nonce/";
 const ACTIVE_ISSUER_PREFIX: &[u8] = b"community/v1/active_issuer/";
 const EMPTY_ROOT_DOMAIN: &[u8] = b"agora-community-empty-root-v1";
 const ROLLING_ROOT_DOMAIN: &[u8] = b"agora-community-rolling-root-v1";
@@ -74,6 +86,34 @@ pub fn passport_issuer_nonce_key(issuer: &Address) -> Vec<u8> {
     issuer_nonce_key(issuer)
 }
 
+pub fn hub_record_key(id: &Hash) -> Vec<u8> {
+    record_key(HUB_PREFIX, id)
+}
+
+pub fn grant_record_key(id: &Hash) -> Vec<u8> {
+    record_key(GRANT_PREFIX, id)
+}
+
+pub fn mission_record_key(id: &Hash) -> Vec<u8> {
+    record_key(MISSION_PREFIX, id)
+}
+
+pub fn hub_coordinator_nonce_key(coordinator: &Address) -> Vec<u8> {
+    keyed(HUB_NONCE_PREFIX, &coordinator.0)
+}
+
+pub fn grant_registrar_nonce_key(registrar: &Address) -> Vec<u8> {
+    keyed(GRANT_NONCE_PREFIX, &registrar.0)
+}
+
+pub fn mission_sponsor_nonce_key(sponsor: &Address) -> Vec<u8> {
+    keyed(SPONSOR_NONCE_PREFIX, &sponsor.0)
+}
+
+pub fn active_hub_coordinator_key(coordinator: &Address) -> Vec<u8> {
+    keyed(ACTIVE_ISSUER_PREFIX, &coordinator.0)
+}
+
 pub fn community_summary_key() -> Vec<u8> {
     SUMMARY_KEY.to_vec()
 }
@@ -90,6 +130,64 @@ pub fn load_passport_attestation(
 
 pub fn load_passport_issuer_nonce(store: &StateStore, issuer: &Address) -> Result<u64, StateError> {
     load_issuer_nonce(store, issuer)
+}
+
+pub fn load_hub_registration(
+    store: &StateStore,
+    id: &Hash,
+) -> Result<Option<HubRecord>, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &hub_record_key(id))? else {
+        return Ok(None);
+    };
+    Ok(Some(decode(&bytes)?))
+}
+
+pub fn load_grant_registration(
+    store: &StateStore,
+    id: &Hash,
+) -> Result<Option<GrantRecord>, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &grant_record_key(id))? else {
+        return Ok(None);
+    };
+    Ok(Some(decode(&bytes)?))
+}
+
+pub fn load_mission_registration(
+    store: &StateStore,
+    id: &Hash,
+) -> Result<Option<MissionRecord>, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &mission_record_key(id))? else {
+        return Ok(None);
+    };
+    Ok(Some(decode(&bytes)?))
+}
+
+fn load_prefixed_nonce(store: &StateStore, key: &[u8]) -> Result<u64, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, key)? else {
+        return Ok(0);
+    };
+    decode(&bytes)
+}
+
+pub fn load_hub_coordinator_nonce(
+    store: &StateStore,
+    coordinator: &Address,
+) -> Result<u64, StateError> {
+    load_prefixed_nonce(store, &hub_coordinator_nonce_key(coordinator))
+}
+
+pub fn load_grant_registrar_nonce(
+    store: &StateStore,
+    registrar: &Address,
+) -> Result<u64, StateError> {
+    load_prefixed_nonce(store, &grant_registrar_nonce_key(registrar))
+}
+
+pub fn load_mission_sponsor_nonce(
+    store: &StateStore,
+    sponsor: &Address,
+) -> Result<u64, StateError> {
+    load_prefixed_nonce(store, &mission_sponsor_nonce_key(sponsor))
 }
 
 fn active_issuer_key(issuer: &Address) -> Vec<u8> {
@@ -337,6 +435,184 @@ pub fn register_passport_attestation_into(
     Ok(())
 }
 
+fn map_grant_kind(kind: CommunityGrantKind) -> GrantKind {
+    match kind {
+        CommunityGrantKind::Micro => GrantKind::Micro,
+        CommunityGrantKind::Milestone => GrantKind::Milestone,
+        CommunityGrantKind::Bounty => GrantKind::Bounty,
+        CommunityGrantKind::Retroactive => GrantKind::Retroactive,
+    }
+}
+
+fn hub_record_from_registration(registration: &HubRegistration) -> Result<HubRecord, StateError> {
+    Ok(HubRecord {
+        id: registration.registration_id(),
+        public_name: registration.public_name.clone(),
+        classification: registration.classification.clone(),
+        charter_hash: registration.charter_hash,
+        coordinators: registration.coordinators.clone(),
+        treasury_multisig: registration.treasury_multisig,
+        election_term_epochs: registration.election_term_epochs,
+        reporting_interval_epochs: registration.reporting_interval_epochs,
+        coi_disclosure_root: registration.coi_disclosure_root,
+        deliverables_root: registration.deliverables_root,
+        accreditation_proposal_id: registration.accreditation_proposal_id,
+        status: HubAccreditationStatus::Active,
+    })
+}
+
+fn grant_record_from_registration(
+    registration: &GrantRegistration,
+) -> Result<GrantRecord, StateError> {
+    let milestones = registration
+        .milestones
+        .iter()
+        .map(|milestone| GrantMilestone {
+            index: milestone.index,
+            amount: milestone.amount,
+            deliverable_hash: milestone.deliverable_hash,
+            status: MilestoneStatus::Pending,
+        })
+        .collect();
+    let mut grant = GrantRecord::new(
+        registration.registration_id(),
+        registration.proposal_id,
+        registration.treasury,
+        registration.beneficiary,
+        registration.total,
+        map_grant_kind(registration.kind),
+        agora_governance::GrantStatus::Approved,
+        milestones,
+    )
+    .map_err(|error| invalid(error.to_string()))?;
+    if registration.treasury == TreasuryId::DrcCommunity {
+        grant
+            .record_conflict_review(true, registration.coi_disclosure_hash)
+            .map_err(|error| invalid(error.to_string()))?;
+    } else if registration.coi_disclosure_hash != Hash::ZERO {
+        return Err(invalid("non-community grant must not carry COI disclosure"));
+    }
+    Ok(grant)
+}
+
+fn mission_record_from_registration(
+    registration: &MissionRegistration,
+) -> Result<MissionRecord, StateError> {
+    Ok(MissionRecord {
+        id: registration.registration_id(),
+        sponsor: registration.sponsor,
+        reward_treasury: registration.reward_treasury,
+        reward: registration.reward,
+        requirements_hash: registration.requirements_hash,
+        assignee: None,
+        status: MissionStatus::Open,
+        completion_evidence: Hash::ZERO,
+    })
+}
+
+pub fn register_signed_hub_into(
+    batch: &mut WriteBatch,
+    store: &StateStore,
+    registration: &HubRegistration,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    if registration.version != 1 {
+        return Err(invalid("unsupported hub registration version"));
+    }
+    verify_hub_registration_bound(registration, &auth.chain_id, &auth.genesis)
+        .map_err(|error| invalid(error.to_string()))?;
+    let coordinator = registration
+        .first_coordinator()
+        .ok_or_else(|| invalid("hub coordinators must be nonempty"))?;
+    let current_nonce = load_hub_coordinator_nonce(store, &coordinator)?;
+    if registration.nonce != current_nonce {
+        return Err(invalid("hub coordinator nonce mismatch"));
+    }
+    let next_nonce = current_nonce
+        .checked_add(1)
+        .ok_or_else(|| invalid("hub coordinator nonce overflow"))?;
+    let hub = hub_record_from_registration(registration)?;
+    register_hub_into(batch, store, &hub)?;
+    let mut pending = WriteBatch::new();
+    pending.put_cf(
+        ColumnFamily::Meta,
+        &hub_coordinator_nonce_key(&coordinator),
+        &encode(&next_nonce)?,
+    );
+    batch.append(pending);
+    Ok(())
+}
+
+pub fn register_signed_grant_into(
+    batch: &mut WriteBatch,
+    store: &StateStore,
+    registration: &GrantRegistration,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    if registration.version != 1 {
+        return Err(invalid("unsupported grant registration version"));
+    }
+    verify_grant_registration_bound(registration, &auth.chain_id, &auth.genesis)
+        .map_err(|error| invalid(error.to_string()))?;
+    if !issuer_is_active_hub_coordinator(store, &registration.registrar)? {
+        return Err(invalid(
+            "grant registrar is not an active canonical hub coordinator",
+        ));
+    }
+    let current_nonce = load_grant_registrar_nonce(store, &registration.registrar)?;
+    if registration.nonce != current_nonce {
+        return Err(invalid("grant registrar nonce mismatch"));
+    }
+    let next_nonce = current_nonce
+        .checked_add(1)
+        .ok_or_else(|| invalid("grant registrar nonce overflow"))?;
+    let grant = grant_record_from_registration(registration)?;
+    register_grant_into(batch, store, &grant)?;
+    let mut pending = WriteBatch::new();
+    pending.put_cf(
+        ColumnFamily::Meta,
+        &grant_registrar_nonce_key(&registration.registrar),
+        &encode(&next_nonce)?,
+    );
+    batch.append(pending);
+    Ok(())
+}
+
+pub fn register_signed_mission_into(
+    batch: &mut WriteBatch,
+    store: &StateStore,
+    registration: &MissionRegistration,
+    auth: &TxAuthContext,
+) -> Result<(), StateError> {
+    if registration.version != 1 {
+        return Err(invalid("unsupported mission registration version"));
+    }
+    verify_mission_registration_bound(registration, &auth.chain_id, &auth.genesis)
+        .map_err(|error| invalid(error.to_string()))?;
+    if !issuer_is_active_hub_coordinator(store, &registration.sponsor)? {
+        return Err(invalid(
+            "mission sponsor is not an active canonical hub coordinator",
+        ));
+    }
+    let current_nonce = load_mission_sponsor_nonce(store, &registration.sponsor)?;
+    if registration.nonce != current_nonce {
+        return Err(invalid("mission sponsor nonce mismatch"));
+    }
+    let next_nonce = current_nonce
+        .checked_add(1)
+        .ok_or_else(|| invalid("mission sponsor nonce overflow"))?;
+    let mission = mission_record_from_registration(registration)?;
+    register_mission_into(batch, store, &mission)?;
+    let mut pending = WriteBatch::new();
+    pending.put_cf(
+        ColumnFamily::Meta,
+        &mission_sponsor_nonce_key(&registration.sponsor),
+        &encode(&next_nonce)?,
+    );
+    batch.append(pending);
+    Ok(())
+}
+
 pub fn register_grant_into(
     batch: &mut WriteBatch,
     store: &StateStore,
@@ -437,9 +713,15 @@ pub fn register_mission_into(
 
 #[cfg(test)]
 mod tests {
-    use agora_crypto::{sign_passport_attestation_bound, KeyPair};
+    use agora_crypto::{
+        sign_grant_registration_bound, sign_hub_registration_bound,
+        sign_mission_registration_bound, sign_passport_attestation_bound, KeyPair,
+    };
     use agora_governance::{GrantKind, GrantStatus, MissionStatus};
-    use agora_types::{NativeAssetId, PassportCategory, TreasuryId};
+    use agora_types::{
+        CommunityGrantKind, GrantRegistration, HubRegistration, MissionRegistration, NativeAssetId,
+        PassportCategory, TreasuryId,
+    };
 
     use super::*;
     use crate::{load_issued_supply, load_protocol_treasuries, GenesisBuilder};
@@ -676,6 +958,114 @@ mod tests {
             completion_evidence: Hash::ZERO,
         };
         assert!(register_mission_into(&mut batch, &store, &mission).is_err());
+        assert!(batch.is_empty());
+    }
+
+    fn signed_hub(coordinator: &KeyPair, nonce: u64, auth: &TxAuthContext) -> HubRegistration {
+        let mut registration = HubRegistration::unsigned(
+            "Agora Signed Hub".into(),
+            "Geographic".into(),
+            Hash([2; 32]),
+            vec![coordinator.address()],
+            Address([3; 20]),
+            12,
+            3,
+            Hash([4; 32]),
+            Hash([5; 32]),
+            1,
+            nonce,
+        );
+        sign_hub_registration_bound(
+            &mut registration,
+            coordinator,
+            &auth.chain_id,
+            &auth.genesis,
+        )
+        .unwrap();
+        registration
+    }
+
+    #[test]
+    fn signed_hub_then_grant_and_mission_are_accepted() {
+        let store = StateStore::open_in_memory();
+        let coordinator = KeyPair::from_secret_bytes(&[4; 32]).unwrap();
+        let auth = auth();
+        let hub = signed_hub(&coordinator, 0, &auth);
+        let mut hub_batch = WriteBatch::new();
+        register_signed_hub_into(&mut hub_batch, &store, &hub, &auth).unwrap();
+        store.write_batch(hub_batch).unwrap();
+        assert_eq!(
+            load_hub_coordinator_nonce(&store, &coordinator.address()).unwrap(),
+            1
+        );
+        assert!(issuer_is_active_hub_coordinator(&store, &coordinator.address()).unwrap());
+
+        let mut grant = GrantRegistration::unsigned(
+            coordinator.address(),
+            7,
+            TreasuryId::OvlBuilder,
+            Address([6; 20]),
+            Amount::from_base_units(100),
+            CommunityGrantKind::Micro,
+            vec![],
+            Hash::ZERO,
+            0,
+        );
+        sign_grant_registration_bound(&mut grant, &coordinator, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let mut grant_batch = WriteBatch::new();
+        register_signed_grant_into(&mut grant_batch, &store, &grant, &auth).unwrap();
+        store.write_batch(grant_batch).unwrap();
+
+        let mut mission = MissionRegistration::unsigned(
+            coordinator.address(),
+            TreasuryId::OvlBuilder,
+            Amount::from_base_units(50),
+            Hash([10; 32]),
+            0,
+        );
+        sign_mission_registration_bound(&mut mission, &coordinator, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let mut mission_batch = WriteBatch::new();
+        register_signed_mission_into(&mut mission_batch, &store, &mission, &auth).unwrap();
+        store.write_batch(mission_batch).unwrap();
+
+        assert_eq!(list_grants(&store, 10).unwrap().len(), 1);
+        assert_eq!(list_missions(&store, 10).unwrap().len(), 1);
+        assert_eq!(
+            load_grant_registrar_nonce(&store, &coordinator.address()).unwrap(),
+            1
+        );
+        assert_eq!(
+            load_mission_sponsor_nonce(&store, &coordinator.address()).unwrap(),
+            1
+        );
+
+        let mut replay = WriteBatch::new();
+        assert!(register_signed_hub_into(&mut replay, &store, &hub, &auth).is_err());
+        assert!(replay.is_empty());
+    }
+
+    #[test]
+    fn signed_grant_rejects_non_hub_registrar() {
+        let store = StateStore::open_in_memory();
+        let registrar = KeyPair::from_secret_bytes(&[5; 32]).unwrap();
+        let auth = auth();
+        let mut grant = GrantRegistration::unsigned(
+            registrar.address(),
+            1,
+            TreasuryId::OvlBuilder,
+            Address([6; 20]),
+            Amount::from_base_units(10),
+            CommunityGrantKind::Micro,
+            vec![],
+            Hash::ZERO,
+            0,
+        );
+        sign_grant_registration_bound(&mut grant, &registrar, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let mut batch = WriteBatch::new();
+        assert!(register_signed_grant_into(&mut batch, &store, &grant, &auth).is_err());
         assert!(batch.is_empty());
     }
 }

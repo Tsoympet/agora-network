@@ -71,6 +71,9 @@ async fn announce_triggers_getblock_and_full_serve() {
         drc_multisign_attachments: vec![],
         tlt_covenants: Vec::new(),
         passport_attestations: Vec::new(),
+        hub_registrations: Vec::new(),
+        grant_registrations: Vec::new(),
+        mission_registrations: Vec::new(),
     };
     let hash = block.id();
 

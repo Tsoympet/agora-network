@@ -7,6 +7,7 @@ mod account;
 mod amount;
 mod asset;
 mod block;
+mod community;
 mod data_availability;
 mod drc_check;
 mod drc_deposit_preauth;
@@ -52,7 +53,13 @@ pub use block::{
     TRIDENT_BLOCK_BODY_V13_DOMAIN, TRIDENT_BLOCK_BODY_V13_VERSION, TRIDENT_BLOCK_BODY_V14_DOMAIN,
     TRIDENT_BLOCK_BODY_V14_VERSION, TRIDENT_BLOCK_BODY_V15_DOMAIN, TRIDENT_BLOCK_BODY_V15_VERSION,
     TRIDENT_BLOCK_BODY_V16_DOMAIN, TRIDENT_BLOCK_BODY_V16_VERSION, TRIDENT_BLOCK_BODY_V17_DOMAIN,
-    TRIDENT_BLOCK_BODY_V17_VERSION, TRIDENT_BLOCK_BODY_VERSION,
+    TRIDENT_BLOCK_BODY_V17_VERSION, TRIDENT_BLOCK_BODY_V21_DOMAIN, TRIDENT_BLOCK_BODY_V21_VERSION,
+    TRIDENT_BLOCK_BODY_VERSION,
+};
+pub use community::{
+    CommunityGrantKind, CommunityGrantMilestone, GrantRegistration, HubRegistration,
+    MissionRegistration, GRANT_REGISTRATION_DOMAIN, HUB_REGISTRATION_DOMAIN,
+    MISSION_REGISTRATION_DOMAIN,
 };
 pub use data_availability::{
     da_fee_change_outpoint, DataAvailabilityCommitment, DataCommitmentAuthorization,
@@ -376,6 +383,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -552,6 +562,11 @@ mod ts_export {
         SignedStakeTx::export_all().expect("export SignedStakeTx");
         PassportCategory::export_all().expect("export PassportCategory");
         PassportAttestation::export_all().expect("export PassportAttestation");
+        CommunityGrantKind::export_all().expect("export CommunityGrantKind");
+        CommunityGrantMilestone::export_all().expect("export CommunityGrantMilestone");
+        HubRegistration::export_all().expect("export HubRegistration");
+        GrantRegistration::export_all().expect("export GrantRegistration");
+        MissionRegistration::export_all().expect("export MissionRegistration");
         IssuedCurrencyCode::export_all().expect("export IssuedCurrencyCode");
         IssuedAmount::export_all().expect("export IssuedAmount");
         IssuedAssetId::export_all().expect("export IssuedAssetId");

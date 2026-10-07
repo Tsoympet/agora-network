@@ -167,6 +167,25 @@ export {
   type PassportCategoryName,
 } from "./typed-lanes-passport";
 export {
+  COMMUNITY_GRANT_KINDS,
+  GRANT_REGISTRATION_DOMAIN,
+  HUB_REGISTRATION_DOMAIN,
+  MISSION_REGISTRATION_DOMAIN,
+  TREASURY_IDS,
+  buildSignedGrantRegistration,
+  buildSignedHubRegistration,
+  buildSignedMissionRegistration,
+  communityGrantKindDiscriminant,
+  encodeGrantRegistrationBody,
+  encodeHubRegistrationBody,
+  encodeMissionRegistrationBody,
+  sendGrantRegistration,
+  sendHubRegistration,
+  sendMissionRegistration,
+  type CommunityGrantKindName,
+  type TreasuryIdName,
+} from "./typed-lanes-community";
+export {
   RAW_EVM_DEV_CHAIN_ID,
   RAW_EVM_KEY_SPLIT,
   RAW_EVM_TESTNET_CHAIN_ID,

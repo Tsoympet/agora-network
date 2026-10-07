@@ -395,7 +395,10 @@ impl NetworkNode {
             | NetworkMessage::DataCommitment(_)
             | NetworkMessage::OvlRawExecution(_)
             | NetworkMessage::DrcMultisignAttachment(_)
-            | NetworkMessage::PassportAttestation(_) => {
+            | NetworkMessage::PassportAttestation(_)
+            | NetworkMessage::HubRegistration(_)
+            | NetworkMessage::GrantRegistration(_)
+            | NetworkMessage::MissionRegistration(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

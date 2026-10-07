@@ -829,6 +829,60 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let issuer = param_address(&req.params, "issuer")?;
                 self.backend.get_passport_issuer_nonce(&issuer)
             }
+            RpcMethod::SubmitHubRegistration => {
+                let raw =
+                    req.params.get("registration").cloned().ok_or_else(|| {
+                        RpcError::InvalidParams("missing registration object".into())
+                    })?;
+                let registration: agora_types::HubRegistration = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_hub_registration(registration)?;
+                Ok(json!({ "registration_id": id.to_hex() }))
+            }
+            RpcMethod::GetHubRegistration => {
+                let id = param_hash(&req.params, "registration_id")?;
+                self.backend.get_hub_registration(&id)
+            }
+            RpcMethod::GetHubCoordinatorNonce => {
+                let coordinator = param_address(&req.params, "coordinator")?;
+                self.backend.get_hub_coordinator_nonce(&coordinator)
+            }
+            RpcMethod::SubmitGrantRegistration => {
+                let raw =
+                    req.params.get("registration").cloned().ok_or_else(|| {
+                        RpcError::InvalidParams("missing registration object".into())
+                    })?;
+                let registration: agora_types::GrantRegistration = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_grant_registration(registration)?;
+                Ok(json!({ "registration_id": id.to_hex() }))
+            }
+            RpcMethod::GetGrantRegistration => {
+                let id = param_hash(&req.params, "registration_id")?;
+                self.backend.get_grant_registration(&id)
+            }
+            RpcMethod::GetGrantRegistrarNonce => {
+                let registrar = param_address(&req.params, "registrar")?;
+                self.backend.get_grant_registrar_nonce(&registrar)
+            }
+            RpcMethod::SubmitMissionRegistration => {
+                let raw =
+                    req.params.get("registration").cloned().ok_or_else(|| {
+                        RpcError::InvalidParams("missing registration object".into())
+                    })?;
+                let registration: agora_types::MissionRegistration = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_mission_registration(registration)?;
+                Ok(json!({ "registration_id": id.to_hex() }))
+            }
+            RpcMethod::GetMissionRegistration => {
+                let id = param_hash(&req.params, "registration_id")?;
+                self.backend.get_mission_registration(&id)
+            }
+            RpcMethod::GetMissionSponsorNonce => {
+                let sponsor = param_address(&req.params, "sponsor")?;
+                self.backend.get_mission_sponsor_nonce(&sponsor)
+            }
             RpcMethod::SubmitStakeTx => {
                 let stake_tx = req
                     .params
@@ -1691,6 +1745,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -1858,6 +1915,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -1914,6 +1974,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {
@@ -2535,6 +2598,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2607,6 +2673,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2678,6 +2747,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2750,6 +2822,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);

@@ -26,6 +26,9 @@ import type { DrcSignerListTx } from "./DrcSignerListTx";
 import type { DrcTicketCreateTx } from "./DrcTicketCreateTx";
 import type { DrcTrustLineIssuerControlTx } from "./DrcTrustLineIssuerControlTx";
 import type { DrcTrustLineSetTx } from "./DrcTrustLineSetTx";
+import type { GrantRegistration } from "./GrantRegistration";
+import type { HubRegistration } from "./HubRegistration";
+import type { MissionRegistration } from "./MissionRegistration";
 import type { OvlExecutionTx } from "./OvlExecutionTx";
 import type { PassportAttestation } from "./PassportAttestation";
 import type { SignedStakeTx } from "./SignedStakeTx";
@@ -158,4 +161,16 @@ tlt_covenants: Array<TltCovenantTx>,
 /**
  * Signed Hub-coordinator passport attestations. Empty stays off the frozen wire.
  */
-passport_attestations: Array<PassportAttestation>, };
+passport_attestations: Array<PassportAttestation>,
+/**
+ * Signed hub registrations. Empty stays off the frozen wire.
+ */
+hub_registrations: Array<HubRegistration>,
+/**
+ * Signed grant registrations. Empty stays off the frozen wire.
+ */
+grant_registrations: Array<GrantRegistration>,
+/**
+ * Signed mission registrations. Empty stays off the frozen wire.
+ */
+mission_registrations: Array<MissionRegistration>, };

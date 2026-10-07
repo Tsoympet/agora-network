@@ -43,7 +43,8 @@ use crate::backend::{
     admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
     admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
     admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_issuer_control,
-    admit_drc_trust_line_set, admit_ovl_execution, admit_ovl_raw_execution,
+    admit_drc_trust_line_set, admit_grant_registration, admit_hub_registration,
+    admit_mission_registration, admit_ovl_execution, admit_ovl_raw_execution,
     admit_passport_attestation, admit_stake_tx, admit_tlt_covenant, admit_transaction, NodeBackend,
     NodeBackendConfig,
 };
@@ -1712,6 +1713,51 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "passport attestation gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::HubRegistration(registration) => {
+                        match admit_hub_registration(
+                            store.as_ref(),
+                            &mempool,
+                            registration,
+                            &tx_auth,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, hub = %id.to_hex(), "hub registration gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "hub registration gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::GrantRegistration(registration) => {
+                        match admit_grant_registration(
+                            store.as_ref(),
+                            &mempool,
+                            registration,
+                            &tx_auth,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, grant = %id.to_hex(), "grant registration gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "grant registration gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::MissionRegistration(registration) => {
+                        match admit_mission_registration(
+                            store.as_ref(),
+                            &mempool,
+                            registration,
+                            &tx_auth,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, mission = %id.to_hex(), "mission registration gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "mission registration gossip rejected");
                             }
                         }
                     }

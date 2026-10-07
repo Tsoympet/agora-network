@@ -514,6 +514,24 @@ pub trait RpcBackend: Send {
     ) -> Result<Hash, RpcError>;
     fn get_passport_attestation(&self, attestation_id: &Hash) -> Result<Value, RpcError>;
     fn get_passport_issuer_nonce(&self, issuer: &Address) -> Result<Value, RpcError>;
+    fn submit_hub_registration(
+        &mut self,
+        registration: agora_types::HubRegistration,
+    ) -> Result<Hash, RpcError>;
+    fn get_hub_registration(&self, registration_id: &Hash) -> Result<Value, RpcError>;
+    fn get_hub_coordinator_nonce(&self, coordinator: &Address) -> Result<Value, RpcError>;
+    fn submit_grant_registration(
+        &mut self,
+        registration: agora_types::GrantRegistration,
+    ) -> Result<Hash, RpcError>;
+    fn get_grant_registration(&self, registration_id: &Hash) -> Result<Value, RpcError>;
+    fn get_grant_registrar_nonce(&self, registrar: &Address) -> Result<Value, RpcError>;
+    fn submit_mission_registration(
+        &mut self,
+        registration: agora_types::MissionRegistration,
+    ) -> Result<Hash, RpcError>;
+    fn get_mission_registration(&self, registration_id: &Hash) -> Result<Value, RpcError>;
+    fn get_mission_sponsor_nonce(&self, sponsor: &Address) -> Result<Value, RpcError>;
     /// Admit a secp256k1-signed stake tx (bond/delegate/unbond/withdraw). Never mint-like.
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError>;
 
@@ -1584,6 +1602,9 @@ impl RpcBackend for InMemoryBackend {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         })
     }
 
@@ -1690,6 +1711,78 @@ impl RpcBackend for InMemoryBackend {
     fn get_passport_issuer_nonce(&self, issuer: &Address) -> Result<Value, RpcError> {
         Ok(json!({
             "issuer": issuer.to_hex(),
+            "nonce": 0u64,
+        }))
+    }
+
+    fn submit_hub_registration(
+        &mut self,
+        _registration: agora_types::HubRegistration,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit hub registrations".into(),
+        ))
+    }
+
+    fn get_hub_registration(&self, registration_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "registration_id": registration_id.to_hex(),
+            "status": "unknown",
+            "hub": null,
+        }))
+    }
+
+    fn get_hub_coordinator_nonce(&self, coordinator: &Address) -> Result<Value, RpcError> {
+        Ok(json!({
+            "coordinator": coordinator.to_hex(),
+            "nonce": 0u64,
+        }))
+    }
+
+    fn submit_grant_registration(
+        &mut self,
+        _registration: agora_types::GrantRegistration,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit grant registrations".into(),
+        ))
+    }
+
+    fn get_grant_registration(&self, registration_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "registration_id": registration_id.to_hex(),
+            "status": "unknown",
+            "grant": null,
+        }))
+    }
+
+    fn get_grant_registrar_nonce(&self, registrar: &Address) -> Result<Value, RpcError> {
+        Ok(json!({
+            "registrar": registrar.to_hex(),
+            "nonce": 0u64,
+        }))
+    }
+
+    fn submit_mission_registration(
+        &mut self,
+        _registration: agora_types::MissionRegistration,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit mission registrations".into(),
+        ))
+    }
+
+    fn get_mission_registration(&self, registration_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "registration_id": registration_id.to_hex(),
+            "status": "unknown",
+            "mission": null,
+        }))
+    }
+
+    fn get_mission_sponsor_nonce(&self, sponsor: &Address) -> Result<Value, RpcError> {
+        Ok(json!({
+            "sponsor": sponsor.to_hex(),
             "nonce": 0u64,
         }))
     }

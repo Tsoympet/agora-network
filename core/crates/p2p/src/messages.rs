@@ -94,6 +94,12 @@ pub enum NetworkMessage {
     DrcMultisignAttachment(agora_types::DrcMultisignBlockAttachment),
     /// Appended in Trident protocol v29; signed Hub-coordinator passport attestation.
     PassportAttestation(agora_types::PassportAttestation),
+    /// Appended in Trident protocol v30; first-coordinator-signed hub registration.
+    HubRegistration(agora_types::HubRegistration),
+    /// Appended in Trident protocol v30; hub-coordinator-signed grant registration.
+    GrantRegistration(agora_types::GrantRegistration),
+    /// Appended in Trident protocol v30; hub-coordinator-signed mission registration.
+    MissionRegistration(agora_types::MissionRegistration),
 }
 
 impl NetworkMessage {
@@ -467,6 +473,47 @@ mod tests {
             NetworkMessage::decode(&passport.encode()).unwrap(),
             passport
         );
+
+        let hub = NetworkMessage::HubRegistration(agora_types::HubRegistration::unsigned(
+            "Agora Hub".into(),
+            "Geographic".into(),
+            Hash([2; 32]),
+            vec![Address([3; 20])],
+            Address([4; 20]),
+            12,
+            3,
+            Hash([5; 32]),
+            Hash([6; 32]),
+            1,
+            0,
+        ));
+        assert_eq!(hub.encode()[0], 38);
+        assert_eq!(NetworkMessage::decode(&hub.encode()).unwrap(), hub);
+
+        let grant = NetworkMessage::GrantRegistration(agora_types::GrantRegistration::unsigned(
+            Address([1; 20]),
+            7,
+            agora_types::TreasuryId::OvlBuilder,
+            Address([2; 20]),
+            agora_types::Amount::from_base_units(10),
+            agora_types::CommunityGrantKind::Micro,
+            vec![],
+            Hash::ZERO,
+            0,
+        ));
+        assert_eq!(grant.encode()[0], 39);
+        assert_eq!(NetworkMessage::decode(&grant.encode()).unwrap(), grant);
+
+        let mission =
+            NetworkMessage::MissionRegistration(agora_types::MissionRegistration::unsigned(
+                Address([1; 20]),
+                agora_types::TreasuryId::DrcCommunity,
+                agora_types::Amount::from_base_units(5),
+                Hash([3; 32]),
+                0,
+            ));
+        assert_eq!(mission.encode()[0], 40);
+        assert_eq!(NetworkMessage::decode(&mission.encode()).unwrap(), mission);
 
         let mut block = Block::utxo(
             BlockHeader {

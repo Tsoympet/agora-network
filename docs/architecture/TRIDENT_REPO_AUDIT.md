@@ -19,12 +19,13 @@ parity files keep their own `INCOMPLETE` status lines.
 
 | Constant | Value | Notes |
 | --- | --- | --- |
-| `TRIDENT_PROTOCOL_VERSION` | 29 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v29 appends `NetworkMessage::PassportAttestation` |
+| `TRIDENT_PROTOCOL_VERSION` | 30 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v30 appends Hub / Grant / Mission registration gossip |
 | Datadir `SCHEMA_VERSION` | 22 | Experimental; `OVL_EVM_SCHEMA_VERSION` is also 22 |
 | DRC fee-burn schema | 20 | Lifetime burned counters |
 | DRC ledger-index datadir | 21 | Common live-object / receipt rebuild |
 | Combined body v18 | offer create/cancel only | Empty history keeps the frozen root |
 | Combined body v20 | passport wrap v19 | Empty passports stay off the empty wire; passport-only bodies write empty offer+covenant vecs |
+| Combined body v21 | hub/grant/mission wrap | Empty new lanes stay off the frozen wire; community-only bodies write empty offer+covenant+passport vecs |
 | DA body wrap | v5 | Empty `data_commitments` keep the v4 root |
 | Consensus / tx signing | secp256k1 | No custom crypto |
 | Outer encoding | Borsh | JSON-RPC is a convenience surface |
@@ -46,7 +47,7 @@ Independent quorums; no price-oracle mixing.
 | DRC payments + XRPL-like objects | Wired (Experimental) | Typed envelopes through offer cancel | Wired; family reservations | Typed submit/get methods | Shared builders for payment, DEX, escrow, Checks, channels, tickets, regular key, signer list, deposit preauth, account policy, trust lines, issued controls |
 | DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared builders + desktop/mobile native-DRC-vs-issued send |
 | Dual-PoS finality / staking | Wired (Experimental) | `CheckpointAttestation`, `StakeTx` | Wired | Validator / pool / `agora_submitStakeTx` | Light-client reads exist |
-| Protocol treasuries / community registry | Passport: Wired (Experimental). Hub/Grant/Mission: genesis + library | `NetworkMessage::PassportAttestation` (v29) | Passport mempool + compact lane 30 | `agora_submitPassportAttestation`, `agora_getPassportAttestation`, `agora_getPassportIssuerNonce`, `agora_getCommunityRegistry` | Shared builder + submit. Hub/Grant/Mission have no signed envelope |
+| Protocol treasuries / community registry | Passport + Hub/Grant/Mission: Wired (Experimental) | `PassportAttestation` (v29) plus `HubRegistration` / `GrantRegistration` / `MissionRegistration` (v30) | Passport lane 30; hub/grant/mission lanes 31–33 | Passport + hub/grant/mission submit/get/nonce; `agora_getCommunityRegistry` | Shared builders + submit. No unsigned mutation RPC |
 | DA commitments | Apply + journal + TLT fee | `NetworkMessage::DataCommitment` (v25) | Wired; default Experimental boot + `DA_INCLUSION_FEE_TLT` | `agora_submitDataCommitment` / `agora_getDataCommitment` | Light-client query + submit wrappers |
 
 `agora_getBalance` remains the TLT UTXO sum. Native OVL/DRC account
@@ -58,8 +59,7 @@ balances and shared nonces are `agora_getAccountBalances`. Ethereum
 ## P2P and compact blocks
 
 `NetworkMessage` Borsh discriminants are append-only through
-`PassportAttestation` (37). Hub/Grant/Mission still have no mutation gossip
-variant because those records have no secp256k1 envelope.
+`MissionRegistration` (40). Hub/Grant/Mission use discriminants 38–40.
 
 `compact_from_block` keeps UTXO-only `CompactBlock`. Named typed lanes use
 `TypedCompactBlock` with a per-kind short-id list so offers, covenants, DA,
@@ -104,7 +104,7 @@ There is no `agora_submitDrcExecution` or generic `agora_submitExecution`.
 
 | Surface | What it does | Honest gap |
 | --- | --- | --- |
-| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders for every admitted DRC family plus TLT covenant P2PKH, OVL transfer/execution v1, and signed passport attestations, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads, opt-in raw-EVM signer | Keys stay on device. No RandomX recompute. Raw EVM uses an explicit key, not the mnemonic vault. Hub/Grant/Mission mutation builders do not exist because those records are unsigned |
+| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders for every admitted DRC family plus TLT covenant P2PKH, OVL transfer/execution v1, signed passport attestations, and signed Hub/Grant/Mission registrations, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads, opt-in raw-EVM signer | Keys stay on device. No RandomX recompute. Raw EVM uses an explicit key, not the mnemonic vault |
 | Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel, DRC ticket create via shared `DRC_FAMILY_SENDERS` | No DEX book browser. Offer create is native DRC vs one issued asset. Remaining DRC families are library-complete, not per-family screens |
 | Explorer | DAG, tx lookup, protocol-lane reads, mempool, node, governance panel | No DEX book order-entry UI |
 | `agora-layers` HTTP | Historical lab; loopback | Non-canonical; mixed unauthenticated mutations |
@@ -119,9 +119,9 @@ infrastructure servers or store operator keys.
 | Component | Maturity | Wiring |
 | --- | --- | --- |
 | Civic constitution / forum / Ecclesia prototype | Experimental administrative RPC | Local snapshot; not a consensus community lane |
-| Canonical Hub registry | Scaffold | Genesis / `register_hub_into` only. `HubRecord` has no signature; no unsigned mutation RPC |
+| Canonical Hub registry | Experimental | Signed `HubRegistration` lane: apply/journal/gossip/mempool/RPC/light-client. First coordinator signs; apply writes Active hub |
 | Canonical Passport attestations | Experimental | Signed `PassportAttestation` lane: apply/journal/gossip/mempool/RPC/light-client |
-| Canonical Grant / Mission registry | Scaffold | Library `register_*_into`; no signed envelope, so no block lane |
+| Canonical Grant / Mission registry | Experimental | Signed `GrantRegistration` / `MissionRegistration` lanes. Registrar/sponsor must be an active hub coordinator |
 | Protocol treasuries | Scaffold / Experimental reads | `agora_getProtocolTreasuries`; signed disbursement is later |
 | Merchant / Passport / Grants docs | Scaffold | Specs. Passport consensus is the attestation lane above, not merchant UI |
 
@@ -189,11 +189,9 @@ These are real unfinished paths, not parity slogans:
    boot+IBD+tx+finality are demonstrated on a public mesh, maturity stays
    below Public testnet. Frozen v2 TLT peers boot and send, but dual-PoS
    never finalizes (empty OVL/DRC genesis sets).
-2. **Hub / Grant / Mission consensus lanes** — skipped honestly.
-   `HubRecord`, `GrantRecord`, and `MissionRecord` have no secp256k1
-   envelope. Unsigned mutation RPC would be theater. The signed
-   passport attestation lane is wired instead. Civic votes remain
-   local-admin snapshots, not consensus.
+2. **Civic votes** — local-admin snapshots, not consensus. Forum/Ecclesia
+   RPC stays off the gossip mesh because those types are not
+   network-bound secp256k1 envelopes.
 3. **Vesting unlock / treasury spend** — genesis vesting is withheld from
    liquid balances, but there is no consensus unlock tx. Protocol treasury
    reads exist; signed disbursement does not.
@@ -237,8 +235,7 @@ This audit close-out adds:
   mixed into the Agora mnemonic vault. Passport attestations use
   `typed-lanes-passport.ts`.
 - `agora-node schema report|migrate|reindex` for supported library
-  rebuilds. Hub/Grant/Mission stay library/genesis until they have
-  signed envelopes. Civic write RPCs stay local-admin.
+  rebuilds. Civic write RPCs stay local-admin.
 - Protocol v26 `NetworkMessage::OvlRawExecution` gossip and a separate
   raw mempool. Version 2 remains rejected by the Agora-signed pool.
 - Protocol v27 `NetworkMessage::TypedCompactBlock` named-lane compact
@@ -249,6 +246,11 @@ This audit close-out adds:
   compact lane 30, mempool issuer reservation, apply/journal revert,
   and `agora_submitPassportAttestation` / `agora_getPassportAttestation`
   / `agora_getPassportIssuerNonce`.
+- Protocol v30 `NetworkMessage::HubRegistration` / `GrantRegistration` /
+  `MissionRegistration` (discriminants 38–40), compact lanes 31–33, body
+  wrap v21, dedicated coordinator/registrar/sponsor nonces, apply/journal
+  revert, submit/get/nonce RPC, and `typed-lanes-community.ts`. No
+  unsigned mutation RPC.
 - Freeze-ready-only live Block 0 materializer: TLT UTXOs, OVL/DRC liquid
   accounts (allocation − vesting − self-bond), artifact treasuries/controls,
   epoch-zero validators, `compose_trident_state_root` vs live

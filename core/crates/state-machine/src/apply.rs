@@ -57,7 +57,10 @@ use crate::staking::{
 use crate::store::WriteBatch;
 use crate::supply::{burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key};
 use crate::utxo::outpoint_key;
-use crate::{register_passport_attestation_into, StateError, StateStore};
+use crate::{
+    register_passport_attestation_into, register_signed_grant_into, register_signed_hub_into,
+    register_signed_mission_into, StateError, StateStore,
+};
 
 /// Result of applying one block's UTXO transition (journal + typed acceptance + batch).
 pub struct BlockApplyResult {
@@ -127,7 +130,7 @@ pub struct UtxoJournal {
     pub tlt_covenant_created: Vec<OutPoint>,
     /// Script outputs spent by this block's covenant lane (revert restores them).
     pub tlt_covenant_spent: Vec<(OutPoint, crate::tlt_covenant::TltCovenantUtxoRecord)>,
-    /// Community passport keys before Accepted signed attestations.
+    /// Community passport / hub / grant / mission keys before Accepted signed writes.
     pub passport_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
@@ -1588,6 +1591,9 @@ fn apply_trident_lanes(
         && block.drc_signer_lists.is_empty()
         && block.stake_ops.is_empty()
         && block.passport_attestations.is_empty()
+        && block.hub_registrations.is_empty()
+        && block.grant_registrations.is_empty()
+        && block.mission_registrations.is_empty()
     {
         return Ok((
             Vec::new(),
@@ -1659,6 +1665,15 @@ fn apply_trident_lanes(
     if !block.passport_attestations.is_empty() && auth.is_none() {
         return Err(StateError::InvalidTx(
             "passport attestations require network-bound auth".into(),
+        ));
+    }
+    if (!block.hub_registrations.is_empty()
+        || !block.grant_registrations.is_empty()
+        || !block.mission_registrations.is_empty())
+        && auth.is_none()
+    {
+        return Err(StateError::InvalidTx(
+            "hub/grant/mission registrations require network-bound auth".into(),
         ));
     }
     if block.data_commitments.len() > agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK {
@@ -3130,6 +3145,79 @@ fn apply_trident_lanes(
         }
     }
 
+    if !block.hub_registrations.is_empty()
+        || !block.grant_registrations.is_empty()
+        || !block.mission_registrations.is_empty()
+    {
+        let ctx = auth.expect("community registration auth checked above");
+        let mut seen_hubs = std::collections::HashSet::new();
+        for registration in &block.hub_registrations {
+            let id = registration.registration_id();
+            if !seen_hubs.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate hub registration in block".into(),
+                ));
+            }
+            let coordinator = registration
+                .first_coordinator()
+                .ok_or_else(|| StateError::InvalidTx("hub coordinators must be nonempty".into()))?;
+            let mut keys = vec![
+                crate::hub_record_key(&id),
+                crate::hub_coordinator_nonce_key(&coordinator),
+                crate::community_summary_key(),
+            ];
+            for coordinator in &registration.coordinators {
+                keys.push(crate::active_hub_coordinator_key(coordinator));
+            }
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            let mut op_batch = WriteBatch::new();
+            register_signed_hub_into(&mut op_batch, &lane, registration, ctx)?;
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+        let mut seen_grants = std::collections::HashSet::new();
+        for registration in &block.grant_registrations {
+            let id = registration.registration_id();
+            if !seen_grants.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate grant registration in block".into(),
+                ));
+            }
+            let keys = vec![
+                crate::grant_record_key(&id),
+                crate::grant_registrar_nonce_key(&registration.registrar),
+                crate::community_summary_key(),
+            ];
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            let mut op_batch = WriteBatch::new();
+            register_signed_grant_into(&mut op_batch, &lane, registration, ctx)?;
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+        let mut seen_missions = std::collections::HashSet::new();
+        for registration in &block.mission_registrations {
+            let id = registration.registration_id();
+            if !seen_missions.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate mission registration in block".into(),
+                ));
+            }
+            let keys = vec![
+                crate::mission_record_key(&id),
+                crate::mission_sponsor_nonce_key(&registration.sponsor),
+                crate::community_summary_key(),
+            ];
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            let mut op_batch = WriteBatch::new();
+            register_signed_mission_into(&mut op_batch, &lane, registration, ctx)?;
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+    }
+
     Ok((
         drc_ticket_create_statuses,
         drc_escrow_create_statuses,
@@ -3962,6 +4050,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -4177,6 +4268,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -4301,6 +4395,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -4392,6 +4489,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -4492,6 +4592,9 @@ mod tests {
                 drc_multisign_attachments: vec![],
                 tlt_covenants: Vec::new(),
                 passport_attestations: Vec::new(),
+                hub_registrations: Vec::new(),
+                grant_registrations: Vec::new(),
+                mission_registrations: Vec::new(),
             },
             1,
             None,
@@ -4591,6 +4694,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -4708,6 +4814,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -4807,6 +4916,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -4920,6 +5032,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5062,6 +5177,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5725,6 +5843,9 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -6132,6 +6253,124 @@ mod tests {
             load_passport_issuer_nonce(&store, &issuer.address()).unwrap(),
             0
         );
+        assert_eq!(
+            load_canonical_community_summary(&store).unwrap(),
+            summary_before
+        );
+        assert_eq!(canonical_community_root(&store).unwrap(), root_before);
+    }
+
+    #[test]
+    fn signed_hub_grant_mission_lanes_apply_and_revert() {
+        use crate::{
+            canonical_community_root, load_canonical_community_summary, load_grant_registration,
+            load_hub_coordinator_nonce, load_hub_registration, load_mission_registration,
+        };
+        use agora_crypto::{
+            sign_grant_registration_bound, sign_hub_registration_bound,
+            sign_mission_registration_bound,
+        };
+        use agora_types::{
+            CommunityGrantKind, GrantRegistration, HubRegistration, MissionRegistration, TreasuryId,
+        };
+
+        let store = StateStore::open_in_memory();
+        let coordinator = KeyPair::from_secret_bytes(&[12; 32]).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let mut hub = HubRegistration::unsigned(
+            "Agora Hub 2".into(),
+            "Geographic".into(),
+            Hash([2; 32]),
+            vec![coordinator.address()],
+            Address([3; 20]),
+            12,
+            3,
+            Hash([4; 32]),
+            Hash([5; 32]),
+            1,
+            0,
+        );
+        sign_hub_registration_bound(&mut hub, &coordinator, &auth.chain_id, &auth.genesis).unwrap();
+        let mut grant = GrantRegistration::unsigned(
+            coordinator.address(),
+            7,
+            TreasuryId::OvlBuilder,
+            Address([6; 20]),
+            Amount::from_base_units(100),
+            CommunityGrantKind::Micro,
+            vec![],
+            Hash::ZERO,
+            0,
+        );
+        sign_grant_registration_bound(&mut grant, &coordinator, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let mut mission = MissionRegistration::unsigned(
+            coordinator.address(),
+            TreasuryId::OvlBuilder,
+            Amount::from_base_units(50),
+            Hash([10; 32]),
+            0,
+        );
+        sign_mission_registration_bound(&mut mission, &coordinator, &auth.chain_id, &auth.genesis)
+            .unwrap();
+
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.hub_registrations = vec![hub.clone()];
+        block.grant_registrations = vec![grant.clone()];
+        block.mission_registrations = vec![mission.clone()];
+        block.header.tx_root = block.compute_body_root();
+
+        let root_before = canonical_community_root(&store).unwrap();
+        let summary_before = load_canonical_community_summary(&store).unwrap();
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        store.write_batch(result.batch).unwrap();
+        assert!(load_hub_registration(&store, &hub.registration_id())
+            .unwrap()
+            .is_some());
+        assert!(load_grant_registration(&store, &grant.registration_id())
+            .unwrap()
+            .is_some());
+        assert!(
+            load_mission_registration(&store, &mission.registration_id())
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            load_hub_coordinator_nonce(&store, &coordinator.address()).unwrap(),
+            1
+        );
+        assert_ne!(canonical_community_root(&store).unwrap(), root_before);
+
+        store
+            .write_batch(revert_journal_batched(&result.journal).unwrap())
+            .unwrap();
+        assert!(load_hub_registration(&store, &hub.registration_id())
+            .unwrap()
+            .is_none());
         assert_eq!(
             load_canonical_community_summary(&store).unwrap(),
             summary_before

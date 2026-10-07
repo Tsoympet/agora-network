@@ -34,16 +34,18 @@ use agora_state_machine::{
     load_drc_payment_channel_fund_event, load_drc_payment_channel_live,
     load_drc_payment_channel_receipt, load_drc_payment_channel_schedule_event,
     load_drc_payment_receipt, load_drc_transaction, load_drc_trust_line_issuer_control_receipt,
-    load_drc_trust_line_live, load_epoch, load_known_drc_account_keys,
+    load_drc_trust_line_live, load_epoch, load_grant_registrar_nonce, load_grant_registration,
+    load_hub_coordinator_nonce, load_hub_registration, load_known_drc_account_keys,
     load_known_drc_account_policy, load_known_drc_account_signer_summary,
-    load_known_drc_deposit_authorization, load_native_supply_state, load_passport_attestation,
-    load_passport_issuer_nonce, load_protocol_treasuries, load_reward_pool, load_validator,
-    lookup_covenant_tx_location, lookup_data_commitment_location, lookup_drc_check_point,
-    lookup_drc_escrow_point, lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point,
-    lookup_drc_ticket_point, lookup_drc_trust_line_point, lookup_tx_location, meta_keys,
-    outpoint_key, plan_drc_mempool_reservation, validate_mempool_covenant,
-    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, DrcMempoolReservation,
-    DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext, WriteBatch,
+    load_known_drc_deposit_authorization, load_mission_registration, load_mission_sponsor_nonce,
+    load_native_supply_state, load_passport_attestation, load_passport_issuer_nonce,
+    load_protocol_treasuries, load_reward_pool, load_validator, lookup_covenant_tx_location,
+    lookup_data_commitment_location, lookup_drc_check_point, lookup_drc_escrow_point,
+    lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point, lookup_drc_ticket_point,
+    lookup_drc_trust_line_point, lookup_tx_location, meta_keys, outpoint_key,
+    plan_drc_mempool_reservation, validate_mempool_covenant, validate_mempool_tx_with_auth,
+    AccountJournal, ColumnFamily, DrcMempoolReservation, DrcTicketPointStatus, StakingParams,
+    StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
     sequence_signals_rbf, AccountTransfer, Address, Amount, Block, CheckpointAttestation,
@@ -54,11 +56,11 @@ use agora_types::{
     DrcLedgerObjectKind, DrcLedgerObjectPage, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
-    DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx, PassportAttestation,
-    SignedStakeTx, TltCovenantTx, Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
-    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
-    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
-    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    DrcTrustLineSetTx, GrantRegistration, Hash, HubRegistration, MissionRegistration,
+    NativeAssetId, OutPoint, OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx,
+    Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
+    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
+    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -320,6 +322,101 @@ pub(crate) fn admit_passport_attestation(
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
     pool.admit_passport_attestation(attestation)
+        .map_err(|err| RpcError::Rejected(err.to_string()))
+}
+
+pub(crate) fn admit_hub_registration(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    registration: HubRegistration,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    agora_crypto::verify_hub_registration_bound(&registration, &auth.chain_id, &auth.genesis)
+        .map_err(|err| RpcError::Rejected(format!("invalid hub registration: {err}")))?;
+    if load_hub_registration(store, &registration.registration_id())
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+        .is_some()
+    {
+        return Ok(registration.registration_id());
+    }
+    let coordinator = registration
+        .first_coordinator()
+        .ok_or_else(|| RpcError::Rejected("hub coordinators must be nonempty".into()))?;
+    let expected = load_hub_coordinator_nonce(store, &coordinator)
+        .map_err(|err| RpcError::Internal(err.to_string()))?;
+    if registration.nonce != expected {
+        return Err(RpcError::Rejected("hub coordinator nonce mismatch".into()));
+    }
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    pool.admit_hub_registration(registration)
+        .map_err(|err| RpcError::Rejected(err.to_string()))
+}
+
+pub(crate) fn admit_grant_registration(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    registration: GrantRegistration,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    agora_crypto::verify_grant_registration_bound(&registration, &auth.chain_id, &auth.genesis)
+        .map_err(|err| RpcError::Rejected(format!("invalid grant registration: {err}")))?;
+    if load_grant_registration(store, &registration.registration_id())
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+        .is_some()
+    {
+        return Ok(registration.registration_id());
+    }
+    if !issuer_is_active_hub_coordinator(store, &registration.registrar)
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+    {
+        return Err(RpcError::Rejected(
+            "grant registrar is not an active canonical hub coordinator".into(),
+        ));
+    }
+    let expected = load_grant_registrar_nonce(store, &registration.registrar)
+        .map_err(|err| RpcError::Internal(err.to_string()))?;
+    if registration.nonce != expected {
+        return Err(RpcError::Rejected("grant registrar nonce mismatch".into()));
+    }
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    pool.admit_grant_registration(registration)
+        .map_err(|err| RpcError::Rejected(err.to_string()))
+}
+
+pub(crate) fn admit_mission_registration(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    registration: MissionRegistration,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    agora_crypto::verify_mission_registration_bound(&registration, &auth.chain_id, &auth.genesis)
+        .map_err(|err| RpcError::Rejected(format!("invalid mission registration: {err}")))?;
+    if load_mission_registration(store, &registration.registration_id())
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+        .is_some()
+    {
+        return Ok(registration.registration_id());
+    }
+    if !issuer_is_active_hub_coordinator(store, &registration.sponsor)
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+    {
+        return Err(RpcError::Rejected(
+            "mission sponsor is not an active canonical hub coordinator".into(),
+        ));
+    }
+    let expected = load_mission_sponsor_nonce(store, &registration.sponsor)
+        .map_err(|err| RpcError::Internal(err.to_string()))?;
+    if registration.nonce != expected {
+        return Err(RpcError::Rejected("mission sponsor nonce mismatch".into()));
+    }
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    pool.admit_mission_registration(registration)
         .map_err(|err| RpcError::Rejected(err.to_string()))
 }
 
@@ -2624,6 +2721,9 @@ impl RpcBackend for NodeBackend {
             tlt_covenants,
             data_commitments,
             passport_attestations,
+            hub_registrations,
+            grant_registrations,
+            mission_registrations,
         ) = {
             let pool = self
                 .mempool
@@ -2673,6 +2773,9 @@ impl RpcBackend for NodeBackend {
                 pool.select_covenants(DEFAULT_TEMPLATE_TX_LIMIT),
                 data_commitments,
                 pool.select_passport_attestations(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_hub_registrations(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_grant_registrations(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_mission_registrations(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         self.append_local_evm_executions(&mut ovl_executions);
@@ -2710,6 +2813,9 @@ impl RpcBackend for NodeBackend {
                     tlt_covenants: &tlt_covenants,
                     data_commitments: &data_commitments,
                     passport_attestations: &passport_attestations,
+                    hub_registrations: &hub_registrations,
+                    grant_registrations: &grant_registrations,
+                    mission_registrations: &mission_registrations,
                 },
             )
             .map_err(|e| RpcError::Internal(e.to_string()))
@@ -3035,6 +3141,164 @@ impl RpcBackend for NodeBackend {
             .map_err(|e| RpcError::Internal(e.to_string()))?;
         Ok(json!({
             "issuer": issuer.to_hex(),
+            "nonce": nonce,
+        }))
+    }
+
+    fn submit_hub_registration(&mut self, registration: HubRegistration) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_hub_registration(&self.store, &self.mempool, registration.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            if let Err(err) = net.publish_message(NetworkMessage::HubRegistration(registration)) {
+                return Err(RpcError::Internal(err.to_string()));
+            }
+        }
+        Ok(id)
+    }
+
+    fn get_hub_registration(&self, registration_id: &Hash) -> Result<Value, RpcError> {
+        {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            if let Some(registration) = pool.get_hub_registration(registration_id) {
+                return Ok(json!({
+                    "registration_id": registration_id.to_hex(),
+                    "status": "pending",
+                    "hub": registration,
+                }));
+            }
+        }
+        match load_hub_registration(self.store.as_ref(), registration_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        {
+            Some(hub) => Ok(json!({
+                "registration_id": registration_id.to_hex(),
+                "status": "accepted",
+                "hub": hub,
+            })),
+            None => Ok(json!({
+                "registration_id": registration_id.to_hex(),
+                "status": "unknown",
+                "hub": null,
+            })),
+        }
+    }
+
+    fn get_hub_coordinator_nonce(&self, coordinator: &Address) -> Result<Value, RpcError> {
+        let nonce = load_hub_coordinator_nonce(self.store.as_ref(), coordinator)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "coordinator": coordinator.to_hex(),
+            "nonce": nonce,
+        }))
+    }
+
+    fn submit_grant_registration(
+        &mut self,
+        registration: GrantRegistration,
+    ) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_grant_registration(&self.store, &self.mempool, registration.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            if let Err(err) = net.publish_message(NetworkMessage::GrantRegistration(registration)) {
+                return Err(RpcError::Internal(err.to_string()));
+            }
+        }
+        Ok(id)
+    }
+
+    fn get_grant_registration(&self, registration_id: &Hash) -> Result<Value, RpcError> {
+        {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            if let Some(registration) = pool.get_grant_registration(registration_id) {
+                return Ok(json!({
+                    "registration_id": registration_id.to_hex(),
+                    "status": "pending",
+                    "grant": registration,
+                }));
+            }
+        }
+        match load_grant_registration(self.store.as_ref(), registration_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        {
+            Some(grant) => Ok(json!({
+                "registration_id": registration_id.to_hex(),
+                "status": "accepted",
+                "grant": grant,
+            })),
+            None => Ok(json!({
+                "registration_id": registration_id.to_hex(),
+                "status": "unknown",
+                "grant": null,
+            })),
+        }
+    }
+
+    fn get_grant_registrar_nonce(&self, registrar: &Address) -> Result<Value, RpcError> {
+        let nonce = load_grant_registrar_nonce(self.store.as_ref(), registrar)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "registrar": registrar.to_hex(),
+            "nonce": nonce,
+        }))
+    }
+
+    fn submit_mission_registration(
+        &mut self,
+        registration: MissionRegistration,
+    ) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id =
+            admit_mission_registration(&self.store, &self.mempool, registration.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            if let Err(err) = net.publish_message(NetworkMessage::MissionRegistration(registration))
+            {
+                return Err(RpcError::Internal(err.to_string()));
+            }
+        }
+        Ok(id)
+    }
+
+    fn get_mission_registration(&self, registration_id: &Hash) -> Result<Value, RpcError> {
+        {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            if let Some(registration) = pool.get_mission_registration(registration_id) {
+                return Ok(json!({
+                    "registration_id": registration_id.to_hex(),
+                    "status": "pending",
+                    "mission": registration,
+                }));
+            }
+        }
+        match load_mission_registration(self.store.as_ref(), registration_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        {
+            Some(mission) => Ok(json!({
+                "registration_id": registration_id.to_hex(),
+                "status": "accepted",
+                "mission": mission,
+            })),
+            None => Ok(json!({
+                "registration_id": registration_id.to_hex(),
+                "status": "unknown",
+                "mission": null,
+            })),
+        }
+    }
+
+    fn get_mission_sponsor_nonce(&self, sponsor: &Address) -> Result<Value, RpcError> {
+        let nonce = load_mission_sponsor_nonce(self.store.as_ref(), sponsor)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "sponsor": sponsor.to_hex(),
             "nonce": nonce,
         }))
     }

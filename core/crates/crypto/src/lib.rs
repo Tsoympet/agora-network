@@ -7,6 +7,7 @@ mod account;
 mod address;
 mod attestation;
 mod bip44;
+mod community;
 mod data_availability;
 mod drc_check;
 mod drc_deposit_preauth;
@@ -38,6 +39,11 @@ pub use address::address_from_pubkey;
 pub use attestation::{sign_checkpoint_attestation, verify_checkpoint_attestation};
 pub use bip44::{
     derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,
+};
+pub use community::{
+    sign_grant_registration_bound, sign_hub_registration_bound, sign_mission_registration_bound,
+    verify_grant_registration_bound, verify_hub_registration_bound,
+    verify_mission_registration_bound,
 };
 pub use data_availability::{sign_data_commitment_bound, verify_data_commitment_bound};
 pub use drc_check::{
