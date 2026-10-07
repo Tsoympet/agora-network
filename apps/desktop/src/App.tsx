@@ -17,8 +17,14 @@ import {
   sendDrcOfferCancel,
   sendDrcOfferCreate,
   sendDrcPayment,
-  DRC_FAMILY_SENDERS,
+  DRC_WALLET_FAMILY_LANES,
+  drcFamilyNeedsAmount,
+  drcFamilyNeedsIssued,
+  drcFamilyNeedsObjectId,
+  drcFamilyNeedsRecipient,
+  sendDrcWalletFamily,
   sendOvlExecution,
+  type DrcWalletFamilyLane,
   sendTltCovenant,
   sendTransfer,
   shortAddress,
@@ -102,6 +108,7 @@ export function App() {
     | "drc-offer"
     | "drc-offer-cancel"
     | "drc-ticket"
+    | DrcWalletFamilyLane
   >("tlt");
   const [offerIssuer, setOfferIssuer] = useState("");
   const [offerCurrency, setOfferCurrency] = useState("USD");
@@ -339,7 +346,12 @@ export function App() {
     }
     const amt = Number(amount);
     const feeN = Number(fee);
-    if (sendLane !== "drc-offer-cancel" && sendLane !== "drc-ticket" && (!Number.isFinite(amt) || amt <= 0)) {
+    const amountOptional =
+      sendLane === "drc-offer-cancel" ||
+      sendLane === "drc-ticket" ||
+      (DRC_WALLET_FAMILY_LANES.some((lane) => lane.id === sendLane) &&
+        !drcFamilyNeedsAmount(sendLane));
+    if (!amountOptional && (!Number.isFinite(amt) || amt <= 0)) {
       setSendError("Amount must be a positive number");
       return;
     }
@@ -432,9 +444,17 @@ export function App() {
         fromBech32 = built.fromBech32;
         fromHex = built.from;
       } else {
-        const { id: submitted, built } = await DRC_FAMILY_SENDERS.sendDrcTicketCreate(
+        const { id: submitted, built } = await sendDrcWalletFamily(
           client,
-          common,
+          sendLane,
+          {
+            ...common,
+            recipient: toAddress.trim(),
+            amount: Math.floor(amt),
+            objectId: offerId.trim(),
+            issuer: offerIssuer.trim(),
+            currency: offerCurrency,
+          },
         );
         id = submitted;
         fromBech32 = built.fromBech32;
@@ -873,15 +893,7 @@ export function App() {
             value={sendLane}
             onChange={(e) =>
               setSendLane(
-                e.target.value as
-                  | "tlt"
-                  | "tlt-covenant"
-                  | "ovl"
-                  | "ovl-exec"
-                  | "drc"
-                  | "drc-offer"
-                  | "drc-offer-cancel"
-                  | "drc-ticket",
+                e.target.value as typeof sendLane,
               )
             }
             aria-label="Send lane"
@@ -895,17 +907,25 @@ export function App() {
             <option value="drc-offer">DRC offer create</option>
             <option value="drc-offer-cancel">DRC offer cancel</option>
             <option value="drc-ticket">DRC ticket create</option>
+            {DRC_WALLET_FAMILY_LANES.filter((lane) => lane.id !== "drc-ticket").map(
+              (lane) => (
+                <option key={lane.id} value={lane.id}>
+                  {lane.label}
+                </option>
+              ),
+            )}
           </select>
-          {sendLane === "drc-offer-cancel" ? (
+          {sendLane === "drc-offer-cancel" || drcFamilyNeedsObjectId(sendLane) ? (
             <input
               value={offerId}
               onChange={(e) => setOfferId(e.target.value)}
-              placeholder="offer id (64-hex)"
-              aria-label="Offer id"
+              placeholder="object or offer id (64-hex)"
+              aria-label="Object id"
               spellCheck={false}
               style={fieldStyle}
             />
-          ) : (
+          ) : drcFamilyNeedsRecipient(sendLane) ||
+            !DRC_WALLET_FAMILY_LANES.some((lane) => lane.id === sendLane) ? (
             <input
               value={toAddress}
               onChange={(e) => setToAddress(e.target.value)}
@@ -919,8 +939,8 @@ export function App() {
               disabled={!networkReady}
               style={fieldStyle}
             />
-          )}
-          {sendLane === "drc-offer" ? (
+          ) : null}
+          {sendLane === "drc-offer" || drcFamilyNeedsIssued(sendLane) ? (
             <>
               <input
                 value={offerIssuer}
@@ -938,14 +958,16 @@ export function App() {
                   aria-label="Issued currency"
                   style={fieldStyle}
                 />
-                <input
-                  value={offerGets}
-                  onChange={(e) => setOfferGets(e.target.value)}
-                  placeholder="gets amount"
-                  aria-label="Offer gets amount"
-                  inputMode="numeric"
-                  style={fieldStyle}
-                />
+                {sendLane === "drc-offer" ? (
+                  <input
+                    value={offerGets}
+                    onChange={(e) => setOfferGets(e.target.value)}
+                    placeholder="gets amount"
+                    aria-label="Offer gets amount"
+                    inputMode="numeric"
+                    style={fieldStyle}
+                  />
+                ) : null}
               </div>
             </>
           ) : null}

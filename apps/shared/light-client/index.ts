@@ -116,6 +116,13 @@ export {
 } from "./typed-lanes";
 export {
   DRC_FAMILY_SENDERS,
+  DRC_WALLET_FAMILY_LANES,
+  drcFamilyNeedsAmount,
+  drcFamilyNeedsIssued,
+  drcFamilyNeedsObjectId,
+  drcFamilyNeedsRecipient,
+  sendDrcWalletFamily,
+  type DrcWalletFamilyLane,
   buildSignedDrcAccountPolicy,
   buildSignedDrcChannelClaim,
   buildSignedDrcChannelClose,

@@ -30,6 +30,13 @@ import {
   scriptP2pkh,
   standardIssuedCurrency,
 } from "./typed-lanes.ts";
+import {
+  DRC_WALLET_FAMILY_LANES,
+  drcFamilyNeedsAmount,
+  drcFamilyNeedsIssued,
+  drcFamilyNeedsObjectId,
+  drcFamilyNeedsRecipient,
+} from "./typed-lanes-drc.ts";
 
 const GENESIS =
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -573,5 +580,12 @@ lock(
   ),
   "1700000061676f72612d76657374696e672d756e6c6f636b2d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0100000001020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030a000000000000000000000000000000",
 );
+
+assert.equal(DRC_WALLET_FAMILY_LANES.length, 12);
+assert.equal(drcFamilyNeedsAmount("drc-escrow-create"), true);
+assert.equal(drcFamilyNeedsAmount("drc-escrow-finish"), false);
+assert.equal(drcFamilyNeedsObjectId("drc-check-cash"), true);
+assert.equal(drcFamilyNeedsIssued("drc-issued-transfer"), true);
+assert.equal(drcFamilyNeedsRecipient("drc-ticket"), false);
 
 console.log("typed-lane Borsh preimages match agora-types");
