@@ -28,7 +28,14 @@ try {
   await client.getDrcOffer("bb".repeat(32));
   await client.getDrcAccountOffers({ account: "agoradev1qqqq", limit: 8 });
   await client.getDrcBookOffers({
-    book: { taker_gets: { native: true }, taker_pays: { native: false } },
+    book: {
+      pays: { type: "native_drc" },
+      gets: {
+        type: "issued",
+        issuer: "aabbccddeeff00112233445566778899aabbccdd",
+        currency: "USD",
+      },
+    },
     cursor: "c1",
   });
   await client.getDrcEscrow("cc".repeat(32));
@@ -107,10 +114,15 @@ try {
     account: "agoradev1qqqq",
     limit: 8,
   });
-  assert.equal(
-    (calls[5].params as { cursor?: string }).cursor,
-    "c1",
-  );
+  assert.deepEqual(calls[5].params, {
+    pays: { type: "native_drc" },
+    gets: {
+      type: "issued",
+      issuer: "aabbccddeeff00112233445566778899aabbccdd",
+      currency: "USD",
+    },
+    cursor: "c1",
+  });
   assert.deepEqual(calls[6].params, { escrow_id: "cc".repeat(32) });
   assert.deepEqual(calls[7].params, []);
   assert.deepEqual(calls[8].params, ["0x" + "11".repeat(20), "latest"]);

@@ -1,6 +1,6 @@
 //! Strict public RPC currency parsing (no locale / lowercase normalization).
 
-use agora_types::{Address, IssuedAssetId, IssuedCurrencyCode};
+use agora_types::{Address, DrcBookAsset, DrcOfferBook, IssuedAssetId, IssuedCurrencyCode};
 
 use crate::error::RpcError;
 
@@ -126,6 +126,65 @@ pub fn parse_holder_issuer_asset(
     ))
 }
 
+fn parse_network_address(value: &serde_json::Value) -> Result<Address, RpcError> {
+    let s = value
+        .as_str()
+        .ok_or_else(|| RpcError::InvalidParams("address must be a string".into()))?;
+    Address::parse(s).ok_or_else(|| RpcError::InvalidParams("invalid address".into()))
+}
+
+/// Human-readable book side: `{ "type": "native_drc" }` or
+/// `{ "type": "issued", "issuer": "<bech32|hex>", "currency": "USD"|40-hex }`.
+pub fn parse_drc_book_asset(value: &serde_json::Value) -> Result<DrcBookAsset, RpcError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| RpcError::InvalidParams("book side must be an object".into()))?;
+    let kind = obj
+        .get("type")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| RpcError::InvalidParams("book side type is required".into()))?;
+    match kind {
+        "native_drc" => Ok(DrcBookAsset::NativeDrc),
+        "issued" => {
+            let issuer = parse_network_address(
+                obj.get("issuer")
+                    .ok_or_else(|| RpcError::InvalidParams("issued issuer is required".into()))?,
+            )?;
+            let currency =
+                parse_issued_currency_code(obj.get("currency").ok_or_else(|| {
+                    RpcError::InvalidParams("issued currency is required".into())
+                })?)?;
+            let asset = IssuedAssetId { issuer, currency };
+            asset
+                .validate()
+                .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+            Ok(DrcBookAsset::Issued(asset))
+        }
+        _ => Err(RpcError::InvalidParams(
+            "book side type must be native_drc or issued".into(),
+        )),
+    }
+}
+
+/// `agora_getDrcBookOffers` book. Accepts `pays`/`gets` or `taker_pays`/`taker_gets`.
+pub fn parse_drc_offer_book(params: &serde_json::Value) -> Result<DrcOfferBook, RpcError> {
+    let pays = params
+        .get("pays")
+        .or_else(|| params.get("taker_pays"))
+        .ok_or_else(|| RpcError::InvalidParams("pays / taker_pays is required".into()))?;
+    let gets = params
+        .get("gets")
+        .or_else(|| params.get("taker_gets"))
+        .ok_or_else(|| RpcError::InvalidParams("gets / taker_gets is required".into()))?;
+    let book = DrcOfferBook {
+        pays: parse_drc_book_asset(pays)?,
+        gets: parse_drc_book_asset(gets)?,
+    };
+    book.validate()
+        .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+    Ok(book)
+}
+
 #[cfg(test)]
 mod currency_params_tests {
     use super::parse_issued_currency_code;
@@ -141,5 +200,32 @@ mod currency_params_tests {
     #[test]
     fn accepts_uppercase_standard_code() {
         parse_issued_currency_code(&json!("USD")).unwrap();
+    }
+
+    #[test]
+    fn book_accepts_native_versus_issued_bech32() {
+        let issuer =
+            agora_types::Address::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let book = super::parse_drc_offer_book(&json!({
+            "pays": { "type": "native_drc" },
+            "gets": {
+                "type": "issued",
+                "issuer": issuer.to_bech32_hrp("agoratest"),
+                "currency": "USD"
+            }
+        }))
+        .unwrap();
+        assert!(book.pays.is_native());
+        assert!(!book.gets.is_native());
+    }
+
+    #[test]
+    fn book_rejects_identical_native_sides() {
+        let err = super::parse_drc_offer_book(&json!({
+            "taker_pays": { "type": "native_drc" },
+            "taker_gets": { "type": "native_drc" }
+        }))
+        .unwrap_err();
+        assert!(matches!(err, RpcError::InvalidParams(_)));
     }
 }

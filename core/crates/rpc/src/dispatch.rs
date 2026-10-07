@@ -639,10 +639,16 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 self.backend.get_drc_account_offers(&account, cursor, limit)
             }
             RpcMethod::GetDrcBookOffers => {
-                let book: agora_types::DrcOfferBook = serde_json::from_value(req.params.clone())
-                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
-                book.validate()
-                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let book = crate::drc_trust_line_params::parse_drc_offer_book(&req.params)
+                    .or_else(|typed| {
+                        serde_json::from_value::<agora_types::DrcOfferBook>(req.params.clone())
+                            .map_err(|_| typed)
+                            .and_then(|book| {
+                                book.validate()
+                                    .map(|_| book)
+                                    .map_err(|error| RpcError::InvalidParams(error.to_string()))
+                            })
+                    })?;
                 let cursor = match req.params.get("cursor") {
                     Some(value) if !value.is_null() => Some(
                         serde_json::from_value(value.clone())
@@ -3026,5 +3032,26 @@ mod tests {
         assert_eq!(found["finalized"], false);
         assert!(RpcMethod::parse("agora_submitDataCommitment").is_some());
         assert!(RpcMethod::parse("agora_getDataCommitment").is_some());
+    }
+
+    #[test]
+    fn book_offers_accept_human_readable_sides() {
+        let issuer = Address::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let mut rpc = RpcDispatcher::new(InMemoryBackend::new());
+        let page = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getDrcBookOffers".into(),
+            params: json!({
+                "pays": { "type": "native_drc" },
+                "gets": {
+                    "type": "issued",
+                    "issuer": issuer.to_bech32_hrp("agoratest"),
+                    "currency": "USD"
+                },
+                "limit": 8
+            }),
+        });
+        assert!(page.error.is_none(), "{page:?}");
+        assert_eq!(page.result.unwrap()["offers"], json!([]));
     }
 }
