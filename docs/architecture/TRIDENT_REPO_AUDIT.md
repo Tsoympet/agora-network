@@ -166,13 +166,20 @@ is the only programmable domain.
 
 ## Persistence, genesis, CI
 
-- Testnet genesis v2 is frozen in-repo. Trident v3 draft remains
+- Testnet genesis v2 is frozen in-repo. Trident v3 public draft remains
   **UNFROZEN**. Mainnet is not bootable.
+- `docs/genesis/trident.experimental.public-testnet.json` is a labeled
+  **Experimental public-testnet** freeze-ready artifact (generated
+  secp256k1 validators, `agora-trident-experimental-testnet-1`, RandomX,
+  dual-PoS genesis sets). Not ceremony-final. Not mainnet. Default
+  docker-compose stays on frozen v2; profile `experimental-trident` is
+  the only compose path that points at it.
 - Freeze-ready v3 artifacts (not the public draft) can be materialized into
   live Block 0 UTXO/account/treasury/validator state. `compose_trident_state_root`
   must equal the live `TridentHeader` state root before commit.
   `AGORA_TRIDENT_GENESIS_FILE` boots that datadir; `AGORA_GENESIS_FILE` stays
-  v2-only. Docker-compose still points at frozen v2.
+  v2-only. Empty genesis env vars are treated as unset so the Experimental
+  compose profile can clear the image default.
 - Schema migrations exist as library helpers. `agora-node schema
   report|migrate|reindex --data PATH` runs the supported rebuilds
   (19→20 fee-burn, 20→21 ledger index with applied order, 21→22 marker,
@@ -187,12 +194,14 @@ is the only programmable domain.
 
 These are real unfinished paths, not parity slogans:
 
-1. **Public Trident testnet freeze** — the checked-in v3 draft is UNFROZEN.
-   Ceremony must supply allocations, validator keys, hashes, timestamp, bits,
-   and a Block 0 nonce when bits are nonzero. Until that artifact exists and
-   boot+IBD+tx+finality are demonstrated on a public mesh, maturity stays
-   below Public testnet. Frozen v2 TLT peers boot and send, but dual-PoS
-   never finalizes (empty OVL/DRC genesis sets).
+1. **Public Trident testnet freeze** — the checked-in v3 draft
+   (`agora-trident-testnet-1`) is UNFROZEN. Ceremony must still supply
+   allocations, validator keys, hashes, timestamp, bits, and a Block 0
+   nonce when bits are nonzero. An Experimental freeze-ready artifact
+   (`agora-trident-experimental-testnet-1`) now exists with generated
+   keys and dual-PoS genesis validators; it is not ceremony-final and
+   does not declare Public testnet. Frozen v2 TLT peers boot and send,
+   but dual-PoS never finalizes on that mesh (empty OVL/DRC genesis sets).
 2. **Civic votes stay local-admin** — `CivicSnapshot` / forum / Ecclesia
    RPC cannot honestly become a consensus lane. Types have no secp256k1
    envelope, vote weight is caller-supplied (`raw_balance` /
@@ -280,3 +289,8 @@ This audit close-out adds:
   id and, on a Trident datadir, also reports `trident_header_hash`,
   `artifact_identity`, and `block_zero_commitment`. IBD/mining stay on
   `BlockHeader`.
+- Experimental public-testnet freeze-ready JSON
+  (`trident.experimental.public-testnet.json`) with generated secp256k1
+  OVL/DRC validators, nonzero timestamp, RandomX-only, dual-PoS genesis
+  sets, `validate_freeze_ready` + live materialize lock, and an
+  Experimental-only docker-compose profile. Public draft stays UNFROZEN.

@@ -11,6 +11,7 @@ bytecode, Hook, or contract API.
 | Network | Artifact | Status |
 | --- | --- | --- |
 | Trident testnet | [`trident.testnet.genesis.draft.json`](trident.testnet.genesis.draft.json) | **Draft** (UNFROZEN; Scaffold) |
+| Experimental public-testnet | [`trident.experimental.public-testnet.json`](trident.experimental.public-testnet.json) | **Experimental** freeze-ready (generated secp256k1 keys; not ceremony-final; not mainnet) |
 | Trident mainnet | TBD | Not bootable until human freeze |
 
 See [`../architecture/TRIDENT_L1.md`](../architecture/TRIDENT_L1.md) and [`../migration/OVL_DRC_TO_L1.md`](../migration/OVL_DRC_TO_L1.md).
@@ -68,8 +69,23 @@ cargo run -p agora-node -- genesis trident verify \
   --mode freeze-ready
 ```
 
-The checked-in draft must fail the second command. Freeze-ready validation
-rejects `UNFROZEN` or malformed hashes, draft/provisional policy labels,
+The checked-in draft must fail the second command. The Experimental
+public-testnet artifact must pass it:
+
+```bash
+cargo run -p agora-node -- genesis trident verify \
+  --file docs/genesis/trident.experimental.public-testnet.json \
+  --mode freeze-ready
+```
+
+That file uses a distinct `chain_id`
+(`agora-trident-experimental-testnet-1`), generated secp256k1 OVL/DRC
+validators, nonzero timestamp, RandomX-only PoW, and dual-PoS genesis sets
+so finality can fire after the PoW work threshold. It is **not**
+ceremony-final and **not** mainnet. The public draft stays the ceremony
+document and remains UNFROZEN.
+
+Freeze-ready validation rejects `UNFROZEN` or malformed hashes, draft/provisional policy labels,
 missing timestamp or difficulty selection, empty OVL/DRC validator sets,
 invalid compressed secp256k1 validator keys, missing or over-limit
 per-validator commissions, missing or zero validator metadata commitments,
@@ -101,10 +117,23 @@ whose state root is `compose_trident_state_root`, and stores datadir identity.
 at the same freeze-ready file. `AGORA_GENESIS_FILE` remains v2-only and cannot
 be combined with the Trident file.
 
-Gossip and mining still use `Block`/`BlockHeader`. Dual-PoS can finalize only
-after a ceremony-selected OVL+DRC genesis set exists in a freeze-ready
-artifact. Until that artifact is published and a public mesh is run, v3 is not
-Public testnet.
+The Experimental public-testnet file is the checked-in freeze-ready path:
+
+```bash
+cargo run -p agora-node -- genesis trident materialize \
+  --file docs/genesis/trident.experimental.public-testnet.json \
+  --data /tmp/trident-experimental
+```
+
+Docker default compose still boots frozen v2. The opt-in profile
+`experimental-trident` points `AGORA_TRIDENT_GENESIS_FILE` at this file
+and clears `AGORA_GENESIS_FILE`. Do not call that profile Public testnet
+or mainnet.
+
+Gossip and mining still use `Block`/`BlockHeader`. Dual-PoS can finalize
+on the Experimental artifact because OVL+DRC genesis validators are
+populated. A ceremony freeze of `agora-trident-testnet-1` is still
+required before declaring Public testnet.
 
 Populated `genesis_set` entries use:
 

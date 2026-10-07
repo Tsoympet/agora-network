@@ -675,4 +675,67 @@ mod tests {
         assert_ne!(live.live_state_root, Hash::ZERO);
         assert_ne!(live.body_root, Hash::ZERO);
     }
+
+    #[test]
+    fn experimental_public_testnet_materializes_and_matches_composed_root() {
+        let artifact = crate::experimental_public_testnet_artifact();
+        artifact.validate_freeze_ready().unwrap();
+        let store = StateStore::open_in_memory();
+        let live = materialize_trident_block_zero_live(&store, &artifact, 0).unwrap();
+        assert_eq!(
+            compose_trident_state_root(&store, &live.genesis_hash).unwrap(),
+            live.live_state_root
+        );
+        assert_ne!(live.live_state_root, live.manifest_state_root);
+        verify_trident_datadir_identity(&store, &live.record.datadir_identity).unwrap();
+
+        let ovl = agora_crypto::KeyPair::from_secret_bytes(&[0xa1; 32])
+            .unwrap()
+            .address();
+        let drc = agora_crypto::KeyPair::from_secret_bytes(&[0xa2; 32])
+            .unwrap()
+            .address();
+        let tlt = agora_crypto::KeyPair::from_secret_bytes(&[0xa3; 32])
+            .unwrap()
+            .address();
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &ovl)
+                .unwrap()
+                .balance,
+            1_000_000_000
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::DRC, &drc)
+                .unwrap()
+                .balance,
+            1_000_000_000
+        );
+        let tlt_utxos = collect_address_utxos(&store, &tlt, &HashSet::new()).unwrap();
+        assert_eq!(tlt_utxos.len(), 1);
+        assert_eq!(
+            tlt_utxos[0].1.value.as_base_units(),
+            artifact.assets.tlt.genesis_allocation
+        );
+        assert_eq!(
+            load_validator(&store, NativeAssetId::OVL, &ovl)
+                .unwrap()
+                .unwrap()
+                .self_bond,
+            1_000_000_000
+        );
+        assert_eq!(
+            load_validator(&store, NativeAssetId::DRC, &drc)
+                .unwrap()
+                .unwrap()
+                .self_bond,
+            1_000_000_000
+        );
+        assert_eq!(
+            crate::governance_state::load_protocol_treasury(&store, TreasuryId::OvlBuilder)
+                .unwrap()
+                .balance
+                .as_base_units(),
+            1_000_000_000
+        );
+    }
 }

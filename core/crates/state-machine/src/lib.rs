@@ -353,11 +353,12 @@ pub use supply::{
 };
 pub use tlt_covenant::{load_covenant_utxo, validate_mempool_covenant, TltCovenantUtxoRecord};
 pub use trident_genesis::{
-    TridentFinalityPolicy, TridentGenesisArtifact, TridentGenesisValidator,
-    TridentRuntimeFinalityPolicy, TridentRuntimePolicy, TridentValidatorGenesis,
-    TRIDENT_CONSENSUS_POLICY_DOMAIN, TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA,
-    TRIDENT_NET_FP_DOMAIN, TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION,
-    TRIDENT_TX_SIGNING_VERSION,
+    experimental_public_testnet_artifact, TridentFinalityPolicy, TridentGenesisArtifact,
+    TridentGenesisValidator, TridentRuntimeFinalityPolicy, TridentRuntimePolicy,
+    TridentValidatorGenesis, EXPERIMENTAL_PUBLIC_TESTNET_CHAIN_ID,
+    EXPERIMENTAL_PUBLIC_TESTNET_TIMESTAMP_MS, TRIDENT_CONSENSUS_POLICY_DOMAIN,
+    TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA, TRIDENT_NET_FP_DOMAIN,
+    TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION, TRIDENT_TX_SIGNING_VERSION,
 };
 pub use tx_index::{
     covenant_tx_inclusion_key, covenant_tx_index_key, data_commitment_inclusion_key,

@@ -58,6 +58,10 @@ use crate::{
     storage_policy::StoragePolicy,
 };
 
+fn env_os_nonempty(name: &str) -> Option<std::ffi::OsString> {
+    std::env::var_os(name).filter(|value| !value.is_empty())
+}
+
 fn resolve_chain_params() -> ChainParams {
     let network = std::env::var("AGORA_NETWORK")
         .ok()
@@ -95,7 +99,7 @@ fn resolve_chain_params() -> ChainParams {
         );
     }
 
-    if let Some(path) = std::env::var_os("AGORA_GENESIS_FILE") {
+    if let Some(path) = env_os_nonempty("AGORA_GENESIS_FILE") {
         let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| {
             eprintln!(
                 "agora-node: failed to read AGORA_GENESIS_FILE {}: {e}",
@@ -514,93 +518,92 @@ async fn main() {
     );
     let storage = StoragePolicy::from_env().for_network(chain_params.network.as_str());
     let premine_address = chain_params.supply.premine_address;
-    if std::env::var_os("AGORA_TRIDENT_GENESIS_FILE").is_some()
-        && std::env::var_os("AGORA_GENESIS_FILE").is_some()
-    {
+    let trident_genesis = env_os_nonempty("AGORA_TRIDENT_GENESIS_FILE");
+    let v2_genesis = env_os_nonempty("AGORA_GENESIS_FILE");
+    if trident_genesis.is_some() && v2_genesis.is_some() {
         eprintln!(
             "agora-node: AGORA_TRIDENT_GENESIS_FILE cannot be combined with AGORA_GENESIS_FILE"
         );
         std::process::exit(1);
     }
 
-    let (store, genesis_hash, identity, net_fp) =
-        if let Some(path) = std::env::var_os("AGORA_TRIDENT_GENESIS_FILE") {
-            let nonce = std::env::var("AGORA_TRIDENT_BLOCK_ZERO_NONCE")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(0);
-            let prepared = prepare_trident_datadir(
-                &data_dir,
-                std::path::Path::new(&path),
-                nonce,
-                |identity_path| load_or_generate_identity(identity_path),
-            )
+    let (store, genesis_hash, identity, net_fp) = if let Some(path) = trident_genesis {
+        let nonce = std::env::var("AGORA_TRIDENT_BLOCK_ZERO_NONCE")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        let prepared = prepare_trident_datadir(
+            &data_dir,
+            std::path::Path::new(&path),
+            nonce,
+            |identity_path| load_or_generate_identity(identity_path),
+        )
+        .unwrap_or_else(|error| {
+            eprintln!("agora-node: Trident startup refused: {error}");
+            std::process::exit(1);
+        });
+        let runtime = prepared
+            .artifact
+            .to_runtime_policy()
             .unwrap_or_else(|error| {
-                eprintln!("agora-node: Trident startup refused: {error}");
+                eprintln!("agora-node: Trident runtime policy: {error}");
                 std::process::exit(1);
             });
-            let runtime = prepared
-                .artifact
-                .to_runtime_policy()
-                .unwrap_or_else(|error| {
-                    eprintln!("agora-node: Trident runtime policy: {error}");
-                    std::process::exit(1);
-                });
-            if runtime.pow_algorithm != PowAlgorithm::RandomX {
-                eprintln!("agora-node: public Trident networks are RandomX-only");
-                std::process::exit(1);
-            }
-            boot.pow = PowAlgorithm::RandomX;
-            boot.initial_bits = runtime.bits;
-            boot.daa = runtime.daa;
-            boot.ghostdag = runtime.ghostdag;
-            boot.emission = runtime.tlt_emission;
-            boot.chain_id = runtime.chain_id.clone();
-            boot.consensus_policy_hash = runtime.consensus_policy_hash;
-            let net_fp = agora_p2p::trident_network_fingerprint(
-                &runtime.chain_id,
-                &runtime.artifact_identity,
-                &runtime.consensus_policy_hash,
-            );
-            info!(
-                genesis = %prepared.genesis_hash.to_hex(),
-                live_state_root = %prepared.live_state_root.to_hex(),
-                chain_id = %runtime.chain_id,
-                "Trident freeze-ready Block 0 live state ready"
-            );
-            (
-                prepared.store,
-                prepared.genesis_hash,
-                prepared.p2p_identity,
-                net_fp,
-            )
-        } else {
-            let prepared = prepare_legacy_datadir(&data_dir, &chain_params, storage, |path| {
-                load_or_generate_identity(path)
-            })
-            .unwrap_or_else(|error| {
-                eprintln!("agora-node: startup refused: {error}");
-                std::process::exit(1);
-            });
-            let artifact = agora_state_machine::GenesisArtifact::from_params(&chain_params);
-            let policy_hash = artifact
-                .consensus
-                .as_ref()
-                .map(|c| c.canonical_hash())
-                .or_else(|| Hash::from_hex(&artifact.consensus_policy_hash))
-                .unwrap_or(Hash::ZERO);
-            let net_fp = agora_p2p::network_fingerprint(
-                chain_params.network.chain_id(),
-                &prepared.genesis_hash,
-                &policy_hash,
-            );
-            (
-                prepared.store,
-                prepared.genesis_hash,
-                prepared.p2p_identity,
-                net_fp,
-            )
-        };
+        if runtime.pow_algorithm != PowAlgorithm::RandomX {
+            eprintln!("agora-node: public Trident networks are RandomX-only");
+            std::process::exit(1);
+        }
+        boot.pow = PowAlgorithm::RandomX;
+        boot.initial_bits = runtime.bits;
+        boot.daa = runtime.daa;
+        boot.ghostdag = runtime.ghostdag;
+        boot.emission = runtime.tlt_emission;
+        boot.chain_id = runtime.chain_id.clone();
+        boot.consensus_policy_hash = runtime.consensus_policy_hash;
+        let net_fp = agora_p2p::trident_network_fingerprint(
+            &runtime.chain_id,
+            &runtime.artifact_identity,
+            &runtime.consensus_policy_hash,
+        );
+        info!(
+            genesis = %prepared.genesis_hash.to_hex(),
+            live_state_root = %prepared.live_state_root.to_hex(),
+            chain_id = %runtime.chain_id,
+            "Trident freeze-ready Block 0 live state ready"
+        );
+        (
+            prepared.store,
+            prepared.genesis_hash,
+            prepared.p2p_identity,
+            net_fp,
+        )
+    } else {
+        let prepared = prepare_legacy_datadir(&data_dir, &chain_params, storage, |path| {
+            load_or_generate_identity(path)
+        })
+        .unwrap_or_else(|error| {
+            eprintln!("agora-node: startup refused: {error}");
+            std::process::exit(1);
+        });
+        let artifact = agora_state_machine::GenesisArtifact::from_params(&chain_params);
+        let policy_hash = artifact
+            .consensus
+            .as_ref()
+            .map(|c| c.canonical_hash())
+            .or_else(|| Hash::from_hex(&artifact.consensus_policy_hash))
+            .unwrap_or(Hash::ZERO);
+        let net_fp = agora_p2p::network_fingerprint(
+            chain_params.network.chain_id(),
+            &prepared.genesis_hash,
+            &policy_hash,
+        );
+        (
+            prepared.store,
+            prepared.genesis_hash,
+            prepared.p2p_identity,
+            net_fp,
+        )
+    };
     let identity_path = p2p_identity_path(&data_dir);
     info!(
         path = %identity_path.display(),

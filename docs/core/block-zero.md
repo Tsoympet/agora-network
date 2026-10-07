@@ -99,13 +99,21 @@ fork. The claim does not mint.
 
 - The checked-in `trident.testnet.genesis.draft.json` is UNFROZEN. Ceremony
   must supply allocations, validator keys, hashes, timestamp, bits, and (if
-  `bits != 0`) a Block 0 nonce. Tooling does not invent them.
-- Frozen v2 `AGORA_GENESIS_FILE` / docker-compose still boot the TLT-only
-  testnet, which has no OVL/DRC genesis validators, so dual-PoS never
-  finalizes.
+  `bits != 0`) a Block 0 nonce. Tooling does not invent them for that file.
+- [`trident.experimental.public-testnet.json`](../genesis/trident.experimental.public-testnet.json)
+  is a labeled **Experimental** freeze-ready artifact (generated secp256k1
+  keys, distinct `agora-trident-experimental-testnet-1` chain id, RandomX,
+  dual-PoS genesis validators). It is not ceremony-final and not mainnet.
+  Default docker-compose stays on frozen v2; the `experimental-trident`
+  profile is the only compose path that points at it.
+- Frozen v2 `AGORA_GENESIS_FILE` / default docker-compose still boot the
+  TLT-only testnet, which has no OVL/DRC genesis validators, so dual-PoS
+  never finalizes on that mesh.
 - Gossip, mining templates, and IBD continue to identify blocks by
   `BlockHeader` hash. That is required to keep frozen v2 history. The
   Trident header commitment is a Meta identity, not a GHOSTDAG parent.
 
-Until a freeze-ready v3 artifact is published and multi-node boot+IBD+tx+
-finality are demonstrated against it, status stays **INCOMPLETE**.
+Until a ceremony freeze of `agora-trident-testnet-1` is published and
+multi-node boot+IBD+tx+finality are demonstrated on a public mesh, status
+stays **INCOMPLETE**. The Experimental artifact is a local/devnet boot
+path, not a Public testnet declaration.
