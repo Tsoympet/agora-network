@@ -100,7 +100,7 @@ effective = isqrt(capped)
 | Hub/Passport/Grant/Mission schemas + bounded root | yes — canonical read-only scaffold |
 | JSON-RPC civic methods | yes — **trusted caller** prototype |
 | Explorer ballot panel + desktop vote UI | yes (drives local RPC) |
-| Signed votes / locked deposits / block replication | **not yet** |
+| Signed votes / locked deposits / block replication | **must stay local-admin** until new envelopes exist |
 | L2/L3 operator sets as Ecclesia ranks | out of scope |
 
 ## Canonical Phase 5a scaffold
@@ -128,6 +128,33 @@ timelocks, and mandatory emergency expiry/post-action ratification.
 
 No unsigned civic RPC can mutate these records. Existing `meta/governance`
 proposal/forum endpoints remain `administrative_local` and excluded from the
-canonical governance root. Signed block-replicated governance operations,
-deposits, votes, and treasury *funding* are still required before this can
-be called complete on-chain governance. Signed spend execution exists.
+canonical governance root.
+
+### Why civic votes cannot be a v32+ consensus lane yet
+
+The live civic types (`CivicSnapshot`, `Ballot`, `Proposal`, forum topics)
+cannot be honestly promoted to BlockDAG gossip:
+
+1. **No secp256k1 envelope.** There is no `chain_id` + genesis-bound signing
+   domain, public key, signature, or nonce. Wrapping the JSON blob would
+   still leave vote weight as a trusted RPC argument.
+2. **Vote weight is caller-supplied.** `agora_castGovVote` takes
+   `raw_balance` and `total_supply` from the HTTP caller. Consensus would
+   need a TLT-UTXO-derived weight proof at a committed blue-score, not an
+   operator-chosen integer.
+3. **Not journaled or rooted.** Persistence is pretty-printed JSON at
+   `meta/governance`. Apply/revert, compact lanes, and
+   `governance_treasury_root` do not see it. A reorg cannot undo a civic
+   vote because the vote never entered the state machine.
+4. **Lifecycle is an in-process engine.** Deposit, open, tally, timelock,
+   and execute are node-local method calls. A honest consensus civic
+   protocol would need new signed types for each of those acts, plus
+   chamber quorums that match the constitution catalog already committed
+   at genesis.
+
+Hub/Grant/Mission/Passport/Treasury/Vesting succeeded because those
+envelopes already had (or could be given) a single signer and a
+deterministic state write. Civic voting does not. Promoting it now would
+be a new protocol, not a completion of existing types. Signed treasury
+*spend* exists; signed treasury *funding* and signed Ecclesia ballots do
+not.

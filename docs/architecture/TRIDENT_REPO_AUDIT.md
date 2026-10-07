@@ -121,7 +121,7 @@ infrastructure servers or store operator keys.
 
 | Component | Maturity | Wiring |
 | --- | --- | --- |
-| Civic constitution / forum / Ecclesia prototype | Experimental administrative RPC | Local snapshot; not a consensus community lane |
+| Civic constitution / forum / Ecclesia prototype | Experimental administrative RPC | **Stays local-admin.** Types are unsigned JSON (`CivicSnapshot` at `meta/governance`). Vote weight is caller-supplied. Not gossiped, not journaled, not in the governance root. See `docs/core/governance.md` |
 | Canonical Hub registry | Experimental | Signed `HubRegistration` lane: apply/journal/gossip/mempool/RPC/light-client. First coordinator signs; apply writes Active hub |
 | Canonical Passport attestations | Experimental | Signed `PassportAttestation` lane: apply/journal/gossip/mempool/RPC/light-client |
 | Canonical Grant / Mission registry | Experimental | Signed `GrantRegistration` / `MissionRegistration` lanes. Registrar/sponsor must be an active hub coordinator |
@@ -193,9 +193,13 @@ These are real unfinished paths, not parity slogans:
    boot+IBD+tx+finality are demonstrated on a public mesh, maturity stays
    below Public testnet. Frozen v2 TLT peers boot and send, but dual-PoS
    never finalizes (empty OVL/DRC genesis sets).
-2. **Civic votes** — local-admin snapshots, not consensus. Forum/Ecclesia
-   RPC stays off the gossip mesh because those types are not
-   network-bound secp256k1 envelopes.
+2. **Civic votes stay local-admin** — `CivicSnapshot` / forum / Ecclesia
+   RPC cannot honestly become a consensus lane. Types have no secp256k1
+   envelope, vote weight is caller-supplied (`raw_balance` /
+   `total_supply`), and the JSON blob is excluded from
+   `governance_treasury_root`. A real civic lane needs new signed types
+   plus TLT-UTXO weight proofs; wrapping the current snapshot would be
+   fake consensus. Documented in `docs/core/governance.md`.
 3. **`TridentHeader` is not the gossip header** — Block 0 identity is bound
    in Meta; IBD/mining still use `BlockHeader`.
 
@@ -265,3 +269,6 @@ This audit close-out adds:
   claim against genesis schedules, unlocked progress in
   `agora-governance-treasury-root-v3`, submit/get/nonce RPC, and
   `typed-lanes-vesting.ts`. Time source is block `timestamp_ms`.
+- Civic votes remain local-admin by design: existing types cannot be
+  honest consensus envelopes (no secp256k1 bind, caller-supplied weight,
+  JSON Meta snapshot). No gossip discriminant is added.
