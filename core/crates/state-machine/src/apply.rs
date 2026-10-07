@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use agora_crypto::{address_from_pubkey, signer_address, verify_transaction_bound, PublicKeyBytes};
 use agora_types::{
-    Address, Amount, Block, Hash, NativeAssetId, OutPoint, Transaction, TransactionAcceptance,
-    TxOut,
+    da_fee_change_outpoint, Address, Amount, Block, Hash, NativeAssetId, OutPoint, Transaction,
+    TransactionAcceptance, TxOut, DA_INCLUSION_FEE_TLT,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -55,9 +55,9 @@ use crate::staking::{
     snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
 };
 use crate::store::WriteBatch;
-use crate::supply::{burn_drc_fee_into, burned_supply_key};
+use crate::supply::{burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key};
 use crate::utxo::outpoint_key;
-use crate::{StateError, StateStore};
+use crate::{register_passport_attestation_into, StateError, StateStore};
 
 /// Result of applying one block's UTXO transition (journal + typed acceptance + batch).
 pub struct BlockApplyResult {
@@ -68,8 +68,9 @@ pub struct BlockApplyResult {
 
 /// Network domain for transaction signatures (`chain_id` + genesis).
 ///
-/// `data_availability_network_fingerprint` is `None` until a reviewed Trident
-/// TLT base-fee/inclusion policy activates the block-only DA lane.
+/// `data_availability_network_fingerprint` is bound on default Experimental
+/// boot. `None` rejects DA admission (signing-context error, not a fee
+/// placeholder). Accepted DA authorizations burn [`DA_INCLUSION_FEE_TLT`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TxAuthContext {
     pub chain_id: String,
@@ -126,6 +127,8 @@ pub struct UtxoJournal {
     pub tlt_covenant_created: Vec<OutPoint>,
     /// Script outputs spent by this block's covenant lane (revert restores them).
     pub tlt_covenant_spent: Vec<(OutPoint, crate::tlt_covenant::TltCovenantUtxoRecord)>,
+    /// Community passport keys before Accepted signed attestations.
+    pub passport_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Journal layout before the offer lane. Trailing offer snapshots must not be
@@ -179,6 +182,11 @@ impl BorshSerialize for UtxoJournal {
         BorshSerialize::serialize(&self.drc_offer_meta_before, writer)?;
         BorshSerialize::serialize(&self.tlt_covenant_created, writer)?;
         BorshSerialize::serialize(&self.tlt_covenant_spent, writer)?;
+        // Empty passport meta stays off the pre-passport journal wire so
+        // default journals still end with the two covenant length prefixes.
+        if !self.passport_meta_before.is_empty() {
+            BorshSerialize::serialize(&self.passport_meta_before, writer)?;
+        }
         Ok(())
     }
 }
@@ -208,10 +216,14 @@ impl BorshDeserialize for UtxoJournal {
             drc_offer_meta_before: Vec::deserialize_reader(reader)?,
             tlt_covenant_created: Vec::new(),
             tlt_covenant_spent: Vec::new(),
+            passport_meta_before: Vec::new(),
         };
         if let Some(created) = read_optional_vec(reader)? {
             journal.tlt_covenant_created = created;
             journal.tlt_covenant_spent = Vec::deserialize_reader(reader)?;
+            if let Some(passports) = read_optional_vec(reader)? {
+                journal.passport_meta_before = passports;
+            }
         }
         Ok(journal)
     }
@@ -508,6 +520,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v14) = UtxoJournalV14Trust::try_from_slice(bytes) {
@@ -534,6 +547,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v13) = UtxoJournalV13Paychan::try_from_slice(bytes) {
@@ -560,6 +574,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v12) = UtxoJournalV12::try_from_slice(bytes) {
@@ -586,6 +601,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v11) = UtxoJournalV11::try_from_slice(bytes) {
@@ -612,6 +628,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v10) = UtxoJournalV10::try_from_slice(bytes) {
@@ -638,6 +655,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v9) = UtxoJournalV9::try_from_slice(bytes) {
@@ -664,6 +682,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v8) = UtxoJournalV8::try_from_slice(bytes) {
@@ -690,6 +709,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v7) = UtxoJournalV7::try_from_slice(bytes) {
@@ -716,6 +736,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v6) = UtxoJournalV6::try_from_slice(bytes) {
@@ -742,6 +763,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
@@ -768,6 +790,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
@@ -794,6 +817,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -820,6 +844,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -846,6 +871,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -873,6 +899,7 @@ impl UtxoJournal {
             drc_offer_meta_before: Vec::new(),
             tlt_covenant_created: Vec::new(),
             tlt_covenant_spent: Vec::new(),
+            passport_meta_before: Vec::new(),
         })
     }
 }
@@ -1282,6 +1309,8 @@ fn apply_block_batched_mode(
         mode,
         &mut batch,
         &mut journal,
+        &mut spent_in_block,
+        &mut created_in_block,
     )?;
 
     let acceptance = BlockAcceptanceRecord {
@@ -1496,6 +1525,7 @@ type TridentLaneAcceptances = (
 );
 
 /// Apply canonical Trident lanes and settle fees only for Accepted operations.
+#[allow(clippy::too_many_arguments)]
 fn apply_trident_lanes(
     store: &StateStore,
     block: &Block,
@@ -1504,6 +1534,8 @@ fn apply_trident_lanes(
     mode: ApplyMode,
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
+    spent_in_block: &mut HashSet<OutPoint>,
+    created_in_block: &mut HashMap<OutPoint, TxOut>,
 ) -> Result<TridentLaneAcceptances, StateError> {
     // Validate the detached lane even when no typed operation is present. This
     // prevents orphan or cross-kind authorization bytes from becoming inert,
@@ -1555,6 +1587,7 @@ fn apply_trident_lanes(
         && block.drc_regular_keys.is_empty()
         && block.drc_signer_lists.is_empty()
         && block.stake_ops.is_empty()
+        && block.passport_attestations.is_empty()
     {
         return Ok((
             Vec::new(),
@@ -1621,6 +1654,11 @@ fn apply_trident_lanes(
     if !block.data_commitments.is_empty() && auth.is_none() {
         return Err(StateError::InvalidTx(
             "data commitments require network-bound auth".into(),
+        ));
+    }
+    if !block.passport_attestations.is_empty() && auth.is_none() {
+        return Err(StateError::InvalidTx(
+            "passport attestations require network-bound auth".into(),
         ));
     }
     if block.data_commitments.len() > agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK {
@@ -3017,9 +3055,7 @@ fn apply_trident_lanes(
             .as_ref()
             .filter(|fingerprint| **fingerprint != Hash::ZERO)
             .ok_or_else(|| {
-                StateError::InvalidTx(
-                    "data commitment lane disabled pending TLT base-fee policy".into(),
-                )
+                StateError::InvalidTx("data commitment requires a DA network fingerprint".into())
             })?;
         for authorization in &block.data_commitments {
             let mut op_batch = WriteBatch::new();
@@ -3036,6 +3072,16 @@ fn apply_trident_lanes(
             )?;
             match status {
                 TransactionAcceptance::Accepted => {
+                    debit_da_inclusion_fee(
+                        &lane,
+                        &authorization.operator,
+                        authorization.authorization_id(),
+                        &mut op_batch,
+                        journal,
+                        spent_in_block,
+                        created_in_block,
+                        &mut meta_before,
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.data_availability_meta_before.extend(meta_before);
@@ -3057,6 +3103,30 @@ fn apply_trident_lanes(
                     ));
                 }
             }
+        }
+    }
+
+    if !block.passport_attestations.is_empty() {
+        let ctx = auth.expect("passport auth checked above");
+        let mut seen_ids = std::collections::HashSet::new();
+        for attestation in &block.passport_attestations {
+            let id = attestation.attestation_id();
+            if !seen_ids.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate passport attestation in block".into(),
+                ));
+            }
+            let keys = vec![
+                crate::passport_record_key(&id),
+                crate::passport_issuer_nonce_key(&attestation.issuer),
+                crate::community_summary_key(),
+            ];
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            let mut op_batch = WriteBatch::new();
+            register_passport_attestation_into(&mut op_batch, &lane, attestation, ctx)?;
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
         }
     }
 
@@ -3332,6 +3402,131 @@ fn verify_and_signer(
     }
 }
 
+/// Collect spendable TLT UTXOs for `address`, skipping already-spent outpoints.
+pub fn collect_address_utxos(
+    store: &StateStore,
+    address: &Address,
+    spent_in_block: &HashSet<OutPoint>,
+) -> Result<Vec<(OutPoint, TxOut)>, StateError> {
+    let mut found = Vec::new();
+    store.for_each_cf(ColumnFamily::Utxo, |key, value| {
+        let out = TxOut::try_from_slice(value).map_err(|e| StateError::Storage(e.to_string()))?;
+        if &out.address != address || out.value.as_base_units() == 0 {
+            return Ok(());
+        }
+        let op = outpoint_from_utxo_key(key)?;
+        if spent_in_block.contains(&op) {
+            return Ok(());
+        }
+        found.push((op, out));
+        Ok(())
+    })?;
+    found.sort_by_key(|a| outpoint_key(&a.0));
+    Ok(found)
+}
+
+fn outpoint_from_utxo_key(key: &[u8]) -> Result<OutPoint, StateError> {
+    if key.len() != 36 {
+        return Err(StateError::Storage("malformed UTXO key".into()));
+    }
+    let mut tx_id = [0u8; 32];
+    tx_id.copy_from_slice(&key[..32]);
+    let mut index_bytes = [0u8; 4];
+    index_bytes.copy_from_slice(&key[32..]);
+    Ok(OutPoint {
+        tx_id: Hash(tx_id),
+        index: u32::from_le_bytes(index_bytes),
+    })
+}
+
+/// Burn [`DA_INCLUSION_FEE_TLT`] from the operator's TLT UTXOs.
+#[allow(clippy::too_many_arguments)]
+fn debit_da_inclusion_fee(
+    store: &StateStore,
+    operator: &Address,
+    authorization_id: Hash,
+    batch: &mut WriteBatch,
+    journal: &mut UtxoJournal,
+    spent_in_block: &mut HashSet<OutPoint>,
+    created_in_block: &mut HashMap<OutPoint, TxOut>,
+    meta_before: &mut Vec<(Vec<u8>, Option<Vec<u8>>)>,
+) -> Result<(), StateError> {
+    let fee = DA_INCLUSION_FEE_TLT;
+    let mut selected = Vec::new();
+    let mut total = 0u64;
+    for (op, out) in collect_address_utxos(store, operator, spent_in_block)? {
+        if created_in_block.contains_key(&op) {
+            continue;
+        }
+        total = total
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("DA fee input overflow".into()))?;
+        selected.push((op, out));
+        if total >= fee {
+            break;
+        }
+    }
+    let mut from_block: Vec<(OutPoint, TxOut)> = created_in_block
+        .iter()
+        .filter(|(op, out)| {
+            &out.address == operator
+                && !spent_in_block.contains(*op)
+                && selected.iter().all(|(existing, _)| existing != *op)
+        })
+        .map(|(op, out)| (*op, out.clone()))
+        .collect();
+    from_block.sort_by_key(|a| outpoint_key(&a.0));
+    for (op, out) in from_block {
+        if total >= fee {
+            break;
+        }
+        total = total
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("DA fee input overflow".into()))?;
+        selected.push((op, out));
+    }
+    if total < fee {
+        return Err(StateError::InvalidTx(format!(
+            "DA inclusion fee: insufficient TLT (need {fee}, have {total})"
+        )));
+    }
+    selected.sort_by_key(|a| outpoint_key(&a.0));
+    let burned_key = burned_supply_key(NativeAssetId::TLT);
+    meta_before.extend(snapshot_meta_keys(store, &[burned_key])?);
+    burn_tlt_fee_into(store, batch, fee)?;
+    for (op, out) in &selected {
+        spend_utxo(batch, op, out, journal, spent_in_block, created_in_block);
+    }
+    let change = total - fee;
+    if change > 0 {
+        let change_op = da_fee_change_outpoint(&authorization_id);
+        if spent_in_block.contains(&change_op) || created_in_block.contains_key(&change_op) {
+            return Err(StateError::DuplicateOutpoint(format!(
+                "{}:{}",
+                change_op.tx_id.to_hex(),
+                change_op.index
+            )));
+        }
+        let change_out = TxOut {
+            value: Amount::from_base_units(change),
+            address: *operator,
+        };
+        let key = outpoint_key(&change_op);
+        if store.get_cf(ColumnFamily::Utxo, &key)?.is_some() {
+            return Err(StateError::DuplicateOutpoint(format!(
+                "{}:{} (already in utxo set)",
+                change_op.tx_id.to_hex(),
+                change_op.index
+            )));
+        }
+        let bytes = borsh::to_vec(&change_out).map_err(|e| StateError::Storage(e.to_string()))?;
+        batch.put_cf(ColumnFamily::Utxo, &key, &bytes);
+        journal.created.push(change_op);
+        created_in_block.insert(change_op, change_out);
+    }
+    Ok(())
+}
+
 pub(crate) fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
     let key = outpoint_key(op);
     let bytes = store
@@ -3502,6 +3697,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
     }
     crate::tlt_covenant::revert_covenant_outputs(&mut batch, journal)?;
     revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
+    for (key, prior) in journal.passport_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     Ok(batch)
 }
 
@@ -3760,6 +3961,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -3974,6 +4176,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -4097,6 +4300,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -4187,6 +4391,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -4286,6 +4491,7 @@ mod tests {
                 drc_offer_cancels: vec![],
                 drc_multisign_attachments: vec![],
                 tlt_covenants: Vec::new(),
+                passport_attestations: Vec::new(),
             },
             1,
             None,
@@ -4384,6 +4590,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -4500,6 +4707,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -4598,6 +4806,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -4710,6 +4919,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -4851,6 +5061,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5513,6 +5724,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5598,11 +5810,17 @@ mod tests {
 
     #[test]
     fn data_commitment_lane_orders_duplicates_and_reverts_atomically() {
-        use crate::{data_availability_root, load_data_commitment, load_data_commitment_nonce};
+        use crate::{
+            data_availability_root, load_burned_supply, load_data_commitment,
+            load_data_commitment_nonce,
+        };
 
         let store = StateStore::open_in_memory();
-        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
         let keypair = KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(keypair.address())
+            .ignite(&store)
+            .unwrap();
         let fingerprint = Hash([9; 32]);
         let context = TxAuthContext {
             chain_id: "agora-trident-testnet-1".into(),
@@ -5612,6 +5830,8 @@ mod tests {
         let first = signed_data_commitment(&keypair, 4, 0, 11, &genesis, &fingerprint);
         let conflict = signed_data_commitment(&keypair, 4, 1, 12, &genesis, &fingerprint);
         let root_before = data_availability_root(&store).unwrap();
+        let burned_before = load_burned_supply(&store, NativeAssetId::TLT).unwrap();
+        let balance_before = balance_of(&store, &keypair.address()).unwrap();
         let coinbase = Transaction::unsigned(
             1,
             vec![],
@@ -5661,6 +5881,16 @@ mod tests {
             first
         );
         assert_ne!(data_availability_root(&store).unwrap(), root_before);
+        assert_eq!(
+            load_burned_supply(&store, NativeAssetId::TLT).unwrap(),
+            burned_before + DA_INCLUSION_FEE_TLT
+        );
+        assert_eq!(
+            balance_of(&store, &keypair.address())
+                .unwrap()
+                .as_base_units(),
+            balance_before.as_base_units() - DA_INCLUSION_FEE_TLT
+        );
 
         store
             .write_batch(revert_journal_batched(&journal).unwrap())
@@ -5669,6 +5899,14 @@ mod tests {
         assert_eq!(
             load_data_commitment_nonce(&store, &keypair.address()).unwrap(),
             0
+        );
+        assert_eq!(
+            load_burned_supply(&store, NativeAssetId::TLT).unwrap(),
+            burned_before
+        );
+        assert_eq!(
+            balance_of(&store, &keypair.address()).unwrap(),
+            balance_before
         );
     }
 
@@ -5714,15 +5952,190 @@ mod tests {
         let disabled_err = apply_block_batched_virtual(&store, &block, 0, Some(&disabled))
             .err()
             .expect("disabled DA lane must reject");
-        assert!(disabled_err.to_string().contains("base-fee policy"));
+        assert!(disabled_err.to_string().contains("DA network fingerprint"));
+
+        let unfunded = TxAuthContext {
+            chain_id: disabled.chain_id.clone(),
+            genesis: disabled.genesis,
+            data_availability_network_fingerprint: Some(fingerprint),
+        };
+        let unfunded_err = apply_block_batched_virtual(&store, &block, 0, Some(&unfunded))
+            .err()
+            .expect("unfunded DA operator must reject");
+        assert!(unfunded_err.to_string().contains("insufficient TLT"));
 
         let enabled = TxAuthContext {
+            chain_id: disabled.chain_id.clone(),
+            genesis: disabled.genesis,
             data_availability_network_fingerprint: Some(fingerprint),
-            ..disabled
         };
         assert!(apply_block_batched_virtual(&store, &block, 0, Some(&enabled)).is_err());
         assert!(load_data_commitment(&store, valid.commitment.source, 4)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn data_commitment_invalid_auth_discards_funded_partial_batch() {
+        use crate::load_data_commitment;
+
+        let store = StateStore::open_in_memory();
+        let keypair = KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(keypair.address())
+            .ignite(&store)
+            .unwrap();
+        let fingerprint = Hash([9; 32]);
+        let valid = signed_data_commitment(&keypair, 4, 0, 11, &genesis, &fingerprint);
+        let mut invalid = signed_data_commitment(&keypair, 5, 1, 12, &genesis, &fingerprint);
+        invalid.signature[0] ^= 1;
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.data_commitments = vec![valid.clone(), invalid];
+        block.header.tx_root = block.compute_body_root();
+        let enabled = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: Some(fingerprint),
+        };
+        assert!(apply_block_batched_virtual(&store, &block, 0, Some(&enabled)).is_err());
+        assert!(load_data_commitment(&store, valid.commitment.source, 4)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            balance_of(&store, &keypair.address())
+                .unwrap()
+                .as_base_units(),
+            Amount::from_whole(10_000_000).unwrap().as_base_units()
+        );
+    }
+
+    #[test]
+    fn signed_passport_lane_applies_and_reverts() {
+        use crate::{
+            canonical_community_root, load_canonical_community_summary, load_passport_attestation,
+            load_passport_issuer_nonce, register_hub_into,
+        };
+        use agora_crypto::sign_passport_attestation_bound;
+        use agora_governance::{HubAccreditationStatus, HubRecord};
+        use agora_types::{PassportAttestation, PassportCategory};
+
+        let store = StateStore::open_in_memory();
+        let issuer = KeyPair::from_secret_bytes(&[11; 32]).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let hub = HubRecord {
+            id: Hash([1; 32]),
+            public_name: "Agora Hub 1".into(),
+            classification: "Geographic".into(),
+            charter_hash: Hash([2; 32]),
+            coordinators: vec![issuer.address()],
+            treasury_multisig: Address([3; 20]),
+            election_term_epochs: 12,
+            reporting_interval_epochs: 3,
+            coi_disclosure_root: Hash([4; 32]),
+            deliverables_root: Hash([5; 32]),
+            accreditation_proposal_id: 1,
+            status: HubAccreditationStatus::Active,
+        };
+        let mut hub_batch = WriteBatch::new();
+        register_hub_into(&mut hub_batch, &store, &hub).unwrap();
+        store.write_batch(hub_batch).unwrap();
+        let root_before = canonical_community_root(&store).unwrap();
+        let summary_before = load_canonical_community_summary(&store).unwrap();
+
+        let mut attestation = PassportAttestation::unsigned(
+            issuer.address(),
+            Address([7; 20]),
+            PassportCategory::CommunitySupport,
+            Hash([3; 32]),
+            Hash([4; 32]),
+            10,
+            Some(20),
+            0,
+        );
+        sign_passport_attestation_bound(&mut attestation, &issuer, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let id = attestation.attestation_id();
+
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.passport_attestations = vec![attestation.clone()];
+        block.header.tx_root = block.compute_body_root();
+
+        let missing_hub_store = StateStore::open_in_memory();
+        GenesisBuilder::default()
+            .ignite(&missing_hub_store)
+            .unwrap();
+        assert!(apply_block_batched_with_auth(&missing_hub_store, &block, 0, Some(&auth)).is_err());
+
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(
+            load_passport_attestation(&store, &id).unwrap().unwrap(),
+            attestation
+        );
+        assert_eq!(
+            load_passport_issuer_nonce(&store, &issuer.address()).unwrap(),
+            1
+        );
+        let summary = load_canonical_community_summary(&store).unwrap();
+        assert_eq!(summary.hub_count, 1);
+        assert_eq!(summary.passport_count, 1);
+        assert_ne!(canonical_community_root(&store).unwrap(), root_before);
+
+        store
+            .write_batch(revert_journal_batched(&result.journal).unwrap())
+            .unwrap();
+        assert!(load_passport_attestation(&store, &id).unwrap().is_none());
+        assert_eq!(
+            load_passport_issuer_nonce(&store, &issuer.address()).unwrap(),
+            0
+        );
+        assert_eq!(
+            load_canonical_community_summary(&store).unwrap(),
+            summary_before
+        );
+        assert_eq!(canonical_community_root(&store).unwrap(), root_before);
     }
 }

@@ -66,6 +66,32 @@ fn issuer_nonce_key(issuer: &Address) -> Vec<u8> {
     keyed(ISSUER_NONCE_PREFIX, &issuer.0)
 }
 
+pub fn passport_record_key(id: &Hash) -> Vec<u8> {
+    record_key(PASSPORT_PREFIX, id)
+}
+
+pub fn passport_issuer_nonce_key(issuer: &Address) -> Vec<u8> {
+    issuer_nonce_key(issuer)
+}
+
+pub fn community_summary_key() -> Vec<u8> {
+    SUMMARY_KEY.to_vec()
+}
+
+pub fn load_passport_attestation(
+    store: &StateStore,
+    id: &Hash,
+) -> Result<Option<PassportAttestation>, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &passport_record_key(id))? else {
+        return Ok(None);
+    };
+    Ok(Some(decode(&bytes)?))
+}
+
+pub fn load_passport_issuer_nonce(store: &StateStore, issuer: &Address) -> Result<u64, StateError> {
+    load_issuer_nonce(store, issuer)
+}
+
 fn active_issuer_key(issuer: &Address) -> Vec<u8> {
     keyed(ACTIVE_ISSUER_PREFIX, &issuer.0)
 }
@@ -238,7 +264,7 @@ fn load_issuer_nonce(store: &StateStore, issuer: &Address) -> Result<u64, StateE
     decode(&bytes)
 }
 
-fn issuer_is_active_hub_coordinator(
+pub fn issuer_is_active_hub_coordinator(
     store: &StateStore,
     issuer: &Address,
 ) -> Result<bool, StateError> {

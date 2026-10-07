@@ -464,6 +464,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         }
     }
 

@@ -4,7 +4,9 @@ use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use agora_state_machine::{ChainParams, StateStore};
+use agora_state_machine::{
+    load_or_materialize_trident_block_zero, ChainParams, StateStore, TridentGenesisArtifact,
+};
 use agora_types::Hash;
 
 use crate::storage_policy::StoragePolicy;
@@ -46,6 +48,54 @@ where
     Ok(PreparedLegacyDatadir {
         store,
         genesis_hash,
+        p2p_identity,
+    })
+}
+
+pub(crate) struct PreparedTridentDatadir<T> {
+    pub store: Arc<StateStore>,
+    pub genesis_hash: Hash,
+    pub artifact: TridentGenesisArtifact,
+    pub live_state_root: Hash,
+    pub p2p_identity: T,
+}
+
+/// Open and materialize a freeze-ready Trident datadir before any P2P side effect.
+///
+/// The public UNFROZEN draft fails `validate_freeze_ready` and never reaches
+/// the identity loader.
+pub(crate) fn prepare_trident_datadir<T, E>(
+    data_dir: &Path,
+    artifact_path: &Path,
+    nonce: u64,
+    identity_loader: impl FnOnce(&Path) -> Result<T, E>,
+) -> Result<PreparedTridentDatadir<T>, String>
+where
+    E: Display,
+{
+    let raw = std::fs::read_to_string(artifact_path).map_err(|error| {
+        format!(
+            "read AGORA_TRIDENT_GENESIS_FILE {}: {error}",
+            artifact_path.display()
+        )
+    })?;
+    let artifact = TridentGenesisArtifact::from_json(&raw)
+        .map_err(|error| format!("parse Trident genesis artifact: {error}"))?;
+    artifact
+        .validate_freeze_ready()
+        .map_err(|error| format!("Trident genesis is not freeze-ready: {error}"))?;
+    let store =
+        Arc::new(StateStore::open(data_dir).map_err(|error| format!("open state store: {error}"))?);
+    let live = load_or_materialize_trident_block_zero(store.as_ref(), &artifact, nonce)
+        .map_err(|error| format!("Trident live Block 0 materialization: {error}"))?;
+    let identity_path = p2p_identity_path(data_dir);
+    let p2p_identity = identity_loader(&identity_path)
+        .map_err(|error| format!("load p2p identity after datadir preflight: {error}"))?;
+    Ok(PreparedTridentDatadir {
+        store,
+        genesis_hash: live.genesis_hash,
+        live_state_root: live.live_state_root,
+        artifact,
         p2p_identity,
     })
 }
@@ -161,6 +211,29 @@ mod tests {
                 Some(identity_bytes)
             );
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn trident_unfrozen_draft_refuses_before_p2p_side_effects() {
+        let dir = temp_rocks_dir("trident-draft-refusal");
+        let identity_path = p2p_identity_path(&dir);
+        let identity_loader_called = Cell::new(false);
+        let draft = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/genesis/trident.testnet.genesis.draft.json");
+        let error = prepare_trident_datadir(&dir, &draft, 0, |path| -> Result<(), String> {
+            identity_loader_called.set(true);
+            std::fs::create_dir_all(path.parent().expect("identity parent"))
+                .map_err(|error| error.to_string())?;
+            std::fs::write(path, b"must-not-exist").map_err(|error| error.to_string())
+        })
+        .err()
+        .expect("UNFROZEN draft must be refused");
+
+        assert!(error.contains("not freeze-ready") || error.contains("timestamp_ms"));
+        assert!(!identity_loader_called.get());
+        assert!(!identity_path.exists());
+        assert!(!dir.join("p2p").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

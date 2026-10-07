@@ -90,6 +90,10 @@ pub enum NetworkMessage {
     OvlRawExecution(agora_types::OvlExecutionTx),
     /// Appended in Trident protocol v27; named-lane compact body (not UTXO short ids).
     TypedCompactBlock(TypedCompactBody),
+    /// Appended in Trident protocol v28; detached DRC multisign attachments on the tx topic.
+    DrcMultisignAttachment(agora_types::DrcMultisignBlockAttachment),
+    /// Appended in Trident protocol v29; signed Hub-coordinator passport attestation.
+    PassportAttestation(agora_types::PassportAttestation),
 }
 
 impl NetworkMessage {
@@ -103,9 +107,9 @@ impl NetworkMessage {
 
     /// Build compact gossip.
     ///
-    /// UTXO-only blocks keep `CompactBlock`. Named typed lanes use
-    /// `TypedCompactBlock`. Lanes this version cannot name (detached
-    /// multisign attachments) still send the full body.
+    /// UTXO-only blocks keep `CompactBlock`. Named typed lanes, including
+    /// detached DRC multisign attachments, use `TypedCompactBlock`. A miss
+    /// or unknown kind still falls back to GetBlock.
     pub fn compact_from_block(block: &Block) -> Self {
         if !block.requires_full_body_gossip() {
             Self::CompactBlock {
@@ -406,6 +410,63 @@ mod tests {
         ]));
         assert_eq!(raw.encode()[0], 34);
         assert_eq!(NetworkMessage::decode(&raw.encode()).unwrap(), raw);
+
+        let compact = NetworkMessage::TypedCompactBlock(crate::typed_compact::TypedCompactBody {
+            version: TYPED_COMPACT_VERSION,
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            lanes: vec![],
+        });
+        assert_eq!(compact.encode()[0], 35);
+
+        let attachment =
+            NetworkMessage::DrcMultisignAttachment(agora_types::DrcMultisignBlockAttachment {
+                version: 1,
+                key: agora_types::DrcMultisignAttachmentKey {
+                    version: 1,
+                    kind: agora_types::DrcMultisignOperationKind::DrcPayment,
+                    signing_commitment: Hash([9; 32]),
+                },
+                auth: agora_types::DrcMultisignAuth {
+                    version: 1,
+                    signing_for: Address([9; 20]),
+                    signatures: vec![agora_types::DrcMultisignEntry {
+                        signer: Address([10; 20]),
+                        public_key: vec![2; 33],
+                        signature: vec![3; 64],
+                    }],
+                },
+            });
+        assert_eq!(attachment.encode()[0], 36);
+        assert_eq!(
+            NetworkMessage::decode(&attachment.encode()).unwrap(),
+            attachment
+        );
+
+        let passport = NetworkMessage::PassportAttestation(agora_types::PassportAttestation {
+            version: 1,
+            issuer: Address([1; 20]),
+            subject: Address([2; 20]),
+            category: agora_types::PassportCategory::Code,
+            evidence_hash: Hash([3; 32]),
+            issuer_policy_hash: Hash([4; 32]),
+            issued_epoch: 5,
+            expires_epoch: Some(10),
+            nonce: 0,
+            public_key: vec![1; 33],
+            signature: vec![2; 64],
+        });
+        assert_eq!(passport.encode()[0], 37);
+        assert_eq!(
+            NetworkMessage::decode(&passport.encode()).unwrap(),
+            passport
+        );
 
         let mut block = Block::utxo(
             BlockHeader {

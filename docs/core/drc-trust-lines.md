@@ -35,7 +35,7 @@ Contract-free issuer liabilities in the DRC payment domain. Not native DRC, not 
 ## Block / mesh versions
 
 - Body: `TRIDENT_BLOCK_BODY_V16` when trust-line lanes non-empty.
-- P2P fingerprint: current aggregate `TRIDENT_PROTOCOL_VERSION` 27; state
+- P2P fingerprint: current aggregate `TRIDENT_PROTOCOL_VERSION` 28; state
   transition `agora-trident-state-v22`.
 - Issued controls (policy/freeze/clawback): see [`drc-issued-controls.md`](drc-issued-controls.md).
 - Gossip: `NetworkMessage::DrcTrustLineSet`, `NetworkMessage::DrcIssuedTransfer` on the transactions topic.

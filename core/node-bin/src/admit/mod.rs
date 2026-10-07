@@ -155,8 +155,9 @@ pub struct ChainBootConfig {
     pub chain_id: String,
     /// Bound into Trident checkpoint bodies (from [`agora_state_machine::GenesisConsensusPolicy`]).
     pub consensus_policy_hash: Hash,
-    /// `None` keeps DA inclusion fail-closed until a reviewed TLT fee policy
-    /// explicitly activates this Trident-only block lane.
+    /// Mesh fingerprint bound into DA authorizations. Default Experimental boot
+    /// always sets this from the live network fingerprint; inclusion still burns
+    /// [`agora_types::DA_INCLUSION_FEE_TLT`] from the operator's TLT UTXOs.
     pub data_availability_network_fingerprint: Option<Hash>,
 }
 
@@ -231,6 +232,7 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_offer_creates: &'a [agora_types::DrcOfferCreateTx],
     pub drc_offer_cancels: &'a [agora_types::DrcOfferCancelTx],
     pub tlt_covenants: &'a [agora_types::TltCovenantTx],
+    pub passport_attestations: &'a [agora_types::PassportAttestation],
 }
 
 impl ChainState {
@@ -635,6 +637,7 @@ impl ChainState {
             drc_offer_cancels: lanes.drc_offer_cancels.to_vec(),
             drc_multisign_attachments: Vec::new(),
             tlt_covenants: included_covenants.to_vec(),
+            passport_attestations: lanes.passport_attestations.to_vec(),
         };
         if let Some(ctx) = self.auth.as_ref() {
             agora_types::materialize_drc_multisign_attachments(
@@ -2160,6 +2163,7 @@ impl ChainState {
                 drc_offer_meta_before: journal.drc_offer_meta_before,
                 tlt_covenant_created: journal.tlt_covenant_created,
                 tlt_covenant_spent: journal.tlt_covenant_spent,
+                passport_meta_before: journal.passport_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store
@@ -3399,7 +3403,11 @@ mod tests {
         use agora_types::TransactionAcceptance;
 
         let store = Arc::new(StateStore::open_in_memory());
-        let genesis = GenesisBuilder::default().ignite(store.as_ref()).unwrap();
+        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(operator.address())
+            .ignite(store.as_ref())
+            .unwrap();
         let fingerprint = Hash([9; 32]);
         let boot = ChainBootConfig {
             initial_bits: 0,
@@ -3414,7 +3422,6 @@ mod tests {
             StoragePolicy::default(),
         )
         .unwrap();
-        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
         let first = signed_da_authorization(&operator, &genesis, &fingerprint, 4, 0, 11);
         let conflict = signed_da_authorization(&operator, &genesis, &fingerprint, 4, 0, 12);
 

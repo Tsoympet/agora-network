@@ -9,7 +9,8 @@ use crate::{
     DrcMultisignBlockAttachment, DrcOfferCancelTx, DrcOfferCreateTx, DrcPaymentChannelClaimTx,
     DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx,
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
-    DrcTrustLineSetTx, Hash, OvlExecutionTx, SignedStakeTx, TltCovenantTx, Transaction,
+    DrcTrustLineSetTx, Hash, OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx,
+    Transaction,
 };
 
 /// Explicit version/domain for bodies carrying native DRC offer operations.
@@ -21,6 +22,9 @@ pub const TRIDENT_BLOCK_BODY_V18_DOMAIN: &[u8] = b"agora-block-body-v18";
 /// cannot share that wrap: both prototypes used the same trailing slot.
 pub const TRIDENT_BLOCK_BODY_V19_VERSION: u16 = 19;
 pub const TRIDENT_BLOCK_BODY_V19_DOMAIN: &[u8] = b"agora-block-body-v19";
+/// Combined trailing lane when signed passport attestations are present.
+pub const TRIDENT_BLOCK_BODY_V20_VERSION: u16 = 20;
+pub const TRIDENT_BLOCK_BODY_V20_DOMAIN: &[u8] = b"agora-block-body-v20";
 /// Explicit version/domain for bodies carrying issued-control operations.
 pub const TRIDENT_BLOCK_BODY_V17_VERSION: u16 = 17;
 pub const TRIDENT_BLOCK_BODY_V17_DOMAIN: &[u8] = b"agora-block-body-v17";
@@ -171,6 +175,9 @@ pub struct Block {
     /// TLT covenant spends. Absent from the wire when empty so v1 block bytes stay frozen.
     #[serde(default)]
     pub tlt_covenants: Vec<TltCovenantTx>,
+    /// Signed Hub-coordinator passport attestations. Empty stays off the frozen wire.
+    #[serde(default)]
+    pub passport_attestations: Vec<PassportAttestation>,
 }
 
 impl Block {
@@ -208,6 +215,7 @@ impl Block {
             drc_offer_cancels: Vec::new(),
             drc_multisign_attachments: Vec::new(),
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         }
     }
 
@@ -241,11 +249,12 @@ impl Block {
             || !self.drc_offer_creates.is_empty()
             || !self.drc_offer_cancels.is_empty()
             || !self.tlt_covenants.is_empty()
+            || !self.passport_attestations.is_empty()
     }
 
     /// Compact gossip is UTXO-only unless a versioned typed compact names each
-    /// lane. Unknown lanes (today: detached multisign attachments) keep the
-    /// full-body fallback.
+    /// lane. Typed compact names every live body field, including detached DRC
+    /// multisign attachments (protocol v28 gossip + lane 29).
     pub fn requires_full_body_gossip(&self) -> bool {
         !self.account_transfers.is_empty()
             || !self.stake_ops.is_empty()
@@ -254,9 +263,10 @@ impl Block {
             || self.has_post_v4_body_lanes()
     }
 
-    /// Lanes that protocol-v27 typed compact cannot name from the mempool.
+    /// Historical name: every current lane is named. Kept so callers can still
+    /// fail closed if a future body field is added without a compact kind.
     pub fn typed_compact_unnamed_lanes(&self) -> bool {
-        !self.drc_multisign_attachments.is_empty()
+        false
     }
 
     /// Compute a simple pairwise tx merkle root (duplicate last leaf when odd).
@@ -477,6 +487,19 @@ impl Block {
                 TRIDENT_BLOCK_BODY_V19_VERSION,
                 inner,
                 covenant_ids,
+            ));
+        }
+        if !self.passport_attestations.is_empty() {
+            let ids: Vec<Hash> = self
+                .passport_attestations
+                .iter()
+                .map(PassportAttestation::attestation_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V20_DOMAIN,
+                TRIDENT_BLOCK_BODY_V20_VERSION,
+                inner,
+                ids,
             ));
         }
         inner
@@ -705,13 +728,17 @@ impl BorshSerialize for Block {
         if self.drc_offer_creates.is_empty()
             && self.drc_offer_cancels.is_empty()
             && self.tlt_covenants.is_empty()
+            && self.passport_attestations.is_empty()
         {
             return Ok(());
         }
         BorshSerialize::serialize(&self.drc_offer_creates, writer)?;
         BorshSerialize::serialize(&self.drc_offer_cancels, writer)?;
-        if !self.tlt_covenants.is_empty() {
+        if !self.tlt_covenants.is_empty() || !self.passport_attestations.is_empty() {
             BorshSerialize::serialize(&self.tlt_covenants, writer)?;
+        }
+        if !self.passport_attestations.is_empty() {
+            BorshSerialize::serialize(&self.passport_attestations, writer)?;
         }
         Ok(())
     }
@@ -751,6 +778,7 @@ impl BorshDeserialize for Block {
             drc_offer_creates: deserialize_trailing_vec(reader)?,
             drc_offer_cancels: deserialize_trailing_vec(reader)?,
             tlt_covenants: deserialize_trailing_vec(reader)?,
+            passport_attestations: deserialize_trailing_vec(reader)?,
         })
     }
 }

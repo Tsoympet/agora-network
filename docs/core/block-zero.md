@@ -1,10 +1,12 @@
 # Trident Block 0 commitment
 
-**Maturity:** Scaffold. This is not a node boot path and does not claim public-testnet readiness.
+**Maturity:** Experimental (live materializer + freeze-ready-only node path).
+**Not** public-testnet ready. The checked-in v3 draft remains UNFROZEN.
 
 `core/crates/state-machine/src/block_zero.rs` defines the versioned,
-deterministic Borsh manifest that a future Trident Block 0 transition must
-materialize. Preparation is accepted only from a freeze-ready v3 artifact.
+deterministic Borsh manifest. `block_zero_live.rs` materializes that manifest
+into live UTXO, account, treasury, vesting, validator, and supply state.
+Preparation is accepted only from a freeze-ready v3 artifact.
 
 Manifest version 3 is a pre-freeze break. It retains the version 2 chain ID and
 network-fingerprint binding and adds complete ceremony-selected validator
@@ -41,71 +43,61 @@ network fingerprint, chain ID, and bound datadir identity.
 
 `TridentDatadirIdentity` is a separately versioned Borsh record under
 `meta/trident_datadir_identity/`. It binds the chain ID, network fingerprint,
-artifact identity, consensus-policy hash, Block 0 commitment, committed state
-root, and the Trident header network identity. When a fully specified offline
-header is available, it also binds that header's canonical hash; no ceremony
-value is defaulted when the hash is absent.
+artifact identity, consensus-policy hash, Block 0 commitment, committed
+**manifest** state root, and the Trident header network identity. When a fully
+specified live header is available, it also binds that header's canonical hash.
 
 `TridentBlockZeroState::stage_verified_store_batch` places the envelope and
-identity bytes in one `WriteBatch`, applies that batch only to a copy-on-write
-overlay, and rereads every byte. `persist_verified_store_record` commits that
-same batch atomically and performs a durable reread. Reopen verification decodes
-both records, requires canonical Borsh round trips, compares the independently
-stored identity bytes with the copy inside the Block 0 envelope, and can compare
-the entire actual identity byte-for-byte with a caller-supplied expected
-identity. Missing, malformed, inconsistent, duplicate, partial, tampered, or
-mismatched records fail closed.
+identity bytes in one `WriteBatch` without live balances. The live path uses
+`stage_verified_live_envelope_batch` plus the live writes below.
 
 The legacy `GenesisBuilder` load paths reject any complete or partial Trident
-Block 0/datadir marker, even when a valid v2 genesis hash is also present.
-`agora-node` completes this storage preflight before it calls the libp2p
-identity loader. A candidate persisted by offline tooling therefore cannot be
-silently opened, ignored, or overwritten by the v2 node.
+Block 0/datadir marker. `agora-node` v2 startup still refuses a Trident datadir
+before loading `$AGORA_DATA/p2p/identity.key`.
 
-## Offline header bridge
+## Live materialization
 
-`TridentBlockZeroCommitment::to_offline_trident_header` now converts a
-self-consistent commitment into the separate versioned `TridentHeader` type.
-The conversion fixes no ceremony values: callers must provide timestamp,
-difficulty, nonce, and a nonzero concrete-body root. It repeats and verifies
-the Block 0 commitment hash, artifact identity, consensus-policy hash, Trident
-protocol/state-transition versions, and state root. Block 0 parents must be
-empty. This type has no conversion to the current `Block`, no storage key, and
-no loader, mining, consensus, RPC, or P2P consumer.
+`materialize_trident_block_zero_live` / `load_or_materialize_trident_block_zero`
+require `validate_freeze_ready`. They:
 
-## Why the loader remains disabled
+1. Build a concrete Block 0 body (`Block` + `BlockHeader`) whose coinbase
+   outputs are the TLT allocations.
+2. Write OVL/DRC liquid accounts as allocation minus vesting minus self-bond.
+3. Write artifact treasuries, treasury controls, constitution hash, emergency
+   policy hash, and vesting schedules into the governance store. The composed
+   governance root domain is `agora-governance-treasury-root-v2`.
+4. Write epoch-zero `ValidatorRecord` values under `stake/val/`.
+5. Ignite per-asset supply counters from the artifact monetary policy.
+6. Store the body, header, tx index, tips, and `GENESIS_HASH`.
+7. Recompute `compose_trident_state_root` on a copy-on-write overlay.
+8. Bind a `TridentHeader` whose `state_root` is that **live** composed root
+   (the manifest hash stays on `TridentBlockZeroCommitment.state_root`).
+9. Commit envelope + live writes only when the durable recomputed root equals
+   the header. Nonce `0` is allowed only when `bits == 0`; otherwise nonce is
+   ceremony-owned (`--nonce` / `AGORA_TRIDENT_BLOCK_ZERO_NONCE`).
 
-The abstraction still does not construct a [`agora_types::Block`], materialize
-live UTXO/account balances, or run inside `agora-node`. A partial boot path
-would be unsafe because:
+`agora-node genesis trident materialize --file PATH --data PATH` and
+`AGORA_TRIDENT_GENESIS_FILE` use this path. The public draft fails freeze-ready
+before any write or P2P identity load. Subsequent GHOSTDAG, mining, RPC, and
+IBD still use the existing `Block`/`BlockHeader` wire. `TridentHeader` is the
+Block 0 identity commitment in Meta, not a replacement gossip header.
 
-1. The new header encoding is offline-only. A concrete Trident body format,
-   body-root derivation, PoW hash rule, and explicit runtime protocol gate still
-   need specification and wiring; the frozen v2 `BlockHeader`/`Block` path
-   cannot be repurposed.
-2. TLT artifact allocations still need a lossless Block 0 transaction/UTXO
-   mapping, while OVL/DRC allocations need an atomic account mapping whose
-   composed root exactly equals the header state root.
-3. Runtime treasury records do not preserve artifact treasury controls, and the
-   governance store currently initializes compiled defaults rather than the
-   artifact-selected constitution and emergency-policy hashes.
-4. No canonical vesting store or lock enforcement exists.
-5. Validator records now have a checked, lossless projection onto the existing
-   asset-scoped `stake/val/` key and `ValidatorRecord` Borsh value. They are
-   still not written into live state or reconciled with the composed runtime
-   state root.
-6. The initial finality record and epoch-zero snapshots need explicit persistent
-   keys and inclusion in the live composed state root.
-7. Future Trident startup must call `verify_trident_datadir_identity` with the
-   identity derived from its independently verified artifact and concrete
-   header before loading a libp2p key or binding RPC. This prerequisite provides
-   that fail-closed comparison, but no Trident runtime path invokes it yet.
+Vested amounts are withheld from liquid balances. There is not yet a consensus
+unlock transaction; schedules with nonzero vesting stay locked until that lane
+exists.
 
-The remaining live-state blocker is the lossless materialization and atomic
-root check: define the concrete Block 0 body/UTXOs, account and treasury
-records, vesting locks, validator/finality writes, and append them to
-the already-verified batch only when the recomputed live composed root equals
-the offline header. Explicit consensus/PoW/storage/P2P/RPC activation gates
-must then consume that verified state without changing v2 identities. Until
-those pieces exist together, `AGORA_GENESIS_FILE` remains the frozen v2 loader
-only.
+## Remaining public-testnet blockers
+
+- The checked-in `trident.testnet.genesis.draft.json` is UNFROZEN. Ceremony
+  must supply allocations, validator keys, hashes, timestamp, bits, and (if
+  `bits != 0`) a Block 0 nonce. Tooling does not invent them.
+- Frozen v2 `AGORA_GENESIS_FILE` / docker-compose still boot the TLT-only
+  testnet, which has no OVL/DRC genesis validators, so dual-PoS never
+  finalizes.
+- Gossip, mining templates, and IBD continue to identify blocks by
+  `BlockHeader` hash. `TridentHeader` is not the P2P block identity.
+- Vesting unlock, signed treasury spend, and Hub/Grant/Mission mutation remain
+  unwired.
+
+Until a freeze-ready v3 artifact is published and multi-node boot+IBD+tx+
+finality are demonstrated against it, status stays **INCOMPLETE**.

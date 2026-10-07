@@ -9,6 +9,7 @@ mod acceptance;
 mod accounts;
 mod apply;
 mod block_zero;
+mod block_zero_live;
 mod columns;
 mod community_state;
 mod data_availability;
@@ -166,9 +167,10 @@ pub use accounts::{
 pub use apply::{
     apply_block, apply_block_batched, apply_block_batched_virtual,
     apply_block_batched_virtual_at_blue_score, apply_block_batched_with_auth,
-    apply_block_batched_with_auth_at_blue_score, apply_block_with_auth, balance_of, revert_journal,
-    revert_journal_batched, sum_transfer_fees, transfer_fee, validate_mempool_tx,
-    validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult, TxAuthContext, UtxoJournal,
+    apply_block_batched_with_auth_at_blue_score, apply_block_with_auth, balance_of,
+    collect_address_utxos, revert_journal, revert_journal_batched, sum_transfer_fees, transfer_fee,
+    validate_mempool_tx, validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult, TxAuthContext,
+    UtxoJournal,
 };
 pub use block_zero::{
     ensure_legacy_v2_datadir, load_verified_trident_block_zero, verify_trident_datadir_identity,
@@ -179,12 +181,18 @@ pub use block_zero::{
     TRIDENT_BLOCK_ZERO_STATE_VERSION, TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
     TRIDENT_DATADIR_IDENTITY_VERSION,
 };
+pub use block_zero_live::{
+    load_or_materialize_trident_block_zero, materialize_trident_block_zero_live,
+    TridentBlockZeroLiveMaterialization,
+};
 pub use columns::{meta_keys, ColumnFamily, OVL_EVM_SCHEMA_VERSION, SCHEMA_VERSION};
 pub use community_state::{
-    canonical_community_root, init_canonical_community_into, list_grants, list_hubs, list_missions,
-    list_passport_attestations, load_canonical_community_summary, register_grant_into,
-    register_hub_into, register_mission_into, register_passport_attestation_into,
-    CanonicalCommunitySummary, CANONICAL_COMMUNITY_VERSION,
+    canonical_community_root, community_summary_key, init_canonical_community_into,
+    issuer_is_active_hub_coordinator, list_grants, list_hubs, list_missions,
+    list_passport_attestations, load_canonical_community_summary, load_passport_attestation,
+    load_passport_issuer_nonce, passport_issuer_nonce_key, passport_record_key,
+    register_grant_into, register_hub_into, register_mission_into,
+    register_passport_attestation_into, CanonicalCommunitySummary, CANONICAL_COMMUNITY_VERSION,
 };
 pub use data_availability::{
     apply_data_commitment, data_availability_root, data_commitment_key, data_commitment_nonce_key,
@@ -280,8 +288,8 @@ pub use ghostdag_store::{
 };
 pub use governance_state::{
     authorization_policy_root, governance_treasury_root, init_canonical_governance_into,
-    load_canonical_governance_policy, load_protocol_treasuries, load_protocol_treasury,
-    CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
+    init_trident_governance_into, load_canonical_governance_policy, load_protocol_treasuries,
+    load_protocol_treasury, CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
 };
 pub use headers::{header_key, load_header, store_header, store_header_into};
 pub use marks::{default_token_marks, TokenMark};
@@ -325,11 +333,12 @@ pub use state_root::{
 };
 pub use store::{StateStore, WriteBatch};
 pub use supply::{
-    burn_drc_fee_into, burned_supply_key, ignite_trident_supply, issued_supply_key,
-    load_burned_supply, load_issued_supply, load_max_supply, load_native_supply_state,
-    load_schema_version, max_supply_key, migrate_drc_fee_burn_schema, native_supply_root,
-    put_burned_supply_into, put_issued_supply_into, put_max_supply_into, put_schema_version_into,
-    verify_supply_invariants, NativeSupplyState, DRC_FEE_BURN_SCHEMA_VERSION,
+    burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key, ignite_trident_supply,
+    issued_supply_key, load_burned_supply, load_issued_supply, load_max_supply,
+    load_native_supply_state, load_schema_version, max_supply_key, migrate_drc_fee_burn_schema,
+    native_supply_root, put_burned_supply_into, put_issued_supply_into, put_max_supply_into,
+    put_schema_version_into, verify_supply_invariants, NativeSupplyState,
+    DRC_FEE_BURN_SCHEMA_VERSION,
 };
 pub use tlt_covenant::{load_covenant_utxo, validate_mempool_covenant, TltCovenantUtxoRecord};
 pub use trident_genesis::{

@@ -59,5 +59,5 @@ pub use topics::{
 };
 pub use typed_compact::{
     reconstruct_typed_compact, CompactLaneItem, TypedCompactBody, TypedCompactLane,
-    TYPED_COMPACT_VERSION,
+    COMPACT_LANE_DRC_MULTISIGN, COMPACT_LANE_PASSPORT, TYPED_COMPACT_VERSION,
 };

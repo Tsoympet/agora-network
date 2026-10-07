@@ -1,18 +1,19 @@
 //! Versioned compact gossip that names consensus-lane kinds.
 //!
 //! Legacy [`crate::NetworkMessage::CompactBlock`] remains UTXO-only. Typed
-//! lanes use this envelope so offers, covenants, and DA short ids cannot mix
-//! into the UTXO list. Detached DRC multisign attachments have no mempool map,
-//! so those blocks keep the full-body fallback.
+//! lanes use this envelope so offers, covenants, DA, and detached DRC
+//! multisign attachments cannot mix into the UTXO list. Reconstruction miss
+//! or unknown kind falls back to GetBlock.
 
 use agora_types::{
     AccountTransfer, Block, BlockHeader, DataCommitmentAuthorization, DrcAccountPolicyTx,
     DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx,
     DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx,
-    DrcIssuedTransferTx, DrcOfferCancelTx, DrcOfferCreateTx, DrcPaymentChannelClaimTx,
-    DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
-    DrcTrustLineSetTx, Hash, OvlExecutionTx, SignedStakeTx, TltCovenantTx, Transaction,
+    DrcIssuedTransferTx, DrcMultisignBlockAttachment, DrcOfferCancelTx, DrcOfferCreateTx,
+    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
+    DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
+    DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash, OvlExecutionTx, PassportAttestation,
+    SignedStakeTx, TltCovenantTx, Transaction,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -49,6 +50,8 @@ pub const COMPACT_LANE_DRC_CLAWBACK: u8 = 25;
 pub const COMPACT_LANE_DRC_OFFER_CREATE: u8 = 26;
 pub const COMPACT_LANE_DRC_OFFER_CANCEL: u8 = 27;
 pub const COMPACT_LANE_TLT_COVENANT: u8 = 28;
+pub const COMPACT_LANE_DRC_MULTISIGN: u8 = 29;
+pub const COMPACT_LANE_PASSPORT: u8 = 30;
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct TypedCompactLane {
@@ -94,17 +97,14 @@ pub enum CompactLaneItem {
     DrcOfferCreate(DrcOfferCreateTx),
     DrcOfferCancel(DrcOfferCancelTx),
     TltCovenant(TltCovenantTx),
+    DrcMultisign(DrcMultisignBlockAttachment),
+    Passport(PassportAttestation),
 }
 
 impl TypedCompactBody {
-    /// Named short-id lanes for every mempool-backed body field.
-    ///
-    /// Returns `None` when a lane cannot be named (today: detached multisign
-    /// attachments), so callers keep the full `Block` envelope.
+    /// Named short-id lanes for every mempool-backed body field, including
+    /// detached DRC multisign attachments.
     pub fn from_block(block: &Block) -> Option<Self> {
-        if block.typed_compact_unnamed_lanes() {
-            return None;
-        }
         let mut lanes = Vec::new();
         push_lane(
             &mut lanes,
@@ -280,6 +280,18 @@ impl TypedCompactBody {
             &block.tlt_covenants,
             TltCovenantTx::tx_id,
         );
+        push_lane(
+            &mut lanes,
+            COMPACT_LANE_DRC_MULTISIGN,
+            &block.drc_multisign_attachments,
+            DrcMultisignBlockAttachment::body_commitment_id,
+        );
+        push_lane(
+            &mut lanes,
+            COMPACT_LANE_PASSPORT,
+            &block.passport_attestations,
+            PassportAttestation::attestation_id,
+        );
         Some(Self {
             version: TYPED_COMPACT_VERSION,
             header: block.header.clone(),
@@ -406,6 +418,12 @@ fn apply_item(block: &mut Block, kind: u8, item: CompactLaneItem) -> Result<(), 
         (COMPACT_LANE_TLT_COVENANT, CompactLaneItem::TltCovenant(tx)) => {
             block.tlt_covenants.push(tx)
         }
+        (COMPACT_LANE_DRC_MULTISIGN, CompactLaneItem::DrcMultisign(tx)) => {
+            block.drc_multisign_attachments.push(tx)
+        }
+        (COMPACT_LANE_PASSPORT, CompactLaneItem::Passport(tx)) => {
+            block.passport_attestations.push(tx)
+        }
         _ => return Err(ReconstructError::UnsupportedLane(kind)),
     }
     Ok(())
@@ -414,7 +432,7 @@ fn apply_item(block: &mut Block, kind: u8, item: CompactLaneItem) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agora_types::{Address, Amount, NativeAssetId};
+    use agora_types::{Address, Amount, NativeAssetId, PassportCategory};
 
     fn account_block() -> Block {
         let mut block = Block::utxo(
@@ -475,5 +493,128 @@ mod tests {
         let block = account_block();
         assert!(!block.typed_compact_unnamed_lanes());
         assert!(TypedCompactBody::from_block(&block).is_some());
+    }
+
+    fn sample_multisign_attachment(marker: u8) -> DrcMultisignBlockAttachment {
+        DrcMultisignBlockAttachment {
+            version: 1,
+            key: agora_types::DrcMultisignAttachmentKey {
+                version: 1,
+                kind: agora_types::DrcMultisignOperationKind::DrcPayment,
+                signing_commitment: Hash([marker; 32]),
+            },
+            auth: agora_types::DrcMultisignAuth {
+                version: 1,
+                signing_for: Address([marker; 20]),
+                signatures: vec![agora_types::DrcMultisignEntry {
+                    signer: Address([marker.wrapping_add(1); 20]),
+                    public_key: vec![2; 33],
+                    signature: vec![3; 64],
+                }],
+            },
+        }
+    }
+
+    fn multisign_block() -> Block {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block
+            .drc_multisign_attachments
+            .push(sample_multisign_attachment(9));
+        block.header.tx_root = block.compute_body_root();
+        block
+    }
+
+    #[test]
+    fn detached_multisign_lane_reconstructs_from_lookup() {
+        let block = multisign_block();
+        let body = TypedCompactBody::from_block(&block).expect("named");
+        assert_eq!(body.lanes.len(), 1);
+        assert_eq!(body.lanes[0].kind, COMPACT_LANE_DRC_MULTISIGN);
+        let attachment = block.drc_multisign_attachments[0].clone();
+        let rebuilt = reconstruct_typed_compact(body, |kind, _| {
+            assert_eq!(kind, COMPACT_LANE_DRC_MULTISIGN);
+            Some(CompactLaneItem::DrcMultisign(attachment.clone()))
+        })
+        .unwrap();
+        assert_eq!(
+            rebuilt.drc_multisign_attachments,
+            block.drc_multisign_attachments
+        );
+        assert_eq!(rebuilt.header.tx_root, block.header.tx_root);
+    }
+
+    fn sample_passport(marker: u8) -> PassportAttestation {
+        let mut attestation = PassportAttestation::unsigned(
+            Address([marker; 20]),
+            Address([marker.wrapping_add(1); 20]),
+            PassportCategory::Code,
+            Hash([marker.wrapping_add(2); 32]),
+            Hash([marker.wrapping_add(3); 32]),
+            5,
+            Some(10),
+            0,
+        );
+        attestation.public_key = vec![1; 33];
+        attestation.signature = vec![2; 64];
+        attestation
+    }
+
+    fn passport_block() -> Block {
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.passport_attestations.push(sample_passport(9));
+        block.header.tx_root = block.compute_body_root();
+        block
+    }
+
+    #[test]
+    fn passport_lane_reconstructs_from_lookup() {
+        let block = passport_block();
+        let body = TypedCompactBody::from_block(&block).expect("named");
+        assert_eq!(body.lanes.len(), 1);
+        assert_eq!(body.lanes[0].kind, COMPACT_LANE_PASSPORT);
+        let attestation = block.passport_attestations[0].clone();
+        let rebuilt = reconstruct_typed_compact(body, |kind, _| {
+            assert_eq!(kind, COMPACT_LANE_PASSPORT);
+            Some(CompactLaneItem::Passport(attestation.clone()))
+        })
+        .unwrap();
+        assert_eq!(rebuilt.passport_attestations, block.passport_attestations);
+        assert_eq!(rebuilt.header.tx_root, block.header.tx_root);
+    }
+
+    #[test]
+    fn passport_lane_miss_fails_closed() {
+        let block = passport_block();
+        let body = TypedCompactBody::from_block(&block).unwrap();
+        let err = reconstruct_typed_compact(body, |_, _| None).unwrap_err();
+        assert!(matches!(err, ReconstructError::MissingShortIds(1)));
+    }
+
+    #[test]
+    fn detached_multisign_miss_fails_closed() {
+        let block = multisign_block();
+        let body = TypedCompactBody::from_block(&block).unwrap();
+        let err = reconstruct_typed_compact(body, |_, _| None).unwrap_err();
+        assert!(matches!(err, ReconstructError::MissingShortIds(1)));
     }
 }

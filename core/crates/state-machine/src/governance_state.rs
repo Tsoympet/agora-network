@@ -17,7 +17,11 @@ use crate::{StateError, StateStore};
 
 const POLICY_KEY: &[u8] = b"governance/consensus/policy";
 const TREASURY_PREFIX: &[u8] = b"governance/treasury/";
+const TREASURY_CONTROL_PREFIX: &[u8] = b"governance/treasury_control/";
+const EMERGENCY_POLICY_KEY: &[u8] = b"governance/consensus/emergency_policy_hash";
+const VESTING_KEY: &[u8] = b"governance/vesting/schedules-v1";
 pub const CANONICAL_GOVERNANCE_VERSION: u32 = 1;
+const GOVERNANCE_TREASURY_ROOT_DOMAIN: &[u8] = b"agora-governance-treasury-root-v2";
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct CanonicalGovernancePolicy {
@@ -58,7 +62,10 @@ fn treasury_key(treasury: TreasuryId) -> Vec<u8> {
     key
 }
 
-fn put_treasury_into(batch: &mut WriteBatch, treasury: &TreasuryBalance) -> Result<(), StateError> {
+pub(crate) fn put_treasury_into(
+    batch: &mut WriteBatch,
+    treasury: &TreasuryBalance,
+) -> Result<(), StateError> {
     if treasury.treasury.asset() != treasury.asset {
         return Err(StateError::InvalidTx(
             "protocol treasury asset mismatch".into(),
@@ -66,6 +73,117 @@ fn put_treasury_into(batch: &mut WriteBatch, treasury: &TreasuryBalance) -> Resu
     }
     let bytes = borsh::to_vec(treasury).map_err(|e| StateError::Storage(e.to_string()))?;
     batch.put_cf(ColumnFamily::Meta, &treasury_key(treasury.treasury), &bytes);
+    Ok(())
+}
+
+fn treasury_control_key(treasury: TreasuryId) -> Vec<u8> {
+    let mut key = Vec::with_capacity(TREASURY_CONTROL_PREFIX.len() + 1);
+    key.extend_from_slice(TREASURY_CONTROL_PREFIX);
+    key.push(treasury.wire_byte());
+    key
+}
+
+pub(crate) fn put_treasury_control_into(
+    batch: &mut WriteBatch,
+    treasury: TreasuryId,
+    control: &str,
+) -> Result<(), StateError> {
+    if control.trim().is_empty() {
+        return Err(StateError::InvalidTx(
+            "protocol treasury control must be nonempty".into(),
+        ));
+    }
+    let bytes =
+        borsh::to_vec(&control.to_string()).map_err(|e| StateError::Storage(e.to_string()))?;
+    batch.put_cf(ColumnFamily::Meta, &treasury_control_key(treasury), &bytes);
+    Ok(())
+}
+
+pub(crate) fn put_emergency_policy_hash_into(batch: &mut WriteBatch, hash: Hash) {
+    batch.put_cf(ColumnFamily::Meta, EMERGENCY_POLICY_KEY, hash.as_bytes());
+}
+
+pub(crate) fn put_vesting_schedules_into(
+    batch: &mut WriteBatch,
+    vesting: &[crate::block_zero::BlockZeroVesting],
+) -> Result<(), StateError> {
+    let bytes = borsh::to_vec(&vesting.to_vec()).map_err(|e| StateError::Storage(e.to_string()))?;
+    batch.put_cf(ColumnFamily::Meta, VESTING_KEY, &bytes);
+    Ok(())
+}
+
+fn load_emergency_policy_hash(store: &StateStore) -> Result<Hash, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, EMERGENCY_POLICY_KEY)? else {
+        return Ok(Hash::ZERO);
+    };
+    if bytes.len() != 32 {
+        return Err(StateError::Storage(
+            "malformed emergency policy hash".into(),
+        ));
+    }
+    let mut hash = [0u8; 32];
+    hash.copy_from_slice(&bytes);
+    Ok(Hash(hash))
+}
+
+fn load_treasury_controls(store: &StateStore) -> Result<Vec<(u8, String)>, StateError> {
+    let mut controls = Vec::new();
+    for treasury in TreasuryId::ALL {
+        let Some(bytes) = store.get_cf(ColumnFamily::Meta, &treasury_control_key(treasury))? else {
+            continue;
+        };
+        let control = String::try_from_slice(&bytes)
+            .map_err(|error| StateError::Storage(error.to_string()))?;
+        controls.push((treasury.wire_byte(), control));
+    }
+    Ok(controls)
+}
+
+fn load_vesting_schedules(
+    store: &StateStore,
+) -> Result<Vec<crate::block_zero::BlockZeroVesting>, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, VESTING_KEY)? else {
+        return Ok(Vec::new());
+    };
+    Vec::<crate::block_zero::BlockZeroVesting>::try_from_slice(&bytes)
+        .map_err(|error| StateError::Storage(error.to_string()))
+}
+
+/// Write artifact-selected constitution, emergency policy, treasuries, controls, and vesting.
+pub fn init_trident_governance_into(
+    batch: &mut WriteBatch,
+    constitution_hash: Hash,
+    emergency_policy_hash: Hash,
+    treasuries: &[TreasuryBalance],
+    controls: &[(TreasuryId, String)],
+    vesting: &[crate::block_zero::BlockZeroVesting],
+) -> Result<(), StateError> {
+    if constitution_hash == Hash::ZERO || emergency_policy_hash == Hash::ZERO {
+        return Err(StateError::InvalidTx(
+            "Trident governance hashes must be nonzero".into(),
+        ));
+    }
+    let policy = CanonicalGovernancePolicy {
+        version: CANONICAL_GOVERNANCE_VERSION,
+        constitution_id: if constitution_hash == Hash(hash_constitution_body(CONSTITUTION_V1_BODY))
+        {
+            CONSTITUTION_V1_ID.into()
+        } else {
+            "trident-genesis-artifact".into()
+        },
+        constitution_hash,
+        authorization_root: authorization_policy_root(),
+    };
+    let bytes = borsh::to_vec(&policy).map_err(|e| StateError::Storage(e.to_string()))?;
+    batch.put_cf(ColumnFamily::Meta, POLICY_KEY, &bytes);
+    put_emergency_policy_hash_into(batch, emergency_policy_hash);
+    for treasury in treasuries {
+        put_treasury_into(batch, treasury)?;
+    }
+    for (treasury, control) in controls {
+        put_treasury_control_into(batch, *treasury, control)?;
+    }
+    put_vesting_schedules_into(batch, vesting)?;
     Ok(())
 }
 
@@ -122,10 +240,16 @@ pub fn load_protocol_treasuries(store: &StateStore) -> Result<Vec<TreasuryBalanc
 pub fn governance_treasury_root(store: &StateStore) -> Result<Hash, StateError> {
     let policy = load_canonical_governance_policy(store)?;
     let treasuries = load_protocol_treasuries(store)?;
+    let emergency = load_emergency_policy_hash(store)?;
+    let controls = load_treasury_controls(store)?;
+    let vesting = load_vesting_schedules(store)?;
     Ok(Hash::hash_borsh(&(
-        b"agora-governance-treasury-root-v1",
+        GOVERNANCE_TREASURY_ROOT_DOMAIN,
         policy,
         treasuries,
+        emergency,
+        controls,
+        vesting,
     )))
 }
 

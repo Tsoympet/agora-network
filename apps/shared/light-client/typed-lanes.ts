@@ -75,7 +75,7 @@ export type BuiltTypedEnvelope = {
   signingBytes: Uint8Array;
 };
 
-function hexToBytes(hex: string): Uint8Array {
+export function hexToBytes(hex: string): Uint8Array {
   const s = hex.startsWith("0x") ? hex.slice(2) : hex;
   if (s.length % 2 !== 0) throw new Error("invalid hex");
   const out = new Uint8Array(s.length / 2);
@@ -91,7 +91,7 @@ export function bytesToHex(bytes: Uint8Array): string {
     .join("");
 }
 
-function concat(parts: Uint8Array[]): Uint8Array {
+export function concat(parts: Uint8Array[]): Uint8Array {
   const size = parts.reduce((n, p) => n + p.length, 0);
   const out = new Uint8Array(size);
   let o = 0;
@@ -102,17 +102,23 @@ function concat(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-function u8(value: number): Uint8Array {
+export function u8(value: number): Uint8Array {
   return Uint8Array.of(value & 0xff);
 }
 
-function u32(value: number): Uint8Array {
+export function u32(value: number): Uint8Array {
   const buf = new ArrayBuffer(4);
   new DataView(buf).setUint32(0, value >>> 0, true);
   return new Uint8Array(buf);
 }
 
-function u64(value: number | bigint): Uint8Array {
+export function u16(value: number): Uint8Array {
+  const buf = new ArrayBuffer(2);
+  new DataView(buf).setUint16(0, value & 0xffff, true);
+  return new Uint8Array(buf);
+}
+
+export function u64(value: number | bigint): Uint8Array {
   const buf = new ArrayBuffer(8);
   new DataView(buf).setBigUint64(0, BigInt(value), true);
   return new Uint8Array(buf);
@@ -128,31 +134,31 @@ export function encodeString(value: string): Uint8Array {
   return encodeVec(new TextEncoder().encode(value));
 }
 
-function encodeOptionU32(value: number | null | undefined): Uint8Array {
+export function encodeOptionU32(value: number | null | undefined): Uint8Array {
   if (value === null || value === undefined) return u8(0);
   return concat([u8(1), u32(value)]);
 }
 
-function encodeOptionU64(value: number | bigint | null | undefined): Uint8Array {
+export function encodeOptionU64(value: number | bigint | null | undefined): Uint8Array {
   if (value === null || value === undefined) return u8(0);
   return concat([u8(1), u64(value)]);
 }
 
-function requireAddress(bytes: Uint8Array): Uint8Array {
+export function requireAddress(bytes: Uint8Array): Uint8Array {
   if (bytes.length !== 20) throw new Error("address must be 20 bytes");
   return bytes;
 }
 
-function requireHash(bytes: Uint8Array): Uint8Array {
+export function requireHash(bytes: Uint8Array): Uint8Array {
   if (bytes.length !== 32) throw new Error("hash must be 32 bytes");
   return bytes;
 }
 
-function jsonBytes(bytes: Uint8Array): number[] {
+export function jsonBytes(bytes: Uint8Array): number[] {
   return Array.from(bytes);
 }
 
-function jsonAddress(bytes: Uint8Array): number[] {
+export function jsonAddress(bytes: Uint8Array): number[] {
   return jsonBytes(requireAddress(bytes));
 }
 
@@ -379,7 +385,7 @@ function jsonBookAsset(asset: DrcBookAssetWire): Record<string, unknown> {
   };
 }
 
-async function signBound(
+export async function signBound(
   secretKey: Uint8Array,
   domain: Uint8Array,
   chainId: string,
@@ -391,7 +397,7 @@ async function signBound(
   return { publicKey, signature, signingBytes };
 }
 
-function accountFromMnemonic(
+export function accountFromMnemonic(
   mnemonic: string,
   network: string,
   accountIndex: number,
@@ -399,7 +405,7 @@ function accountFromMnemonic(
   return deriveAccount(mnemonic, accountIndex, "", network, 0);
 }
 
-function parseRecipient(input: string, network: string): { hex: string; bytes: Uint8Array } {
+export function parseRecipient(input: string, network: string): { hex: string; bytes: Uint8Array } {
   const hex = parseAddress(input, network);
   return { hex, bytes: hexToBytes(hex) };
 }
@@ -806,7 +812,7 @@ export async function buildSignedTltCovenant(options: {
   };
 }
 
-async function nodeBinding(client: LightClient, network: string): Promise<{
+export async function nodeBinding(client: LightClient, network: string): Promise<{
   genesisHash: string;
   chainId: string;
   network: string;
@@ -821,7 +827,7 @@ async function nodeBinding(client: LightClient, network: string): Promise<{
   };
 }
 
-async function accountNonce(
+export async function accountNonce(
   client: LightClient,
   addressHex: string,
   asset: NativeAssetTicker,

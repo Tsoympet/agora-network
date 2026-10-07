@@ -358,6 +358,15 @@ export type LightClient = {
   ) => Promise<LightNativeAssetSupply>;
   getProtocolTreasuries: () => Promise<LightProtocolTreasuries>;
   getCommunityRegistry: (limit?: number) => Promise<LightCommunityRegistry>;
+  getPassportAttestation: (attestationId: string) => Promise<{
+    attestation_id: string;
+    status: string;
+    attestation: unknown | null;
+  }>;
+  getPassportIssuerNonce: (issuer: string) => Promise<{
+    issuer: string;
+    nonce: number;
+  }>;
   getDrcObject: (objectId: string) => Promise<{
     object_id: string;
     status: "live" | "unknown";
@@ -413,6 +422,7 @@ export type LightClient = {
   getEthChainId: () => Promise<unknown>;
   getEthBlockNumber: () => Promise<unknown>;
   getEthBalance: (address: string, blockTag?: string) => Promise<unknown>;
+  sendRawEvmTransaction: (rawHex: string) => Promise<string>;
   getUtxos: (address: string) => Promise<LightUtxoSet>;
   /** Submit a signed transaction JSON body (native serde / byte-array hashes). */
   submitTransaction: (tx: unknown) => Promise<SubmitTxResult>;
@@ -428,6 +438,31 @@ export type LightClient = {
     simulated_fill: boolean;
   }>;
   submitDrcOfferCancel: (tx: unknown) => Promise<{ cancel_tx_id: string }>;
+  submitDrcEscrowCreate: (tx: unknown) => Promise<{ escrow_id: string }>;
+  submitDrcEscrowFinish: (tx: unknown) => Promise<{ finish_tx_id: string }>;
+  submitDrcEscrowCancel: (tx: unknown) => Promise<{ cancel_tx_id: string }>;
+  submitDrcCheckCreate: (tx: unknown) => Promise<{ check_id: string }>;
+  submitDrcCheckCash: (tx: unknown) => Promise<{ cash_tx_id: string }>;
+  submitDrcCheckCancel: (tx: unknown) => Promise<{ cancel_tx_id: string }>;
+  submitDrcPaymentChannelCreate: (tx: unknown) => Promise<{ channel_id: string }>;
+  submitDrcPaymentChannelFund: (tx: unknown) => Promise<{ fund_tx_id: string }>;
+  submitDrcPaymentChannelClaim: (tx: unknown) => Promise<{ claim_tx_id: string }>;
+  submitDrcPaymentChannelClose: (tx: unknown) => Promise<{ close_tx_id: string }>;
+  submitDrcTicketCreate: (tx: unknown) => Promise<{ ticket_create_tx_id: string }>;
+  submitDrcRegularKey: (tx: unknown) => Promise<{ regular_key_tx_id: string }>;
+  submitDrcSignerList: (tx: unknown) => Promise<{ signer_list_tx_id: string }>;
+  submitDrcDepositPreauth: (tx: unknown) => Promise<{ preauth_tx_id: string }>;
+  submitDrcAccountPolicy: (tx: unknown) => Promise<{ policy_tx_id: string }>;
+  submitDrcTrustLineSet: (tx: unknown) => Promise<{ trust_line_set_tx_id: string }>;
+  submitDrcIssuedTransfer: (tx: unknown) => Promise<{ issued_transfer_tx_id: string }>;
+  submitDrcIssuedAssetPolicySet: (tx: unknown) => Promise<{ policy_set_tx_id: string }>;
+  submitDrcTrustLineIssuerControl: (tx: unknown) => Promise<{
+    issuer_control_tx_id: string;
+  }>;
+  submitDrcIssuedClawback: (tx: unknown) => Promise<{ clawback_tx_id: string }>;
+  submitPassportAttestation: (attestation: unknown) => Promise<{
+    attestation_id: string;
+  }>;
   getConstitution: () => Promise<LightConstitution>;
   getGovernance: () => Promise<LightGovernance>;
   listProposals: (limit?: number) => Promise<LightProposalList>;
@@ -516,6 +551,17 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<LightProtocolTreasuries>("agora_getProtocolTreasuries", []),
     getCommunityRegistry: (limit = 64) =>
       call<LightCommunityRegistry>("agora_getCommunityRegistry", { limit }),
+    getPassportAttestation: (attestationId) =>
+      call<{
+        attestation_id: string;
+        status: string;
+        attestation: unknown | null;
+      }>("agora_getPassportAttestation", { attestation_id: attestationId }),
+    getPassportIssuerNonce: (issuer) =>
+      call<{ issuer: string; nonce: number }>(
+        "agora_getPassportIssuerNonce",
+        { issuer },
+      ),
     getDrcObject: (objectId) =>
       call<{
         object_id: string;
@@ -590,6 +636,10 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getEthBlockNumber: () => call("eth_blockNumber", []),
     getEthBalance: (address, blockTag = "latest") =>
       call("eth_getBalance", [address, blockTag]),
+    sendRawEvmTransaction: (rawHex) => {
+      const hex = rawHex.startsWith("0x") || rawHex.startsWith("0X") ? rawHex : `0x${rawHex}`;
+      return call<string>("eth_sendRawTransaction", [hex]);
+    },
     getUtxos: (address: string) =>
       call<LightUtxoSet>("agora_getUtxos", { address }),
     submitTransaction: (tx: unknown) =>
@@ -618,6 +668,91 @@ export function createLightClient(config: LightClientConfig): LightClient {
     submitDrcOfferCancel: (tx) =>
       call<{ cancel_tx_id: string }>("agora_submitDrcOfferCancel", {
         offer_cancel: tx,
+      }),
+    submitDrcEscrowCreate: (tx) =>
+      call<{ escrow_id: string }>("agora_submitDrcEscrowCreate", {
+        escrow_create: tx,
+      }),
+    submitDrcEscrowFinish: (tx) =>
+      call<{ finish_tx_id: string }>("agora_submitDrcEscrowFinish", {
+        escrow_finish: tx,
+      }),
+    submitDrcEscrowCancel: (tx) =>
+      call<{ cancel_tx_id: string }>("agora_submitDrcEscrowCancel", {
+        escrow_cancel: tx,
+      }),
+    submitDrcCheckCreate: (tx) =>
+      call<{ check_id: string }>("agora_submitDrcCheckCreate", {
+        check_create: tx,
+      }),
+    submitDrcCheckCash: (tx) =>
+      call<{ cash_tx_id: string }>("agora_submitDrcCheckCash", {
+        check_cash: tx,
+      }),
+    submitDrcCheckCancel: (tx) =>
+      call<{ cancel_tx_id: string }>("agora_submitDrcCheckCancel", {
+        check_cancel: tx,
+      }),
+    submitDrcPaymentChannelCreate: (tx) =>
+      call<{ channel_id: string }>("agora_submitDrcPaymentChannelCreate", {
+        payment_channel_create: tx,
+      }),
+    submitDrcPaymentChannelFund: (tx) =>
+      call<{ fund_tx_id: string }>("agora_submitDrcPaymentChannelFund", {
+        payment_channel_fund: tx,
+      }),
+    submitDrcPaymentChannelClaim: (tx) =>
+      call<{ claim_tx_id: string }>("agora_submitDrcPaymentChannelClaim", {
+        payment_channel_claim: tx,
+      }),
+    submitDrcPaymentChannelClose: (tx) =>
+      call<{ close_tx_id: string }>("agora_submitDrcPaymentChannelClose", {
+        payment_channel_close: tx,
+      }),
+    submitDrcTicketCreate: (tx) =>
+      call<{ ticket_create_tx_id: string }>("agora_submitDrcTicketCreate", {
+        ticket_create: tx,
+      }),
+    submitDrcRegularKey: (tx) =>
+      call<{ regular_key_tx_id: string }>("agora_submitDrcRegularKey", {
+        regular_key: tx,
+      }),
+    submitDrcSignerList: (tx) =>
+      call<{ signer_list_tx_id: string }>("agora_submitDrcSignerList", {
+        signer_list: tx,
+      }),
+    submitDrcDepositPreauth: (tx) =>
+      call<{ preauth_tx_id: string }>("agora_submitDrcDepositPreauth", {
+        preauth: tx,
+      }),
+    submitDrcAccountPolicy: (tx) =>
+      call<{ policy_tx_id: string }>("agora_submitDrcAccountPolicy", {
+        policy: tx,
+      }),
+    submitDrcTrustLineSet: (tx) =>
+      call<{ trust_line_set_tx_id: string }>("agora_submitDrcTrustLineSet", {
+        trust_line_set: tx,
+      }),
+    submitDrcIssuedTransfer: (tx) =>
+      call<{ issued_transfer_tx_id: string }>("agora_submitDrcIssuedTransfer", {
+        issued_transfer: tx,
+      }),
+    submitDrcIssuedAssetPolicySet: (tx) =>
+      call<{ policy_set_tx_id: string }>("agora_submitDrcIssuedAssetPolicySet", {
+        issued_asset_policy_set: tx,
+      }),
+    submitDrcTrustLineIssuerControl: (tx) =>
+      call<{ issuer_control_tx_id: string }>(
+        "agora_submitDrcTrustLineIssuerControl",
+        { trust_line_issuer_control: tx },
+      ),
+    submitDrcIssuedClawback: (tx) =>
+      call<{ clawback_tx_id: string }>("agora_submitDrcIssuedClawback", {
+        issued_clawback: tx,
+      }),
+    submitPassportAttestation: (attestation) =>
+      call<{ attestation_id: string }>("agora_submitPassportAttestation", {
+        attestation,
       }),
     getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
     getGovernance: () => call<LightGovernance>("agora_getGovernance", []),

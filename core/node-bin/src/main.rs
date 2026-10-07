@@ -43,11 +43,12 @@ use crate::backend::{
     admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
     admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
     admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_issuer_control,
-    admit_drc_trust_line_set, admit_ovl_execution, admit_ovl_raw_execution, admit_stake_tx,
-    admit_tlt_covenant, admit_transaction, NodeBackend, NodeBackendConfig,
+    admit_drc_trust_line_set, admit_ovl_execution, admit_ovl_raw_execution,
+    admit_passport_attestation, admit_stake_tx, admit_tlt_covenant, admit_transaction, NodeBackend,
+    NodeBackendConfig,
 };
 use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
-use crate::startup::{p2p_identity_path, prepare_legacy_datadir};
+use crate::startup::{p2p_identity_path, prepare_legacy_datadir, prepare_trident_datadir};
 use crate::storage_policy::StoragePolicy;
 
 fn resolve_chain_params() -> ChainParams {
@@ -476,8 +477,6 @@ async fn main() {
     let chain_params = resolve_chain_params();
     let emission = chain_params.emission.clone();
     let mut boot = resolve_boot_config(&chain_params);
-    let pow_algo = boot.pow;
-    let template_bits = boot.initial_bits;
 
     let listen = std::env::var("AGORA_LISTEN").unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/16111".into());
     let bootstrap = std::env::var("AGORA_BOOTSTRAP")
@@ -508,16 +507,93 @@ async fn main() {
     );
     let storage = StoragePolicy::from_env().for_network(chain_params.network.as_str());
     let premine_address = chain_params.supply.premine_address;
-    let prepared = prepare_legacy_datadir(&data_dir, &chain_params, storage, |path| {
-        load_or_generate_identity(path)
-    })
-    .unwrap_or_else(|error| {
-        eprintln!("agora-node: startup refused: {error}");
+    if std::env::var_os("AGORA_TRIDENT_GENESIS_FILE").is_some()
+        && std::env::var_os("AGORA_GENESIS_FILE").is_some()
+    {
+        eprintln!(
+            "agora-node: AGORA_TRIDENT_GENESIS_FILE cannot be combined with AGORA_GENESIS_FILE"
+        );
         std::process::exit(1);
-    });
-    let store = prepared.store;
-    let genesis_hash = prepared.genesis_hash;
-    let identity = prepared.p2p_identity;
+    }
+
+    let (store, genesis_hash, identity, net_fp) =
+        if let Some(path) = std::env::var_os("AGORA_TRIDENT_GENESIS_FILE") {
+            let nonce = std::env::var("AGORA_TRIDENT_BLOCK_ZERO_NONCE")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            let prepared = prepare_trident_datadir(
+                &data_dir,
+                std::path::Path::new(&path),
+                nonce,
+                |identity_path| load_or_generate_identity(identity_path),
+            )
+            .unwrap_or_else(|error| {
+                eprintln!("agora-node: Trident startup refused: {error}");
+                std::process::exit(1);
+            });
+            let runtime = prepared
+                .artifact
+                .to_runtime_policy()
+                .unwrap_or_else(|error| {
+                    eprintln!("agora-node: Trident runtime policy: {error}");
+                    std::process::exit(1);
+                });
+            if runtime.pow_algorithm != PowAlgorithm::RandomX {
+                eprintln!("agora-node: public Trident networks are RandomX-only");
+                std::process::exit(1);
+            }
+            boot.pow = PowAlgorithm::RandomX;
+            boot.initial_bits = runtime.bits;
+            boot.daa = runtime.daa;
+            boot.ghostdag = runtime.ghostdag;
+            boot.emission = runtime.tlt_emission;
+            boot.chain_id = runtime.chain_id.clone();
+            boot.consensus_policy_hash = runtime.consensus_policy_hash;
+            let net_fp = agora_p2p::trident_network_fingerprint(
+                &runtime.chain_id,
+                &runtime.artifact_identity,
+                &runtime.consensus_policy_hash,
+            );
+            info!(
+                genesis = %prepared.genesis_hash.to_hex(),
+                live_state_root = %prepared.live_state_root.to_hex(),
+                chain_id = %runtime.chain_id,
+                "Trident freeze-ready Block 0 live state ready"
+            );
+            (
+                prepared.store,
+                prepared.genesis_hash,
+                prepared.p2p_identity,
+                net_fp,
+            )
+        } else {
+            let prepared = prepare_legacy_datadir(&data_dir, &chain_params, storage, |path| {
+                load_or_generate_identity(path)
+            })
+            .unwrap_or_else(|error| {
+                eprintln!("agora-node: startup refused: {error}");
+                std::process::exit(1);
+            });
+            let artifact = agora_state_machine::GenesisArtifact::from_params(&chain_params);
+            let policy_hash = artifact
+                .consensus
+                .as_ref()
+                .map(|c| c.canonical_hash())
+                .or_else(|| Hash::from_hex(&artifact.consensus_policy_hash))
+                .unwrap_or(Hash::ZERO);
+            let net_fp = agora_p2p::network_fingerprint(
+                chain_params.network.chain_id(),
+                &prepared.genesis_hash,
+                &policy_hash,
+            );
+            (
+                prepared.store,
+                prepared.genesis_hash,
+                prepared.p2p_identity,
+                net_fp,
+            )
+        };
     let identity_path = p2p_identity_path(&data_dir);
     info!(
         path = %identity_path.display(),
@@ -535,19 +611,6 @@ async fn main() {
     if let Some(url) = &dns_seeder {
         net_cfg = net_cfg.with_dns_seeder(url.clone());
     }
-
-    let artifact = agora_state_machine::GenesisArtifact::from_params(&chain_params);
-    let policy_hash = artifact
-        .consensus
-        .as_ref()
-        .map(|c| c.canonical_hash())
-        .or_else(|| Hash::from_hex(&artifact.consensus_policy_hash))
-        .unwrap_or(Hash::ZERO);
-    let net_fp = agora_p2p::network_fingerprint(
-        chain_params.network.chain_id(),
-        &genesis_hash,
-        &policy_hash,
-    );
     net_cfg = net_cfg.with_fingerprint(agora_p2p::fingerprint_topic_tag(&net_fp));
     info!(
         network = %chain_params.network,
@@ -557,20 +620,14 @@ async fn main() {
         "genesis ready"
     );
 
-    let da_lane_opt_in = matches!(
-        std::env::var("AGORA_ENABLE_DA_LANE")
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "1" | "true" | "yes" | "on"
+    boot.data_availability_network_fingerprint = Some(net_fp);
+    let pow_algo = boot.pow;
+    let template_bits = boot.initial_bits;
+    info!(
+        fingerprint = %agora_p2p::fingerprint_topic_tag(&net_fp),
+        fee_tlt = agora_types::DA_INCLUSION_FEE_TLT,
+        "DA commitment lane enabled: mesh-bound, burns TLT inclusion fee, Experimental"
     );
-    if da_lane_opt_in {
-        boot.data_availability_network_fingerprint = Some(net_fp);
-        info!(
-            fingerprint = %agora_p2p::fingerprint_topic_tag(&net_fp),
-            "DA commitment lane opt-in: mesh-bound, TLT inclusion fee still unspecified, Experimental"
-        );
-    }
 
     let chain = Arc::new(Mutex::new(
         ChainState::bootstrap_with(store.clone(), genesis_hash, boot.clone(), storage)
@@ -1617,6 +1674,44 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "DA commitment gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::DrcMultisignAttachment(attachment) => match mempool.lock() {
+                        Ok(mut pool) => match pool.admit_drc_multisign_attachment(attachment) {
+                            Ok(id) => {
+                                info!(
+                                    %peer,
+                                    %topic,
+                                    attachment = %id.to_hex(),
+                                    "DRC multisign attachment gossip admitted"
+                                );
+                            }
+                            Err(err) => {
+                                warn!(
+                                    %peer,
+                                    %topic,
+                                    error = %err,
+                                    "DRC multisign attachment gossip rejected"
+                                );
+                            }
+                        },
+                        Err(_) => {
+                            warn!(%peer, %topic, "DRC multisign attachment gossip dropped: mempool lock poisoned");
+                        }
+                    },
+                    NetworkMessage::PassportAttestation(attestation) => {
+                        match admit_passport_attestation(
+                            store.as_ref(),
+                            &mempool,
+                            attestation,
+                            &tx_auth,
+                        ) {
+                            Ok(id) => {
+                                info!(%peer, %topic, passport = %id.to_hex(), "passport attestation gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "passport attestation gossip rejected");
                             }
                         }
                     }

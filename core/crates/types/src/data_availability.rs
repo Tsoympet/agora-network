@@ -1,15 +1,16 @@
 //! Provenance-bound data-commitment types for the Trident L1 block lane.
 //!
 //! These types define canonical bytes and operator authorization consumed by
-//! [`crate::Block::data_commitments`]. Standalone gossip and RPC exist; default
-//! boot stays fail-closed until `TxAuthContext` carries a DA fingerprint.
+//! [`crate::Block::data_commitments`]. Standalone gossip and RPC exist. Default
+//! Experimental boot binds the DA fingerprint to the live mesh and burns
+//! [`DA_INCLUSION_FEE_TLT`] from the operator's TLT UTXOs on accept.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use ts_rs::TS;
 
-use crate::{Address, Hash};
+use crate::{Address, Hash, OutPoint};
 
 /// Domain for the source commitment bytes. Changing the payload requires a new version/domain.
 pub const DA_COMMITMENT_PAYLOAD_DOMAIN: &[u8] = b"agora-trident-da-commitment-v1";
@@ -20,6 +21,11 @@ pub const DA_COMMITMENT_AUTHORIZATION_ID_DOMAIN: &[u8] = b"agora-trident-da-auth
 pub const DA_COMMITMENT_VERSION: u32 = 1;
 pub const DA_COMMITMENT_AUTHORIZATION_VERSION: u32 = 1;
 pub const MAX_DA_CHAIN_ID_BYTES: usize = 128;
+/// TLT base units burned from the operator's P2PKH UTXOs per accepted DA
+/// authorization. 0.01 TLT at the 8-decimal base unit.
+pub const DA_INCLUSION_FEE_TLT: u64 = 1_000_000;
+/// Domain for the change outpoint created when a DA fee spend is not exact.
+pub const DA_FEE_CHANGE_DOMAIN: &[u8] = b"agora-trident-da-fee-change-v1";
 
 /// Append-only source discriminant for explicitly non-canonical producer data.
 #[derive(
@@ -129,11 +135,19 @@ impl DataAvailabilityCommitment {
     }
 }
 
+/// Deterministic change outpoint when a DA fee spend is not exact.
+pub fn da_fee_change_outpoint(authorization_id: &Hash) -> OutPoint {
+    OutPoint {
+        tx_id: Hash::hash_borsh(&(DA_FEE_CHANGE_DOMAIN, authorization_id)),
+        index: 0,
+    }
+}
+
 /// Signed operator authorization carried in `Block::data_commitments`.
 ///
 /// `replay_nonce` is cryptographically bound here and enforced atomically by
-/// the state transition. Standalone RPC/gossip admit only when the node has a
-/// DA network fingerprint.
+/// the state transition. Inclusion burns [`DA_INCLUSION_FEE_TLT`] from the
+/// operator's TLT UTXOs. The DA fingerprint is the mesh bind, not a fee gate.
 #[derive(
     Clone, PartialEq, Eq, Debug, BorshSerialize, BorshDeserialize, Serialize, Deserialize, TS,
 )]
@@ -344,5 +358,15 @@ mod tests {
             DataCommitmentSource::AgoraLayersOvolosBatchLab.wire_byte(),
             0
         );
+    }
+
+    #[test]
+    fn da_fee_change_outpoint_is_domain_separated() {
+        let a = da_fee_change_outpoint(&Hash([1; 32]));
+        let b = da_fee_change_outpoint(&Hash([2; 32]));
+        assert_ne!(a.tx_id, b.tx_id);
+        assert_eq!(a.index, 0);
+        assert_ne!(a.tx_id, Hash([1; 32]));
+        assert_eq!(DA_INCLUSION_FEE_TLT, 1_000_000);
     }
 }

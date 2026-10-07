@@ -17,6 +17,7 @@ import {
   sendDrcOfferCancel,
   sendDrcOfferCreate,
   sendDrcPayment,
+  DRC_FAMILY_SENDERS,
   sendOvlExecution,
   sendTltCovenant,
   sendTransfer,
@@ -100,6 +101,7 @@ export function App() {
     | "drc"
     | "drc-offer"
     | "drc-offer-cancel"
+    | "drc-ticket"
   >("tlt");
   const [offerIssuer, setOfferIssuer] = useState("");
   const [offerCurrency, setOfferCurrency] = useState("USD");
@@ -337,7 +339,7 @@ export function App() {
     }
     const amt = Number(amount);
     const feeN = Number(fee);
-    if (sendLane !== "drc-offer-cancel" && (!Number.isFinite(amt) || amt <= 0)) {
+    if (sendLane !== "drc-offer-cancel" && sendLane !== "drc-ticket" && (!Number.isFinite(amt) || amt <= 0)) {
       setSendError("Amount must be a positive number");
       return;
     }
@@ -421,11 +423,19 @@ export function App() {
         id = submitted;
         fromBech32 = built.fromBech32;
         fromHex = built.from;
-      } else {
+      } else if (sendLane === "drc-offer-cancel") {
         const { id: submitted, built } = await sendDrcOfferCancel(client, {
           ...common,
           offerId: offerId.trim(),
         });
+        id = submitted;
+        fromBech32 = built.fromBech32;
+        fromHex = built.from;
+      } else {
+        const { id: submitted, built } = await DRC_FAMILY_SENDERS.sendDrcTicketCreate(
+          client,
+          common,
+        );
         id = submitted;
         fromBech32 = built.fromBech32;
         fromHex = built.from;
@@ -870,7 +880,8 @@ export function App() {
                   | "ovl-exec"
                   | "drc"
                   | "drc-offer"
-                  | "drc-offer-cancel",
+                  | "drc-offer-cancel"
+                  | "drc-ticket",
               )
             }
             aria-label="Send lane"
@@ -883,6 +894,7 @@ export function App() {
             <option value="drc">DRC payment v4</option>
             <option value="drc-offer">DRC offer create</option>
             <option value="drc-offer-cancel">DRC offer cancel</option>
+            <option value="drc-ticket">DRC ticket create</option>
           </select>
           {sendLane === "drc-offer-cancel" ? (
             <input

@@ -62,8 +62,12 @@ This gate does not load v3 into a node and does not establish Public testnet
 readiness.
 
 Block 0 store tests cover in-memory staging plus RocksDB reopen, tamper, and
-no-partial-write cases for the candidate Meta envelope. They must not write
-live balances or change v2 ignition.
+no-partial-write cases for the candidate Meta envelope. Live materialization
+tests (`block_zero_live`) use `synthetic_freeze_ready_artifact()` only: they
+must write UTXO/account/validator/treasury state, require
+`compose_trident_state_root` to equal the live `TridentHeader` state root, and
+leave the checked-in draft failing freeze-ready / materialize. They must not
+change v2 ignition identities.
 
 ## Integration
 

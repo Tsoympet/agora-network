@@ -40,6 +40,12 @@ try {
   await client.submitDrcPayment({ version: 4 });
   await client.submitDataCommitment({ version: 1 });
   await client.submitDrcOfferCreate({ version: 1 });
+  await client.submitDrcTicketCreate({ version: 1 });
+  await client.submitDrcEscrowCreate({ version: 1 });
+  await client.sendRawEvmTransaction("02c0");
+  await client.submitPassportAttestation({ version: 1 });
+  await client.getPassportAttestation("ee".repeat(32));
+  await client.getPassportIssuerNonce("agoradev1qqqq");
 
   assert.deepEqual(
     calls.map((call) => call.method),
@@ -59,6 +65,12 @@ try {
       "agora_submitDrcPayment",
       "agora_submitDataCommitment",
       "agora_submitDrcOfferCreate",
+      "agora_submitDrcTicketCreate",
+      "agora_submitDrcEscrowCreate",
+      "eth_sendRawTransaction",
+      "agora_submitPassportAttestation",
+      "agora_getPassportAttestation",
+      "agora_getPassportIssuerNonce",
     ],
   );
   assert.deepEqual(calls[0].params, { address: "agoradev1qqqq" });
@@ -82,6 +94,12 @@ try {
   assert.deepEqual(calls[12].params, { payment: { version: 4 } });
   assert.deepEqual(calls[13].params, { authorization: { version: 1 } });
   assert.deepEqual(calls[14].params, { offer_create: { version: 1 } });
+  assert.deepEqual(calls[15].params, { ticket_create: { version: 1 } });
+  assert.deepEqual(calls[16].params, { escrow_create: { version: 1 } });
+  assert.deepEqual(calls[17].params, ["0x02c0"]);
+  assert.deepEqual(calls[18].params, { attestation: { version: 1 } });
+  assert.deepEqual(calls[19].params, { attestation_id: "ee".repeat(32) });
+  assert.deepEqual(calls[20].params, { issuer: "agoradev1qqqq" });
   console.log("light-client query wrappers ok");
 } finally {
   globalThis.fetch = originalFetch;

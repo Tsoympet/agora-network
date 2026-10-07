@@ -5,15 +5,16 @@ use agora_types::{
     DataCommitmentAuthorization, DrcAccountPolicyTx, DrcAccountSequence, DrcCheckCancelTx,
     DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthAction, DrcDepositPreauthTx,
     DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx,
-    DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcOfferCancelTx, DrcOfferCreateTx,
-    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
-    DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
-    DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash, NativeAssetId, OutPoint, OvlExecutionTx,
-    SignedStakeTx, TltCovenantTx, Transaction, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
-    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_CHECK_CANCEL_TICKET_VERSION,
-    DRC_CHECK_CASH_TICKET_VERSION, DRC_CHECK_CREATE_TICKET_VERSION,
-    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_ESCROW_CANCEL_TICKET_VERSION,
-    DRC_ESCROW_CREATE_TICKET_VERSION, DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
+    DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcMultisignBlockAttachment, DrcOfferCancelTx,
+    DrcOfferCreateTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
+    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash,
+    NativeAssetId, OutPoint, OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx,
+    Transaction, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
+    DRC_CHECK_CANCEL_TICKET_VERSION, DRC_CHECK_CASH_TICKET_VERSION,
+    DRC_CHECK_CREATE_TICKET_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_ESCROW_CANCEL_TICKET_VERSION, DRC_ESCROW_CREATE_TICKET_VERSION,
+    DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
     DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 
@@ -23,10 +24,14 @@ use crate::P2pError;
 mod da_lane;
 #[path = "issued_controls_lane.rs"]
 mod issued_controls_lane;
+#[path = "multisign_compact.rs"]
+mod multisign_compact;
 #[path = "offer_lane.rs"]
 mod offer_lane;
 #[path = "ovl_raw_lane.rs"]
 mod ovl_raw_lane;
+#[path = "passport_lane.rs"]
+mod passport_lane;
 #[path = "payment_channel_lane.rs"]
 mod payment_channel_lane;
 #[path = "trust_line_lane.rs"]
@@ -97,10 +102,15 @@ pub struct Mempool {
     drc_offer_create_txs: HashMap<Hash, DrcOfferCreateTx>,
     drc_offer_cancel_txs: HashMap<Hash, DrcOfferCancelTx>,
     pending_offer_cancels: HashMap<Hash, Hash>,
-    /// Signed DA authorizations. Inclusion still requires a DA fingerprint.
+    /// Signed DA authorizations. Inclusion burns the TLT inclusion fee at apply.
     data_commitments: HashMap<Hash, DataCommitmentAuthorization>,
     reserved_da_sequences: HashMap<(u8, u64), Hash>,
     reserved_da_operators: HashMap<Address, Hash>,
+    /// Detached DRC multisign attachments indexed by `body_commitment_id`.
+    drc_multisign_attachments: HashMap<Hash, DrcMultisignBlockAttachment>,
+    /// Signed Hub-coordinator passport attestations.
+    passport_attestations: HashMap<Hash, PassportAttestation>,
+    reserved_passport_issuers: HashMap<Address, Hash>,
     pending_native_offer_lock: HashMap<Address, u64>,
     pending_issued_offer_reserve: HashMap<(Address, Hash), u64>,
     reserved_asset_policy_assets: HashMap<Hash, Hash>,
@@ -187,6 +197,9 @@ impl Mempool {
             data_commitments: HashMap::new(),
             reserved_da_sequences: HashMap::new(),
             reserved_da_operators: HashMap::new(),
+            drc_multisign_attachments: HashMap::new(),
+            passport_attestations: HashMap::new(),
+            reserved_passport_issuers: HashMap::new(),
             pending_native_offer_lock: HashMap::new(),
             pending_issued_offer_reserve: HashMap::new(),
             reserved_asset_policy_assets: HashMap::new(),
@@ -231,6 +244,8 @@ impl Mempool {
             + self.issued_controls_maps_len()
             + self.offer_maps_len()
             + self.data_commitment_maps_len()
+            + self.drc_multisign_attachments.len()
+            + self.passport_attestations.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -261,6 +276,7 @@ impl Mempool {
             || self.issued_controls_maps_contains(tx_id)
             || self.offer_maps_contains(tx_id)
             || self.data_commitment_maps_contains(tx_id)
+            || self.drc_multisign_attachments.contains_key(tx_id)
     }
 
     pub fn ticket_consumer_reserved(&self, owner: &Address, ticket_sequence: u64) -> bool {
@@ -1494,11 +1510,12 @@ impl Mempool {
             COMPACT_LANE_DRC_CHECK_CASH, COMPACT_LANE_DRC_CHECK_CREATE, COMPACT_LANE_DRC_CLAWBACK,
             COMPACT_LANE_DRC_ESCROW_CANCEL, COMPACT_LANE_DRC_ESCROW_CREATE,
             COMPACT_LANE_DRC_ESCROW_FINISH, COMPACT_LANE_DRC_ISSUED_TRANSFER,
-            COMPACT_LANE_DRC_ISSUER_CONTROL, COMPACT_LANE_DRC_OFFER_CANCEL,
-            COMPACT_LANE_DRC_OFFER_CREATE, COMPACT_LANE_DRC_PAYMENT, COMPACT_LANE_DRC_POLICY,
-            COMPACT_LANE_DRC_PREAUTH, COMPACT_LANE_DRC_REGULAR_KEY, COMPACT_LANE_DRC_SIGNER_LIST,
-            COMPACT_LANE_DRC_TICKET, COMPACT_LANE_DRC_TRUST_LINE, COMPACT_LANE_OVL_EXECUTION,
-            COMPACT_LANE_STAKE, COMPACT_LANE_TLT_COVENANT, COMPACT_LANE_UTXO,
+            COMPACT_LANE_DRC_ISSUER_CONTROL, COMPACT_LANE_DRC_MULTISIGN,
+            COMPACT_LANE_DRC_OFFER_CANCEL, COMPACT_LANE_DRC_OFFER_CREATE, COMPACT_LANE_DRC_PAYMENT,
+            COMPACT_LANE_DRC_POLICY, COMPACT_LANE_DRC_PREAUTH, COMPACT_LANE_DRC_REGULAR_KEY,
+            COMPACT_LANE_DRC_SIGNER_LIST, COMPACT_LANE_DRC_TICKET, COMPACT_LANE_DRC_TRUST_LINE,
+            COMPACT_LANE_OVL_EXECUTION, COMPACT_LANE_PASSPORT, COMPACT_LANE_STAKE,
+            COMPACT_LANE_TLT_COVENANT, COMPACT_LANE_UTXO,
         };
         match kind {
             COMPACT_LANE_UTXO => map_by_short_id(&self.txs, short_id)
@@ -1609,6 +1626,14 @@ impl Mempool {
             COMPACT_LANE_TLT_COVENANT => map_by_short_id(&self.covenant_txs, short_id)
                 .cloned()
                 .map(Item::TltCovenant),
+            COMPACT_LANE_DRC_MULTISIGN => {
+                map_by_short_id(&self.drc_multisign_attachments, short_id)
+                    .cloned()
+                    .map(Item::DrcMultisign)
+            }
+            COMPACT_LANE_PASSPORT => map_by_short_id(&self.passport_attestations, short_id)
+                .cloned()
+                .map(Item::Passport),
             _ => None,
         }
     }
@@ -1939,6 +1964,8 @@ impl Mempool {
         }
         self.evict_offer_lanes_from_block(block);
         self.evict_data_commitment_lanes_from_block(block);
+        self.evict_drc_multisign_attachments_from_block(block);
+        self.evict_passport_attestations_from_block(block);
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
             let id = tx.policy_tx_id();
@@ -2421,6 +2448,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -2505,6 +2533,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));
@@ -3329,6 +3358,7 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.pending_check_create(&id));

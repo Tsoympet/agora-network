@@ -508,6 +508,12 @@ pub trait RpcBackend: Send {
     fn get_native_asset_supply(&self, asset: &str) -> Result<Value, RpcError>;
     fn get_protocol_treasuries(&self) -> Result<Value, RpcError>;
     fn get_community_registry(&self, limit: usize) -> Result<Value, RpcError>;
+    fn submit_passport_attestation(
+        &mut self,
+        attestation: agora_types::PassportAttestation,
+    ) -> Result<Hash, RpcError>;
+    fn get_passport_attestation(&self, attestation_id: &Hash) -> Result<Value, RpcError>;
+    fn get_passport_issuer_nonce(&self, issuer: &Address) -> Result<Value, RpcError>;
     /// Admit a secp256k1-signed stake tx (bond/delegate/unbond/withdraw). Never mint-like.
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError>;
 
@@ -1577,6 +1583,7 @@ impl RpcBackend for InMemoryBackend {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
         })
     }
 
@@ -1660,6 +1667,30 @@ impl RpcBackend for InMemoryBackend {
             "passport_attestations": [],
             "grants": [],
             "missions": [],
+        }))
+    }
+
+    fn submit_passport_attestation(
+        &mut self,
+        _attestation: agora_types::PassportAttestation,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit passport attestations".into(),
+        ))
+    }
+
+    fn get_passport_attestation(&self, attestation_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "attestation_id": attestation_id.to_hex(),
+            "status": "unknown",
+            "attestation": null,
+        }))
+    }
+
+    fn get_passport_issuer_nonce(&self, issuer: &Address) -> Result<Value, RpcError> {
+        Ok(json!({
+            "issuer": issuer.to_hex(),
+            "nonce": 0u64,
         }))
     }
 

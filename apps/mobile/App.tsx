@@ -30,6 +30,7 @@ import {
   sendDrcOfferCancel,
   sendDrcOfferCreate,
   sendDrcPayment,
+  DRC_FAMILY_SENDERS,
   sendOvlExecution,
   sendTltCovenant,
   sendTransfer,
@@ -95,6 +96,7 @@ export default function App() {
     | "drc"
     | "drc-offer"
     | "drc-offer-cancel"
+    | "drc-ticket"
   >("tlt");
   const [offerIssuer, setOfferIssuer] = useState("");
   const [offerCurrency, setOfferCurrency] = useState("USD");
@@ -333,7 +335,7 @@ export default function App() {
     }
     const amt = Number(amount);
     const feeN = Number(fee);
-    if (sendLane !== "drc-offer-cancel" && (!Number.isFinite(amt) || amt <= 0)) {
+    if (sendLane !== "drc-offer-cancel" && sendLane !== "drc-ticket" && (!Number.isFinite(amt) || amt <= 0)) {
       setSendError("Amount must be a positive number");
       return;
     }
@@ -417,11 +419,19 @@ export default function App() {
         id = submitted;
         fromBech32 = built.fromBech32;
         fromHex = built.from;
-      } else {
+      } else if (sendLane === "drc-offer-cancel") {
         const { id: submitted, built } = await sendDrcOfferCancel(client, {
           ...common,
           offerId: offerId.trim(),
         });
+        id = submitted;
+        fromBech32 = built.fromBech32;
+        fromHex = built.from;
+      } else {
+        const { id: submitted, built } = await DRC_FAMILY_SENDERS.sendDrcTicketCreate(
+          client,
+          common,
+        );
         id = submitted;
         fromBech32 = built.fromBech32;
         fromHex = built.from;
@@ -706,6 +716,7 @@ export default function App() {
               ["drc", "DRC"],
               ["drc-offer", "Offer"],
               ["drc-offer-cancel", "Cancel"],
+              ["drc-ticket", "Ticket"],
             ] as const
           ).map(([id, label]) => (
             <Pressable
