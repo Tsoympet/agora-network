@@ -32,6 +32,7 @@ mod stake;
 mod tlt_script;
 mod transaction;
 mod treasury;
+mod vesting;
 
 pub use account::{
     account_signer_address, sign_account_transfer_bound, verify_account_transfer_bound,
@@ -102,3 +103,4 @@ pub use transaction::{
     verify_transaction, verify_transaction_bound,
 };
 pub use treasury::{sign_treasury_disbursement_bound, verify_treasury_disbursement_bound};
+pub use vesting::{sign_vesting_unlock_bound, verify_vesting_unlock_bound};

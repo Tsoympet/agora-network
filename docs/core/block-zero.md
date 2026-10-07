@@ -82,9 +82,12 @@ before any write or P2P identity load. Subsequent GHOSTDAG, mining, RPC, and
 IBD still use the existing `Block`/`BlockHeader` wire. `TridentHeader` is the
 Block 0 identity commitment in Meta, not a replacement gossip header.
 
-Vested amounts are withheld from liquid balances. There is not yet a consensus
-unlock transaction; schedules with nonzero vesting stay locked until that lane
-exists.
+Vested amounts are withheld from liquid balances. Beneficiary-signed
+`VestingUnlock` claims (protocol v32) credit the remainder that is vested at
+the including block's `header.timestamp_ms` (linear after `start`, nothing
+before `cliff`, full at/after `end`). Unlocked progress is committed in
+`agora-governance-treasury-root-v3` so unlock-then-spend-then-reunlock cannot
+fork. The claim does not mint.
 
 ## Remaining public-testnet blockers
 

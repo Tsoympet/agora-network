@@ -4,14 +4,14 @@
 //! into consensus state. The existing unsigned node-local civic RPC snapshot is
 //! intentionally stored under a different key and excluded from this root.
 
-use agora_crypto::verify_treasury_disbursement_bound;
+use agora_crypto::{verify_treasury_disbursement_bound, verify_vesting_unlock_bound};
 use agora_governance::{
     authorization_for_class, hash_constitution_body, trident_policy_catalog, ProposalAuthorization,
     ProposalClass, CONSTITUTION_V1_BODY, CONSTITUTION_V1_ID,
 };
 use agora_types::{
-    Address, Amount, Hash, NativeAssetId, OutPoint, TreasuryBalance, TreasuryDisbursement,
-    TreasuryId, TxOut,
+    vested_amount_at, vesting_schedule_id, Address, Amount, Hash, NativeAssetId, OutPoint,
+    TreasuryBalance, TreasuryDisbursement, TreasuryId, TxOut, VestingUnlock,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -28,8 +28,11 @@ const TREASURY_NONCE_PREFIX: &[u8] = b"governance/treasury_nonce/";
 const TREASURY_DISBURSEMENT_PREFIX: &[u8] = b"governance/treasury_disbursement/";
 const EMERGENCY_POLICY_KEY: &[u8] = b"governance/consensus/emergency_policy_hash";
 const VESTING_KEY: &[u8] = b"governance/vesting/schedules-v1";
+const VESTING_UNLOCKED_PREFIX: &[u8] = b"governance/vesting/unlocked/";
+const VESTING_NONCE_PREFIX: &[u8] = b"governance/vesting/nonce/";
+const VESTING_CLAIM_PREFIX: &[u8] = b"governance/vesting/claim/";
 pub const CANONICAL_GOVERNANCE_VERSION: u32 = 1;
-const GOVERNANCE_TREASURY_ROOT_DOMAIN: &[u8] = b"agora-governance-treasury-root-v2";
+const GOVERNANCE_TREASURY_ROOT_DOMAIN: &[u8] = b"agora-governance-treasury-root-v3";
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct CanonicalGovernancePolicy {
@@ -234,7 +237,7 @@ fn load_treasury_controls(store: &StateStore) -> Result<Vec<(u8, String)>, State
     Ok(controls)
 }
 
-fn load_vesting_schedules(
+pub fn load_vesting_schedules(
     store: &StateStore,
 ) -> Result<Vec<crate::block_zero::BlockZeroVesting>, StateError> {
     let Some(bytes) = store.get_cf(ColumnFamily::Meta, VESTING_KEY)? else {
@@ -435,6 +438,220 @@ pub fn apply_treasury_disbursement_into(
     Ok(created)
 }
 
+pub fn vesting_unlocked_record_key(schedule_id: &Hash) -> Vec<u8> {
+    vesting_unlocked_key(schedule_id)
+}
+
+pub fn vesting_nonce_record_key(beneficiary: &Address) -> Vec<u8> {
+    vesting_nonce_key(beneficiary)
+}
+
+pub fn vesting_claim_record_key(id: &Hash) -> Vec<u8> {
+    vesting_claim_key(id)
+}
+
+fn vesting_unlocked_key(schedule_id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(VESTING_UNLOCKED_PREFIX.len() + 32);
+    key.extend_from_slice(VESTING_UNLOCKED_PREFIX);
+    key.extend_from_slice(schedule_id.as_bytes());
+    key
+}
+
+fn vesting_nonce_key(beneficiary: &Address) -> Vec<u8> {
+    let mut key = Vec::with_capacity(VESTING_NONCE_PREFIX.len() + 20);
+    key.extend_from_slice(VESTING_NONCE_PREFIX);
+    key.extend_from_slice(&beneficiary.0);
+    key
+}
+
+fn vesting_claim_key(id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(VESTING_CLAIM_PREFIX.len() + 32);
+    key.extend_from_slice(VESTING_CLAIM_PREFIX);
+    key.extend_from_slice(id.as_bytes());
+    key
+}
+
+pub fn load_vesting_unlocked(store: &StateStore, schedule_id: &Hash) -> Result<u64, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &vesting_unlocked_key(schedule_id))? else {
+        return Ok(0);
+    };
+    u64::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))
+}
+
+pub fn load_vesting_nonce(store: &StateStore, beneficiary: &Address) -> Result<u64, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &vesting_nonce_key(beneficiary))? else {
+        return Ok(0);
+    };
+    u64::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))
+}
+
+pub fn load_vesting_unlock(
+    store: &StateStore,
+    id: &Hash,
+) -> Result<Option<VestingUnlock>, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &vesting_claim_key(id))? else {
+        return Ok(None);
+    };
+    VestingUnlock::try_from_slice(&bytes)
+        .map(Some)
+        .map_err(|e| StateError::Storage(e.to_string()))
+}
+
+pub fn load_vesting_progress(store: &StateStore) -> Result<Vec<(Hash, u64)>, StateError> {
+    let mut progress = Vec::new();
+    for schedule in load_vesting_schedules(store)? {
+        let id = vesting_schedule_id(
+            schedule.asset,
+            &schedule.address,
+            schedule.amount,
+            schedule.start_timestamp_ms,
+            schedule.cliff_timestamp_ms,
+            schedule.end_timestamp_ms,
+        );
+        let unlocked = load_vesting_unlocked(store, &id)?;
+        if unlocked > 0 {
+            progress.push((id, unlocked));
+        }
+    }
+    progress.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+    Ok(progress)
+}
+
+pub fn apply_vesting_unlock_into(
+    batch: &mut WriteBatch,
+    store: &StateStore,
+    claim: &VestingUnlock,
+    auth: &TxAuthContext,
+    now_ms: u64,
+) -> Result<Option<OutPoint>, StateError> {
+    if claim.version != 1 {
+        return Err(StateError::InvalidTx(
+            "unsupported vesting unlock version".into(),
+        ));
+    }
+    if claim.beneficiary == Address::ZERO {
+        return Err(StateError::InvalidTx(
+            "vesting beneficiary must be nonzero".into(),
+        ));
+    }
+    if claim.amount == Amount::ZERO {
+        return Err(StateError::InvalidTx(
+            "vesting amount must be nonzero".into(),
+        ));
+    }
+    let signer = verify_vesting_unlock_bound(claim, &auth.chain_id, &auth.genesis)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    if signer != claim.beneficiary {
+        return Err(StateError::InvalidTx(
+            "vesting unlock signer is not the beneficiary".into(),
+        ));
+    }
+    let schedules = load_vesting_schedules(store)?;
+    let schedule = schedules
+        .iter()
+        .find(|schedule| {
+            vesting_schedule_id(
+                schedule.asset,
+                &schedule.address,
+                schedule.amount,
+                schedule.start_timestamp_ms,
+                schedule.cliff_timestamp_ms,
+                schedule.end_timestamp_ms,
+            ) == claim.schedule_id
+        })
+        .ok_or_else(|| StateError::InvalidTx("unknown vesting schedule".into()))?;
+    if schedule.asset != claim.asset || schedule.address != claim.beneficiary {
+        return Err(StateError::InvalidTx(
+            "vesting unlock does not match the schedule".into(),
+        ));
+    }
+    let current_nonce = load_vesting_nonce(store, &claim.beneficiary)?;
+    if claim.nonce != current_nonce {
+        return Err(StateError::InvalidTx("vesting nonce mismatch".into()));
+    }
+    let id = claim.unlock_id();
+    if store
+        .get_cf(ColumnFamily::Meta, &vesting_claim_key(&id))?
+        .is_some()
+    {
+        return Err(StateError::InvalidTx("duplicate vesting unlock".into()));
+    }
+    let vested = vested_amount_at(
+        schedule.amount,
+        schedule.start_timestamp_ms,
+        schedule.cliff_timestamp_ms,
+        schedule.end_timestamp_ms,
+        now_ms,
+    );
+    let already = load_vesting_unlocked(store, &claim.schedule_id)?;
+    let claimable = vested
+        .checked_sub(already)
+        .ok_or_else(|| StateError::InvalidTx("vesting unlock accounting overflow".into()))?;
+    if claim.amount.as_base_units() > claimable {
+        return Err(StateError::InvalidTx(
+            "vesting unlock exceeds vested remainder".into(),
+        ));
+    }
+    let next_unlocked = already
+        .checked_add(claim.amount.as_base_units())
+        .ok_or_else(|| StateError::InvalidTx("vesting unlock overflow".into()))?;
+    let next_nonce = current_nonce
+        .checked_add(1)
+        .ok_or_else(|| StateError::InvalidTx("vesting nonce overflow".into()))?;
+
+    let mut pending = WriteBatch::new();
+    let unlocked_bytes =
+        borsh::to_vec(&next_unlocked).map_err(|e| StateError::Storage(e.to_string()))?;
+    pending.put_cf(
+        ColumnFamily::Meta,
+        &vesting_unlocked_key(&claim.schedule_id),
+        &unlocked_bytes,
+    );
+    let nonce_bytes = borsh::to_vec(&next_nonce).map_err(|e| StateError::Storage(e.to_string()))?;
+    pending.put_cf(
+        ColumnFamily::Meta,
+        &vesting_nonce_key(&claim.beneficiary),
+        &nonce_bytes,
+    );
+    let rec = borsh::to_vec(claim).map_err(|e| StateError::Storage(e.to_string()))?;
+    pending.put_cf(ColumnFamily::Meta, &vesting_claim_key(&id), &rec);
+
+    let created = match claim.asset {
+        NativeAssetId::TLT => {
+            let op = OutPoint {
+                tx_id: id,
+                index: 0,
+            };
+            let key = outpoint_key(&op);
+            if store.get_cf(ColumnFamily::Utxo, &key)?.is_some() {
+                return Err(StateError::DuplicateOutpoint(format!(
+                    "{}:0",
+                    op.tx_id.to_hex()
+                )));
+            }
+            let out = TxOut {
+                value: claim.amount,
+                address: claim.beneficiary,
+            };
+            let bytes = borsh::to_vec(&out).map_err(|e| StateError::Storage(e.to_string()))?;
+            pending.put_cf(ColumnFamily::Utxo, &key, &bytes);
+            Some(op)
+        }
+        NativeAssetId::OVL | NativeAssetId::DRC => {
+            credit_account_into(
+                &mut pending,
+                store,
+                claim.asset,
+                &claim.beneficiary,
+                claim.amount,
+            )?;
+            None
+        }
+    };
+    batch.append(pending);
+    Ok(created)
+}
+
 pub fn load_protocol_treasuries(store: &StateStore) -> Result<Vec<TreasuryBalance>, StateError> {
     TreasuryId::ALL
         .iter()
@@ -449,6 +666,7 @@ pub fn governance_treasury_root(store: &StateStore) -> Result<Hash, StateError> 
     let emergency = load_emergency_policy_hash(store)?;
     let controls = load_treasury_controls(store)?;
     let vesting = load_vesting_schedules(store)?;
+    let vesting_progress = load_vesting_progress(store)?;
     Ok(Hash::hash_borsh(&(
         GOVERNANCE_TREASURY_ROOT_DOMAIN,
         policy,
@@ -456,6 +674,7 @@ pub fn governance_treasury_root(store: &StateStore) -> Result<Hash, StateError> 
         emergency,
         controls,
         vesting,
+        vesting_progress,
     )))
 }
 
@@ -577,5 +796,68 @@ mod tests {
                 .balance,
             Amount::from_base_units(30)
         );
+    }
+
+    #[test]
+    fn vesting_unlock_rejects_before_cliff_overclaim_and_wrong_signer() {
+        use agora_crypto::{sign_vesting_unlock_bound, KeyPair};
+        use agora_types::vesting_schedule_id;
+
+        let store = StateStore::open_in_memory();
+        let beneficiary = KeyPair::from_secret_bytes(&[8; 32]).unwrap();
+        let stranger = KeyPair::from_secret_bytes(&[9; 32]).unwrap();
+        let schedule = crate::block_zero::BlockZeroVesting {
+            asset: NativeAssetId::OVL,
+            address: beneficiary.address(),
+            amount: 100,
+            start_timestamp_ms: 10,
+            cliff_timestamp_ms: 20,
+            end_timestamp_ms: 30,
+        };
+        let schedule_id = vesting_schedule_id(
+            schedule.asset,
+            &schedule.address,
+            schedule.amount,
+            schedule.start_timestamp_ms,
+            schedule.cliff_timestamp_ms,
+            schedule.end_timestamp_ms,
+        );
+        let mut batch = WriteBatch::new();
+        init_canonical_governance_into(&mut batch).unwrap();
+        put_vesting_schedules_into(&mut batch, &[schedule]).unwrap();
+        store.write_batch(batch).unwrap();
+
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis: Hash([7; 32]),
+            data_availability_network_fingerprint: None,
+        };
+        let mut claim = VestingUnlock::unsigned(
+            NativeAssetId::OVL,
+            beneficiary.address(),
+            schedule_id,
+            Amount::from_base_units(50),
+            0,
+        );
+        sign_vesting_unlock_bound(&mut claim, &stranger, &auth.chain_id, &auth.genesis).unwrap();
+        let mut reject = WriteBatch::new();
+        assert!(apply_vesting_unlock_into(&mut reject, &store, &claim, &auth, 20).is_err());
+
+        sign_vesting_unlock_bound(&mut claim, &beneficiary, &auth.chain_id, &auth.genesis).unwrap();
+        assert!(apply_vesting_unlock_into(&mut reject, &store, &claim, &auth, 19).is_err());
+
+        claim.amount = Amount::from_base_units(51);
+        sign_vesting_unlock_bound(&mut claim, &beneficiary, &auth.chain_id, &auth.genesis).unwrap();
+        assert!(apply_vesting_unlock_into(&mut reject, &store, &claim, &auth, 20).is_err());
+
+        claim.amount = Amount::from_base_units(50);
+        sign_vesting_unlock_bound(&mut claim, &beneficiary, &auth.chain_id, &auth.genesis).unwrap();
+        apply_vesting_unlock_into(&mut reject, &store, &claim, &auth, 20).unwrap();
+        store.write_batch(reject).unwrap();
+        assert_eq!(load_vesting_unlocked(&store, &schedule_id).unwrap(), 50);
+        let root_after = governance_treasury_root(&store).unwrap();
+        let empty = StateStore::open_in_memory();
+        init_canonical_governance_into(&mut WriteBatch::new()).unwrap();
+        assert_ne!(root_after, governance_treasury_root(&empty).unwrap());
     }
 }

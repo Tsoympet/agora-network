@@ -540,6 +540,12 @@ pub trait RpcBackend: Send {
     ) -> Result<Hash, RpcError>;
     fn get_treasury_disbursement(&self, disbursement_id: &Hash) -> Result<Value, RpcError>;
     fn get_treasury_nonce(&self, treasury: agora_types::TreasuryId) -> Result<Value, RpcError>;
+    fn submit_vesting_unlock(
+        &mut self,
+        claim: agora_types::VestingUnlock,
+    ) -> Result<Hash, RpcError>;
+    fn get_vesting_unlock(&self, unlock_id: &Hash) -> Result<Value, RpcError>;
+    fn get_vesting_nonce(&self, beneficiary: &Address) -> Result<Value, RpcError>;
     /// Admit a secp256k1-signed stake tx (bond/delegate/unbond/withdraw). Never mint-like.
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError>;
 
@@ -1614,6 +1620,7 @@ impl RpcBackend for InMemoryBackend {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         })
     }
 
@@ -1816,6 +1823,30 @@ impl RpcBackend for InMemoryBackend {
     fn get_treasury_nonce(&self, treasury: agora_types::TreasuryId) -> Result<Value, RpcError> {
         Ok(json!({
             "treasury": treasury.as_str(),
+            "nonce": 0u64,
+        }))
+    }
+
+    fn submit_vesting_unlock(
+        &mut self,
+        _claim: agora_types::VestingUnlock,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit vesting unlocks".into(),
+        ))
+    }
+
+    fn get_vesting_unlock(&self, unlock_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "unlock_id": unlock_id.to_hex(),
+            "status": "unknown",
+            "unlock": null,
+        }))
+    }
+
+    fn get_vesting_nonce(&self, beneficiary: &Address) -> Result<Value, RpcError> {
+        Ok(json!({
+            "beneficiary": beneficiary.to_hex(),
             "nonce": 0u64,
         }))
     }

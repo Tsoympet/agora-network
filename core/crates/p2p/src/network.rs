@@ -404,7 +404,8 @@ impl NetworkNode {
             | NetworkMessage::HubRegistration(_)
             | NetworkMessage::GrantRegistration(_)
             | NetworkMessage::MissionRegistration(_)
-            | NetworkMessage::TreasuryDisbursement(_) => {
+            | NetworkMessage::TreasuryDisbursement(_)
+            | NetworkMessage::VestingUnlock(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

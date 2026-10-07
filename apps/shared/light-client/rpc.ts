@@ -405,6 +405,15 @@ export type LightClient = {
     treasury: string;
     nonce: number;
   }>;
+  getVestingUnlock: (unlockId: string) => Promise<{
+    unlock_id: string;
+    status: string;
+    unlock: unknown | null;
+  }>;
+  getVestingNonce: (beneficiary: string) => Promise<{
+    beneficiary: string;
+    nonce: number;
+  }>;
   getDrcObject: (objectId: string) => Promise<{
     object_id: string;
     status: "live" | "unknown";
@@ -512,6 +521,9 @@ export type LightClient = {
   }>;
   submitTreasuryDisbursement: (disbursement: unknown) => Promise<{
     disbursement_id: string;
+  }>;
+  submitVestingUnlock: (unlock: unknown) => Promise<{
+    unlock_id: string;
   }>;
   getConstitution: () => Promise<LightConstitution>;
   getGovernance: () => Promise<LightGovernance>;
@@ -654,6 +666,16 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getTreasuryNonce: (treasury) =>
       call<{ treasury: string; nonce: number }>("agora_getTreasuryNonce", {
         treasury,
+      }),
+    getVestingUnlock: (unlockId) =>
+      call<{
+        unlock_id: string;
+        status: string;
+        unlock: unknown | null;
+      }>("agora_getVestingUnlock", { unlock_id: unlockId }),
+    getVestingNonce: (beneficiary) =>
+      call<{ beneficiary: string; nonce: number }>("agora_getVestingNonce", {
+        beneficiary,
       }),
     getDrcObject: (objectId) =>
       call<{
@@ -863,6 +885,8 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<{ disbursement_id: string }>("agora_submitTreasuryDisbursement", {
         disbursement,
       }),
+    submitVestingUnlock: (unlock) =>
+      call<{ unlock_id: string }>("agora_submitVestingUnlock", { unlock }),
     getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
     getGovernance: () => call<LightGovernance>("agora_getGovernance", []),
     listProposals: (limit = 64) =>

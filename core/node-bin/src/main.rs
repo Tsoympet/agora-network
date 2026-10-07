@@ -51,7 +51,7 @@ use crate::{
         admit_drc_trust_line_set, admit_grant_registration, admit_hub_registration,
         admit_mission_registration, admit_ovl_execution, admit_ovl_raw_execution,
         admit_passport_attestation, admit_stake_tx, admit_tlt_covenant, admit_transaction,
-        admit_treasury_disbursement, NodeBackend, NodeBackendConfig,
+        admit_treasury_disbursement, admit_vesting_unlock, NodeBackend, NodeBackendConfig,
     },
     http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig},
     startup::{p2p_identity_path, prepare_legacy_datadir, prepare_trident_datadir},
@@ -1775,6 +1775,16 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "treasury disbursement gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::VestingUnlock(claim) => {
+                        match admit_vesting_unlock(store.as_ref(), &mempool, claim, &tx_auth) {
+                            Ok(id) => {
+                                info!(%peer, %topic, vesting = %id.to_hex(), "vesting unlock gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "vesting unlock gossip rejected");
                             }
                         }
                     }

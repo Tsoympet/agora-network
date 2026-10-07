@@ -39,6 +39,7 @@ mod tlt_script;
 mod transaction;
 mod treasury;
 mod trident_header;
+mod vesting;
 
 pub use acceptance::{AcceptanceBitmap, TransactionAcceptance};
 pub use account::{
@@ -54,7 +55,8 @@ pub use block::{
     TRIDENT_BLOCK_BODY_V14_VERSION, TRIDENT_BLOCK_BODY_V15_DOMAIN, TRIDENT_BLOCK_BODY_V15_VERSION,
     TRIDENT_BLOCK_BODY_V16_DOMAIN, TRIDENT_BLOCK_BODY_V16_VERSION, TRIDENT_BLOCK_BODY_V17_DOMAIN,
     TRIDENT_BLOCK_BODY_V17_VERSION, TRIDENT_BLOCK_BODY_V21_DOMAIN, TRIDENT_BLOCK_BODY_V21_VERSION,
-    TRIDENT_BLOCK_BODY_V22_DOMAIN, TRIDENT_BLOCK_BODY_V22_VERSION, TRIDENT_BLOCK_BODY_VERSION,
+    TRIDENT_BLOCK_BODY_V22_DOMAIN, TRIDENT_BLOCK_BODY_V22_VERSION, TRIDENT_BLOCK_BODY_V23_DOMAIN,
+    TRIDENT_BLOCK_BODY_V23_VERSION, TRIDENT_BLOCK_BODY_VERSION,
 };
 pub use community::{
     CommunityGrantKind, CommunityGrantMilestone, GrantRegistration, HubRegistration,
@@ -285,6 +287,10 @@ pub use trident_header::{
     TridentHeader, TridentHeaderError, TridentHeaderIdentity, TRIDENT_HEADER_ENCODING_DOMAIN,
     TRIDENT_HEADER_ENCODING_VERSION,
 };
+pub use vesting::{
+    vested_amount_at, vesting_schedule_id, VestingUnlock, VESTING_SCHEDULE_ID_DOMAIN,
+    VESTING_UNLOCK_DOMAIN,
+};
 
 #[cfg(test)]
 mod tests {
@@ -389,6 +395,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -571,6 +578,7 @@ mod ts_export {
         GrantRegistration::export_all().expect("export GrantRegistration");
         MissionRegistration::export_all().expect("export MissionRegistration");
         TreasuryDisbursement::export_all().expect("export TreasuryDisbursement");
+        VestingUnlock::export_all().expect("export VestingUnlock");
         IssuedCurrencyCode::export_all().expect("export IssuedCurrencyCode");
         IssuedAmount::export_all().expect("export IssuedAmount");
         IssuedAssetId::export_all().expect("export IssuedAssetId");

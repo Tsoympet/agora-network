@@ -75,6 +75,7 @@ async fn announce_triggers_getblock_and_full_serve() {
         grant_registrations: Vec::new(),
         mission_registrations: Vec::new(),
         treasury_disbursements: Vec::new(),
+        vesting_unlocks: Vec::new(),
     };
     let hash = block.id();
 

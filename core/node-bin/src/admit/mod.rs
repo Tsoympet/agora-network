@@ -239,6 +239,7 @@ pub struct BlockTemplateLanes<'a> {
     pub grant_registrations: &'a [agora_types::GrantRegistration],
     pub mission_registrations: &'a [agora_types::MissionRegistration],
     pub treasury_disbursements: &'a [agora_types::TreasuryDisbursement],
+    pub vesting_unlocks: &'a [agora_types::VestingUnlock],
 }
 
 impl ChainState {
@@ -648,6 +649,7 @@ impl ChainState {
             grant_registrations: lanes.grant_registrations.to_vec(),
             mission_registrations: lanes.mission_registrations.to_vec(),
             treasury_disbursements: lanes.treasury_disbursements.to_vec(),
+            vesting_unlocks: lanes.vesting_unlocks.to_vec(),
         };
         if let Some(ctx) = self.auth.as_ref() {
             agora_types::materialize_drc_multisign_attachments(

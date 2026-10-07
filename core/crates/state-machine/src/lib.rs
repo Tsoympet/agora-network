@@ -292,12 +292,15 @@ pub use ghostdag_store::{
     ghostdag_key, load_ghostdag_record, store_ghostdag_record, GhostdagRecord,
 };
 pub use governance_state::{
-    apply_treasury_disbursement_into, authorization_policy_root, governance_treasury_root,
-    init_canonical_governance_into, init_trident_governance_into, load_canonical_governance_policy,
-    load_protocol_treasuries, load_protocol_treasury, load_treasury_controller,
-    load_treasury_disbursement, load_treasury_nonce, put_treasury_controller_into,
-    treasury_balance_key, treasury_controller_record_key, treasury_disbursement_record_key,
-    treasury_nonce_record_key, CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
+    apply_treasury_disbursement_into, apply_vesting_unlock_into, authorization_policy_root,
+    governance_treasury_root, init_canonical_governance_into, init_trident_governance_into,
+    load_canonical_governance_policy, load_protocol_treasuries, load_protocol_treasury,
+    load_treasury_controller, load_treasury_disbursement, load_treasury_nonce, load_vesting_nonce,
+    load_vesting_progress, load_vesting_schedules, load_vesting_unlock, load_vesting_unlocked,
+    put_treasury_controller_into, treasury_balance_key, treasury_controller_record_key,
+    treasury_disbursement_record_key, treasury_nonce_record_key, vesting_claim_record_key,
+    vesting_nonce_record_key, vesting_unlocked_record_key, CanonicalGovernancePolicy,
+    CANONICAL_GOVERNANCE_VERSION,
 };
 pub use headers::{header_key, load_header, store_header, store_header_into};
 pub use marks::{default_token_marks, TokenMark};

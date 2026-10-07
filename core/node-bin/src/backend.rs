@@ -44,13 +44,14 @@ use agora_state_machine::{
     load_known_drc_deposit_authorization, load_mission_registration, load_mission_sponsor_nonce,
     load_native_supply_state, load_passport_attestation, load_passport_issuer_nonce,
     load_protocol_treasuries, load_protocol_treasury, load_reward_pool, load_treasury_controller,
-    load_treasury_disbursement, load_treasury_nonce, load_validator, lookup_covenant_tx_location,
-    lookup_data_commitment_location, lookup_drc_check_point, lookup_drc_escrow_point,
-    lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point, lookup_drc_ticket_point,
-    lookup_drc_trust_line_point, lookup_tx_location, meta_keys, outpoint_key,
-    plan_drc_mempool_reservation, validate_mempool_covenant, validate_mempool_tx_with_auth,
-    AccountJournal, ColumnFamily, DrcMempoolReservation, DrcTicketPointStatus, StakingParams,
-    StateStore, TxAuthContext, WriteBatch,
+    load_treasury_disbursement, load_treasury_nonce, load_validator, load_vesting_nonce,
+    load_vesting_schedules, load_vesting_unlock, load_vesting_unlocked,
+    lookup_covenant_tx_location, lookup_data_commitment_location, lookup_drc_check_point,
+    lookup_drc_escrow_point, lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point,
+    lookup_drc_ticket_point, lookup_drc_trust_line_point, lookup_tx_location, meta_keys,
+    outpoint_key, plan_drc_mempool_reservation, validate_mempool_covenant,
+    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, DrcMempoolReservation,
+    DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
     sequence_signals_rbf, AccountTransfer, Address, Amount, Block, CheckpointAttestation,
@@ -63,10 +64,10 @@ use agora_types::{
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
     DrcTrustLineSetTx, GrantRegistration, Hash, HubRegistration, MissionRegistration,
     NativeAssetId, OutPoint, OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx,
-    Transaction, TreasuryDisbursement, TreasuryId, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
-    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
-    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
-    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    Transaction, TreasuryDisbursement, TreasuryId, TxOut, VestingUnlock,
+    ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
+    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
+    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
@@ -472,6 +473,68 @@ pub(crate) fn admit_treasury_disbursement(
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
     pool.admit_treasury_disbursement(spend)
+        .map_err(|err| RpcError::Rejected(err.to_string()))
+}
+
+pub(crate) fn admit_vesting_unlock(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    claim: VestingUnlock,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let signer = agora_crypto::verify_vesting_unlock_bound(&claim, &auth.chain_id, &auth.genesis)
+        .map_err(|err| RpcError::Rejected(format!("invalid vesting unlock: {err}")))?;
+    if signer != claim.beneficiary {
+        return Err(RpcError::Rejected(
+            "vesting unlock signer is not the beneficiary".into(),
+        ));
+    }
+    if load_vesting_unlock(store, &claim.unlock_id())
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+        .is_some()
+    {
+        return Ok(claim.unlock_id());
+    }
+    let schedules =
+        load_vesting_schedules(store).map_err(|err| RpcError::Internal(err.to_string()))?;
+    let schedule = schedules
+        .iter()
+        .find(|schedule| {
+            agora_types::vesting_schedule_id(
+                schedule.asset,
+                &schedule.address,
+                schedule.amount,
+                schedule.start_timestamp_ms,
+                schedule.cliff_timestamp_ms,
+                schedule.end_timestamp_ms,
+            ) == claim.schedule_id
+        })
+        .ok_or_else(|| RpcError::Rejected("unknown vesting schedule".into()))?;
+    if schedule.asset != claim.asset || schedule.address != claim.beneficiary {
+        return Err(RpcError::Rejected(
+            "vesting unlock does not match the schedule".into(),
+        ));
+    }
+    let expected = load_vesting_nonce(store, &claim.beneficiary)
+        .map_err(|err| RpcError::Internal(err.to_string()))?;
+    if claim.nonce != expected {
+        return Err(RpcError::Rejected("vesting nonce mismatch".into()));
+    }
+    let already = load_vesting_unlocked(store, &claim.schedule_id)
+        .map_err(|err| RpcError::Internal(err.to_string()))?;
+    if already
+        .checked_add(claim.amount.as_base_units())
+        .filter(|total| *total <= schedule.amount)
+        .is_none()
+    {
+        return Err(RpcError::Rejected(
+            "vesting unlock exceeds schedule remainder".into(),
+        ));
+    }
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    pool.admit_vesting_unlock(claim)
         .map_err(|err| RpcError::Rejected(err.to_string()))
 }
 
@@ -2780,6 +2843,7 @@ impl RpcBackend for NodeBackend {
             grant_registrations,
             mission_registrations,
             treasury_disbursements,
+            vesting_unlocks,
         ) = {
             let pool = self
                 .mempool
@@ -2833,6 +2897,7 @@ impl RpcBackend for NodeBackend {
                 pool.select_grant_registrations(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_mission_registrations(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_treasury_disbursements(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_vesting_unlocks(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         self.append_local_evm_executions(&mut ovl_executions);
@@ -2874,6 +2939,7 @@ impl RpcBackend for NodeBackend {
                     grant_registrations: &grant_registrations,
                     mission_registrations: &mission_registrations,
                     treasury_disbursements: &treasury_disbursements,
+                    vesting_unlocks: &vesting_unlocks,
                 },
             )
             .map_err(|e| RpcError::Internal(e.to_string()))
@@ -3419,6 +3485,56 @@ impl RpcBackend for NodeBackend {
             .map_err(|e| RpcError::Internal(e.to_string()))?;
         Ok(json!({
             "treasury": treasury.as_str(),
+            "nonce": nonce,
+        }))
+    }
+
+    fn submit_vesting_unlock(&mut self, claim: VestingUnlock) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_vesting_unlock(&self.store, &self.mempool, claim.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            if let Err(err) = net.publish_message(NetworkMessage::VestingUnlock(claim)) {
+                return Err(RpcError::Internal(err.to_string()));
+            }
+        }
+        Ok(id)
+    }
+
+    fn get_vesting_unlock(&self, unlock_id: &Hash) -> Result<Value, RpcError> {
+        {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            if let Some(claim) = pool.get_vesting_unlock(unlock_id) {
+                return Ok(json!({
+                    "unlock_id": unlock_id.to_hex(),
+                    "status": "pending",
+                    "unlock": claim,
+                }));
+            }
+        }
+        match load_vesting_unlock(self.store.as_ref(), unlock_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        {
+            Some(claim) => Ok(json!({
+                "unlock_id": unlock_id.to_hex(),
+                "status": "accepted",
+                "unlock": claim,
+            })),
+            None => Ok(json!({
+                "unlock_id": unlock_id.to_hex(),
+                "status": "unknown",
+                "unlock": null,
+            })),
+        }
+    }
+
+    fn get_vesting_nonce(&self, beneficiary: &Address) -> Result<Value, RpcError> {
+        let nonce = load_vesting_nonce(self.store.as_ref(), beneficiary)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "beneficiary": beneficiary.to_hex(),
             "nonce": nonce,
         }))
     }

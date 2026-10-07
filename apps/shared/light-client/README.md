@@ -44,15 +44,16 @@ channels, trust lines, issued controls, tickets, keys, policy),
 `agora_getGrantRegistrarNonce`, `agora_submitMissionRegistration`,
 `agora_getMissionRegistration`, `agora_getMissionSponsorNonce`,
 `agora_submitTreasuryDisbursement`, `agora_getTreasuryDisbursement`,
-`agora_getTreasuryNonce`.
+`agora_getTreasuryNonce`, `agora_submitVestingUnlock`,
+`agora_getVestingUnlock`, `agora_getVestingNonce`.
 
 Device-local builders (`typed-lanes.ts`, `typed-lanes-drc.ts`,
 `typed-lanes-passport.ts`, `typed-lanes-community.ts`,
-`typed-lanes-treasury.ts`) construct Agora-signed
+`typed-lanes-treasury.ts`, `typed-lanes-vesting.ts`) construct Agora-signed
 DRC payments, native/issued offers, escrow, Checks, payment channels, tickets,
 regular key, signer list, deposit preauth, account policy, trust lines, issued
 controls, signed Hub-coordinator passport attestations, signed Hub / Grant /
-Mission registrations, controller-signed treasury disbursements, TLT P2PKH covenants, OVL account transfers, and OVL
+Mission registrations, controller-signed treasury disbursements, beneficiary-signed vesting unlocks, TLT P2PKH covenants, OVL account transfers, and OVL
 execution v1 (empty calldata). Keys stay on the device. Raw Ethereum
 envelopes are signed only by `raw-evm.ts` from an explicit secp256k1 key
 (never a vault mnemonic). Agora BIP-44 addresses and Ethereum keccak

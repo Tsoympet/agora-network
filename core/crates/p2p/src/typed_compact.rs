@@ -14,7 +14,7 @@ use agora_types::{
     DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
     DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, GrantRegistration, Hash, HubRegistration,
     MissionRegistration, OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx,
-    Transaction, TreasuryDisbursement,
+    Transaction, TreasuryDisbursement, VestingUnlock,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -57,6 +57,7 @@ pub const COMPACT_LANE_HUB: u8 = 31;
 pub const COMPACT_LANE_GRANT: u8 = 32;
 pub const COMPACT_LANE_MISSION: u8 = 33;
 pub const COMPACT_LANE_TREASURY: u8 = 34;
+pub const COMPACT_LANE_VESTING: u8 = 35;
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct TypedCompactLane {
@@ -108,6 +109,7 @@ pub enum CompactLaneItem {
     Grant(GrantRegistration),
     Mission(MissionRegistration),
     Treasury(TreasuryDisbursement),
+    Vesting(VestingUnlock),
 }
 
 impl TypedCompactBody {
@@ -325,6 +327,12 @@ impl TypedCompactBody {
             &block.treasury_disbursements,
             TreasuryDisbursement::disbursement_id,
         );
+        push_lane(
+            &mut lanes,
+            COMPACT_LANE_VESTING,
+            &block.vesting_unlocks,
+            VestingUnlock::unlock_id,
+        );
         Some(Self {
             version: TYPED_COMPACT_VERSION,
             header: block.header.clone(),
@@ -465,6 +473,7 @@ fn apply_item(block: &mut Block, kind: u8, item: CompactLaneItem) -> Result<(), 
         (COMPACT_LANE_TREASURY, CompactLaneItem::Treasury(tx)) => {
             block.treasury_disbursements.push(tx)
         }
+        (COMPACT_LANE_VESTING, CompactLaneItem::Vesting(tx)) => block.vesting_unlocks.push(tx),
         _ => return Err(ReconstructError::UnsupportedLane(kind)),
     }
     Ok(())
@@ -692,6 +701,42 @@ mod tests {
         })
         .unwrap();
         assert_eq!(rebuilt.hub_registrations, block.hub_registrations);
+        assert_eq!(rebuilt.header.tx_root, block.header.tx_root);
+    }
+
+    #[test]
+    fn vesting_lane_reconstructs_from_lookup() {
+        let mut claim = VestingUnlock::unsigned(
+            NativeAssetId::OVL,
+            Address([1; 20]),
+            Hash([2; 32]),
+            Amount::from_base_units(10),
+            0,
+        );
+        claim.public_key = vec![1; 33];
+        claim.signature = vec![2; 64];
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.vesting_unlocks.push(claim.clone());
+        block.header.tx_root = block.compute_body_root();
+        let body = TypedCompactBody::from_block(&block).expect("named");
+        assert_eq!(body.lanes.len(), 1);
+        assert_eq!(body.lanes[0].kind, COMPACT_LANE_VESTING);
+        let rebuilt = reconstruct_typed_compact(body, |kind, _| {
+            assert_eq!(kind, COMPACT_LANE_VESTING);
+            Some(CompactLaneItem::Vesting(claim.clone()))
+        })
+        .unwrap();
+        assert_eq!(rebuilt.vesting_unlocks, block.vesting_unlocks);
         assert_eq!(rebuilt.header.tx_root, block.header.tx_root);
     }
 

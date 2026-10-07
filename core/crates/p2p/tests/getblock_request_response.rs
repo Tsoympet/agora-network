@@ -74,6 +74,7 @@ async fn direct_getblock_returns_full_block() {
         grant_registrations: Vec::new(),
         mission_registrations: Vec::new(),
         treasury_disbursements: Vec::new(),
+        vesting_unlocks: Vec::new(),
     };
     let hash = block.id();
 

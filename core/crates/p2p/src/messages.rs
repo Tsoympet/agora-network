@@ -101,6 +101,8 @@ pub enum NetworkMessage {
     MissionRegistration(agora_types::MissionRegistration),
     /// Appended in Trident protocol v31; controller-signed protocol treasury spend.
     TreasuryDisbursement(agora_types::TreasuryDisbursement),
+    /// Appended in Trident protocol v32; beneficiary-signed vesting unlock.
+    VestingUnlock(agora_types::VestingUnlock),
 }
 
 impl NetworkMessage {
@@ -515,6 +517,31 @@ mod tests {
             ));
         assert_eq!(mission.encode()[0], 40);
         assert_eq!(NetworkMessage::decode(&mission.encode()).unwrap(), mission);
+
+        let treasury =
+            NetworkMessage::TreasuryDisbursement(agora_types::TreasuryDisbursement::unsigned(
+                agora_types::TreasuryId::OvlBuilder,
+                Address([1; 20]),
+                agora_types::Amount::from_base_units(10),
+                Hash([2; 32]),
+                Hash([3; 32]),
+                0,
+            ));
+        assert_eq!(treasury.encode()[0], 41);
+        assert_eq!(
+            NetworkMessage::decode(&treasury.encode()).unwrap(),
+            treasury
+        );
+
+        let vesting = NetworkMessage::VestingUnlock(agora_types::VestingUnlock::unsigned(
+            agora_types::NativeAssetId::OVL,
+            Address([1; 20]),
+            Hash([2; 32]),
+            agora_types::Amount::from_base_units(10),
+            0,
+        ));
+        assert_eq!(vesting.encode()[0], 42);
+        assert_eq!(NetworkMessage::decode(&vesting.encode()).unwrap(), vesting);
 
         let mut block = Block::utxo(
             BlockHeader {

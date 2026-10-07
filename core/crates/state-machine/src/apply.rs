@@ -18,7 +18,7 @@ use crate::{
         apply_account_transfer_checked, load_account, put_account_into, AccountJournal,
         AccountState,
     },
-    apply_treasury_disbursement_into,
+    apply_treasury_disbursement_into, apply_vesting_unlock_into,
     columns::ColumnFamily,
     data_availability::{apply_data_commitment, revert_data_commitment_meta_into},
     drc_check::{
@@ -65,7 +65,8 @@ use crate::{
     supply::{burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key},
     treasury_balance_key, treasury_disbursement_record_key, treasury_nonce_record_key,
     utxo::outpoint_key,
-    StateError, StateStore,
+    vesting_claim_record_key, vesting_nonce_record_key, vesting_unlocked_record_key, StateError,
+    StateStore,
 };
 
 /// Result of applying one block's UTXO transition (journal + typed acceptance + batch).
@@ -1601,6 +1602,7 @@ fn apply_trident_lanes(
         && block.grant_registrations.is_empty()
         && block.mission_registrations.is_empty()
         && block.treasury_disbursements.is_empty()
+        && block.vesting_unlocks.is_empty()
     {
         return Ok((
             Vec::new(),
@@ -1686,6 +1688,11 @@ fn apply_trident_lanes(
     if !block.treasury_disbursements.is_empty() && auth.is_none() {
         return Err(StateError::InvalidTx(
             "treasury disbursements require network-bound auth".into(),
+        ));
+    }
+    if !block.vesting_unlocks.is_empty() && auth.is_none() {
+        return Err(StateError::InvalidTx(
+            "vesting unlocks require network-bound auth".into(),
         ));
     }
     if block.data_commitments.len() > agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK {
@@ -3282,6 +3289,53 @@ fn apply_trident_lanes(
         }
     }
 
+    if !block.vesting_unlocks.is_empty() {
+        let ctx = auth.expect("vesting unlock auth checked above");
+        let now_ms = block.header.timestamp_ms;
+        let mut seen_ids = std::collections::HashSet::new();
+        for claim in &block.vesting_unlocks {
+            let id = claim.unlock_id();
+            if !seen_ids.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate vesting unlock in block".into(),
+                ));
+            }
+            let mut keys = vec![
+                vesting_unlocked_record_key(&claim.schedule_id),
+                vesting_nonce_record_key(&claim.beneficiary),
+                vesting_claim_record_key(&id),
+            ];
+            if matches!(claim.asset, NativeAssetId::OVL | NativeAssetId::DRC) {
+                keys.push(crate::accounts::account_key(
+                    claim.asset,
+                    &claim.beneficiary,
+                ));
+            }
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            if matches!(claim.asset, NativeAssetId::OVL | NativeAssetId::DRC) {
+                let prior = load_account(&lane, claim.asset, &claim.beneficiary)?;
+                journal
+                    .account_before
+                    .push((claim.asset, claim.beneficiary, prior));
+            }
+            let mut op_batch = WriteBatch::new();
+            let created = apply_vesting_unlock_into(&mut op_batch, &lane, claim, ctx, now_ms)?;
+            if let Some(op) = created {
+                journal.created.push(op);
+                created_in_block.insert(
+                    op,
+                    TxOut {
+                        value: claim.amount,
+                        address: claim.beneficiary,
+                    },
+                );
+            }
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+    }
+
     Ok((
         drc_ticket_create_statuses,
         drc_escrow_create_statuses,
@@ -4118,6 +4172,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -4337,6 +4392,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -4465,6 +4521,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -4560,6 +4617,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -4664,6 +4722,7 @@ mod tests {
                 grant_registrations: Vec::new(),
                 mission_registrations: Vec::new(),
                 treasury_disbursements: Vec::new(),
+                vesting_unlocks: Vec::new(),
             },
             1,
             None,
@@ -4767,6 +4826,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -4888,6 +4948,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -4993,6 +5054,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -5112,6 +5174,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5260,6 +5323,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5933,6 +5997,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -6585,5 +6650,119 @@ mod tests {
         reject.treasury_disbursements = vec![wrong_root];
         reject.header.tx_root = reject.compute_body_root();
         assert!(apply_block_batched_with_auth(&store, &reject, 0, Some(&auth)).is_err());
+    }
+
+    #[test]
+    fn signed_vesting_unlock_credits_and_reverts() {
+        use crate::block_zero::BlockZeroVesting;
+        use crate::governance_state::{
+            load_vesting_nonce, load_vesting_unlock, load_vesting_unlocked,
+            put_vesting_schedules_into,
+        };
+        use agora_crypto::sign_vesting_unlock_bound;
+        use agora_types::{vesting_schedule_id, VestingUnlock};
+
+        let store = StateStore::open_in_memory();
+        let beneficiary = KeyPair::from_secret_bytes(&[22; 32]).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let schedule = BlockZeroVesting {
+            asset: NativeAssetId::OVL,
+            address: beneficiary.address(),
+            amount: 100,
+            start_timestamp_ms: 10,
+            cliff_timestamp_ms: 20,
+            end_timestamp_ms: 30,
+        };
+        let schedule_id = vesting_schedule_id(
+            schedule.asset,
+            &schedule.address,
+            schedule.amount,
+            schedule.start_timestamp_ms,
+            schedule.cliff_timestamp_ms,
+            schedule.end_timestamp_ms,
+        );
+        let mut fund = WriteBatch::new();
+        put_vesting_schedules_into(&mut fund, &[schedule]).unwrap();
+        store.write_batch(fund).unwrap();
+
+        let mut claim = VestingUnlock::unsigned(
+            NativeAssetId::OVL,
+            beneficiary.address(),
+            schedule_id,
+            Amount::from_base_units(50),
+            0,
+        );
+        sign_vesting_unlock_bound(&mut claim, &beneficiary, &auth.chain_id, &auth.genesis).unwrap();
+
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 20,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.vesting_unlocks = vec![claim.clone()];
+        block.header.tx_root = block.compute_body_root();
+
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(load_vesting_unlocked(&store, &schedule_id).unwrap(), 50);
+        assert_eq!(
+            load_vesting_nonce(&store, &beneficiary.address()).unwrap(),
+            1
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &beneficiary.address())
+                .unwrap()
+                .balance,
+            50
+        );
+        assert_eq!(
+            load_vesting_unlock(&store, &claim.unlock_id())
+                .unwrap()
+                .unwrap(),
+            claim
+        );
+
+        store
+            .write_batch(revert_journal_batched(&result.journal).unwrap())
+            .unwrap();
+        assert_eq!(load_vesting_unlocked(&store, &schedule_id).unwrap(), 0);
+        assert_eq!(
+            load_vesting_nonce(&store, &beneficiary.address()).unwrap(),
+            0
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &beneficiary.address())
+                .unwrap()
+                .balance,
+            0
+        );
+        assert!(load_vesting_unlock(&store, &claim.unlock_id())
+            .unwrap()
+            .is_none());
+
+        let mut early = block.clone();
+        early.header.timestamp_ms = 19;
+        early.header.tx_root = early.compute_body_root();
+        assert!(apply_block_batched_with_auth(&store, &early, 0, Some(&auth)).is_err());
     }
 }

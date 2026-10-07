@@ -192,6 +192,13 @@ export {
   sendTreasuryDisbursement,
 } from "./typed-lanes-treasury";
 export {
+  VESTING_UNLOCK_DOMAIN,
+  NATIVE_ASSET_TLT,
+  buildSignedVestingUnlock,
+  encodeVestingUnlockBody,
+  sendVestingUnlock,
+} from "./typed-lanes-vesting";
+export {
   RAW_EVM_DEV_CHAIN_ID,
   RAW_EVM_KEY_SPLIT,
   RAW_EVM_TESTNET_CHAIN_ID,

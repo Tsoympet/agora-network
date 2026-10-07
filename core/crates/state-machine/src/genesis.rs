@@ -117,6 +117,7 @@ impl GenesisBuilder {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         }
     }
 

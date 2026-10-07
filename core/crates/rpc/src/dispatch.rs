@@ -903,6 +903,25 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let treasury = parse_treasury_id(&param_string(&req.params, "treasury")?)?;
                 self.backend.get_treasury_nonce(treasury)
             }
+            RpcMethod::SubmitVestingUnlock => {
+                let raw = req
+                    .params
+                    .get("unlock")
+                    .cloned()
+                    .ok_or_else(|| RpcError::InvalidParams("missing unlock object".into()))?;
+                let claim: agora_types::VestingUnlock = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_vesting_unlock(claim)?;
+                Ok(json!({ "unlock_id": id.to_hex() }))
+            }
+            RpcMethod::GetVestingUnlock => {
+                let id = param_hash(&req.params, "unlock_id")?;
+                self.backend.get_vesting_unlock(&id)
+            }
+            RpcMethod::GetVestingNonce => {
+                let beneficiary = param_address(&req.params, "beneficiary")?;
+                self.backend.get_vesting_nonce(&beneficiary)
+            }
             RpcMethod::SubmitStakeTx => {
                 let stake_tx = req
                     .params
@@ -1779,6 +1798,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -1950,6 +1970,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -2010,6 +2031,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {
@@ -2635,6 +2657,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2711,6 +2734,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2786,6 +2810,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2862,6 +2887,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);

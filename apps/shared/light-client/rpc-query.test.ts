@@ -56,6 +56,9 @@ try {
   await client.submitTreasuryDisbursement({ version: 1 });
   await client.getTreasuryDisbursement("aa".repeat(32));
   await client.getTreasuryNonce("ovl_builder");
+  await client.submitVestingUnlock({ version: 1 });
+  await client.getVestingUnlock("aa".repeat(32));
+  await client.getVestingNonce("agoradev1qqqq");
 
   assert.deepEqual(
     calls.map((call) => call.method),
@@ -91,6 +94,9 @@ try {
       "agora_submitTreasuryDisbursement",
       "agora_getTreasuryDisbursement",
       "agora_getTreasuryNonce",
+      "agora_submitVestingUnlock",
+      "agora_getVestingUnlock",
+      "agora_getVestingNonce",
     ],
   );
   assert.deepEqual(calls[0].params, { address: "agoradev1qqqq" });

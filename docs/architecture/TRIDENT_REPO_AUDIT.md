@@ -19,13 +19,15 @@ parity files keep their own `INCOMPLETE` status lines.
 
 | Constant | Value | Notes |
 | --- | --- | --- |
-| `TRIDENT_PROTOCOL_VERSION` | 30 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v30 appends Hub / Grant / Mission registration gossip |
+| `TRIDENT_PROTOCOL_VERSION` | 32 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v32 appends vesting-unlock gossip; v31 treasury; v30 Hub / Grant / Mission |
 | Datadir `SCHEMA_VERSION` | 22 | Experimental; `OVL_EVM_SCHEMA_VERSION` is also 22 |
 | DRC fee-burn schema | 20 | Lifetime burned counters |
 | DRC ledger-index datadir | 21 | Common live-object / receipt rebuild |
 | Combined body v18 | offer create/cancel only | Empty history keeps the frozen root |
 | Combined body v20 | passport wrap v19 | Empty passports stay off the empty wire; passport-only bodies write empty offer+covenant vecs |
 | Combined body v21 | hub/grant/mission wrap | Empty new lanes stay off the frozen wire; community-only bodies write empty offer+covenant+passport vecs |
+| Combined body v22 | treasury wrap | Empty treasury stays off the frozen wire |
+| Combined body v23 | vesting wrap | Empty vesting stays off the frozen wire; vesting-only bodies write empty treasury |
 | DA body wrap | v5 | Empty `data_commitments` keep the v4 root |
 | Consensus / tx signing | secp256k1 | No custom crypto |
 | Outer encoding | Borsh | JSON-RPC is a convenience surface |
@@ -47,7 +49,7 @@ Independent quorums; no price-oracle mixing.
 | DRC payments + XRPL-like objects | Wired (Experimental) | Typed envelopes through offer cancel | Wired; family reservations | Typed submit/get methods | Shared builders for payment, DEX, escrow, Checks, channels, tickets, regular key, signer list, deposit preauth, account policy, trust lines, issued controls |
 | DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared builders + desktop/mobile native-DRC-vs-issued send |
 | Dual-PoS finality / staking | Wired (Experimental) | `CheckpointAttestation`, `StakeTx` | Wired | Validator / pool / `agora_submitStakeTx` | Light-client reads exist |
-| Protocol treasuries / community registry | Passport + Hub/Grant/Mission + treasury spend: Wired (Experimental) | `PassportAttestation` (v29), Hub/Grant/Mission (v30), `TreasuryDisbursement` (v31) | Passport 30; hub/grant/mission 31–33; treasury 34 | Passport + hub/grant/mission + treasury submit/get/nonce; `agora_getCommunityRegistry` / `agora_getProtocolTreasuries` | Shared builders + submit. No unsigned mutation RPC |
+| Protocol treasuries / community registry | Passport + Hub/Grant/Mission + treasury spend + vesting unlock: Wired (Experimental) | `PassportAttestation` (v29), Hub/Grant/Mission (v30), `TreasuryDisbursement` (v31), `VestingUnlock` (v32) | Passport 30; hub/grant/mission 31–33; treasury 34; vesting 35 | Passport + hub/grant/mission + treasury + vesting submit/get/nonce; `agora_getCommunityRegistry` / `agora_getProtocolTreasuries` | Shared builders + submit. No unsigned mutation RPC |
 | DA commitments | Apply + journal + TLT fee | `NetworkMessage::DataCommitment` (v25) | Wired; default Experimental boot + `DA_INCLUSION_FEE_TLT` | `agora_submitDataCommitment` / `agora_getDataCommitment` | Light-client query + submit wrappers |
 
 `agora_getBalance` remains the TLT UTXO sum. Native OVL/DRC account
@@ -59,7 +61,8 @@ balances and shared nonces are `agora_getAccountBalances`. Ethereum
 ## P2P and compact blocks
 
 `NetworkMessage` Borsh discriminants are append-only through
-`TreasuryDisbursement` (41). Hub/Grant/Mission use 38–40; treasury uses 41.
+`VestingUnlock` (42). Hub/Grant/Mission use 38–40; treasury uses 41;
+vesting uses 42.
 
 `compact_from_block` keeps UTXO-only `CompactBlock`. Named typed lanes use
 `TypedCompactBlock` with a per-kind short-id list so offers, covenants, DA,
@@ -104,7 +107,7 @@ There is no `agora_submitDrcExecution` or generic `agora_submitExecution`.
 
 | Surface | What it does | Honest gap |
 | --- | --- | --- |
-| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders for every admitted DRC family plus TLT covenant P2PKH, OVL transfer/execution v1, signed passport attestations, and signed Hub/Grant/Mission registrations, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads, opt-in raw-EVM signer | Keys stay on device. No RandomX recompute. Raw EVM uses an explicit key, not the mnemonic vault |
+| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders for every admitted DRC family plus TLT covenant P2PKH, OVL transfer/execution v1, signed passport attestations, signed Hub/Grant/Mission registrations, treasury disbursements, and vesting unlocks, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads, opt-in raw-EVM signer | Keys stay on device. No RandomX recompute. Raw EVM uses an explicit key, not the mnemonic vault |
 | Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel, DRC ticket create via shared `DRC_FAMILY_SENDERS` | No DEX book browser. Offer create is native DRC vs one issued asset. Remaining DRC families are library-complete, not per-family screens |
 | Explorer | DAG, tx lookup, protocol-lane reads, mempool, node, governance panel | No DEX book order-entry UI |
 | `agora-layers` HTTP | Historical lab; loopback | Non-canonical; mixed unauthenticated mutations |
@@ -123,6 +126,7 @@ infrastructure servers or store operator keys.
 | Canonical Passport attestations | Experimental | Signed `PassportAttestation` lane: apply/journal/gossip/mempool/RPC/light-client |
 | Canonical Grant / Mission registry | Experimental | Signed `GrantRegistration` / `MissionRegistration` lanes. Registrar/sponsor must be an active hub coordinator |
 | Protocol treasuries | Experimental | Signed `TreasuryDisbursement` lane: controller + authorization_root + nonce. Debits existing treasury only (no mint). TLT creates a UTXO; OVL/DRC credits the account |
+| Vesting unlock | Experimental | Signed `VestingUnlock` lane: beneficiary + schedule identity + nonce. Time source is the including block `timestamp_ms` (schedules have timestamps, not blue-score). Linear after start; 0 before cliff. Unlocked progress is in the governance root. No mint |
 | Merchant / Passport / Grants docs | Scaffold | Specs. Passport consensus is the attestation lane above, not merchant UI |
 
 Community Definition of Done remains **INCOMPLETE**. On-chain state is
@@ -192,10 +196,7 @@ These are real unfinished paths, not parity slogans:
 2. **Civic votes** — local-admin snapshots, not consensus. Forum/Ecclesia
    RPC stays off the gossip mesh because those types are not
    network-bound secp256k1 envelopes.
-3. **Vesting unlock** — genesis vesting is withheld from liquid balances,
-   but there is no consensus unlock tx. Signed treasury disbursement is
-   wired (v31); it does not unlock vesting.
-4. **`TridentHeader` is not the gossip header** — Block 0 identity is bound
+3. **`TridentHeader` is not the gossip header** — Block 0 identity is bound
    in Meta; IBD/mining still use `BlockHeader`.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
@@ -256,3 +257,11 @@ This audit close-out adds:
   epoch-zero validators, `compose_trident_state_root` vs live
   `TridentHeader.state_root`, `AGORA_TRIDENT_GENESIS_FILE` boot, and
   `agora-node genesis trident materialize`. Public draft stays UNFROZEN.
+- Protocol v31 `NetworkMessage::TreasuryDisbursement` (discriminant 41),
+  compact lane 34, body wrap v22, controller + authorization_root, debit-only
+  spend, submit/get/nonce RPC, and `typed-lanes-treasury.ts`.
+- Protocol v32 `NetworkMessage::VestingUnlock` (discriminant 42), compact
+  lane 35, body wrap v23, state `agora-trident-state-v24`, beneficiary-signed
+  claim against genesis schedules, unlocked progress in
+  `agora-governance-treasury-root-v3`, submit/get/nonce RPC, and
+  `typed-lanes-vesting.ts`. Time source is block `timestamp_ms`.

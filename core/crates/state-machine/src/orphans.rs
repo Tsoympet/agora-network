@@ -98,6 +98,7 @@ mod tests {
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
             treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         let id = block.id();
         store_orphan(&store, &block).unwrap();

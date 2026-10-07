@@ -35,6 +35,7 @@ import type { SignedStakeTx } from "./SignedStakeTx";
 import type { TltCovenantTx } from "./TltCovenantTx";
 import type { Transaction } from "./Transaction";
 import type { TreasuryDisbursement } from "./TreasuryDisbursement";
+import type { VestingUnlock } from "./VestingUnlock";
 
 /**
  * Full Trident body with an OVL-only execution lane.
@@ -178,4 +179,8 @@ mission_registrations: Array<MissionRegistration>,
 /**
  * Signed protocol treasury spends. Empty stays off the frozen wire.
  */
-treasury_disbursements: Array<TreasuryDisbursement>, };
+treasury_disbursements: Array<TreasuryDisbursement>,
+/**
+ * Signed vesting unlock claims. Empty stays off the frozen wire.
+ */
+vesting_unlocks: Array<VestingUnlock>, };
