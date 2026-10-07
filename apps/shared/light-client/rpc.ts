@@ -135,12 +135,18 @@ export type LightNodeInfo = {
   hot_window: number;
   allow_fund: boolean;
   miner_address: string | null;
-  /** Hex id of Block 0 when reported by the node. */
+  /** Hex id of Block 0 when reported by the node (`BlockHeader` / gossip). */
   genesis_hash: string | null;
   /** Network-bound signing chain id (`agora-testnet-1`, …). */
   chain_id?: string | null;
   /** Minimum mempool relay fee when reported. */
   min_relay_fee?: number;
+  /** TridentHeader commitment hash. Absent on frozen v2. Not a gossip parent. */
+  trident_header_hash?: string | null;
+  /** Artifact identity used in the Trident network fingerprint. */
+  artifact_identity?: string | null;
+  /** Offline Block 0 manifest commitment. */
+  block_zero_commitment?: string | null;
 };
 
 /** JSON-safe base units. Nodes may encode large amounts as decimal strings. */

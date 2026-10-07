@@ -200,8 +200,12 @@ These are real unfinished paths, not parity slogans:
    `governance_treasury_root`. A real civic lane needs new signed types
    plus TLT-UTXO weight proofs; wrapping the current snapshot would be
    fake consensus. Documented in `docs/core/governance.md`.
-3. **`TridentHeader` is not the gossip header** — Block 0 identity is bound
-   in Meta; IBD/mining still use `BlockHeader`.
+3. **`TridentHeader` stays off the gossip wire** — required. Frozen v2
+   history and compact IBD identify vertices by `Block::id()`
+   (`BlockHeader`). Collapsing that onto `TridentHeader.commitment_hash()`
+   would change parent hashes and break the frozen mesh. Trident isolation
+   uses the network fingerprint (artifact identity). RPC now reports both
+   hashes on Trident datadirs; `genesis_hash` remains the gossip id.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
 OVL/DRC, price-oracle stake mixing, silent kHeavyHash public PoW
@@ -272,3 +276,7 @@ This audit close-out adds:
 - Civic votes remain local-admin by design: existing types cannot be
   honest consensus envelopes (no secp256k1 bind, caller-supplied weight,
   JSON Meta snapshot). No gossip discriminant is added.
+- `agora_getNodeInfo` keeps `genesis_hash` as the gossip `BlockHeader`
+  id and, on a Trident datadir, also reports `trident_header_hash`,
+  `artifact_identity`, and `block_zero_commitment`. IBD/mining stay on
+  `BlockHeader`.

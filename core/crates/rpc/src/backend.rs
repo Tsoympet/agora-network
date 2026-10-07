@@ -215,11 +215,21 @@ pub struct NodeInfo {
     /// Bech32m miner payout address when known.
     pub miner_address: Option<String>,
     /// Hex id of Block 0 for this datadir / network.
+    ///
+    /// This is the gossip / IBD / mining `BlockHeader` hash (`Block::id`).
+    /// It is not the Trident header commitment hash.
     pub genesis_hash: Option<String>,
     /// Signing domain chain id (`agora-mainnet-1` / `agora-testnet-1` / `agora-dev`).
     pub chain_id: Option<String>,
     /// Minimum mempool relay fee (`in − out`) in base units.
     pub min_relay_fee: u64,
+    /// SHA-256 of the live `TridentHeader` envelope when this datadir is Trident.
+    /// Absent on frozen v2. Never used as a gossip parent or mining identity.
+    pub trident_header_hash: Option<String>,
+    /// Artifact identity committed into the Trident network fingerprint.
+    pub artifact_identity: Option<String>,
+    /// Manifest Block 0 commitment hash (offline `BlockZeroState` domain).
+    pub block_zero_commitment: Option<String>,
 }
 
 /// Fee guidance for wallets (`agora_estimateFee`).
@@ -865,6 +875,9 @@ impl RpcBackend for InMemoryBackend {
             genesis_hash: self.tips.first().map(|h| h.to_hex()),
             chain_id: Some("agora-dev".into()),
             min_relay_fee: 1,
+            trident_header_hash: None,
+            artifact_identity: None,
+            block_zero_commitment: None,
         })
     }
 

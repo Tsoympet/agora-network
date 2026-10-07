@@ -1152,6 +1152,9 @@ fn node_info_to_json(info: &crate::backend::NodeInfo) -> Value {
         "genesis_hash": info.genesis_hash,
         "chain_id": info.chain_id,
         "min_relay_fee": info.min_relay_fee,
+        "trident_header_hash": info.trident_header_hash,
+        "artifact_identity": info.artifact_identity,
+        "block_zero_commitment": info.block_zero_commitment,
     })
 }
 

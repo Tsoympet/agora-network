@@ -44,14 +44,15 @@ use agora_state_machine::{
     load_known_drc_deposit_authorization, load_mission_registration, load_mission_sponsor_nonce,
     load_native_supply_state, load_passport_attestation, load_passport_issuer_nonce,
     load_protocol_treasuries, load_protocol_treasury, load_reward_pool, load_treasury_controller,
-    load_treasury_disbursement, load_treasury_nonce, load_validator, load_vesting_nonce,
-    load_vesting_schedules, load_vesting_unlock, load_vesting_unlocked,
-    lookup_covenant_tx_location, lookup_data_commitment_location, lookup_drc_check_point,
-    lookup_drc_escrow_point, lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point,
-    lookup_drc_ticket_point, lookup_drc_trust_line_point, lookup_tx_location, meta_keys,
-    outpoint_key, plan_drc_mempool_reservation, validate_mempool_covenant,
-    validate_mempool_tx_with_auth, AccountJournal, ColumnFamily, DrcMempoolReservation,
-    DrcTicketPointStatus, StakingParams, StateStore, TxAuthContext, WriteBatch,
+    load_treasury_disbursement, load_treasury_nonce, load_validator,
+    load_verified_trident_block_zero, load_vesting_nonce, load_vesting_schedules,
+    load_vesting_unlock, load_vesting_unlocked, lookup_covenant_tx_location,
+    lookup_data_commitment_location, lookup_drc_check_point, lookup_drc_escrow_point,
+    lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point, lookup_drc_ticket_point,
+    lookup_drc_trust_line_point, lookup_tx_location, meta_keys, outpoint_key,
+    plan_drc_mempool_reservation, validate_mempool_covenant, validate_mempool_tx_with_auth,
+    AccountJournal, ColumnFamily, DrcMempoolReservation, DrcTicketPointStatus, StakingParams,
+    StateStore, TxAuthContext, WriteBatch,
 };
 use agora_types::{
     sequence_signals_rbf, AccountTransfer, Address, Amount, Block, CheckpointAttestation,
@@ -1640,6 +1641,7 @@ impl RpcBackend for NodeBackend {
             PowAlgorithm::KHeavyHash => "kheavyhash",
         };
         let mempool_count = self.mempool.lock().map(|p| p.len()).unwrap_or(0);
+        let trident = load_verified_trident_block_zero(self.store.as_ref()).ok();
         Ok(NodeInfo {
             network: self.network.clone(),
             version: env!("CARGO_PKG_VERSION").into(),
@@ -1656,6 +1658,16 @@ impl RpcBackend for NodeBackend {
             genesis_hash: Some(self.genesis_hash.to_hex()),
             chain_id: Some(self.tx_auth().chain_id),
             min_relay_fee: min_relay_fee(),
+            trident_header_hash: trident
+                .as_ref()
+                .and_then(|record| record.datadir_identity.block_zero_header_hash)
+                .map(|hash| hash.to_hex()),
+            artifact_identity: trident
+                .as_ref()
+                .map(|record| record.datadir_identity.artifact_identity.to_hex()),
+            block_zero_commitment: trident
+                .as_ref()
+                .map(|record| record.datadir_identity.block_zero_commitment.to_hex()),
         })
     }
 

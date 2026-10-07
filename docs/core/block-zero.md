@@ -81,6 +81,12 @@ require `validate_freeze_ready`. They:
 before any write or P2P identity load. Subsequent GHOSTDAG, mining, RPC, and
 IBD still use the existing `Block`/`BlockHeader` wire. `TridentHeader` is the
 Block 0 identity commitment in Meta, not a replacement gossip header.
+Public testnet does **not** collapse these into one hash: frozen v2 history
+and compact gossip identify vertices by `Block::id()` (`BlockHeader`). The
+Trident mesh is isolated by `trident_network_fingerprint` (artifact
+identity + policy + protocol versions). `agora_getNodeInfo` reports
+`genesis_hash` as the gossip id and, on a Trident datadir, also reports
+`trident_header_hash`, `artifact_identity`, and `block_zero_commitment`.
 
 Vested amounts are withheld from liquid balances. Beneficiary-signed
 `VestingUnlock` claims (protocol v32) credit the remainder that is vested at
@@ -98,9 +104,8 @@ fork. The claim does not mint.
   testnet, which has no OVL/DRC genesis validators, so dual-PoS never
   finalizes.
 - Gossip, mining templates, and IBD continue to identify blocks by
-  `BlockHeader` hash. `TridentHeader` is not the P2P block identity.
-- Vesting unlock remains unwired. Signed Hub/Grant/Mission and treasury
-  disbursement are later consensus lanes, not Block 0 writes.
+  `BlockHeader` hash. That is required to keep frozen v2 history. The
+  Trident header commitment is a Meta identity, not a GHOSTDAG parent.
 
 Until a freeze-ready v3 artifact is published and multi-node boot+IBD+tx+
 finality are demonstrated against it, status stays **INCOMPLETE**.
