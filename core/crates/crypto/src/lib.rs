@@ -31,6 +31,7 @@ mod payment;
 mod stake;
 mod tlt_script;
 mod transaction;
+mod treasury;
 
 pub use account::{
     account_signer_address, sign_account_transfer_bound, verify_account_transfer_bound,
@@ -100,3 +101,4 @@ pub use transaction::{
     sign_transaction, sign_transaction_bound, signature_from_slice, signer_address,
     verify_transaction, verify_transaction_bound,
 };
+pub use treasury::{sign_treasury_disbursement_bound, verify_treasury_disbursement_bound};

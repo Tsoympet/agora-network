@@ -11,11 +11,11 @@ use agora_types::{
     DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx,
     GrantRegistration, Hash, HubRegistration, MissionRegistration, NativeAssetId, OutPoint,
     OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx, Transaction,
-    ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
-    DRC_CHECK_CANCEL_TICKET_VERSION, DRC_CHECK_CASH_TICKET_VERSION,
-    DRC_CHECK_CREATE_TICKET_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
-    DRC_ESCROW_CANCEL_TICKET_VERSION, DRC_ESCROW_CREATE_TICKET_VERSION,
-    DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
+    TreasuryDisbursement, TreasuryId, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_CHECK_CANCEL_TICKET_VERSION,
+    DRC_CHECK_CASH_TICKET_VERSION, DRC_CHECK_CREATE_TICKET_VERSION,
+    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_ESCROW_CANCEL_TICKET_VERSION,
+    DRC_ESCROW_CREATE_TICKET_VERSION, DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
     DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 
@@ -37,6 +37,8 @@ mod ovl_raw_lane;
 mod passport_lane;
 #[path = "payment_channel_lane.rs"]
 mod payment_channel_lane;
+#[path = "treasury_lane.rs"]
+mod treasury_lane;
 #[path = "trust_line_lane.rs"]
 mod trust_line_lane;
 
@@ -120,6 +122,8 @@ pub struct Mempool {
     reserved_grant_registrars: HashMap<Address, Hash>,
     mission_registrations: HashMap<Hash, MissionRegistration>,
     reserved_mission_sponsors: HashMap<Address, Hash>,
+    treasury_disbursements: HashMap<Hash, TreasuryDisbursement>,
+    reserved_treasury_ids: HashMap<TreasuryId, Hash>,
     pending_native_offer_lock: HashMap<Address, u64>,
     pending_issued_offer_reserve: HashMap<(Address, Hash), u64>,
     reserved_asset_policy_assets: HashMap<Hash, Hash>,
@@ -215,6 +219,8 @@ impl Mempool {
             reserved_grant_registrars: HashMap::new(),
             mission_registrations: HashMap::new(),
             reserved_mission_sponsors: HashMap::new(),
+            treasury_disbursements: HashMap::new(),
+            reserved_treasury_ids: HashMap::new(),
             pending_native_offer_lock: HashMap::new(),
             pending_issued_offer_reserve: HashMap::new(),
             reserved_asset_policy_assets: HashMap::new(),
@@ -264,6 +270,7 @@ impl Mempool {
             + self.hub_registrations.len()
             + self.grant_registrations.len()
             + self.mission_registrations.len()
+            + self.treasury_disbursements.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1534,7 +1541,7 @@ impl Mempool {
             COMPACT_LANE_DRC_SIGNER_LIST, COMPACT_LANE_DRC_TICKET, COMPACT_LANE_DRC_TRUST_LINE,
             COMPACT_LANE_GRANT, COMPACT_LANE_HUB, COMPACT_LANE_MISSION, COMPACT_LANE_OVL_EXECUTION,
             COMPACT_LANE_PASSPORT, COMPACT_LANE_STAKE, COMPACT_LANE_TLT_COVENANT,
-            COMPACT_LANE_UTXO,
+            COMPACT_LANE_TREASURY, COMPACT_LANE_UTXO,
         };
         match kind {
             COMPACT_LANE_UTXO => map_by_short_id(&self.txs, short_id)
@@ -1662,6 +1669,9 @@ impl Mempool {
             COMPACT_LANE_MISSION => map_by_short_id(&self.mission_registrations, short_id)
                 .cloned()
                 .map(Item::Mission),
+            COMPACT_LANE_TREASURY => map_by_short_id(&self.treasury_disbursements, short_id)
+                .cloned()
+                .map(Item::Treasury),
             _ => None,
         }
     }
@@ -1995,6 +2005,7 @@ impl Mempool {
         self.evict_drc_multisign_attachments_from_block(block);
         self.evict_passport_attestations_from_block(block);
         self.evict_community_registrations_from_block(block);
+        self.evict_treasury_disbursements_from_block(block);
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
             let id = tx.policy_tx_id();
@@ -2481,6 +2492,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -2569,6 +2581,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));
@@ -3397,6 +3410,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.pending_check_create(&id));

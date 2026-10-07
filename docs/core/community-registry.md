@@ -50,7 +50,9 @@ DRC Community grants cannot enter the canonical registry without a cleared,
 non-zero conflict-of-interest disclosure.
 
 These transitions record eligibility and completion only. They do not move
-treasury funds; signed consensus disbursement remains a later phase.
+treasury funds. Controller-signed `TreasuryDisbursement` is a separate
+consensus lane (`agora-treasury-disbursement-v1`) that debits an existing
+protocol treasury after authorization-root and nonce checks.
 
 Grant and Mission **registration** is a signed consensus lane.
 `GrantRegistration` is signed by an active hub coordinator

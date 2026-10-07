@@ -96,8 +96,8 @@ exists.
   finalizes.
 - Gossip, mining templates, and IBD continue to identify blocks by
   `BlockHeader` hash. `TridentHeader` is not the P2P block identity.
-- Vesting unlock, signed treasury spend, and Hub/Grant/Mission mutation remain
-  unwired.
+- Vesting unlock remains unwired. Signed Hub/Grant/Mission and treasury
+  disbursement are later consensus lanes, not Block 0 writes.
 
 Until a freeze-ready v3 artifact is published and multi-node boot+IBD+tx+
 finality are demonstrated against it, status stays **INCOMPLETE**.

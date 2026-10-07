@@ -1,25 +1,30 @@
-use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
-use std::hash::{Hash as StdHash, Hasher};
-use std::time::Duration;
+use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
+    hash::{Hash as StdHash, Hasher},
+    time::Duration,
+};
 
 use agora_types::{Block, BlockHeader, Hash};
 use futures::StreamExt;
-use libp2p::gossipsub::{self, IdentTopic, MessageAuthenticity};
-use libp2p::identity::Keypair;
-use libp2p::request_response::{self, ProtocolSupport, ResponseChannel};
-use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
-use libp2p::{Multiaddr, PeerId, Swarm, SwarmBuilder};
+use libp2p::{
+    gossipsub::{self, IdentTopic, MessageAuthenticity},
+    identity::Keypair,
+    request_response::{self, ProtocolSupport, ResponseChannel},
+    swarm::{NetworkBehaviour, SwarmEvent},
+    Multiaddr, PeerId, Swarm, SwarmBuilder,
+};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-use crate::getblock::{GetBlockRequest, GetBlockResponse};
-use crate::getheaders::{GetHeadersRequest, GetHeadersResponse};
-use crate::limits::connection_limits_behaviour;
-use crate::messages::NetworkMessage;
-use crate::scoring::{enable_peer_scoring, APP_SCORE_BAD_PEER, APP_SCORE_GOOD_PEER};
-use crate::topics::NetworkTopics;
-use crate::{NetworkConfig, P2pError};
+use crate::{
+    getblock::{GetBlockRequest, GetBlockResponse},
+    getheaders::{GetHeadersRequest, GetHeadersResponse},
+    limits::connection_limits_behaviour,
+    messages::NetworkMessage,
+    scoring::{enable_peer_scoring, APP_SCORE_BAD_PEER, APP_SCORE_GOOD_PEER},
+    topics::NetworkTopics,
+    NetworkConfig, P2pError,
+};
 
 type GetBlockBehaviour = request_response::cbor::Behaviour<GetBlockRequest, GetBlockResponse>;
 type GetHeadersBehaviour = request_response::cbor::Behaviour<GetHeadersRequest, GetHeadersResponse>;
@@ -398,7 +403,8 @@ impl NetworkNode {
             | NetworkMessage::PassportAttestation(_)
             | NetworkMessage::HubRegistration(_)
             | NetworkMessage::GrantRegistration(_)
-            | NetworkMessage::MissionRegistration(_) => {
+            | NetworkMessage::MissionRegistration(_)
+            | NetworkMessage::TreasuryDisbursement(_) => {
                 self.publish(self.topics.transactions(), message.encode())
             }
             NetworkMessage::CheckpointAttestation(_) => {

@@ -34,6 +34,7 @@ import type { PassportAttestation } from "./PassportAttestation";
 import type { SignedStakeTx } from "./SignedStakeTx";
 import type { TltCovenantTx } from "./TltCovenantTx";
 import type { Transaction } from "./Transaction";
+import type { TreasuryDisbursement } from "./TreasuryDisbursement";
 
 /**
  * Full Trident body with an OVL-only execution lane.
@@ -173,4 +174,8 @@ grant_registrations: Array<GrantRegistration>,
 /**
  * Signed mission registrations. Empty stays off the frozen wire.
  */
-mission_registrations: Array<MissionRegistration>, };
+mission_registrations: Array<MissionRegistration>,
+/**
+ * Signed protocol treasury spends. Empty stays off the frozen wire.
+ */
+treasury_disbursements: Array<TreasuryDisbursement>, };

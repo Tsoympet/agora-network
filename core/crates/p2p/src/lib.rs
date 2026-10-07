@@ -60,5 +60,5 @@ pub use topics::{
 pub use typed_compact::{
     reconstruct_typed_compact, CompactLaneItem, TypedCompactBody, TypedCompactLane,
     COMPACT_LANE_DRC_MULTISIGN, COMPACT_LANE_GRANT, COMPACT_LANE_HUB, COMPACT_LANE_MISSION,
-    COMPACT_LANE_PASSPORT, TYPED_COMPACT_VERSION,
+    COMPACT_LANE_PASSPORT, COMPACT_LANE_TREASURY, TYPED_COMPACT_VERSION,
 };

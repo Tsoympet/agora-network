@@ -4,20 +4,28 @@
 //! into consensus state. The existing unsigned node-local civic RPC snapshot is
 //! intentionally stored under a different key and excluded from this root.
 
+use agora_crypto::verify_treasury_disbursement_bound;
 use agora_governance::{
     authorization_for_class, hash_constitution_body, trident_policy_catalog, ProposalAuthorization,
     ProposalClass, CONSTITUTION_V1_BODY, CONSTITUTION_V1_ID,
 };
-use agora_types::{Amount, Hash, TreasuryBalance, TreasuryId};
+use agora_types::{
+    Address, Amount, Hash, NativeAssetId, OutPoint, TreasuryBalance, TreasuryDisbursement,
+    TreasuryId, TxOut,
+};
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::columns::ColumnFamily;
-use crate::store::WriteBatch;
-use crate::{StateError, StateStore};
+use crate::{
+    accounts::credit_account_into, apply::TxAuthContext, columns::ColumnFamily, store::WriteBatch,
+    utxo::outpoint_key, StateError, StateStore,
+};
 
 const POLICY_KEY: &[u8] = b"governance/consensus/policy";
 const TREASURY_PREFIX: &[u8] = b"governance/treasury/";
 const TREASURY_CONTROL_PREFIX: &[u8] = b"governance/treasury_control/";
+const TREASURY_CONTROLLER_PREFIX: &[u8] = b"governance/treasury_controller/";
+const TREASURY_NONCE_PREFIX: &[u8] = b"governance/treasury_nonce/";
+const TREASURY_DISBURSEMENT_PREFIX: &[u8] = b"governance/treasury_disbursement/";
 const EMERGENCY_POLICY_KEY: &[u8] = b"governance/consensus/emergency_policy_hash";
 const VESTING_KEY: &[u8] = b"governance/vesting/schedules-v1";
 pub const CANONICAL_GOVERNANCE_VERSION: u32 = 1;
@@ -74,6 +82,93 @@ pub(crate) fn put_treasury_into(
     let bytes = borsh::to_vec(treasury).map_err(|e| StateError::Storage(e.to_string()))?;
     batch.put_cf(ColumnFamily::Meta, &treasury_key(treasury.treasury), &bytes);
     Ok(())
+}
+
+fn treasury_controller_key(treasury: TreasuryId) -> Vec<u8> {
+    let mut key = Vec::with_capacity(TREASURY_CONTROLLER_PREFIX.len() + 1);
+    key.extend_from_slice(TREASURY_CONTROLLER_PREFIX);
+    key.push(treasury.wire_byte());
+    key
+}
+
+fn treasury_nonce_key(treasury: TreasuryId) -> Vec<u8> {
+    let mut key = Vec::with_capacity(TREASURY_NONCE_PREFIX.len() + 1);
+    key.extend_from_slice(TREASURY_NONCE_PREFIX);
+    key.push(treasury.wire_byte());
+    key
+}
+
+pub fn treasury_balance_key(treasury: TreasuryId) -> Vec<u8> {
+    treasury_key(treasury)
+}
+
+pub fn treasury_controller_record_key(treasury: TreasuryId) -> Vec<u8> {
+    treasury_controller_key(treasury)
+}
+
+pub fn treasury_nonce_record_key(treasury: TreasuryId) -> Vec<u8> {
+    treasury_nonce_key(treasury)
+}
+
+pub fn treasury_disbursement_record_key(id: &Hash) -> Vec<u8> {
+    treasury_disbursement_key(id)
+}
+
+fn treasury_disbursement_key(id: &Hash) -> Vec<u8> {
+    let mut key = Vec::with_capacity(TREASURY_DISBURSEMENT_PREFIX.len() + 32);
+    key.extend_from_slice(TREASURY_DISBURSEMENT_PREFIX);
+    key.extend_from_slice(id.as_bytes());
+    key
+}
+
+pub fn load_treasury_disbursement(
+    store: &StateStore,
+    id: &Hash,
+) -> Result<Option<TreasuryDisbursement>, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &treasury_disbursement_key(id))? else {
+        return Ok(None);
+    };
+    TreasuryDisbursement::try_from_slice(&bytes)
+        .map(Some)
+        .map_err(|e| StateError::Storage(e.to_string()))
+}
+
+pub fn put_treasury_controller_into(
+    batch: &mut WriteBatch,
+    treasury: TreasuryId,
+    controller: Address,
+) -> Result<(), StateError> {
+    if controller == Address::ZERO {
+        return Err(StateError::InvalidTx(
+            "treasury controller must be nonzero".into(),
+        ));
+    }
+    let bytes = borsh::to_vec(&controller).map_err(|e| StateError::Storage(e.to_string()))?;
+    batch.put_cf(
+        ColumnFamily::Meta,
+        &treasury_controller_key(treasury),
+        &bytes,
+    );
+    Ok(())
+}
+
+pub fn load_treasury_controller(
+    store: &StateStore,
+    treasury: TreasuryId,
+) -> Result<Option<Address>, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &treasury_controller_key(treasury))? else {
+        return Ok(None);
+    };
+    Address::try_from_slice(&bytes)
+        .map(Some)
+        .map_err(|e| StateError::Storage(e.to_string()))
+}
+
+pub fn load_treasury_nonce(store: &StateStore, treasury: TreasuryId) -> Result<u64, StateError> {
+    let Some(bytes) = store.get_cf(ColumnFamily::Meta, &treasury_nonce_key(treasury))? else {
+        return Ok(0);
+    };
+    u64::try_from_slice(&bytes).map_err(|e| StateError::Storage(e.to_string()))
 }
 
 fn treasury_control_key(treasury: TreasuryId) -> Vec<u8> {
@@ -229,6 +324,117 @@ pub fn load_protocol_treasury(
     Ok(balance)
 }
 
+pub fn apply_treasury_disbursement_into(
+    batch: &mut WriteBatch,
+    store: &StateStore,
+    spend: &TreasuryDisbursement,
+    auth: &TxAuthContext,
+) -> Result<Option<OutPoint>, StateError> {
+    if spend.version != 1 {
+        return Err(StateError::InvalidTx(
+            "unsupported treasury disbursement version".into(),
+        ));
+    }
+    if spend.beneficiary == Address::ZERO {
+        return Err(StateError::InvalidTx(
+            "treasury beneficiary must be nonzero".into(),
+        ));
+    }
+    if spend.amount == Amount::ZERO {
+        return Err(StateError::InvalidTx(
+            "treasury amount must be nonzero".into(),
+        ));
+    }
+    if spend.reason_hash == Hash::ZERO {
+        return Err(StateError::InvalidTx(
+            "treasury reason hash must be nonzero".into(),
+        ));
+    }
+    let signer = verify_treasury_disbursement_bound(spend, &auth.chain_id, &auth.genesis)
+        .map_err(|error| StateError::InvalidTx(error.to_string()))?;
+    let policy = load_canonical_governance_policy(store)?;
+    if spend.authorization_root != policy.authorization_root {
+        return Err(StateError::InvalidTx(
+            "treasury authorization root mismatch".into(),
+        ));
+    }
+    let controller = load_treasury_controller(store, spend.treasury)?
+        .ok_or_else(|| StateError::InvalidTx("treasury has no consensus controller".into()))?;
+    if signer != controller {
+        return Err(StateError::InvalidTx(
+            "treasury disbursement signer is not the controller".into(),
+        ));
+    }
+    let current_nonce = load_treasury_nonce(store, spend.treasury)?;
+    if spend.nonce != current_nonce {
+        return Err(StateError::InvalidTx("treasury nonce mismatch".into()));
+    }
+    let id = spend.disbursement_id();
+    if store
+        .get_cf(ColumnFamily::Meta, &treasury_disbursement_key(&id))?
+        .is_some()
+    {
+        return Err(StateError::InvalidTx(
+            "duplicate treasury disbursement".into(),
+        ));
+    }
+    let mut balance = load_protocol_treasury(store, spend.treasury)?;
+    let next_balance = balance
+        .balance
+        .checked_sub(spend.amount)
+        .ok_or_else(|| StateError::InvalidTx("treasury balance insufficient".into()))?;
+    balance.balance = next_balance;
+    let next_nonce = current_nonce
+        .checked_add(1)
+        .ok_or_else(|| StateError::InvalidTx("treasury nonce overflow".into()))?;
+
+    let mut pending = WriteBatch::new();
+    put_treasury_into(&mut pending, &balance)?;
+    let nonce_bytes = borsh::to_vec(&next_nonce).map_err(|e| StateError::Storage(e.to_string()))?;
+    pending.put_cf(
+        ColumnFamily::Meta,
+        &treasury_nonce_key(spend.treasury),
+        &nonce_bytes,
+    );
+    let rec = borsh::to_vec(spend).map_err(|e| StateError::Storage(e.to_string()))?;
+    pending.put_cf(ColumnFamily::Meta, &treasury_disbursement_key(&id), &rec);
+
+    let created = match spend.treasury.asset() {
+        NativeAssetId::TLT => {
+            let op = OutPoint {
+                tx_id: spend.disbursement_id(),
+                index: 0,
+            };
+            let key = outpoint_key(&op);
+            if store.get_cf(ColumnFamily::Utxo, &key)?.is_some() {
+                return Err(StateError::DuplicateOutpoint(format!(
+                    "{}:0",
+                    op.tx_id.to_hex()
+                )));
+            }
+            let out = TxOut {
+                value: spend.amount,
+                address: spend.beneficiary,
+            };
+            let bytes = borsh::to_vec(&out).map_err(|e| StateError::Storage(e.to_string()))?;
+            pending.put_cf(ColumnFamily::Utxo, &key, &bytes);
+            Some(op)
+        }
+        NativeAssetId::OVL | NativeAssetId::DRC => {
+            credit_account_into(
+                &mut pending,
+                store,
+                spend.treasury.asset(),
+                &spend.beneficiary,
+                spend.amount,
+            )?;
+            None
+        }
+    };
+    batch.append(pending);
+    Ok(created)
+}
+
 pub fn load_protocol_treasuries(store: &StateStore) -> Result<Vec<TreasuryBalance>, StateError> {
     TreasuryId::ALL
         .iter()
@@ -306,5 +512,70 @@ mod tests {
         };
         assert!(put_treasury_into(&mut batch, &corrupt).is_err());
         assert!(batch.is_empty());
+    }
+
+    #[test]
+    fn disbursement_rejects_wrong_signer_root_and_insufficient_balance() {
+        use agora_crypto::{sign_treasury_disbursement_bound, KeyPair};
+
+        let store = StateStore::open_in_memory();
+        let controller = KeyPair::from_secret_bytes(&[5; 32]).unwrap();
+        let stranger = KeyPair::from_secret_bytes(&[6; 32]).unwrap();
+        let mut batch = WriteBatch::new();
+        init_canonical_governance_into(&mut batch).unwrap();
+        put_treasury_into(
+            &mut batch,
+            &TreasuryBalance::new(
+                TreasuryId::OvlBuilder,
+                NativeAssetId::OVL,
+                Amount::from_base_units(40),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        put_treasury_controller_into(&mut batch, TreasuryId::OvlBuilder, controller.address())
+            .unwrap();
+        store.write_batch(batch).unwrap();
+
+        let auth = TxAuthContext {
+            chain_id: "agora-dev".into(),
+            genesis: Hash([7; 32]),
+            data_availability_network_fingerprint: None,
+        };
+        let mut spend = TreasuryDisbursement::unsigned(
+            TreasuryId::OvlBuilder,
+            Address([9; 20]),
+            Amount::from_base_units(10),
+            Hash([3; 32]),
+            authorization_policy_root(),
+            0,
+        );
+        sign_treasury_disbursement_bound(&mut spend, &stranger, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let mut reject = WriteBatch::new();
+        assert!(apply_treasury_disbursement_into(&mut reject, &store, &spend, &auth).is_err());
+
+        sign_treasury_disbursement_bound(&mut spend, &controller, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        spend.authorization_root = Hash([1; 32]);
+        assert!(apply_treasury_disbursement_into(&mut reject, &store, &spend, &auth).is_err());
+
+        spend.authorization_root = authorization_policy_root();
+        spend.amount = Amount::from_base_units(41);
+        sign_treasury_disbursement_bound(&mut spend, &controller, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        assert!(apply_treasury_disbursement_into(&mut reject, &store, &spend, &auth).is_err());
+
+        spend.amount = Amount::from_base_units(10);
+        sign_treasury_disbursement_bound(&mut spend, &controller, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        apply_treasury_disbursement_into(&mut reject, &store, &spend, &auth).unwrap();
+        store.write_batch(reject).unwrap();
+        assert_eq!(
+            load_protocol_treasury(&store, TreasuryId::OvlBuilder)
+                .unwrap()
+                .balance,
+            Amount::from_base_units(30)
+        );
     }
 }

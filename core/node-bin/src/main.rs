@@ -13,10 +13,14 @@ mod schema_cli;
 mod startup;
 mod storage_policy;
 
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
+};
 
 use agora_consensus::PowAlgorithm;
 use agora_p2p::{
@@ -33,24 +37,26 @@ use agora_state_machine::{
 use agora_types::{Address, Block, Hash};
 use tracing::{info, warn};
 
-use crate::admit::{AdmitError, ChainBootConfig, ChainState};
-use crate::backend::{
-    admit_account_transfer, admit_data_commitment, admit_drc_account_policy,
-    admit_drc_check_cancel, admit_drc_check_cash, admit_drc_check_create,
-    admit_drc_deposit_preauth, admit_drc_escrow_cancel, admit_drc_escrow_create,
-    admit_drc_escrow_finish, admit_drc_issued_asset_policy_set, admit_drc_issued_clawback,
-    admit_drc_issued_transfer, admit_drc_offer_cancel, admit_drc_offer_create, admit_drc_payment,
-    admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
-    admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
-    admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_issuer_control,
-    admit_drc_trust_line_set, admit_grant_registration, admit_hub_registration,
-    admit_mission_registration, admit_ovl_execution, admit_ovl_raw_execution,
-    admit_passport_attestation, admit_stake_tx, admit_tlt_covenant, admit_transaction, NodeBackend,
-    NodeBackendConfig,
+use crate::{
+    admit::{AdmitError, ChainBootConfig, ChainState},
+    backend::{
+        admit_account_transfer, admit_data_commitment, admit_drc_account_policy,
+        admit_drc_check_cancel, admit_drc_check_cash, admit_drc_check_create,
+        admit_drc_deposit_preauth, admit_drc_escrow_cancel, admit_drc_escrow_create,
+        admit_drc_escrow_finish, admit_drc_issued_asset_policy_set, admit_drc_issued_clawback,
+        admit_drc_issued_transfer, admit_drc_offer_cancel, admit_drc_offer_create,
+        admit_drc_payment, admit_drc_payment_channel_claim, admit_drc_payment_channel_close,
+        admit_drc_payment_channel_create, admit_drc_payment_channel_fund, admit_drc_regular_key,
+        admit_drc_signer_list, admit_drc_ticket_create, admit_drc_trust_line_issuer_control,
+        admit_drc_trust_line_set, admit_grant_registration, admit_hub_registration,
+        admit_mission_registration, admit_ovl_execution, admit_ovl_raw_execution,
+        admit_passport_attestation, admit_stake_tx, admit_tlt_covenant, admit_transaction,
+        admit_treasury_disbursement, NodeBackend, NodeBackendConfig,
+    },
+    http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig},
+    startup::{p2p_identity_path, prepare_legacy_datadir, prepare_trident_datadir},
+    storage_policy::StoragePolicy,
 };
-use crate::http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig};
-use crate::startup::{p2p_identity_path, prepare_legacy_datadir, prepare_trident_datadir};
-use crate::storage_policy::StoragePolicy;
 
 fn resolve_chain_params() -> ChainParams {
     let network = std::env::var("AGORA_NETWORK")
@@ -1758,6 +1764,17 @@ async fn main() {
                             }
                             Err(err) => {
                                 warn!(%peer, %topic, error = %err, "mission registration gossip rejected");
+                            }
+                        }
+                    }
+                    NetworkMessage::TreasuryDisbursement(spend) => {
+                        match admit_treasury_disbursement(store.as_ref(), &mempool, spend, &tx_auth)
+                        {
+                            Ok(id) => {
+                                info!(%peer, %topic, treasury = %id.to_hex(), "treasury disbursement gossip admitted");
+                            }
+                            Err(err) => {
+                                warn!(%peer, %topic, error = %err, "treasury disbursement gossip rejected");
                             }
                         }
                     }

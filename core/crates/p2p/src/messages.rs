@@ -6,8 +6,7 @@ use agora_types::{
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::ibd::short_ids_for_block;
-use crate::typed_compact::TypedCompactBody;
+use crate::{ibd::short_ids_for_block, typed_compact::TypedCompactBody};
 
 /// Wire envelopes for gossip payloads.
 #[allow(clippy::large_enum_variant)]
@@ -100,6 +99,8 @@ pub enum NetworkMessage {
     GrantRegistration(agora_types::GrantRegistration),
     /// Appended in Trident protocol v30; hub-coordinator-signed mission registration.
     MissionRegistration(agora_types::MissionRegistration),
+    /// Appended in Trident protocol v31; controller-signed protocol treasury spend.
+    TreasuryDisbursement(agora_types::TreasuryDisbursement),
 }
 
 impl NetworkMessage {

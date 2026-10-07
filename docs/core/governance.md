@@ -96,7 +96,7 @@ effective = isqrt(capped)
 | Community board (forum + acks) | yes (local) |
 | Node Meta CF persistence (`meta/governance`) | yes — **local**, not consensus-derived |
 | Canonical authorization policy commitment | yes — genesis/state-root scaffold |
-| TLT/OVL/DRC protocol treasury identities + zero balances | yes — canonical read-only scaffold |
+| TLT/OVL/DRC protocol treasury identities + balances | yes — genesis balances plus signed `TreasuryDisbursement` spend |
 | Hub/Passport/Grant/Mission schemas + bounded root | yes — canonical read-only scaffold |
 | JSON-RPC civic methods | yes — **trusted caller** prototype |
 | Explorer ballot panel + desktop vote UI | yes (drives local RPC) |
@@ -115,7 +115,10 @@ effective = isqrt(capped)
 | `drc_community` | DRC |
 
 Their authorization policy and balances commit into the Trident state root.
-`agora_getProtocolTreasuries` exposes this read-only state.
+`agora_getProtocolTreasuries` exposes policy, balances, controller, and nonce.
+Controller-signed `TreasuryDisbursement` (protocol v31) debits an existing
+treasury only; it never mints. TLT creates a UTXO at the beneficiary; OVL/DRC
+credit the account module.
 
 The committed policy catalog includes the Trident OVL Technical, DRC Community,
 Ecclesia, miner-signaling, and limited Security Council paths from
@@ -126,5 +129,5 @@ timelocks, and mandatory emergency expiry/post-action ratification.
 No unsigned civic RPC can mutate these records. Existing `meta/governance`
 proposal/forum endpoints remain `administrative_local` and excluded from the
 canonical governance root. Signed block-replicated governance operations,
-deposits, votes, treasury funding, and spend execution are still required
-before this can be called on-chain governance.
+deposits, votes, and treasury *funding* are still required before this can
+be called complete on-chain governance. Signed spend execution exists.

@@ -1,8 +1,10 @@
 use agora_consensus::EmissionSchedule;
 use agora_types::{Address, Amount, Block, BlockHeader, Hash, Transaction, TxOut};
 
-use crate::columns::{meta_keys, ColumnFamily};
-use crate::{StateError, StateStore, WriteBatch};
+use crate::{
+    columns::{meta_keys, ColumnFamily},
+    StateError, StateStore, WriteBatch,
+};
 
 /// Fixed monetary parameters written at genesis and never mutated ad hoc.
 #[derive(Debug, Clone)]
@@ -114,6 +116,7 @@ impl GenesisBuilder {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         }
     }
 

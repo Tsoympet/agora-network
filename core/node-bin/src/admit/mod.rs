@@ -16,9 +16,11 @@
 
 mod finality;
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use agora_consensus::{
     median_time_past, next_difficulty_weighted, work_from_bits, ConsensusLimits, DaaConfig,
@@ -236,6 +238,7 @@ pub struct BlockTemplateLanes<'a> {
     pub hub_registrations: &'a [agora_types::HubRegistration],
     pub grant_registrations: &'a [agora_types::GrantRegistration],
     pub mission_registrations: &'a [agora_types::MissionRegistration],
+    pub treasury_disbursements: &'a [agora_types::TreasuryDisbursement],
 }
 
 impl ChainState {
@@ -644,6 +647,7 @@ impl ChainState {
             hub_registrations: lanes.hub_registrations.to_vec(),
             grant_registrations: lanes.grant_registrations.to_vec(),
             mission_registrations: lanes.mission_registrations.to_vec(),
+            treasury_disbursements: lanes.treasury_disbursements.to_vec(),
         };
         if let Some(ctx) = self.auth.as_ref() {
             agora_types::materialize_drc_multisign_attachments(

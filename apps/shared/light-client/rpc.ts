@@ -199,6 +199,8 @@ export type LightProtocolTreasuries = {
     id: string;
     asset: NativeAssetTicker;
     balance: LightAmount;
+    nonce?: number;
+    controller?: string | null;
   }>;
 };
 
@@ -394,6 +396,15 @@ export type LightClient = {
     sponsor: string;
     nonce: number;
   }>;
+  getTreasuryDisbursement: (disbursementId: string) => Promise<{
+    disbursement_id: string;
+    status: string;
+    disbursement: unknown | null;
+  }>;
+  getTreasuryNonce: (treasury: string) => Promise<{
+    treasury: string;
+    nonce: number;
+  }>;
   getDrcObject: (objectId: string) => Promise<{
     object_id: string;
     status: "live" | "unknown";
@@ -498,6 +509,9 @@ export type LightClient = {
   }>;
   submitMissionRegistration: (registration: unknown) => Promise<{
     registration_id: string;
+  }>;
+  submitTreasuryDisbursement: (disbursement: unknown) => Promise<{
+    disbursement_id: string;
   }>;
   getConstitution: () => Promise<LightConstitution>;
   getGovernance: () => Promise<LightGovernance>;
@@ -631,6 +645,16 @@ export function createLightClient(config: LightClientConfig): LightClient {
         "agora_getMissionSponsorNonce",
         { sponsor },
       ),
+    getTreasuryDisbursement: (disbursementId) =>
+      call<{
+        disbursement_id: string;
+        status: string;
+        disbursement: unknown | null;
+      }>("agora_getTreasuryDisbursement", { disbursement_id: disbursementId }),
+    getTreasuryNonce: (treasury) =>
+      call<{ treasury: string; nonce: number }>("agora_getTreasuryNonce", {
+        treasury,
+      }),
     getDrcObject: (objectId) =>
       call<{
         object_id: string;
@@ -834,6 +858,10 @@ export function createLightClient(config: LightClientConfig): LightClient {
     submitMissionRegistration: (registration) =>
       call<{ registration_id: string }>("agora_submitMissionRegistration", {
         registration,
+      }),
+    submitTreasuryDisbursement: (disbursement) =>
+      call<{ disbursement_id: string }>("agora_submitTreasuryDisbursement", {
+        disbursement,
       }),
     getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
     getGovernance: () => call<LightGovernance>("agora_getGovernance", []),

@@ -53,6 +53,9 @@ try {
   await client.getGrantRegistrarNonce("agoradev1qqqq");
   await client.submitMissionRegistration({ version: 1 });
   await client.getMissionSponsorNonce("agoradev1qqqq");
+  await client.submitTreasuryDisbursement({ version: 1 });
+  await client.getTreasuryDisbursement("aa".repeat(32));
+  await client.getTreasuryNonce("ovl_builder");
 
   assert.deepEqual(
     calls.map((call) => call.method),
@@ -85,6 +88,9 @@ try {
       "agora_getGrantRegistrarNonce",
       "agora_submitMissionRegistration",
       "agora_getMissionSponsorNonce",
+      "agora_submitTreasuryDisbursement",
+      "agora_getTreasuryDisbursement",
+      "agora_getTreasuryNonce",
     ],
   );
   assert.deepEqual(calls[0].params, { address: "agoradev1qqqq" });

@@ -54,7 +54,7 @@ pub use block::{
     TRIDENT_BLOCK_BODY_V14_VERSION, TRIDENT_BLOCK_BODY_V15_DOMAIN, TRIDENT_BLOCK_BODY_V15_VERSION,
     TRIDENT_BLOCK_BODY_V16_DOMAIN, TRIDENT_BLOCK_BODY_V16_VERSION, TRIDENT_BLOCK_BODY_V17_DOMAIN,
     TRIDENT_BLOCK_BODY_V17_VERSION, TRIDENT_BLOCK_BODY_V21_DOMAIN, TRIDENT_BLOCK_BODY_V21_VERSION,
-    TRIDENT_BLOCK_BODY_VERSION,
+    TRIDENT_BLOCK_BODY_V22_DOMAIN, TRIDENT_BLOCK_BODY_V22_VERSION, TRIDENT_BLOCK_BODY_VERSION,
 };
 pub use community::{
     CommunityGrantKind, CommunityGrantMilestone, GrantRegistration, HubRegistration,
@@ -278,7 +278,9 @@ pub use tlt_script::{
     TLT_SEQUENCE_TIME_FLAG,
 };
 pub use transaction::{Address, OutPoint, Transaction, TransactionBody, TxIn, TxOut};
-pub use treasury::{TreasuryBalance, TreasuryId};
+pub use treasury::{
+    TreasuryBalance, TreasuryDisbursement, TreasuryId, TREASURY_DISBURSEMENT_DOMAIN,
+};
 pub use trident_header::{
     TridentHeader, TridentHeaderError, TridentHeaderIdentity, TRIDENT_HEADER_ENCODING_DOMAIN,
     TRIDENT_HEADER_ENCODING_VERSION,
@@ -386,6 +388,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         assert_eq!(block.id(), header.hash());
         assert_eq!(Block::compute_tx_root(&block.transactions), root);
@@ -567,6 +570,7 @@ mod ts_export {
         HubRegistration::export_all().expect("export HubRegistration");
         GrantRegistration::export_all().expect("export GrantRegistration");
         MissionRegistration::export_all().expect("export MissionRegistration");
+        TreasuryDisbursement::export_all().expect("export TreasuryDisbursement");
         IssuedCurrencyCode::export_all().expect("export IssuedCurrencyCode");
         IssuedAmount::export_all().expect("export IssuedAmount");
         IssuedAssetId::export_all().expect("export IssuedAssetId");

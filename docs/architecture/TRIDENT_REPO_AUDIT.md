@@ -47,7 +47,7 @@ Independent quorums; no price-oracle mixing.
 | DRC payments + XRPL-like objects | Wired (Experimental) | Typed envelopes through offer cancel | Wired; family reservations | Typed submit/get methods | Shared builders for payment, DEX, escrow, Checks, channels, tickets, regular key, signer list, deposit preauth, account policy, trust lines, issued controls |
 | DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared builders + desktop/mobile native-DRC-vs-issued send |
 | Dual-PoS finality / staking | Wired (Experimental) | `CheckpointAttestation`, `StakeTx` | Wired | Validator / pool / `agora_submitStakeTx` | Light-client reads exist |
-| Protocol treasuries / community registry | Passport + Hub/Grant/Mission: Wired (Experimental) | `PassportAttestation` (v29) plus `HubRegistration` / `GrantRegistration` / `MissionRegistration` (v30) | Passport lane 30; hub/grant/mission lanes 31–33 | Passport + hub/grant/mission submit/get/nonce; `agora_getCommunityRegistry` | Shared builders + submit. No unsigned mutation RPC |
+| Protocol treasuries / community registry | Passport + Hub/Grant/Mission + treasury spend: Wired (Experimental) | `PassportAttestation` (v29), Hub/Grant/Mission (v30), `TreasuryDisbursement` (v31) | Passport 30; hub/grant/mission 31–33; treasury 34 | Passport + hub/grant/mission + treasury submit/get/nonce; `agora_getCommunityRegistry` / `agora_getProtocolTreasuries` | Shared builders + submit. No unsigned mutation RPC |
 | DA commitments | Apply + journal + TLT fee | `NetworkMessage::DataCommitment` (v25) | Wired; default Experimental boot + `DA_INCLUSION_FEE_TLT` | `agora_submitDataCommitment` / `agora_getDataCommitment` | Light-client query + submit wrappers |
 
 `agora_getBalance` remains the TLT UTXO sum. Native OVL/DRC account
@@ -59,7 +59,7 @@ balances and shared nonces are `agora_getAccountBalances`. Ethereum
 ## P2P and compact blocks
 
 `NetworkMessage` Borsh discriminants are append-only through
-`MissionRegistration` (40). Hub/Grant/Mission use discriminants 38–40.
+`TreasuryDisbursement` (41). Hub/Grant/Mission use 38–40; treasury uses 41.
 
 `compact_from_block` keeps UTXO-only `CompactBlock`. Named typed lanes use
 `TypedCompactBlock` with a per-kind short-id list so offers, covenants, DA,
@@ -122,7 +122,7 @@ infrastructure servers or store operator keys.
 | Canonical Hub registry | Experimental | Signed `HubRegistration` lane: apply/journal/gossip/mempool/RPC/light-client. First coordinator signs; apply writes Active hub |
 | Canonical Passport attestations | Experimental | Signed `PassportAttestation` lane: apply/journal/gossip/mempool/RPC/light-client |
 | Canonical Grant / Mission registry | Experimental | Signed `GrantRegistration` / `MissionRegistration` lanes. Registrar/sponsor must be an active hub coordinator |
-| Protocol treasuries | Scaffold / Experimental reads | `agora_getProtocolTreasuries`; signed disbursement is later |
+| Protocol treasuries | Experimental | Signed `TreasuryDisbursement` lane: controller + authorization_root + nonce. Debits existing treasury only (no mint). TLT creates a UTXO; OVL/DRC credits the account |
 | Merchant / Passport / Grants docs | Scaffold | Specs. Passport consensus is the attestation lane above, not merchant UI |
 
 Community Definition of Done remains **INCOMPLETE**. On-chain state is
@@ -192,9 +192,9 @@ These are real unfinished paths, not parity slogans:
 2. **Civic votes** — local-admin snapshots, not consensus. Forum/Ecclesia
    RPC stays off the gossip mesh because those types are not
    network-bound secp256k1 envelopes.
-3. **Vesting unlock / treasury spend** — genesis vesting is withheld from
-   liquid balances, but there is no consensus unlock tx. Protocol treasury
-   reads exist; signed disbursement does not.
+3. **Vesting unlock** — genesis vesting is withheld from liquid balances,
+   but there is no consensus unlock tx. Signed treasury disbursement is
+   wired (v31); it does not unlock vesting.
 4. **`TridentHeader` is not the gossip header** — Block 0 identity is bound
    in Meta; IBD/mining still use `BlockHeader`.
 

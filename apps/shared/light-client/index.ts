@@ -186,6 +186,12 @@ export {
   type TreasuryIdName,
 } from "./typed-lanes-community";
 export {
+  TREASURY_DISBURSEMENT_DOMAIN,
+  buildSignedTreasuryDisbursement,
+  encodeTreasuryDisbursementBody,
+  sendTreasuryDisbursement,
+} from "./typed-lanes-treasury";
+export {
   RAW_EVM_DEV_CHAIN_ID,
   RAW_EVM_KEY_SPLIT,
   RAW_EVM_TESTNET_CHAIN_ID,

@@ -9,10 +9,12 @@ use agora_types::{
 };
 use serde_json::{json, Value};
 
-use crate::backend::RpcBackend;
-use crate::drc_trust_line_params::{parse_holder_issuer_asset, parse_issued_asset_id};
-use crate::error::RpcError;
-use crate::methods::{RpcMethod, RpcRequest, RpcResponse};
+use crate::{
+    backend::RpcBackend,
+    drc_trust_line_params::{parse_holder_issuer_asset, parse_issued_asset_id},
+    error::RpcError,
+    methods::{RpcMethod, RpcRequest, RpcResponse},
+};
 
 /// Dispatches JSON-RPC style requests against an [`RpcBackend`].
 #[derive(Debug)]
@@ -883,6 +885,24 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let sponsor = param_address(&req.params, "sponsor")?;
                 self.backend.get_mission_sponsor_nonce(&sponsor)
             }
+            RpcMethod::SubmitTreasuryDisbursement => {
+                let raw =
+                    req.params.get("disbursement").cloned().ok_or_else(|| {
+                        RpcError::InvalidParams("missing disbursement object".into())
+                    })?;
+                let spend: agora_types::TreasuryDisbursement = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_treasury_disbursement(spend)?;
+                Ok(json!({ "disbursement_id": id.to_hex() }))
+            }
+            RpcMethod::GetTreasuryDisbursement => {
+                let id = param_hash(&req.params, "disbursement_id")?;
+                self.backend.get_treasury_disbursement(&id)
+            }
+            RpcMethod::GetTreasuryNonce => {
+                let treasury = parse_treasury_id(&param_string(&req.params, "treasury")?)?;
+                self.backend.get_treasury_nonce(treasury)
+            }
             RpcMethod::SubmitStakeTx => {
                 let stake_tx = req
                     .params
@@ -1456,6 +1476,17 @@ fn optional_u64_opt(params: &Value, key: &str) -> Result<Option<u64>, RpcError> 
     }
 }
 
+fn parse_treasury_id(name: &str) -> Result<agora_types::TreasuryId, RpcError> {
+    match name {
+        "tlt_security" | "TltSecurity" => Ok(agora_types::TreasuryId::TltSecurity),
+        "ovl_builder" | "OvlBuilder" => Ok(agora_types::TreasuryId::OvlBuilder),
+        "drc_community" | "DrcCommunity" => Ok(agora_types::TreasuryId::DrcCommunity),
+        other => Err(RpcError::InvalidParams(format!(
+            "unknown treasury `{other}`"
+        ))),
+    }
+}
+
 fn param_string(params: &Value, key: &str) -> Result<String, RpcError> {
     let v = if let Some(obj) = params.as_object() {
         obj.get(key)
@@ -1505,8 +1536,7 @@ fn param_topic_category(params: &Value) -> Result<agora_governance::TopicCategor
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::InMemoryBackend;
-    use crate::methods::RpcMethod;
+    use crate::{backend::InMemoryBackend, methods::RpcMethod};
     use agora_types::{
         AccountTransfer, Amount, Block, BlockHeader, DrcAcceptedOperationReceipt, DrcAccountPolicy,
         DrcAccountPolicyTx, DrcDepositPreauth, DrcLedgerObject, DrcLedgerObjectDescriptor,
@@ -1748,6 +1778,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -1918,6 +1949,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -1977,6 +2009,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {
@@ -2601,6 +2634,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2676,6 +2710,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2750,6 +2785,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2825,6 +2861,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);

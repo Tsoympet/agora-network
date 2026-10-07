@@ -14,7 +14,7 @@ use agora_types::{
     DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx,
     DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, GrantRegistration, Hash, HubRegistration,
     MissionRegistration, OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx,
-    Transaction,
+    Transaction, TreasuryDisbursement,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
@@ -56,6 +56,7 @@ pub const COMPACT_LANE_PASSPORT: u8 = 30;
 pub const COMPACT_LANE_HUB: u8 = 31;
 pub const COMPACT_LANE_GRANT: u8 = 32;
 pub const COMPACT_LANE_MISSION: u8 = 33;
+pub const COMPACT_LANE_TREASURY: u8 = 34;
 
 #[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct TypedCompactLane {
@@ -106,6 +107,7 @@ pub enum CompactLaneItem {
     Hub(HubRegistration),
     Grant(GrantRegistration),
     Mission(MissionRegistration),
+    Treasury(TreasuryDisbursement),
 }
 
 impl TypedCompactBody {
@@ -317,6 +319,12 @@ impl TypedCompactBody {
             &block.mission_registrations,
             MissionRegistration::registration_id,
         );
+        push_lane(
+            &mut lanes,
+            COMPACT_LANE_TREASURY,
+            &block.treasury_disbursements,
+            TreasuryDisbursement::disbursement_id,
+        );
         Some(Self {
             version: TYPED_COMPACT_VERSION,
             header: block.header.clone(),
@@ -453,6 +461,9 @@ fn apply_item(block: &mut Block, kind: u8, item: CompactLaneItem) -> Result<(), 
         (COMPACT_LANE_GRANT, CompactLaneItem::Grant(tx)) => block.grant_registrations.push(tx),
         (COMPACT_LANE_MISSION, CompactLaneItem::Mission(tx)) => {
             block.mission_registrations.push(tx)
+        }
+        (COMPACT_LANE_TREASURY, CompactLaneItem::Treasury(tx)) => {
+            block.treasury_disbursements.push(tx)
         }
         _ => return Err(ReconstructError::UnsupportedLane(kind)),
     }

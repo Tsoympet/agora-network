@@ -1,5 +1,7 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Mutex,
+};
 
 use agora_governance::{
     civic_overview_json, list_proposals_json, list_topics_json, office_json, proposal_json,
@@ -532,6 +534,12 @@ pub trait RpcBackend: Send {
     ) -> Result<Hash, RpcError>;
     fn get_mission_registration(&self, registration_id: &Hash) -> Result<Value, RpcError>;
     fn get_mission_sponsor_nonce(&self, sponsor: &Address) -> Result<Value, RpcError>;
+    fn submit_treasury_disbursement(
+        &mut self,
+        spend: agora_types::TreasuryDisbursement,
+    ) -> Result<Hash, RpcError>;
+    fn get_treasury_disbursement(&self, disbursement_id: &Hash) -> Result<Value, RpcError>;
+    fn get_treasury_nonce(&self, treasury: agora_types::TreasuryId) -> Result<Value, RpcError>;
     /// Admit a secp256k1-signed stake tx (bond/delegate/unbond/withdraw). Never mint-like.
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError>;
 
@@ -1605,6 +1613,7 @@ impl RpcBackend for InMemoryBackend {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         })
     }
 
@@ -1783,6 +1792,30 @@ impl RpcBackend for InMemoryBackend {
     fn get_mission_sponsor_nonce(&self, sponsor: &Address) -> Result<Value, RpcError> {
         Ok(json!({
             "sponsor": sponsor.to_hex(),
+            "nonce": 0u64,
+        }))
+    }
+
+    fn submit_treasury_disbursement(
+        &mut self,
+        _spend: agora_types::TreasuryDisbursement,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit treasury disbursements".into(),
+        ))
+    }
+
+    fn get_treasury_disbursement(&self, disbursement_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "disbursement_id": disbursement_id.to_hex(),
+            "status": "unknown",
+            "disbursement": null,
+        }))
+    }
+
+    fn get_treasury_nonce(&self, treasury: agora_types::TreasuryId) -> Result<Value, RpcError> {
+        Ok(json!({
+            "treasury": treasury.as_str(),
             "nonce": 0u64,
         }))
     }

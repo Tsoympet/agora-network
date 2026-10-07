@@ -7,8 +7,10 @@
 //! [`OrphanPool`] holds blocks whose parents are not yet local so multi-hop
 //! IBD can fetch ancestors and re-admit children in order.
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::{Duration, Instant};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    time::{Duration, Instant},
+};
 
 use agora_types::{Block, BlockHeader, Hash, Transaction};
 use libp2p::PeerId;
@@ -468,6 +470,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         }
     }
 

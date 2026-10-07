@@ -1,9 +1,13 @@
 //! Live [`RpcBackend`] backed by chain admission + mempool.
 
-use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Mutex,
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use agora_consensus::PowAlgorithm;
 use agora_governance::{
@@ -39,7 +43,8 @@ use agora_state_machine::{
     load_known_drc_account_policy, load_known_drc_account_signer_summary,
     load_known_drc_deposit_authorization, load_mission_registration, load_mission_sponsor_nonce,
     load_native_supply_state, load_passport_attestation, load_passport_issuer_nonce,
-    load_protocol_treasuries, load_reward_pool, load_validator, lookup_covenant_tx_location,
+    load_protocol_treasuries, load_protocol_treasury, load_reward_pool, load_treasury_controller,
+    load_treasury_disbursement, load_treasury_nonce, load_validator, lookup_covenant_tx_location,
     lookup_data_commitment_location, lookup_drc_check_point, lookup_drc_escrow_point,
     lookup_drc_issuer_liability_point, lookup_drc_payment_channel_point, lookup_drc_ticket_point,
     lookup_drc_trust_line_point, lookup_tx_location, meta_keys, outpoint_key,
@@ -58,15 +63,18 @@ use agora_types::{
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
     DrcTrustLineSetTx, GrantRegistration, Hash, HubRegistration, MissionRegistration,
     NativeAssetId, OutPoint, OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx,
-    Transaction, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
-    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_PAYMENT_TICKET_VERSION,
-    DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
+    Transaction, TreasuryDisbursement, TreasuryId, TxOut, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
+    DRC_PAYMENT_TICKET_VERSION, DRC_REGULAR_KEY_TICKET_TX_VERSION,
+    DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 use borsh::BorshDeserialize;
 use serde_json::{json, Value};
 
-use crate::admit::{BlockTemplateLanes, ChainState};
-use crate::civic::{load_civic, save_civic};
+use crate::{
+    admit::{BlockTemplateLanes, ChainState},
+    civic::{load_civic, save_civic},
+};
 
 pub(crate) fn min_relay_fee() -> u64 {
     std::env::var("AGORA_MIN_RELAY_FEE")
@@ -417,6 +425,53 @@ pub(crate) fn admit_mission_registration(
         .lock()
         .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
     pool.admit_mission_registration(registration)
+        .map_err(|err| RpcError::Rejected(err.to_string()))
+}
+
+pub(crate) fn admit_treasury_disbursement(
+    store: &StateStore,
+    mempool: &Mutex<Mempool>,
+    spend: TreasuryDisbursement,
+    auth: &TxAuthContext,
+) -> Result<Hash, RpcError> {
+    let signer =
+        agora_crypto::verify_treasury_disbursement_bound(&spend, &auth.chain_id, &auth.genesis)
+            .map_err(|err| RpcError::Rejected(format!("invalid treasury disbursement: {err}")))?;
+    if load_treasury_disbursement(store, &spend.disbursement_id())
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+        .is_some()
+    {
+        return Ok(spend.disbursement_id());
+    }
+    let controller = load_treasury_controller(store, spend.treasury)
+        .map_err(|err| RpcError::Internal(err.to_string()))?
+        .ok_or_else(|| RpcError::Rejected("treasury has no consensus controller".into()))?;
+    if signer != controller {
+        return Err(RpcError::Rejected(
+            "treasury disbursement signer is not the controller".into(),
+        ));
+    }
+    let policy = load_canonical_governance_policy(store)
+        .map_err(|err| RpcError::Internal(err.to_string()))?;
+    if spend.authorization_root != policy.authorization_root {
+        return Err(RpcError::Rejected(
+            "treasury authorization root mismatch".into(),
+        ));
+    }
+    let expected = load_treasury_nonce(store, spend.treasury)
+        .map_err(|err| RpcError::Internal(err.to_string()))?;
+    if spend.nonce != expected {
+        return Err(RpcError::Rejected("treasury nonce mismatch".into()));
+    }
+    let balance = load_protocol_treasury(store, spend.treasury)
+        .map_err(|err| RpcError::Internal(err.to_string()))?;
+    if spend.amount > balance.balance {
+        return Err(RpcError::Rejected("treasury balance insufficient".into()));
+    }
+    let mut pool = mempool
+        .lock()
+        .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+    pool.admit_treasury_disbursement(spend)
         .map_err(|err| RpcError::Rejected(err.to_string()))
 }
 
@@ -2724,6 +2779,7 @@ impl RpcBackend for NodeBackend {
             hub_registrations,
             grant_registrations,
             mission_registrations,
+            treasury_disbursements,
         ) = {
             let pool = self
                 .mempool
@@ -2776,6 +2832,7 @@ impl RpcBackend for NodeBackend {
                 pool.select_hub_registrations(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_grant_registrations(DEFAULT_TEMPLATE_TX_LIMIT),
                 pool.select_mission_registrations(DEFAULT_TEMPLATE_TX_LIMIT),
+                pool.select_treasury_disbursements(DEFAULT_TEMPLATE_TX_LIMIT),
             )
         };
         self.append_local_evm_executions(&mut ovl_executions);
@@ -2816,6 +2873,7 @@ impl RpcBackend for NodeBackend {
                     hub_registrations: &hub_registrations,
                     grant_registrations: &grant_registrations,
                     mission_registrations: &mission_registrations,
+                    treasury_disbursements: &treasury_disbursements,
                 },
             )
             .map_err(|e| RpcError::Internal(e.to_string()))
@@ -3043,8 +3101,8 @@ impl RpcBackend for NodeBackend {
         let treasuries = load_protocol_treasuries(self.store.as_ref())
             .map_err(|e| RpcError::Internal(e.to_string()))?;
         Ok(json!({
-            "maturity": "Scaffold",
-            "consensus_mutations_active": false,
+            "maturity": "Experimental",
+            "consensus_mutations_active": true,
             "governance_root": root.to_hex(),
             "policy": {
                 "version": policy.version,
@@ -3052,11 +3110,20 @@ impl RpcBackend for NodeBackend {
                 "constitution_hash": policy.constitution_hash.to_hex(),
                 "authorization_root": policy.authorization_root.to_hex(),
             },
-            "treasuries": treasuries.iter().map(|t| json!({
-                "id": t.treasury.as_str(),
-                "asset": t.asset.ticker(),
-                "balance": t.balance.as_base_units(),
-            })).collect::<Vec<_>>(),
+            "treasuries": treasuries.iter().map(|t| {
+                let nonce = load_treasury_nonce(self.store.as_ref(), t.treasury).unwrap_or(0);
+                let controller = load_treasury_controller(self.store.as_ref(), t.treasury)
+                    .ok()
+                    .flatten()
+                    .map(|addr| addr.to_hex());
+                json!({
+                    "id": t.treasury.as_str(),
+                    "asset": t.asset.ticker(),
+                    "balance": t.balance.as_base_units(),
+                    "nonce": nonce,
+                    "controller": controller,
+                })
+            }).collect::<Vec<_>>(),
         }))
     }
 
@@ -3299,6 +3366,59 @@ impl RpcBackend for NodeBackend {
             .map_err(|e| RpcError::Internal(e.to_string()))?;
         Ok(json!({
             "sponsor": sponsor.to_hex(),
+            "nonce": nonce,
+        }))
+    }
+
+    fn submit_treasury_disbursement(
+        &mut self,
+        spend: TreasuryDisbursement,
+    ) -> Result<Hash, RpcError> {
+        let auth = self.tx_auth();
+        let id = admit_treasury_disbursement(&self.store, &self.mempool, spend.clone(), &auth)?;
+        if let Some(net) = &self.net {
+            if let Err(err) = net.publish_message(NetworkMessage::TreasuryDisbursement(spend)) {
+                return Err(RpcError::Internal(err.to_string()));
+            }
+        }
+        Ok(id)
+    }
+
+    fn get_treasury_disbursement(&self, disbursement_id: &Hash) -> Result<Value, RpcError> {
+        {
+            let pool = self
+                .mempool
+                .lock()
+                .map_err(|_| RpcError::Internal("mempool lock poisoned".into()))?;
+            if let Some(spend) = pool.get_treasury_disbursement(disbursement_id) {
+                return Ok(json!({
+                    "disbursement_id": disbursement_id.to_hex(),
+                    "status": "pending",
+                    "disbursement": spend,
+                }));
+            }
+        }
+        match load_treasury_disbursement(self.store.as_ref(), disbursement_id)
+            .map_err(|e| RpcError::Internal(e.to_string()))?
+        {
+            Some(spend) => Ok(json!({
+                "disbursement_id": disbursement_id.to_hex(),
+                "status": "accepted",
+                "disbursement": spend,
+            })),
+            None => Ok(json!({
+                "disbursement_id": disbursement_id.to_hex(),
+                "status": "unknown",
+                "disbursement": null,
+            })),
+        }
+    }
+
+    fn get_treasury_nonce(&self, treasury: TreasuryId) -> Result<Value, RpcError> {
+        let nonce = load_treasury_nonce(self.store.as_ref(), treasury)
+            .map_err(|e| RpcError::Internal(e.to_string()))?;
+        Ok(json!({
+            "treasury": treasury.as_str(),
             "nonce": nonce,
         }))
     }

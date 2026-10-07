@@ -1,7 +1,9 @@
 //! Apply / revert consensus-ordered blocks against multi-lane Trident state.
 
-use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 use agora_crypto::{address_from_pubkey, signer_address, verify_transaction_bound, PublicKeyBytes};
 use agora_types::{
@@ -10,56 +12,60 @@ use agora_types::{
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::acceptance::BlockAcceptanceRecord;
-use crate::accounts::{
-    apply_account_transfer_checked, load_account, put_account_into, AccountJournal, AccountState,
-};
-use crate::columns::ColumnFamily;
-use crate::data_availability::{apply_data_commitment, revert_data_commitment_meta_into};
-use crate::drc_check::{
-    apply_drc_check_cancel, apply_drc_check_cash, apply_drc_check_create,
-    check_meta_keys_for_create, check_meta_keys_for_settlement, load_drc_check_live,
-};
-use crate::drc_deposit_preauth::{apply_drc_deposit_preauth, drc_deposit_preauth_meta_keys};
-use crate::drc_escrow::{
-    apply_drc_escrow_cancel, apply_drc_escrow_create, apply_drc_escrow_finish,
-    escrow_meta_keys_for_create, escrow_meta_keys_for_settlement, load_drc_escrow_live,
-};
-use crate::drc_issued_controls::{
-    apply_drc_issued_asset_policy_set, apply_drc_issued_clawback,
-    apply_drc_trust_line_issuer_control, issued_controls_meta_keys_for_clawback,
-    issued_controls_meta_keys_for_issuer_control, issued_controls_meta_keys_for_policy,
-};
-use crate::drc_master_key_recovery::assert_drc_recovery_invariant;
-use crate::drc_offer::{apply_drc_offer_cancel, apply_drc_offer_create, DrcOfferApplyLimits};
-use crate::drc_payment_channel::{
-    apply_drc_payment_channel_claim, apply_drc_payment_channel_close,
-    apply_drc_payment_channel_create, apply_drc_payment_channel_fund,
-    load_drc_payment_channel_live, payment_channel_meta_keys_for_claim,
-    payment_channel_meta_keys_for_create, payment_channel_meta_keys_for_fund,
-    payment_channel_meta_keys_for_mutating, payment_channel_meta_keys_for_schedule_close,
-};
-use crate::drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys};
-use crate::drc_regular_key::{apply_drc_regular_key, drc_regular_key_meta_keys};
-use crate::drc_signer_list::{apply_drc_signer_list, drc_signer_list_meta_keys};
-use crate::drc_ticket::{apply_drc_ticket_create, drc_ticket_meta_keys};
-use crate::drc_trust_line::{
-    apply_drc_issued_transfer, apply_drc_trust_line_set, issued_transfer_meta_keys,
-    trust_line_set_meta_keys,
-};
-use crate::execution::{apply_ovl_execution_with_block, OvlSelectedOrder};
-use crate::ovl_evm_state::OVL_EVM_WORLD_KEY;
-use crate::payments::{apply_drc_payment_with_blue_score, payment_meta_keys};
-use crate::staking::{
-    apply_signed_stake_tx, credit_fee_share_to_reward_pool, reward_pool_meta_key,
-    snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
-};
-use crate::store::WriteBatch;
-use crate::supply::{burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key};
-use crate::utxo::outpoint_key;
 use crate::{
+    acceptance::BlockAcceptanceRecord,
+    accounts::{
+        apply_account_transfer_checked, load_account, put_account_into, AccountJournal,
+        AccountState,
+    },
+    apply_treasury_disbursement_into,
+    columns::ColumnFamily,
+    data_availability::{apply_data_commitment, revert_data_commitment_meta_into},
+    drc_check::{
+        apply_drc_check_cancel, apply_drc_check_cash, apply_drc_check_create,
+        check_meta_keys_for_create, check_meta_keys_for_settlement, load_drc_check_live,
+    },
+    drc_deposit_preauth::{apply_drc_deposit_preauth, drc_deposit_preauth_meta_keys},
+    drc_escrow::{
+        apply_drc_escrow_cancel, apply_drc_escrow_create, apply_drc_escrow_finish,
+        escrow_meta_keys_for_create, escrow_meta_keys_for_settlement, load_drc_escrow_live,
+    },
+    drc_issued_controls::{
+        apply_drc_issued_asset_policy_set, apply_drc_issued_clawback,
+        apply_drc_trust_line_issuer_control, issued_controls_meta_keys_for_clawback,
+        issued_controls_meta_keys_for_issuer_control, issued_controls_meta_keys_for_policy,
+    },
+    drc_master_key_recovery::assert_drc_recovery_invariant,
+    drc_offer::{apply_drc_offer_cancel, apply_drc_offer_create, DrcOfferApplyLimits},
+    drc_payment_channel::{
+        apply_drc_payment_channel_claim, apply_drc_payment_channel_close,
+        apply_drc_payment_channel_create, apply_drc_payment_channel_fund,
+        load_drc_payment_channel_live, payment_channel_meta_keys_for_claim,
+        payment_channel_meta_keys_for_create, payment_channel_meta_keys_for_fund,
+        payment_channel_meta_keys_for_mutating, payment_channel_meta_keys_for_schedule_close,
+    },
+    drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys},
+    drc_regular_key::{apply_drc_regular_key, drc_regular_key_meta_keys},
+    drc_signer_list::{apply_drc_signer_list, drc_signer_list_meta_keys},
+    drc_ticket::{apply_drc_ticket_create, drc_ticket_meta_keys},
+    drc_trust_line::{
+        apply_drc_issued_transfer, apply_drc_trust_line_set, issued_transfer_meta_keys,
+        trust_line_set_meta_keys,
+    },
+    execution::{apply_ovl_execution_with_block, OvlSelectedOrder},
+    ovl_evm_state::OVL_EVM_WORLD_KEY,
+    payments::{apply_drc_payment_with_blue_score, payment_meta_keys},
     register_passport_attestation_into, register_signed_grant_into, register_signed_hub_into,
-    register_signed_mission_into, StateError, StateStore,
+    register_signed_mission_into,
+    staking::{
+        apply_signed_stake_tx, credit_fee_share_to_reward_pool, reward_pool_meta_key,
+        snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
+    },
+    store::WriteBatch,
+    supply::{burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key},
+    treasury_balance_key, treasury_disbursement_record_key, treasury_nonce_record_key,
+    utxo::outpoint_key,
+    StateError, StateStore,
 };
 
 /// Result of applying one block's UTXO transition (journal + typed acceptance + batch).
@@ -1594,6 +1600,7 @@ fn apply_trident_lanes(
         && block.hub_registrations.is_empty()
         && block.grant_registrations.is_empty()
         && block.mission_registrations.is_empty()
+        && block.treasury_disbursements.is_empty()
     {
         return Ok((
             Vec::new(),
@@ -1674,6 +1681,11 @@ fn apply_trident_lanes(
     {
         return Err(StateError::InvalidTx(
             "hub/grant/mission registrations require network-bound auth".into(),
+        ));
+    }
+    if !block.treasury_disbursements.is_empty() && auth.is_none() {
+        return Err(StateError::InvalidTx(
+            "treasury disbursements require network-bound auth".into(),
         ));
     }
     if block.data_commitments.len() > agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK {
@@ -3218,6 +3230,58 @@ fn apply_trident_lanes(
         }
     }
 
+    if !block.treasury_disbursements.is_empty() {
+        let ctx = auth.expect("treasury disbursement auth checked above");
+        let mut seen_ids = std::collections::HashSet::new();
+        for spend in &block.treasury_disbursements {
+            let id = spend.disbursement_id();
+            if !seen_ids.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate treasury disbursement in block".into(),
+                ));
+            }
+            let mut keys = vec![
+                treasury_balance_key(spend.treasury),
+                treasury_nonce_record_key(spend.treasury),
+                treasury_disbursement_record_key(&id),
+            ];
+            if matches!(
+                spend.treasury.asset(),
+                NativeAssetId::OVL | NativeAssetId::DRC
+            ) {
+                keys.push(crate::accounts::account_key(
+                    spend.treasury.asset(),
+                    &spend.beneficiary,
+                ));
+            }
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            if matches!(
+                spend.treasury.asset(),
+                NativeAssetId::OVL | NativeAssetId::DRC
+            ) {
+                let prior = load_account(&lane, spend.treasury.asset(), &spend.beneficiary)?;
+                journal
+                    .account_before
+                    .push((spend.treasury.asset(), spend.beneficiary, prior));
+            }
+            let mut op_batch = WriteBatch::new();
+            let created = apply_treasury_disbursement_into(&mut op_batch, &lane, spend, ctx)?;
+            if let Some(op) = created {
+                journal.created.push(op);
+                created_in_block.insert(
+                    op,
+                    TxOut {
+                        value: spend.amount,
+                        address: spend.beneficiary,
+                    },
+                );
+            }
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+    }
+
     Ok((
         drc_ticket_create_statuses,
         drc_escrow_create_statuses,
@@ -4053,6 +4117,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -4271,6 +4336,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -4398,6 +4464,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -4492,6 +4559,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -4595,6 +4663,7 @@ mod tests {
                 hub_registrations: Vec::new(),
                 grant_registrations: Vec::new(),
                 mission_registrations: Vec::new(),
+                treasury_disbursements: Vec::new(),
             },
             1,
             None,
@@ -4697,6 +4766,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -4817,6 +4887,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -4826,8 +4897,10 @@ mod tests {
 
     #[test]
     fn account_transfer_fee_credits_reward_pool_on_accept() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::staking::load_reward_pool;
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            staking::load_reward_pool,
+        };
         use agora_crypto::sign_account_transfer_bound;
         use agora_types::{AccountTransfer, NativeAssetId};
 
@@ -4919,6 +4992,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -4946,9 +5020,11 @@ mod tests {
 
     #[test]
     fn ovl_execution_accepts_credits_fee_and_reverts() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::execution::OVL_INTRINSIC_GAS;
-        use crate::staking::load_reward_pool;
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            execution::OVL_INTRINSIC_GAS,
+            staking::load_reward_pool,
+        };
         use agora_crypto::sign_ovl_execution_bound;
         use agora_types::{NativeAssetId, OvlExecutionTx};
 
@@ -5035,6 +5111,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5082,13 +5159,15 @@ mod tests {
 
     #[test]
     fn drc_payment_accepts_emits_outbox_and_reverts() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::payments::{
-            drc_payment_root, load_drc_outbox_event, load_drc_payment_by_invoice,
-            load_drc_payment_receipt,
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            payments::{
+                drc_payment_root, load_drc_outbox_event, load_drc_payment_by_invoice,
+                load_drc_payment_receipt,
+            },
+            staking::load_reward_pool,
+            supply::{load_burned_supply, native_supply_root, put_issued_supply_into},
         };
-        use crate::staking::load_reward_pool;
-        use crate::supply::{load_burned_supply, native_supply_root, put_issued_supply_into};
         use agora_crypto::sign_drc_payment_bound;
         use agora_types::{DrcPaymentTx, NativeAssetId};
 
@@ -5180,6 +5259,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5251,10 +5331,12 @@ mod tests {
 
     #[test]
     fn drc_policy_precedes_payments_and_reorg_restores_policy() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::drc_policy::load_drc_account_policy;
-        use crate::staking::load_reward_pool;
-        use crate::supply::{load_burned_supply, put_issued_supply_into};
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            drc_policy::load_drc_account_policy,
+            staking::load_reward_pool,
+            supply::{load_burned_supply, put_issued_supply_into},
+        };
         use agora_crypto::{sign_drc_account_policy_bound, sign_drc_payment_bound};
         use agora_types::{DrcAccountPolicyTx, DrcPaymentTx, NativeAssetId};
 
@@ -5460,11 +5542,13 @@ mod tests {
 
     #[test]
     fn drc_deposit_auth_same_block_order_shared_nonce_and_reorg_are_deterministic() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::drc_deposit_preauth::load_drc_deposit_preauth;
-        use crate::drc_policy::load_drc_account_policy;
-        use crate::staking::load_reward_pool;
-        use crate::supply::put_issued_supply_into;
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            drc_deposit_preauth::load_drc_deposit_preauth,
+            drc_policy::load_drc_account_policy,
+            staking::load_reward_pool,
+            supply::put_issued_supply_into,
+        };
         use agora_crypto::{
             sign_drc_account_policy_bound, sign_drc_deposit_preauth_bound, sign_drc_payment_bound,
         };
@@ -5752,8 +5836,10 @@ mod tests {
 
     #[test]
     fn stake_op_in_block_body_bonds_validator() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::staking::{load_validator, StakingParams};
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            staking::{load_validator, StakingParams},
+        };
         use agora_crypto::sign_stake_tx_bound;
         use agora_types::{NativeAssetId, SignedStakeTx};
 
@@ -5846,6 +5932,7 @@ mod tests {
             hub_registrations: Vec::new(),
             grant_registrations: Vec::new(),
             mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -6376,5 +6463,127 @@ mod tests {
             summary_before
         );
         assert_eq!(canonical_community_root(&store).unwrap(), root_before);
+    }
+
+    #[test]
+    fn signed_treasury_disbursement_debits_and_reverts() {
+        use crate::governance_state::{
+            authorization_policy_root, load_protocol_treasury, load_treasury_disbursement,
+            load_treasury_nonce, put_treasury_controller_into, put_treasury_into,
+        };
+        use agora_crypto::sign_treasury_disbursement_bound;
+        use agora_types::{TreasuryBalance, TreasuryDisbursement, TreasuryId};
+
+        let store = StateStore::open_in_memory();
+        let controller = KeyPair::from_secret_bytes(&[21; 32]).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let mut fund = WriteBatch::new();
+        put_treasury_into(
+            &mut fund,
+            &TreasuryBalance::new(
+                TreasuryId::OvlBuilder,
+                NativeAssetId::OVL,
+                Amount::from_base_units(1_000),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        put_treasury_controller_into(&mut fund, TreasuryId::OvlBuilder, controller.address())
+            .unwrap();
+        store.write_batch(fund).unwrap();
+
+        let beneficiary = Address([9; 20]);
+        let mut spend = TreasuryDisbursement::unsigned(
+            TreasuryId::OvlBuilder,
+            beneficiary,
+            Amount::from_base_units(250),
+            Hash([3; 32]),
+            authorization_policy_root(),
+            0,
+        );
+        sign_treasury_disbursement_bound(&mut spend, &controller, &auth.chain_id, &auth.genesis)
+            .unwrap();
+
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.treasury_disbursements = vec![spend.clone()];
+        block.header.tx_root = block.compute_body_root();
+
+        let before = load_protocol_treasury(&store, TreasuryId::OvlBuilder).unwrap();
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(
+            load_protocol_treasury(&store, TreasuryId::OvlBuilder)
+                .unwrap()
+                .balance,
+            Amount::from_base_units(750)
+        );
+        assert_eq!(
+            load_treasury_nonce(&store, TreasuryId::OvlBuilder).unwrap(),
+            1
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &beneficiary)
+                .unwrap()
+                .balance,
+            250
+        );
+        assert_eq!(
+            load_treasury_disbursement(&store, &spend.disbursement_id())
+                .unwrap()
+                .unwrap(),
+            spend
+        );
+
+        store
+            .write_batch(revert_journal_batched(&result.journal).unwrap())
+            .unwrap();
+        assert_eq!(
+            load_protocol_treasury(&store, TreasuryId::OvlBuilder).unwrap(),
+            before
+        );
+        assert_eq!(
+            load_treasury_nonce(&store, TreasuryId::OvlBuilder).unwrap(),
+            0
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &beneficiary)
+                .unwrap()
+                .balance,
+            0
+        );
+        assert!(load_treasury_disbursement(&store, &spend.disbursement_id())
+            .unwrap()
+            .is_none());
+
+        let mut wrong_root = spend.clone();
+        wrong_root.authorization_root = Hash([8; 32]);
+        let mut reject = block.clone();
+        reject.treasury_disbursements = vec![wrong_root];
+        reject.header.tx_root = reject.compute_body_root();
+        assert!(apply_block_batched_with_auth(&store, &reject, 0, Some(&auth)).is_err());
     }
 }
