@@ -13,6 +13,7 @@ export {
   type LightDrcOfferLookup,
   type LightDrcOfferPage,
   type LightFinality,
+  type LightFinalityBody,
   type LightForumTopic,
   type LightGovernance,
   type LightOffice,
@@ -81,6 +82,7 @@ export {
   type TridentLightState,
 } from "./tridentLight";
 export {
+  accountFromSecretHex,
   addressBech32FromMnemonic,
   addressFromMnemonic,
   buildSignedTransfer,
@@ -90,6 +92,7 @@ export {
   encodeTransactionBody,
   generateMnemonic,
   sendTransfer,
+  sendTransferFromAccount,
   signTransactionBound,
   signTransactionBody,
   TX_SIGNING_DOMAIN,
@@ -204,6 +207,14 @@ export {
   encodeTreasuryDisbursementBody,
   sendTreasuryDisbursement,
 } from "./typed-lanes-treasury";
+export {
+  CHECKPOINT_ATTESTATION_DOMAIN,
+  buildSignedCheckpointAttestation,
+  checkpointBodyFromRpc,
+  encodeCheckpointBody,
+  encodeCheckpointSigningBytes,
+  sendCheckpointAttestation,
+} from "./typed-lanes-finality";
 export {
   VESTING_UNLOCK_DOMAIN,
   NATIVE_ASSET_TLT,

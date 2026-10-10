@@ -31,6 +31,11 @@ import {
   standardIssuedCurrency,
 } from "./typed-lanes.ts";
 import {
+  CHECKPOINT_ATTESTATION_DOMAIN,
+  encodeCheckpointSigningBytes,
+} from "./typed-lanes-finality.ts";
+import { accountFromSecretHex } from "./wallet.ts";
+import {
   DRC_ACCOUNT_POLICY_ACTIONS,
   DRC_WALLET_FAMILY_LANES,
   drcFamilyNeedsAmount,
@@ -604,5 +609,26 @@ assert.deepEqual(parseDrcSignerEntries("agoradev1qqqq,2\nagoratest1qqqq 3"), [
   { signer: "agoratest1qqqq", weight: 3 },
 ]);
 assert.throws(() => parseDrcSignerEntries(""), /at least one/);
+
+lock(
+  "checkpoint_attestation",
+  encodeCheckpointSigningBytes({
+    chainId: "agora-trident-testnet-1",
+    genesisHash: "00".repeat(32),
+    consensusPolicyHash: "01".repeat(32),
+    stateTransitionVersion: "agora-trident-state-v1",
+    blueScore: 9,
+    blockHash: "02".repeat(32),
+    stateRoot: "03".repeat(32),
+    validatorEpoch: 4,
+  }),
+  "1b00000061676f72612d74726964656e742d636865636b706f696e742d76311700000061676f72612d74726964656e742d746573746e65742d31000000000000000000000000000000000000000000000000000000000000000001010101010101010101010101010101010101010101010101010101010101011600000061676f72612d74726964656e742d73746174652d76310900000000000000020202020202020202020202020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030400000000000000",
+);
+assert.equal(CHECKPOINT_ATTESTATION_DOMAIN.length, 27);
+const experimentalTlt = accountFromSecretHex("a3".repeat(32), "testnet");
+assert.equal(
+  experimentalTlt.addressBech32,
+  "agoratest1e2eqe8pw7w094srjmulracnh7qn8xz9k4z8234",
+);
 
 console.log("typed-lane Borsh preimages match agora-types");

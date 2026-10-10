@@ -200,8 +200,14 @@ These are real unfinished paths, not parity slogans:
    nonce when bits are nonzero. An Experimental freeze-ready artifact
    (`agora-trident-experimental-testnet-1`) now exists with generated
    keys and dual-PoS genesis validators; it is not ceremony-final and
-   does not declare Public testnet. Frozen v2 TLT peers boot and send,
-   but dual-PoS never finalizes on that mesh (empty OVL/DRC genesis sets).
+   does not declare Public testnet. A local two-node host run against
+   that artifact booted, mined one SHA-256-fallback block, IBDed, and
+   finalized after OVL+DRC attestations (`docs/ops/PUBLIC_TESTNET.md`).
+   That run is not a RandomX public mesh (this host cannot link
+   `libstdc++` / `rust-randomx`). Frozen v2 TLT peers still never
+   finalize (empty OVL/DRC genesis sets). Live admit still uses
+   `FinalityPowPolicy::default()` (`min_pow_depth=1`) instead of the
+   artifact `pow_work_threshold`.
 2. **Civic votes stay local-admin** — `CivicSnapshot` / forum / Ecclesia
    RPC cannot honestly become a consensus lane. Types have no secp256k1
    envelope, vote weight is caller-supplied (`raw_balance` /
@@ -302,4 +308,13 @@ This audit close-out adds:
   including channel create/fund/claim/close, signer-list
   (`address,weight` lines + quorum), and account-policy action select.
   Channel claim/create take explicit claim-key or claim-signature hex
-  on device; they do not embed a node.
+  on device; they do not embed a node. Experimental generated keys use
+  `accountFromSecretHex` / `sendTransferFromAccount` and
+  `sendCheckpointAttestation` (device-local). `agora_getFinality` now
+  returns the signable checkpoint `body`.
+- Local Experimental mesh runbook:
+  `scripts/experimental_trident_mesh.sh` +
+  `scripts/experimental_trident_smoke.mjs`. `agora-miner-sidecar`
+  `--no-default-features` matches a SHA-256 RandomX-fallback node.
+  Recorded host results (boot / IBD / inclusion / dual-PoS) are in
+  `docs/ops/PUBLIC_TESTNET.md`. Not Public testnet.

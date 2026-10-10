@@ -205,6 +205,17 @@ impl ChainState {
             .map_err(|e| AdmitError::Storage(e.to_string()))
     }
 
+    /// Checkpoint body a validator must sign for `block_hash`, when the block is known.
+    pub fn checkpoint_body_of(
+        &self,
+        block_hash: Hash,
+    ) -> Result<Option<CheckpointBody>, AdmitError> {
+        let Some(score) = self.ghostdag.blue_score(&block_hash) else {
+            return Ok(None);
+        };
+        Ok(Some(self.checkpoint_body_for(block_hash, score)?))
+    }
+
     pub(crate) fn checkpoint_body_for(
         &self,
         block_hash: Hash,
