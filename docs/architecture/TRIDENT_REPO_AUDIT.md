@@ -108,7 +108,7 @@ There is no `agora_submitDrcExecution` or generic `agora_submitExecution`.
 | Surface | What it does | Honest gap |
 | --- | --- | --- |
 | `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders for every admitted DRC family plus TLT covenant P2PKH, OVL transfer/execution v1, signed passport attestations, signed Hub/Grant/Mission registrations, treasury disbursements, and vesting unlocks, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads, opt-in raw-EVM signer | Keys stay on device. No RandomX recompute. Raw EVM uses an explicit key, not the mnemonic vault |
-| Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel, and form-complete DRC families (escrow, Checks, ticket, regular key, deposit preauth, trust line, issued transfer/clawback) via `sendDrcWalletFamily` | No on-device DEX book browser. Channel claim / signer-list / account-policy stay library-only (extra keys or action enums). Offer create is native DRC vs one issued asset |
+| Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel, and DRC families including escrow, Checks, ticket, regular key, deposit preauth, trust line, issued transfer/clawback, payment channels (create/fund/claim/close), signer list, and account policy via `sendDrcWalletFamily` | No on-device DEX book browser. Offer create is native DRC vs one issued asset. Channel claim takes an explicit claim-signature hex; keys stay in the vault |
 | Explorer | DAG, tx lookup, protocol-lane reads (covenant/offer/escrow/check/DA/passport/hub/grant/mission/treasury/vesting), DRC account objects, DEX book page, mempool, node, governance panel | Read-only book. Order-entry stays in wallets |
 | `agora-layers` HTTP | Historical lab; loopback | Non-canonical; mixed unauthenticated mutations |
 
@@ -298,6 +298,8 @@ This audit close-out adds:
   (`native_drc` / issued issuer+currency, Bech32m or hex). Explorer
   protocol-lane panel looks up every wired typed-lane id and pages the
   native DEX book. Order-entry stays in wallets.
-- Desktop/mobile send the form-complete DRC families through
-  `sendDrcWalletFamily`. Channel claim, signer-list, and account-policy
-  remain library-only because they need extra keys or action enums.
+- Desktop/mobile send DRC families through `sendDrcWalletFamily`,
+  including channel create/fund/claim/close, signer-list
+  (`address,weight` lines + quorum), and account-policy action select.
+  Channel claim/create take explicit claim-key or claim-signature hex
+  on device; they do not embed a node.

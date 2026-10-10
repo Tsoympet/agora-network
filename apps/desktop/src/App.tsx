@@ -17,13 +17,18 @@ import {
   sendDrcOfferCancel,
   sendDrcOfferCreate,
   sendDrcPayment,
+  DRC_ACCOUNT_POLICY_ACTIONS,
   DRC_WALLET_FAMILY_LANES,
   drcFamilyNeedsAmount,
+  drcFamilyNeedsExtraHex,
   drcFamilyNeedsIssued,
   drcFamilyNeedsObjectId,
+  drcFamilyNeedsPolicyAction,
   drcFamilyNeedsRecipient,
+  drcFamilyNeedsSignerList,
   sendDrcWalletFamily,
   sendOvlExecution,
+  type DrcAccountPolicyAction,
   type DrcWalletFamilyLane,
   sendTltCovenant,
   sendTransfer,
@@ -114,6 +119,14 @@ export function App() {
   const [offerCurrency, setOfferCurrency] = useState("USD");
   const [offerGets, setOfferGets] = useState("1");
   const [offerId, setOfferId] = useState("");
+  const [extraHex, setExtraHex] = useState("");
+  const [settleDelay, setSettleDelay] = useState("1");
+  const [quorum, setQuorum] = useState("1");
+  const [signerEntries, setSignerEntries] = useState("");
+  const [signerAction, setSignerAction] = useState<"set" | "delete">("set");
+  const [policyAction, setPolicyAction] = useState<DrcAccountPolicyAction>(
+    "set_require_destination_tag",
+  );
   const [sendBusy, setSendBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastTxId, setLastTxId] = useState<string | null>(null);
@@ -454,6 +467,12 @@ export function App() {
             objectId: offerId.trim(),
             issuer: offerIssuer.trim(),
             currency: offerCurrency,
+            extraHex: extraHex.trim(),
+            settleDelay: Math.floor(Number(settleDelay)),
+            quorum: Math.floor(Number(quorum)),
+            signerEntries,
+            signerAction,
+            policyAction,
           },
         );
         id = submitted;
@@ -939,6 +958,84 @@ export function App() {
               disabled={!networkReady}
               style={fieldStyle}
             />
+          ) : null}
+          {drcFamilyNeedsExtraHex(sendLane) ? (
+            <>
+              <input
+                value={extraHex}
+                onChange={(e) => setExtraHex(e.target.value)}
+                placeholder={
+                  sendLane === "drc-channel-create"
+                    ? "claim public key (compressed secp256k1 hex)"
+                    : "claim signature (hex)"
+                }
+                aria-label="Extra hex key"
+                spellCheck={false}
+                style={fieldStyle}
+              />
+              {sendLane === "drc-channel-create" ? (
+                <input
+                  value={settleDelay}
+                  onChange={(e) => setSettleDelay(e.target.value)}
+                  placeholder="settle delay"
+                  aria-label="Settle delay"
+                  inputMode="numeric"
+                  style={fieldStyle}
+                />
+              ) : null}
+            </>
+          ) : null}
+          {drcFamilyNeedsSignerList(sendLane) ? (
+            <>
+              <select
+                value={signerAction}
+                onChange={(e) =>
+                  setSignerAction(e.target.value as "set" | "delete")
+                }
+                aria-label="Signer list action"
+                style={fieldStyle}
+              >
+                <option value="set">Set signer list</option>
+                <option value="delete">Delete signer list</option>
+              </select>
+              {signerAction === "set" ? (
+                <>
+                  <input
+                    value={quorum}
+                    onChange={(e) => setQuorum(e.target.value)}
+                    placeholder="quorum"
+                    aria-label="Signer quorum"
+                    inputMode="numeric"
+                    style={fieldStyle}
+                  />
+                  <textarea
+                    value={signerEntries}
+                    onChange={(e) => setSignerEntries(e.target.value)}
+                    placeholder="one signer per line: address,weight"
+                    aria-label="Signer entries"
+                    spellCheck={false}
+                    rows={3}
+                    style={fieldStyle}
+                  />
+                </>
+              ) : null}
+            </>
+          ) : null}
+          {drcFamilyNeedsPolicyAction(sendLane) ? (
+            <select
+              value={policyAction}
+              onChange={(e) =>
+                setPolicyAction(e.target.value as DrcAccountPolicyAction)
+              }
+              aria-label="Account policy action"
+              style={fieldStyle}
+            >
+              {DRC_ACCOUNT_POLICY_ACTIONS.map((action) => (
+                <option key={action.id} value={action.id}>
+                  {action.label}
+                </option>
+              ))}
+            </select>
           ) : null}
           {sendLane === "drc-offer" || drcFamilyNeedsIssued(sendLane) ? (
             <>

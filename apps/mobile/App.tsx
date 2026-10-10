@@ -30,13 +30,18 @@ import {
   sendDrcOfferCancel,
   sendDrcOfferCreate,
   sendDrcPayment,
+  DRC_ACCOUNT_POLICY_ACTIONS,
   DRC_WALLET_FAMILY_LANES,
   drcFamilyNeedsAmount,
+  drcFamilyNeedsExtraHex,
   drcFamilyNeedsIssued,
   drcFamilyNeedsObjectId,
+  drcFamilyNeedsPolicyAction,
   drcFamilyNeedsRecipient,
+  drcFamilyNeedsSignerList,
   sendDrcWalletFamily,
   sendOvlExecution,
+  type DrcAccountPolicyAction,
   type DrcWalletFamilyLane,
   sendTltCovenant,
   sendTransfer,
@@ -109,6 +114,14 @@ export default function App() {
   const [offerCurrency, setOfferCurrency] = useState("USD");
   const [offerGets, setOfferGets] = useState("1");
   const [offerId, setOfferId] = useState("");
+  const [extraHex, setExtraHex] = useState("");
+  const [settleDelay, setSettleDelay] = useState("1");
+  const [quorum, setQuorum] = useState("1");
+  const [signerEntries, setSignerEntries] = useState("");
+  const [signerAction, setSignerAction] = useState<"set" | "delete">("set");
+  const [policyAction, setPolicyAction] = useState<DrcAccountPolicyAction>(
+    "set_require_destination_tag",
+  );
   const [sendBusy, setSendBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastTxId, setLastTxId] = useState<string | null>(null);
@@ -450,6 +463,12 @@ export default function App() {
             objectId: offerId.trim(),
             issuer: offerIssuer.trim(),
             currency: offerCurrency,
+            extraHex: extraHex.trim(),
+            settleDelay: Math.floor(Number(settleDelay)),
+            quorum: Math.floor(Number(quorum)),
+            signerEntries,
+            signerAction,
+            policyAction,
           },
         );
         id = submitted;
@@ -779,6 +798,87 @@ export default function App() {
             editable={networkReady}
             style={styles.input}
           />
+        ) : null}
+        {drcFamilyNeedsExtraHex(sendLane) ? (
+          <>
+            <TextInput
+              value={extraHex}
+              onChangeText={setExtraHex}
+              placeholder={
+                sendLane === "drc-channel-create"
+                  ? "claim public key hex"
+                  : "claim signature hex"
+              }
+              placeholderTextColor={agoraBrand.colors.inkMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
+            {sendLane === "drc-channel-create" ? (
+              <TextInput
+                value={settleDelay}
+                onChangeText={setSettleDelay}
+                placeholder="settle delay"
+                placeholderTextColor={agoraBrand.colors.inkMuted}
+                keyboardType="numeric"
+                style={styles.input}
+              />
+            ) : null}
+          </>
+        ) : null}
+        {drcFamilyNeedsSignerList(sendLane) ? (
+          <>
+            <View style={styles.actions}>
+              {(["set", "delete"] as const).map((action) => (
+                <Pressable
+                  key={action}
+                  onPress={() => setSignerAction(action)}
+                  style={styles.lookupBtn}
+                >
+                  <Text style={styles.lookupLabel}>
+                    {signerAction === action ? `· ${action}` : action}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            {signerAction === "set" ? (
+              <>
+                <TextInput
+                  value={quorum}
+                  onChangeText={setQuorum}
+                  placeholder="quorum"
+                  placeholderTextColor={agoraBrand.colors.inkMuted}
+                  keyboardType="numeric"
+                  style={styles.input}
+                />
+                <TextInput
+                  value={signerEntries}
+                  onChangeText={setSignerEntries}
+                  placeholder={"address,weight\none signer per line"}
+                  placeholderTextColor={agoraBrand.colors.inkMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  multiline
+                  style={styles.input}
+                />
+              </>
+            ) : null}
+          </>
+        ) : null}
+        {drcFamilyNeedsPolicyAction(sendLane) ? (
+          <View style={styles.actions}>
+            {DRC_ACCOUNT_POLICY_ACTIONS.map((action) => (
+              <Pressable
+                key={action.id}
+                onPress={() => setPolicyAction(action.id)}
+                style={styles.lookupBtn}
+              >
+                <Text style={styles.lookupLabel}>
+                  {policyAction === action.id ? `· ${action.label}` : action.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
         ) : null}
         {sendLane === "drc-offer" || drcFamilyNeedsIssued(sendLane) ? (
           <>

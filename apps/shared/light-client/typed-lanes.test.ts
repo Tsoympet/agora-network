@@ -31,11 +31,16 @@ import {
   standardIssuedCurrency,
 } from "./typed-lanes.ts";
 import {
+  DRC_ACCOUNT_POLICY_ACTIONS,
   DRC_WALLET_FAMILY_LANES,
   drcFamilyNeedsAmount,
+  drcFamilyNeedsExtraHex,
   drcFamilyNeedsIssued,
   drcFamilyNeedsObjectId,
+  drcFamilyNeedsPolicyAction,
   drcFamilyNeedsRecipient,
+  drcFamilyNeedsSignerList,
+  parseDrcSignerEntries,
 } from "./typed-lanes-drc.ts";
 
 const GENESIS =
@@ -581,11 +586,23 @@ lock(
   "1700000061676f72612d76657374696e672d756e6c6f636b2d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0100000001020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030a000000000000000000000000000000",
 );
 
-assert.equal(DRC_WALLET_FAMILY_LANES.length, 12);
+assert.equal(DRC_WALLET_FAMILY_LANES.length, 18);
+assert.equal(drcFamilyNeedsAmount("drc-channel-claim"), true);
+assert.equal(drcFamilyNeedsObjectId("drc-channel-close"), true);
+assert.equal(drcFamilyNeedsRecipient("drc-channel-create"), true);
 assert.equal(drcFamilyNeedsAmount("drc-escrow-create"), true);
 assert.equal(drcFamilyNeedsAmount("drc-escrow-finish"), false);
 assert.equal(drcFamilyNeedsObjectId("drc-check-cash"), true);
 assert.equal(drcFamilyNeedsIssued("drc-issued-transfer"), true);
 assert.equal(drcFamilyNeedsRecipient("drc-ticket"), false);
+assert.equal(drcFamilyNeedsExtraHex("drc-channel-claim"), true);
+assert.equal(drcFamilyNeedsSignerList("drc-signer-list"), true);
+assert.equal(drcFamilyNeedsPolicyAction("drc-account-policy"), true);
+assert.equal(DRC_ACCOUNT_POLICY_ACTIONS.length, 6);
+assert.deepEqual(parseDrcSignerEntries("agoradev1qqqq,2\nagoratest1qqqq 3"), [
+  { signer: "agoradev1qqqq", weight: 2 },
+  { signer: "agoratest1qqqq", weight: 3 },
+]);
+assert.throws(() => parseDrcSignerEntries(""), /at least one/);
 
 console.log("typed-lane Borsh preimages match agora-types");
