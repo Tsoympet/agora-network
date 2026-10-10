@@ -7,6 +7,7 @@ mod account;
 mod address;
 mod attestation;
 mod bip44;
+mod community;
 mod data_availability;
 mod drc_check;
 mod drc_deposit_preauth;
@@ -30,6 +31,8 @@ mod payment;
 mod stake;
 mod tlt_script;
 mod transaction;
+mod treasury;
+mod vesting;
 
 pub use account::{
     account_signer_address, sign_account_transfer_bound, verify_account_transfer_bound,
@@ -38,6 +41,11 @@ pub use address::address_from_pubkey;
 pub use attestation::{sign_checkpoint_attestation, verify_checkpoint_attestation};
 pub use bip44::{
     derive_bip44, Bip44Path, AGORA_COIN_TYPE, AGORA_COIN_TYPE_PROVISIONAL, AGORA_COIN_TYPE_TESTNET,
+};
+pub use community::{
+    sign_grant_registration_bound, sign_hub_registration_bound, sign_mission_registration_bound,
+    verify_grant_registration_bound, verify_hub_registration_bound,
+    verify_mission_registration_bound,
 };
 pub use data_availability::{sign_data_commitment_bound, verify_data_commitment_bound};
 pub use drc_check::{
@@ -94,3 +102,5 @@ pub use transaction::{
     sign_transaction, sign_transaction_bound, signature_from_slice, signer_address,
     verify_transaction, verify_transaction_bound,
 };
+pub use treasury::{sign_treasury_disbursement_bound, verify_treasury_disbursement_bound};
+pub use vesting::{sign_vesting_unlock_bound, verify_vesting_unlock_bound};

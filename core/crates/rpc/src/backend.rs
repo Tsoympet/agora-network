@@ -1,5 +1,7 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Mutex,
+};
 
 use agora_governance::{
     civic_overview_json, list_proposals_json, list_topics_json, office_json, proposal_json,
@@ -213,11 +215,21 @@ pub struct NodeInfo {
     /// Bech32m miner payout address when known.
     pub miner_address: Option<String>,
     /// Hex id of Block 0 for this datadir / network.
+    ///
+    /// This is the gossip / IBD / mining `BlockHeader` hash (`Block::id`).
+    /// It is not the Trident header commitment hash.
     pub genesis_hash: Option<String>,
     /// Signing domain chain id (`agora-mainnet-1` / `agora-testnet-1` / `agora-dev`).
     pub chain_id: Option<String>,
     /// Minimum mempool relay fee (`in − out`) in base units.
     pub min_relay_fee: u64,
+    /// SHA-256 of the live `TridentHeader` envelope when this datadir is Trident.
+    /// Absent on frozen v2. Never used as a gossip parent or mining identity.
+    pub trident_header_hash: Option<String>,
+    /// Artifact identity committed into the Trident network fingerprint.
+    pub artifact_identity: Option<String>,
+    /// Manifest Block 0 commitment hash (offline `BlockZeroState` domain).
+    pub block_zero_commitment: Option<String>,
 }
 
 /// Fee guidance for wallets (`agora_estimateFee`).
@@ -514,6 +526,36 @@ pub trait RpcBackend: Send {
     ) -> Result<Hash, RpcError>;
     fn get_passport_attestation(&self, attestation_id: &Hash) -> Result<Value, RpcError>;
     fn get_passport_issuer_nonce(&self, issuer: &Address) -> Result<Value, RpcError>;
+    fn submit_hub_registration(
+        &mut self,
+        registration: agora_types::HubRegistration,
+    ) -> Result<Hash, RpcError>;
+    fn get_hub_registration(&self, registration_id: &Hash) -> Result<Value, RpcError>;
+    fn get_hub_coordinator_nonce(&self, coordinator: &Address) -> Result<Value, RpcError>;
+    fn submit_grant_registration(
+        &mut self,
+        registration: agora_types::GrantRegistration,
+    ) -> Result<Hash, RpcError>;
+    fn get_grant_registration(&self, registration_id: &Hash) -> Result<Value, RpcError>;
+    fn get_grant_registrar_nonce(&self, registrar: &Address) -> Result<Value, RpcError>;
+    fn submit_mission_registration(
+        &mut self,
+        registration: agora_types::MissionRegistration,
+    ) -> Result<Hash, RpcError>;
+    fn get_mission_registration(&self, registration_id: &Hash) -> Result<Value, RpcError>;
+    fn get_mission_sponsor_nonce(&self, sponsor: &Address) -> Result<Value, RpcError>;
+    fn submit_treasury_disbursement(
+        &mut self,
+        spend: agora_types::TreasuryDisbursement,
+    ) -> Result<Hash, RpcError>;
+    fn get_treasury_disbursement(&self, disbursement_id: &Hash) -> Result<Value, RpcError>;
+    fn get_treasury_nonce(&self, treasury: agora_types::TreasuryId) -> Result<Value, RpcError>;
+    fn submit_vesting_unlock(
+        &mut self,
+        claim: agora_types::VestingUnlock,
+    ) -> Result<Hash, RpcError>;
+    fn get_vesting_unlock(&self, unlock_id: &Hash) -> Result<Value, RpcError>;
+    fn get_vesting_nonce(&self, beneficiary: &Address) -> Result<Value, RpcError>;
     /// Admit a secp256k1-signed stake tx (bond/delegate/unbond/withdraw). Never mint-like.
     fn submit_stake_tx(&mut self, stake_tx: Value) -> Result<Value, RpcError>;
 
@@ -833,6 +875,9 @@ impl RpcBackend for InMemoryBackend {
             genesis_hash: self.tips.first().map(|h| h.to_hex()),
             chain_id: Some("agora-dev".into()),
             min_relay_fee: 1,
+            trident_header_hash: None,
+            artifact_identity: None,
+            block_zero_commitment: None,
         })
     }
 
@@ -1584,6 +1629,11 @@ impl RpcBackend for InMemoryBackend {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         })
     }
 
@@ -1690,6 +1740,126 @@ impl RpcBackend for InMemoryBackend {
     fn get_passport_issuer_nonce(&self, issuer: &Address) -> Result<Value, RpcError> {
         Ok(json!({
             "issuer": issuer.to_hex(),
+            "nonce": 0u64,
+        }))
+    }
+
+    fn submit_hub_registration(
+        &mut self,
+        _registration: agora_types::HubRegistration,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit hub registrations".into(),
+        ))
+    }
+
+    fn get_hub_registration(&self, registration_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "registration_id": registration_id.to_hex(),
+            "status": "unknown",
+            "hub": null,
+        }))
+    }
+
+    fn get_hub_coordinator_nonce(&self, coordinator: &Address) -> Result<Value, RpcError> {
+        Ok(json!({
+            "coordinator": coordinator.to_hex(),
+            "nonce": 0u64,
+        }))
+    }
+
+    fn submit_grant_registration(
+        &mut self,
+        _registration: agora_types::GrantRegistration,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit grant registrations".into(),
+        ))
+    }
+
+    fn get_grant_registration(&self, registration_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "registration_id": registration_id.to_hex(),
+            "status": "unknown",
+            "grant": null,
+        }))
+    }
+
+    fn get_grant_registrar_nonce(&self, registrar: &Address) -> Result<Value, RpcError> {
+        Ok(json!({
+            "registrar": registrar.to_hex(),
+            "nonce": 0u64,
+        }))
+    }
+
+    fn submit_mission_registration(
+        &mut self,
+        _registration: agora_types::MissionRegistration,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit mission registrations".into(),
+        ))
+    }
+
+    fn get_mission_registration(&self, registration_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "registration_id": registration_id.to_hex(),
+            "status": "unknown",
+            "mission": null,
+        }))
+    }
+
+    fn get_mission_sponsor_nonce(&self, sponsor: &Address) -> Result<Value, RpcError> {
+        Ok(json!({
+            "sponsor": sponsor.to_hex(),
+            "nonce": 0u64,
+        }))
+    }
+
+    fn submit_treasury_disbursement(
+        &mut self,
+        _spend: agora_types::TreasuryDisbursement,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit treasury disbursements".into(),
+        ))
+    }
+
+    fn get_treasury_disbursement(&self, disbursement_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "disbursement_id": disbursement_id.to_hex(),
+            "status": "unknown",
+            "disbursement": null,
+        }))
+    }
+
+    fn get_treasury_nonce(&self, treasury: agora_types::TreasuryId) -> Result<Value, RpcError> {
+        Ok(json!({
+            "treasury": treasury.as_str(),
+            "nonce": 0u64,
+        }))
+    }
+
+    fn submit_vesting_unlock(
+        &mut self,
+        _claim: agora_types::VestingUnlock,
+    ) -> Result<Hash, RpcError> {
+        Err(RpcError::Rejected(
+            "in-memory backend does not admit vesting unlocks".into(),
+        ))
+    }
+
+    fn get_vesting_unlock(&self, unlock_id: &Hash) -> Result<Value, RpcError> {
+        Ok(json!({
+            "unlock_id": unlock_id.to_hex(),
+            "status": "unknown",
+            "unlock": null,
+        }))
+    }
+
+    fn get_vesting_nonce(&self, beneficiary: &Address) -> Result<Value, RpcError> {
+        Ok(json!({
+            "beneficiary": beneficiary.to_hex(),
             "nonce": 0u64,
         }))
     }

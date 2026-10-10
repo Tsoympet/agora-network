@@ -210,6 +210,12 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getCommunityRegistry"
             | "agora_getPassportAttestation"
             | "agora_getPassportIssuerNonce"
+            | "agora_getHubRegistration"
+            | "agora_getHubCoordinatorNonce"
+            | "agora_getGrantRegistration"
+            | "agora_getGrantRegistrarNonce"
+            | "agora_getMissionRegistration"
+            | "agora_getMissionSponsorNonce"
     )
 }
 

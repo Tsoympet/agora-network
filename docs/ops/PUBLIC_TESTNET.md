@@ -18,9 +18,24 @@ refuses to load a libp2p key until freeze-ready checks pass. Do not combine the
 two genesis env vars. Do not reuse one datadir for both protocols.
 
 Public Trident testnet is still **not** declared: the checked-in v3 draft is
-UNFROZEN, docker-compose still boots frozen v2, and dual-PoS needs
-ceremony-selected OVL+DRC validators. Frozen v2 peers boot, IBD, and send TLT,
-but they never finalize.
+UNFROZEN, default docker-compose still boots frozen v2, and a ceremony freeze
+of `agora-trident-testnet-1` has not happened. Frozen v2 peers boot, IBD, and
+send TLT, but they never finalize.
+
+An **Experimental public-testnet** freeze-ready artifact exists at
+[`../genesis/trident.experimental.public-testnet.json`](../genesis/trident.experimental.public-testnet.json).
+It uses generated secp256k1 validators, a distinct
+`chain_id` (`agora-trident-experimental-testnet-1`), RandomX-only PoW, and
+dual-PoS genesis sets so finality can fire after the PoW work threshold. It
+is not ceremony-final and not mainnet. Default compose must stay on frozen
+v2. Opt in explicitly:
+
+```bash
+docker compose --profile experimental-trident up --build seeder experimental-trident-a
+```
+
+Host RPC for that profile: `http://127.0.0.1:8555/rpc`. Clear
+`AGORA_GENESIS_FILE` when setting `AGORA_TRIDENT_GENESIS_FILE`.
 
 ## Quick start (Docker)
 

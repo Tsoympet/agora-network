@@ -1,7 +1,7 @@
 # Canonical community registry
 
-**Maturity:** Experimental for signed passport attestations; Scaffold for
-Hub/Grant/Mission library registration.
+**Maturity:** Experimental for signed passport attestations and signed
+Hub / Grant / Mission registrations.
 
 Phase 5b defines canonical schemas and a bounded state commitment for Agora
 Hubs, Passport attestations, Grants, and Missions. The registry is initialized
@@ -14,8 +14,12 @@ classification, charter hash, unique coordinators, accreditation proposal, and
 status. Active Hubs require a canonical accreditation proposal, non-zero
 multisig address, election/reporting periods, and COI commitment.
 
-`HubRecord` has no secp256k1 envelope, so hub accreditation stays a genesis /
-library write (`register_hub_into`). There is no unsigned hub mutation RPC.
+Hub accreditation is a signed consensus lane. `HubRegistration` is
+secp256k1-signed by the first coordinator under `agora-hub-registration-v1`.
+Apply creates an Active `HubRecord` so those coordinators can issue
+passports, grants, and missions. Coordinator nonces prevent replay. Genesis
+and library `register_hub_into` remain for Block 0 / tests. There is no
+unsigned hub mutation RPC.
 
 ## Passport
 
@@ -46,9 +50,16 @@ DRC Community grants cannot enter the canonical registry without a cleared,
 non-zero conflict-of-interest disclosure.
 
 These transitions record eligibility and completion only. They do not move
-treasury funds; signed consensus disbursement remains a later phase. Grant
-and Mission records have no signed mutation envelope, so they stay library
-APIs (`register_grant_into`, `register_mission_into`). No unsigned mutation
+treasury funds. Controller-signed `TreasuryDisbursement` is a separate
+consensus lane (`agora-treasury-disbursement-v1`) that debits an existing
+protocol treasury after authorization-root and nonce checks.
+
+Grant and Mission **registration** is a signed consensus lane.
+`GrantRegistration` is signed by an active hub coordinator
+(`agora-grant-registration-v1`). `MissionRegistration` is signed by an
+active hub coordinator acting as sponsor (`agora-mission-registration-v1`).
+Both use dedicated nonces. Library `register_grant_into` /
+`register_mission_into` remain for genesis / tests. No unsigned mutation
 RPC is exposed.
 
 ## Consensus boundary
@@ -56,8 +67,7 @@ RPC is exposed.
 The registry stores records under `community/v1/*` and maintains an O(1)
 rolling root plus record counts. The root commits into the Trident state root.
 
-Passport attestations are the signed community mutation that can be admitted
-on default Experimental boot. Hub, Grant, and Mission writes remain library
-or genesis until those families gain their own secp256k1 envelopes. Civic
-forum/vote RPC stays local administrative state and is excluded from this
-lane.
+Passport attestations and Hub / Grant / Mission registrations are the signed
+community mutations admitted on default Experimental boot (protocol v30,
+discriminants 38–40, compact lanes 31–33). Civic forum/vote RPC stays local
+administrative state and is excluded from this lane.

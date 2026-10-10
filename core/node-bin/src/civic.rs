@@ -1,4 +1,10 @@
 //! Load / save civic governance snapshot from Meta CF.
+//!
+//! This snapshot is **local-admin**, not a consensus lane. `CivicSnapshot` is
+//! JSON, unsigned, and excluded from `governance_treasury_root`. Vote RPCs
+//! accept caller-supplied `raw_balance` / `total_supply` rather than a
+//! network-bound secp256k1 envelope over live TLT UTXO weight. Do not gossip
+//! or apply these blobs as BlockDAG mutations.
 
 use agora_governance::{CivicSnapshot, CIVIC_META_KEY};
 use agora_rpc::RpcError;

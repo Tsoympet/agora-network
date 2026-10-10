@@ -1878,6 +1878,166 @@ export async function sendDrcIssuedClawback(
   );
 }
 
+export type DrcWalletFamilyLane =
+  | "drc-escrow-create"
+  | "drc-escrow-finish"
+  | "drc-escrow-cancel"
+  | "drc-check-create"
+  | "drc-check-cash"
+  | "drc-check-cancel"
+  | "drc-ticket"
+  | "drc-regular-key"
+  | "drc-deposit-preauth"
+  | "drc-trust-line"
+  | "drc-issued-transfer"
+  | "drc-issued-clawback";
+
+export const DRC_WALLET_FAMILY_LANES: { id: DrcWalletFamilyLane; label: string }[] =
+  [
+    { id: "drc-escrow-create", label: "DRC escrow create" },
+    { id: "drc-escrow-finish", label: "DRC escrow finish" },
+    { id: "drc-escrow-cancel", label: "DRC escrow cancel" },
+    { id: "drc-check-create", label: "DRC check create" },
+    { id: "drc-check-cash", label: "DRC check cash" },
+    { id: "drc-check-cancel", label: "DRC check cancel" },
+    { id: "drc-ticket", label: "DRC ticket create" },
+    { id: "drc-regular-key", label: "DRC regular key set" },
+    { id: "drc-deposit-preauth", label: "DRC deposit preauth" },
+    { id: "drc-trust-line", label: "DRC trust line set" },
+    { id: "drc-issued-transfer", label: "DRC issued transfer" },
+    { id: "drc-issued-clawback", label: "DRC issued clawback" },
+  ];
+
+export function drcFamilyNeedsAmount(lane: string): boolean {
+  return (
+    lane === "drc-escrow-create" ||
+    lane === "drc-check-create" ||
+    lane === "drc-trust-line" ||
+    lane === "drc-issued-transfer" ||
+    lane === "drc-issued-clawback"
+  );
+}
+
+export function drcFamilyNeedsObjectId(lane: string): boolean {
+  return (
+    lane === "drc-escrow-finish" ||
+    lane === "drc-escrow-cancel" ||
+    lane === "drc-check-cash" ||
+    lane === "drc-check-cancel"
+  );
+}
+
+export function drcFamilyNeedsIssued(lane: string): boolean {
+  return (
+    lane === "drc-trust-line" ||
+    lane === "drc-issued-transfer" ||
+    lane === "drc-issued-clawback"
+  );
+}
+
+export function drcFamilyNeedsRecipient(lane: string): boolean {
+  return (
+    lane === "drc-escrow-create" ||
+    lane === "drc-check-create" ||
+    lane === "drc-regular-key" ||
+    lane === "drc-deposit-preauth" ||
+    lane === "drc-issued-transfer" ||
+    lane === "drc-issued-clawback"
+  );
+}
+
+/** Wallet form dispatcher for families that share recipient/amount/id/issuer fields. */
+export async function sendDrcWalletFamily(
+  client: LightClient,
+  lane: DrcWalletFamilyLane,
+  options: {
+    mnemonic: string;
+    network?: string;
+    fee?: number;
+    recipient?: string;
+    amount?: number;
+    objectId?: string;
+    issuer?: string;
+    currency?: string;
+  },
+) {
+  const common = {
+    mnemonic: options.mnemonic,
+    network: options.network,
+    fee: options.fee,
+  };
+  switch (lane) {
+    case "drc-escrow-create":
+      return sendDrcEscrowCreate(client, {
+        ...common,
+        recipient: options.recipient ?? "",
+        amount: options.amount ?? 0,
+      });
+    case "drc-escrow-finish":
+      return sendDrcEscrowFinish(client, {
+        ...common,
+        escrowId: options.objectId ?? "",
+      });
+    case "drc-escrow-cancel":
+      return sendDrcEscrowCancel(client, {
+        ...common,
+        escrowId: options.objectId ?? "",
+      });
+    case "drc-check-create":
+      return sendDrcCheckCreate(client, {
+        ...common,
+        destination: options.recipient ?? "",
+        amount: options.amount ?? 0,
+      });
+    case "drc-check-cash":
+      return sendDrcCheckCash(client, {
+        ...common,
+        checkId: options.objectId ?? "",
+      });
+    case "drc-check-cancel":
+      return sendDrcCheckCancel(client, {
+        ...common,
+        checkId: options.objectId ?? "",
+      });
+    case "drc-ticket":
+      return sendDrcTicketCreate(client, common);
+    case "drc-regular-key":
+      return sendDrcRegularKey(client, {
+        ...common,
+        action: "set",
+        regularKey: options.recipient,
+      });
+    case "drc-deposit-preauth":
+      return sendDrcDepositPreauth(client, {
+        ...common,
+        authorizedSource: options.recipient ?? "",
+        action: "authorize",
+      });
+    case "drc-trust-line":
+      return sendDrcTrustLineSet(client, {
+        ...common,
+        issuer: options.issuer ?? "",
+        currency: options.currency ?? "USD",
+        limit: options.amount ?? 0,
+      });
+    case "drc-issued-transfer":
+      return sendDrcIssuedTransfer(client, {
+        ...common,
+        recipient: options.recipient ?? "",
+        issuer: options.issuer ?? "",
+        currency: options.currency ?? "USD",
+        amount: options.amount ?? 0,
+      });
+    case "drc-issued-clawback":
+      return sendDrcIssuedClawback(client, {
+        ...common,
+        holder: options.recipient ?? "",
+        currency: options.currency ?? "USD",
+        amount: options.amount ?? 0,
+      });
+  }
+}
+
 /** Shared helper table so desktop/mobile can call every family without a dedicated screen. */
 export const DRC_FAMILY_SENDERS = {
   sendDrcEscrowCreate,

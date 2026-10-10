@@ -3,8 +3,7 @@
 use agora_types::{Block, Hash};
 use borsh::BorshDeserialize;
 
-use crate::columns::ColumnFamily;
-use crate::{StateError, StateStore};
+use crate::{columns::ColumnFamily, StateError, StateStore};
 
 const ORPHAN_PREFIX: &[u8] = b"orphan/";
 
@@ -95,6 +94,11 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         let id = block.id();
         store_orphan(&store, &block).unwrap();

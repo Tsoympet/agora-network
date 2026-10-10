@@ -2,8 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use agora_types::{Block, Hash};
 
-use crate::error::StratumError;
-use crate::job::{share_id, MiningJob};
+use crate::{
+    error::StratumError,
+    job::{share_id, MiningJob},
+};
 
 /// In-memory stratum pool state for kHeavyHash ASIC aggregation.
 #[derive(Debug, Default)]
@@ -145,6 +147,11 @@ mod tests {
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
             passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         }
     }
 

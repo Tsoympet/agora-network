@@ -70,6 +70,11 @@ async fn direct_getblock_returns_full_block() {
         drc_multisign_attachments: vec![],
         tlt_covenants: Vec::new(),
         passport_attestations: Vec::new(),
+        hub_registrations: Vec::new(),
+        grant_registrations: Vec::new(),
+        mission_registrations: Vec::new(),
+        treasury_disbursements: Vec::new(),
+        vesting_unlocks: Vec::new(),
     };
     let hash = block.id();
 

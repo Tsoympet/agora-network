@@ -30,6 +30,13 @@ import {
   scriptP2pkh,
   standardIssuedCurrency,
 } from "./typed-lanes.ts";
+import {
+  DRC_WALLET_FAMILY_LANES,
+  drcFamilyNeedsAmount,
+  drcFamilyNeedsIssued,
+  drcFamilyNeedsObjectId,
+  drcFamilyNeedsRecipient,
+} from "./typed-lanes-drc.ts";
 
 const GENESIS =
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -194,6 +201,22 @@ import {
   encodePassportAttestationBody,
   PASSPORT_ATTESTATION_DOMAIN,
 } from "./typed-lanes-passport.ts";
+import {
+  encodeGrantRegistrationBody,
+  encodeHubRegistrationBody,
+  encodeMissionRegistrationBody,
+  GRANT_REGISTRATION_DOMAIN,
+  HUB_REGISTRATION_DOMAIN,
+  MISSION_REGISTRATION_DOMAIN,
+} from "./typed-lanes-community.ts";
+import {
+  encodeTreasuryDisbursementBody,
+  TREASURY_DISBURSEMENT_DOMAIN,
+} from "./typed-lanes-treasury.ts";
+import {
+  encodeVestingUnlockBody,
+  VESTING_UNLOCK_DOMAIN,
+} from "./typed-lanes-vesting.ts";
 import { sha256 } from "@noble/hashes/sha256";
 
 function lock(name: string, got: Uint8Array, expected: string) {
@@ -461,5 +484,108 @@ lock(
   ),
   "1d00000061676f72612d70617373706f72742d6174746573746174696f6e2d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef010000000101010101010101010101010101010101010101020202020202020202020202020202020202020200030303030303030303030303030303030303030303030303030303030303030304040404040404040404040404040404040404040404040404040404040404040500000000000000010a000000000000000700000000000000",
 );
+lock(
+  "hub_registration",
+  encodeBoundEnvelope(
+    HUB_REGISTRATION_DOMAIN,
+    CHAIN,
+    GENESIS,
+    encodeHubRegistrationBody({
+      version: 1,
+      publicName: "Agora Hub",
+      classification: "Geographic",
+      charterHash: hash(2),
+      coordinators: [addr(1)],
+      treasuryMultisig: addr(2),
+      electionTermEpochs: 12,
+      reportingIntervalEpochs: 3,
+      coiDisclosureRoot: hash(3),
+      deliverablesRoot: hash(4),
+      accreditationProposalId: 1,
+      nonce: 0,
+    }),
+  ),
+  "1900000061676f72612d6875622d726567697374726174696f6e2d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef010000000900000041676f7261204875620a00000047656f67726170686963020202020202020202020202020202020202020202020202020202020202020201000000010101010101010101010101010101010101010102020202020202020202020202020202020202020c0000000000000003000000000000000303030303030303030303030303030303030303030303030303030303030303040404040404040404040404040404040404040404040404040404040404040401000000000000000000000000000000",
+);
+lock(
+  "grant_registration",
+  encodeBoundEnvelope(
+    GRANT_REGISTRATION_DOMAIN,
+    CHAIN,
+    GENESIS,
+    encodeGrantRegistrationBody({
+      version: 1,
+      registrar: addr(1),
+      proposalId: 7,
+      treasury: "OvlBuilder",
+      beneficiary: addr(2),
+      total: 10,
+      kind: "Micro",
+      milestones: [],
+      coiDisclosureHash: hash(0),
+      nonce: 0,
+    }),
+  ),
+  "1b00000061676f72612d6772616e742d726567697374726174696f6e2d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01000000010101010101010101010101010101010101010107000000000000000102020202020202020202020202020202020202020a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+);
+lock(
+  "mission_registration",
+  encodeBoundEnvelope(
+    MISSION_REGISTRATION_DOMAIN,
+    CHAIN,
+    GENESIS,
+    encodeMissionRegistrationBody({
+      version: 1,
+      sponsor: addr(1),
+      rewardTreasury: "DrcCommunity",
+      reward: 5,
+      requirementsHash: hash(3),
+      nonce: 0,
+    }),
+  ),
+  "1d00000061676f72612d6d697373696f6e2d726567697374726174696f6e2d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01000000010101010101010101010101010101010101010102050000000000000003030303030303030303030303030303030303030303030303030303030303030000000000000000",
+);
+lock(
+  "treasury_disbursement",
+  encodeBoundEnvelope(
+    TREASURY_DISBURSEMENT_DOMAIN,
+    CHAIN,
+    GENESIS,
+    encodeTreasuryDisbursementBody({
+      version: 1,
+      treasury: "OvlBuilder",
+      beneficiary: addr(2),
+      amount: 10,
+      reasonHash: hash(3),
+      authorizationRoot: hash(4),
+      nonce: 0,
+    }),
+  ),
+  "1e00000061676f72612d74726561737572792d64697362757273656d656e742d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef010000000102020202020202020202020202020202020202020a00000000000000030303030303030303030303030303030303030303030303030303030303030304040404040404040404040404040404040404040404040404040404040404040000000000000000",
+);
+lock(
+  "vesting_unlock",
+  encodeBoundEnvelope(
+    VESTING_UNLOCK_DOMAIN,
+    CHAIN,
+    GENESIS,
+    encodeVestingUnlockBody({
+      version: 1,
+      asset: "OVL",
+      beneficiary: addr(2),
+      scheduleId: hash(3),
+      amount: 10,
+      nonce: 0,
+    }),
+  ),
+  "1700000061676f72612d76657374696e672d756e6c6f636b2d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0100000001020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030a000000000000000000000000000000",
+);
+
+assert.equal(DRC_WALLET_FAMILY_LANES.length, 12);
+assert.equal(drcFamilyNeedsAmount("drc-escrow-create"), true);
+assert.equal(drcFamilyNeedsAmount("drc-escrow-finish"), false);
+assert.equal(drcFamilyNeedsObjectId("drc-check-cash"), true);
+assert.equal(drcFamilyNeedsIssued("drc-issued-transfer"), true);
+assert.equal(drcFamilyNeedsRecipient("drc-ticket"), false);
 
 console.log("typed-lane Borsh preimages match agora-types");

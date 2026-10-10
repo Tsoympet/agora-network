@@ -28,7 +28,14 @@ try {
   await client.getDrcOffer("bb".repeat(32));
   await client.getDrcAccountOffers({ account: "agoradev1qqqq", limit: 8 });
   await client.getDrcBookOffers({
-    book: { taker_gets: { native: true }, taker_pays: { native: false } },
+    book: {
+      pays: { type: "native_drc" },
+      gets: {
+        type: "issued",
+        issuer: "aabbccddeeff00112233445566778899aabbccdd",
+        currency: "USD",
+      },
+    },
     cursor: "c1",
   });
   await client.getDrcEscrow("cc".repeat(32));
@@ -46,6 +53,19 @@ try {
   await client.submitPassportAttestation({ version: 1 });
   await client.getPassportAttestation("ee".repeat(32));
   await client.getPassportIssuerNonce("agoradev1qqqq");
+  await client.submitHubRegistration({ version: 1 });
+  await client.getHubRegistration("ff".repeat(32));
+  await client.getHubCoordinatorNonce("agoradev1qqqq");
+  await client.submitGrantRegistration({ version: 1 });
+  await client.getGrantRegistrarNonce("agoradev1qqqq");
+  await client.submitMissionRegistration({ version: 1 });
+  await client.getMissionSponsorNonce("agoradev1qqqq");
+  await client.submitTreasuryDisbursement({ version: 1 });
+  await client.getTreasuryDisbursement("aa".repeat(32));
+  await client.getTreasuryNonce("ovl_builder");
+  await client.submitVestingUnlock({ version: 1 });
+  await client.getVestingUnlock("aa".repeat(32));
+  await client.getVestingNonce("agoradev1qqqq");
 
   assert.deepEqual(
     calls.map((call) => call.method),
@@ -71,6 +91,19 @@ try {
       "agora_submitPassportAttestation",
       "agora_getPassportAttestation",
       "agora_getPassportIssuerNonce",
+      "agora_submitHubRegistration",
+      "agora_getHubRegistration",
+      "agora_getHubCoordinatorNonce",
+      "agora_submitGrantRegistration",
+      "agora_getGrantRegistrarNonce",
+      "agora_submitMissionRegistration",
+      "agora_getMissionSponsorNonce",
+      "agora_submitTreasuryDisbursement",
+      "agora_getTreasuryDisbursement",
+      "agora_getTreasuryNonce",
+      "agora_submitVestingUnlock",
+      "agora_getVestingUnlock",
+      "agora_getVestingNonce",
     ],
   );
   assert.deepEqual(calls[0].params, { address: "agoradev1qqqq" });
@@ -81,10 +114,15 @@ try {
     account: "agoradev1qqqq",
     limit: 8,
   });
-  assert.equal(
-    (calls[5].params as { cursor?: string }).cursor,
-    "c1",
-  );
+  assert.deepEqual(calls[5].params, {
+    pays: { type: "native_drc" },
+    gets: {
+      type: "issued",
+      issuer: "aabbccddeeff00112233445566778899aabbccdd",
+      currency: "USD",
+    },
+    cursor: "c1",
+  });
   assert.deepEqual(calls[6].params, { escrow_id: "cc".repeat(32) });
   assert.deepEqual(calls[7].params, []);
   assert.deepEqual(calls[8].params, ["0x" + "11".repeat(20), "latest"]);

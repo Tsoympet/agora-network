@@ -114,6 +114,11 @@ fn full_block_with_escrow_lanes_borsh_roundtrip() {
         drc_multisign_attachments: vec![],
         tlt_covenants: Vec::new(),
         passport_attestations: Vec::new(),
+        hub_registrations: Vec::new(),
+        grant_registrations: Vec::new(),
+        mission_registrations: Vec::new(),
+        treasury_disbursements: Vec::new(),
+        vesting_unlocks: Vec::new(),
     };
     block.header.tx_root = block.compute_body_root();
     let bytes = borsh::to_vec(&block).unwrap();

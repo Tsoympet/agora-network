@@ -30,8 +30,14 @@ import {
   sendDrcOfferCancel,
   sendDrcOfferCreate,
   sendDrcPayment,
-  DRC_FAMILY_SENDERS,
+  DRC_WALLET_FAMILY_LANES,
+  drcFamilyNeedsAmount,
+  drcFamilyNeedsIssued,
+  drcFamilyNeedsObjectId,
+  drcFamilyNeedsRecipient,
+  sendDrcWalletFamily,
   sendOvlExecution,
+  type DrcWalletFamilyLane,
   sendTltCovenant,
   sendTransfer,
   shortAddress,
@@ -97,6 +103,7 @@ export default function App() {
     | "drc-offer"
     | "drc-offer-cancel"
     | "drc-ticket"
+    | DrcWalletFamilyLane
   >("tlt");
   const [offerIssuer, setOfferIssuer] = useState("");
   const [offerCurrency, setOfferCurrency] = useState("USD");
@@ -335,7 +342,12 @@ export default function App() {
     }
     const amt = Number(amount);
     const feeN = Number(fee);
-    if (sendLane !== "drc-offer-cancel" && sendLane !== "drc-ticket" && (!Number.isFinite(amt) || amt <= 0)) {
+    const amountOptional =
+      sendLane === "drc-offer-cancel" ||
+      sendLane === "drc-ticket" ||
+      (DRC_WALLET_FAMILY_LANES.some((lane) => lane.id === sendLane) &&
+        !drcFamilyNeedsAmount(sendLane));
+    if (!amountOptional && (!Number.isFinite(amt) || amt <= 0)) {
       setSendError("Amount must be a positive number");
       return;
     }
@@ -428,9 +440,17 @@ export default function App() {
         fromBech32 = built.fromBech32;
         fromHex = built.from;
       } else {
-        const { id: submitted, built } = await DRC_FAMILY_SENDERS.sendDrcTicketCreate(
+        const { id: submitted, built } = await sendDrcWalletFamily(
           client,
-          common,
+          sendLane,
+          {
+            ...common,
+            recipient: toAddress.trim(),
+            amount: Math.floor(amt),
+            objectId: offerId.trim(),
+            issuer: offerIssuer.trim(),
+            currency: offerCurrency,
+          },
         );
         id = submitted;
         fromBech32 = built.fromBech32;
@@ -717,6 +737,9 @@ export default function App() {
               ["drc-offer", "Offer"],
               ["drc-offer-cancel", "Cancel"],
               ["drc-ticket", "Ticket"],
+              ...DRC_WALLET_FAMILY_LANES.filter((lane) => lane.id !== "drc-ticket").map(
+                (lane) => [lane.id, lane.label.replace("DRC ", "")] as const,
+              ),
             ] as const
           ).map(([id, label]) => (
             <Pressable
@@ -730,17 +753,18 @@ export default function App() {
             </Pressable>
           ))}
         </View>
-        {sendLane === "drc-offer-cancel" ? (
+        {sendLane === "drc-offer-cancel" || drcFamilyNeedsObjectId(sendLane) ? (
           <TextInput
             value={offerId}
             onChangeText={setOfferId}
-            placeholder="offer id (64-hex)"
+            placeholder="object or offer id (64-hex)"
             placeholderTextColor={agoraBrand.colors.inkMuted}
             autoCapitalize="none"
             autoCorrect={false}
             style={styles.input}
           />
-        ) : (
+        ) : drcFamilyNeedsRecipient(sendLane) ||
+          !DRC_WALLET_FAMILY_LANES.some((lane) => lane.id === sendLane) ? (
           <TextInput
             value={toAddress}
             onChangeText={setToAddress}
@@ -755,8 +779,8 @@ export default function App() {
             editable={networkReady}
             style={styles.input}
           />
-        )}
-        {sendLane === "drc-offer" ? (
+        ) : null}
+        {sendLane === "drc-offer" || drcFamilyNeedsIssued(sendLane) ? (
           <>
             <TextInput
               value={offerIssuer}
@@ -776,14 +800,16 @@ export default function App() {
                 autoCapitalize="characters"
                 style={styles.input}
               />
-              <TextInput
-                value={offerGets}
-                onChangeText={setOfferGets}
-                placeholder="gets amount"
-                placeholderTextColor={agoraBrand.colors.inkMuted}
-                keyboardType="numeric"
-                style={styles.input}
-              />
+              {sendLane === "drc-offer" ? (
+                <TextInput
+                  value={offerGets}
+                  onChangeText={setOfferGets}
+                  placeholder="gets amount"
+                  placeholderTextColor={agoraBrand.colors.inkMuted}
+                  keyboardType="numeric"
+                  style={styles.input}
+                />
+              ) : null}
             </View>
           </>
         ) : null}

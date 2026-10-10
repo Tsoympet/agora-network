@@ -19,12 +19,15 @@ parity files keep their own `INCOMPLETE` status lines.
 
 | Constant | Value | Notes |
 | --- | --- | --- |
-| `TRIDENT_PROTOCOL_VERSION` | 29 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v29 appends `NetworkMessage::PassportAttestation` |
+| `TRIDENT_PROTOCOL_VERSION` | 32 | Shared by `agora-p2p` fingerprint and `agora-state-machine` genesis. v32 appends vesting-unlock gossip; v31 treasury; v30 Hub / Grant / Mission |
 | Datadir `SCHEMA_VERSION` | 22 | Experimental; `OVL_EVM_SCHEMA_VERSION` is also 22 |
 | DRC fee-burn schema | 20 | Lifetime burned counters |
 | DRC ledger-index datadir | 21 | Common live-object / receipt rebuild |
 | Combined body v18 | offer create/cancel only | Empty history keeps the frozen root |
 | Combined body v20 | passport wrap v19 | Empty passports stay off the empty wire; passport-only bodies write empty offer+covenant vecs |
+| Combined body v21 | hub/grant/mission wrap | Empty new lanes stay off the frozen wire; community-only bodies write empty offer+covenant+passport vecs |
+| Combined body v22 | treasury wrap | Empty treasury stays off the frozen wire |
+| Combined body v23 | vesting wrap | Empty vesting stays off the frozen wire; vesting-only bodies write empty treasury |
 | DA body wrap | v5 | Empty `data_commitments` keep the v4 root |
 | Consensus / tx signing | secp256k1 | No custom crypto |
 | Outer encoding | Borsh | JSON-RPC is a convenience surface |
@@ -46,7 +49,7 @@ Independent quorums; no price-oracle mixing.
 | DRC payments + XRPL-like objects | Wired (Experimental) | Typed envelopes through offer cancel | Wired; family reservations | Typed submit/get methods | Shared builders for payment, DEX, escrow, Checks, channels, tickets, regular key, signer list, deposit preauth, account policy, trust lines, issued controls |
 | DRC native DEX | Wired (Experimental) | `DrcOfferCreate` / `DrcOfferCancel` | Wired | Create/cancel + offer/account/book reads | Shared builders + desktop/mobile native-DRC-vs-issued send |
 | Dual-PoS finality / staking | Wired (Experimental) | `CheckpointAttestation`, `StakeTx` | Wired | Validator / pool / `agora_submitStakeTx` | Light-client reads exist |
-| Protocol treasuries / community registry | Passport: Wired (Experimental). Hub/Grant/Mission: genesis + library | `NetworkMessage::PassportAttestation` (v29) | Passport mempool + compact lane 30 | `agora_submitPassportAttestation`, `agora_getPassportAttestation`, `agora_getPassportIssuerNonce`, `agora_getCommunityRegistry` | Shared builder + submit. Hub/Grant/Mission have no signed envelope |
+| Protocol treasuries / community registry | Passport + Hub/Grant/Mission + treasury spend + vesting unlock: Wired (Experimental) | `PassportAttestation` (v29), Hub/Grant/Mission (v30), `TreasuryDisbursement` (v31), `VestingUnlock` (v32) | Passport 30; hub/grant/mission 31–33; treasury 34; vesting 35 | Passport + hub/grant/mission + treasury + vesting submit/get/nonce; `agora_getCommunityRegistry` / `agora_getProtocolTreasuries` | Shared builders + submit. No unsigned mutation RPC |
 | DA commitments | Apply + journal + TLT fee | `NetworkMessage::DataCommitment` (v25) | Wired; default Experimental boot + `DA_INCLUSION_FEE_TLT` | `agora_submitDataCommitment` / `agora_getDataCommitment` | Light-client query + submit wrappers |
 
 `agora_getBalance` remains the TLT UTXO sum. Native OVL/DRC account
@@ -58,8 +61,8 @@ balances and shared nonces are `agora_getAccountBalances`. Ethereum
 ## P2P and compact blocks
 
 `NetworkMessage` Borsh discriminants are append-only through
-`PassportAttestation` (37). Hub/Grant/Mission still have no mutation gossip
-variant because those records have no secp256k1 envelope.
+`VestingUnlock` (42). Hub/Grant/Mission use 38–40; treasury uses 41;
+vesting uses 42.
 
 `compact_from_block` keeps UTXO-only `CompactBlock`. Named typed lanes use
 `TypedCompactBlock` with a per-kind short-id list so offers, covenants, DA,
@@ -104,9 +107,9 @@ There is no `agora_submitDrcExecution` or generic `agora_submitExecution`.
 
 | Surface | What it does | Honest gap |
 | --- | --- | --- |
-| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders for every admitted DRC family plus TLT covenant P2PKH, OVL transfer/execution v1, and signed passport attestations, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads, opt-in raw-EVM signer | Keys stay on device. No RandomX recompute. Raw EVM uses an explicit key, not the mnemonic vault. Hub/Grant/Mission mutation builders do not exist because those records are unsigned |
-| Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel, DRC ticket create via shared `DRC_FAMILY_SENDERS` | No DEX book browser. Offer create is native DRC vs one issued asset. Remaining DRC families are library-complete, not per-family screens |
-| Explorer | DAG, tx lookup, protocol-lane reads, mempool, node, governance panel | No DEX book order-entry UI |
+| `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders for every admitted DRC family plus TLT covenant P2PKH, OVL transfer/execution v1, signed passport attestations, signed Hub/Grant/Mission registrations, treasury disbursements, and vesting unlocks, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads, opt-in raw-EVM signer | Keys stay on device. No RandomX recompute. Raw EVM uses an explicit key, not the mnemonic vault |
+| Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel, and form-complete DRC families (escrow, Checks, ticket, regular key, deposit preauth, trust line, issued transfer/clawback) via `sendDrcWalletFamily` | No on-device DEX book browser. Channel claim / signer-list / account-policy stay library-only (extra keys or action enums). Offer create is native DRC vs one issued asset |
+| Explorer | DAG, tx lookup, protocol-lane reads (covenant/offer/escrow/check/DA/passport/hub/grant/mission/treasury/vesting), DRC account objects, DEX book page, mempool, node, governance panel | Read-only book. Order-entry stays in wallets |
 | `agora-layers` HTTP | Historical lab; loopback | Non-canonical; mixed unauthenticated mutations |
 
 Light clients stay light: they call JSON-RPC; they do not embed
@@ -118,11 +121,12 @@ infrastructure servers or store operator keys.
 
 | Component | Maturity | Wiring |
 | --- | --- | --- |
-| Civic constitution / forum / Ecclesia prototype | Experimental administrative RPC | Local snapshot; not a consensus community lane |
-| Canonical Hub registry | Scaffold | Genesis / `register_hub_into` only. `HubRecord` has no signature; no unsigned mutation RPC |
+| Civic constitution / forum / Ecclesia prototype | Experimental administrative RPC | **Stays local-admin.** Types are unsigned JSON (`CivicSnapshot` at `meta/governance`). Vote weight is caller-supplied. Not gossiped, not journaled, not in the governance root. See `docs/core/governance.md` |
+| Canonical Hub registry | Experimental | Signed `HubRegistration` lane: apply/journal/gossip/mempool/RPC/light-client. First coordinator signs; apply writes Active hub |
 | Canonical Passport attestations | Experimental | Signed `PassportAttestation` lane: apply/journal/gossip/mempool/RPC/light-client |
-| Canonical Grant / Mission registry | Scaffold | Library `register_*_into`; no signed envelope, so no block lane |
-| Protocol treasuries | Scaffold / Experimental reads | `agora_getProtocolTreasuries`; signed disbursement is later |
+| Canonical Grant / Mission registry | Experimental | Signed `GrantRegistration` / `MissionRegistration` lanes. Registrar/sponsor must be an active hub coordinator |
+| Protocol treasuries | Experimental | Signed `TreasuryDisbursement` lane: controller + authorization_root + nonce. Debits existing treasury only (no mint). TLT creates a UTXO; OVL/DRC credits the account |
+| Vesting unlock | Experimental | Signed `VestingUnlock` lane: beneficiary + schedule identity + nonce. Time source is the including block `timestamp_ms` (schedules have timestamps, not blue-score). Linear after start; 0 before cliff. Unlocked progress is in the governance root. No mint |
 | Merchant / Passport / Grants docs | Scaffold | Specs. Passport consensus is the attestation lane above, not merchant UI |
 
 Community Definition of Done remains **INCOMPLETE**. On-chain state is
@@ -162,13 +166,20 @@ is the only programmable domain.
 
 ## Persistence, genesis, CI
 
-- Testnet genesis v2 is frozen in-repo. Trident v3 draft remains
+- Testnet genesis v2 is frozen in-repo. Trident v3 public draft remains
   **UNFROZEN**. Mainnet is not bootable.
+- `docs/genesis/trident.experimental.public-testnet.json` is a labeled
+  **Experimental public-testnet** freeze-ready artifact (generated
+  secp256k1 validators, `agora-trident-experimental-testnet-1`, RandomX,
+  dual-PoS genesis sets). Not ceremony-final. Not mainnet. Default
+  docker-compose stays on frozen v2; profile `experimental-trident` is
+  the only compose path that points at it.
 - Freeze-ready v3 artifacts (not the public draft) can be materialized into
   live Block 0 UTXO/account/treasury/validator state. `compose_trident_state_root`
   must equal the live `TridentHeader` state root before commit.
   `AGORA_TRIDENT_GENESIS_FILE` boots that datadir; `AGORA_GENESIS_FILE` stays
-  v2-only. Docker-compose still points at frozen v2.
+  v2-only. Empty genesis env vars are treated as unset so the Experimental
+  compose profile can clear the image default.
 - Schema migrations exist as library helpers. `agora-node schema
   report|migrate|reindex --data PATH` runs the supported rebuilds
   (19→20 fee-burn, 20→21 ledger index with applied order, 21→22 marker,
@@ -183,22 +194,27 @@ is the only programmable domain.
 
 These are real unfinished paths, not parity slogans:
 
-1. **Public Trident testnet freeze** — the checked-in v3 draft is UNFROZEN.
-   Ceremony must supply allocations, validator keys, hashes, timestamp, bits,
-   and a Block 0 nonce when bits are nonzero. Until that artifact exists and
-   boot+IBD+tx+finality are demonstrated on a public mesh, maturity stays
-   below Public testnet. Frozen v2 TLT peers boot and send, but dual-PoS
-   never finalizes (empty OVL/DRC genesis sets).
-2. **Hub / Grant / Mission consensus lanes** — skipped honestly.
-   `HubRecord`, `GrantRecord`, and `MissionRecord` have no secp256k1
-   envelope. Unsigned mutation RPC would be theater. The signed
-   passport attestation lane is wired instead. Civic votes remain
-   local-admin snapshots, not consensus.
-3. **Vesting unlock / treasury spend** — genesis vesting is withheld from
-   liquid balances, but there is no consensus unlock tx. Protocol treasury
-   reads exist; signed disbursement does not.
-4. **`TridentHeader` is not the gossip header** — Block 0 identity is bound
-   in Meta; IBD/mining still use `BlockHeader`.
+1. **Public Trident testnet freeze** — the checked-in v3 draft
+   (`agora-trident-testnet-1`) is UNFROZEN. Ceremony must still supply
+   allocations, validator keys, hashes, timestamp, bits, and a Block 0
+   nonce when bits are nonzero. An Experimental freeze-ready artifact
+   (`agora-trident-experimental-testnet-1`) now exists with generated
+   keys and dual-PoS genesis validators; it is not ceremony-final and
+   does not declare Public testnet. Frozen v2 TLT peers boot and send,
+   but dual-PoS never finalizes on that mesh (empty OVL/DRC genesis sets).
+2. **Civic votes stay local-admin** — `CivicSnapshot` / forum / Ecclesia
+   RPC cannot honestly become a consensus lane. Types have no secp256k1
+   envelope, vote weight is caller-supplied (`raw_balance` /
+   `total_supply`), and the JSON blob is excluded from
+   `governance_treasury_root`. A real civic lane needs new signed types
+   plus TLT-UTXO weight proofs; wrapping the current snapshot would be
+   fake consensus. Documented in `docs/core/governance.md`.
+3. **`TridentHeader` stays off the gossip wire** — required. Frozen v2
+   history and compact IBD identify vertices by `Block::id()`
+   (`BlockHeader`). Collapsing that onto `TridentHeader.commitment_hash()`
+   would change parent hashes and break the frozen mesh. Trident isolation
+   uses the network fingerprint (artifact identity). RPC now reports both
+   hashes on Trident datadirs; `genesis_hash` remains the gossip id.
 
 Intentionally out of scope (must stay unwired): DRC VM, TLT mining of
 OVL/DRC, price-oracle stake mixing, silent kHeavyHash public PoW
@@ -237,8 +253,7 @@ This audit close-out adds:
   mixed into the Agora mnemonic vault. Passport attestations use
   `typed-lanes-passport.ts`.
 - `agora-node schema report|migrate|reindex` for supported library
-  rebuilds. Hub/Grant/Mission stay library/genesis until they have
-  signed envelopes. Civic write RPCs stay local-admin.
+  rebuilds. Civic write RPCs stay local-admin.
 - Protocol v26 `NetworkMessage::OvlRawExecution` gossip and a separate
   raw mempool. Version 2 remains rejected by the Agora-signed pool.
 - Protocol v27 `NetworkMessage::TypedCompactBlock` named-lane compact
@@ -249,8 +264,40 @@ This audit close-out adds:
   compact lane 30, mempool issuer reservation, apply/journal revert,
   and `agora_submitPassportAttestation` / `agora_getPassportAttestation`
   / `agora_getPassportIssuerNonce`.
+- Protocol v30 `NetworkMessage::HubRegistration` / `GrantRegistration` /
+  `MissionRegistration` (discriminants 38–40), compact lanes 31–33, body
+  wrap v21, dedicated coordinator/registrar/sponsor nonces, apply/journal
+  revert, submit/get/nonce RPC, and `typed-lanes-community.ts`. No
+  unsigned mutation RPC.
 - Freeze-ready-only live Block 0 materializer: TLT UTXOs, OVL/DRC liquid
   accounts (allocation − vesting − self-bond), artifact treasuries/controls,
   epoch-zero validators, `compose_trident_state_root` vs live
   `TridentHeader.state_root`, `AGORA_TRIDENT_GENESIS_FILE` boot, and
   `agora-node genesis trident materialize`. Public draft stays UNFROZEN.
+- Protocol v31 `NetworkMessage::TreasuryDisbursement` (discriminant 41),
+  compact lane 34, body wrap v22, controller + authorization_root, debit-only
+  spend, submit/get/nonce RPC, and `typed-lanes-treasury.ts`.
+- Protocol v32 `NetworkMessage::VestingUnlock` (discriminant 42), compact
+  lane 35, body wrap v23, state `agora-trident-state-v24`, beneficiary-signed
+  claim against genesis schedules, unlocked progress in
+  `agora-governance-treasury-root-v3`, submit/get/nonce RPC, and
+  `typed-lanes-vesting.ts`. Time source is block `timestamp_ms`.
+- Civic votes remain local-admin by design: existing types cannot be
+  honest consensus envelopes (no secp256k1 bind, caller-supplied weight,
+  JSON Meta snapshot). No gossip discriminant is added.
+- `agora_getNodeInfo` keeps `genesis_hash` as the gossip `BlockHeader`
+  id and, on a Trident datadir, also reports `trident_header_hash`,
+  `artifact_identity`, and `block_zero_commitment`. IBD/mining stay on
+  `BlockHeader`.
+- Experimental public-testnet freeze-ready JSON
+  (`trident.experimental.public-testnet.json`) with generated secp256k1
+  OVL/DRC validators, nonzero timestamp, RandomX-only, dual-PoS genesis
+  sets, `validate_freeze_ready` + live materialize lock, and an
+  Experimental-only docker-compose profile. Public draft stays UNFROZEN.
+- `agora_getDrcBookOffers` accepts human-readable book sides
+  (`native_drc` / issued issuer+currency, Bech32m or hex). Explorer
+  protocol-lane panel looks up every wired typed-lane id and pages the
+  native DEX book. Order-entry stays in wallets.
+- Desktop/mobile send the form-complete DRC families through
+  `sendDrcWalletFamily`. Channel claim, signer-list, and account-policy
+  remain library-only because they need extra keys or action enums.

@@ -187,12 +187,17 @@ pub use block_zero_live::{
 };
 pub use columns::{meta_keys, ColumnFamily, OVL_EVM_SCHEMA_VERSION, SCHEMA_VERSION};
 pub use community_state::{
-    canonical_community_root, community_summary_key, init_canonical_community_into,
-    issuer_is_active_hub_coordinator, list_grants, list_hubs, list_missions,
-    list_passport_attestations, load_canonical_community_summary, load_passport_attestation,
-    load_passport_issuer_nonce, passport_issuer_nonce_key, passport_record_key,
-    register_grant_into, register_hub_into, register_mission_into,
-    register_passport_attestation_into, CanonicalCommunitySummary, CANONICAL_COMMUNITY_VERSION,
+    active_hub_coordinator_key, canonical_community_root, community_summary_key, grant_record_key,
+    grant_registrar_nonce_key, hub_coordinator_nonce_key, hub_record_key,
+    init_canonical_community_into, issuer_is_active_hub_coordinator, list_grants, list_hubs,
+    list_missions, list_passport_attestations, load_canonical_community_summary,
+    load_grant_registrar_nonce, load_grant_registration, load_hub_coordinator_nonce,
+    load_hub_registration, load_mission_registration, load_mission_sponsor_nonce,
+    load_passport_attestation, load_passport_issuer_nonce, mission_record_key,
+    mission_sponsor_nonce_key, passport_issuer_nonce_key, passport_record_key, register_grant_into,
+    register_hub_into, register_mission_into, register_passport_attestation_into,
+    register_signed_grant_into, register_signed_hub_into, register_signed_mission_into,
+    CanonicalCommunitySummary, CANONICAL_COMMUNITY_VERSION,
 };
 pub use data_availability::{
     apply_data_commitment, data_availability_root, data_commitment_key, data_commitment_nonce_key,
@@ -287,9 +292,15 @@ pub use ghostdag_store::{
     ghostdag_key, load_ghostdag_record, store_ghostdag_record, GhostdagRecord,
 };
 pub use governance_state::{
-    authorization_policy_root, governance_treasury_root, init_canonical_governance_into,
-    init_trident_governance_into, load_canonical_governance_policy, load_protocol_treasuries,
-    load_protocol_treasury, CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
+    apply_treasury_disbursement_into, apply_vesting_unlock_into, authorization_policy_root,
+    governance_treasury_root, init_canonical_governance_into, init_trident_governance_into,
+    load_canonical_governance_policy, load_protocol_treasuries, load_protocol_treasury,
+    load_treasury_controller, load_treasury_disbursement, load_treasury_nonce, load_vesting_nonce,
+    load_vesting_progress, load_vesting_schedules, load_vesting_unlock, load_vesting_unlocked,
+    put_treasury_controller_into, treasury_balance_key, treasury_controller_record_key,
+    treasury_disbursement_record_key, treasury_nonce_record_key, vesting_claim_record_key,
+    vesting_nonce_record_key, vesting_unlocked_record_key, CanonicalGovernancePolicy,
+    CANONICAL_GOVERNANCE_VERSION,
 };
 pub use headers::{header_key, load_header, store_header, store_header_into};
 pub use marks::{default_token_marks, TokenMark};
@@ -342,11 +353,12 @@ pub use supply::{
 };
 pub use tlt_covenant::{load_covenant_utxo, validate_mempool_covenant, TltCovenantUtxoRecord};
 pub use trident_genesis::{
-    TridentFinalityPolicy, TridentGenesisArtifact, TridentGenesisValidator,
-    TridentRuntimeFinalityPolicy, TridentRuntimePolicy, TridentValidatorGenesis,
-    TRIDENT_CONSENSUS_POLICY_DOMAIN, TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA,
-    TRIDENT_NET_FP_DOMAIN, TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION,
-    TRIDENT_TX_SIGNING_VERSION,
+    experimental_public_testnet_artifact, TridentFinalityPolicy, TridentGenesisArtifact,
+    TridentGenesisValidator, TridentRuntimeFinalityPolicy, TridentRuntimePolicy,
+    TridentValidatorGenesis, EXPERIMENTAL_PUBLIC_TESTNET_CHAIN_ID,
+    EXPERIMENTAL_PUBLIC_TESTNET_TIMESTAMP_MS, TRIDENT_CONSENSUS_POLICY_DOMAIN,
+    TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA, TRIDENT_NET_FP_DOMAIN,
+    TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION, TRIDENT_TX_SIGNING_VERSION,
 };
 pub use tx_index::{
     covenant_tx_inclusion_key, covenant_tx_index_key, data_commitment_inclusion_key,

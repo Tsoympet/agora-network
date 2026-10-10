@@ -16,9 +16,11 @@
 
 mod finality;
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use agora_consensus::{
     median_time_past, next_difficulty_weighted, work_from_bits, ConsensusLimits, DaaConfig,
@@ -233,6 +235,11 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_offer_cancels: &'a [agora_types::DrcOfferCancelTx],
     pub tlt_covenants: &'a [agora_types::TltCovenantTx],
     pub passport_attestations: &'a [agora_types::PassportAttestation],
+    pub hub_registrations: &'a [agora_types::HubRegistration],
+    pub grant_registrations: &'a [agora_types::GrantRegistration],
+    pub mission_registrations: &'a [agora_types::MissionRegistration],
+    pub treasury_disbursements: &'a [agora_types::TreasuryDisbursement],
+    pub vesting_unlocks: &'a [agora_types::VestingUnlock],
 }
 
 impl ChainState {
@@ -638,6 +645,11 @@ impl ChainState {
             drc_multisign_attachments: Vec::new(),
             tlt_covenants: included_covenants.to_vec(),
             passport_attestations: lanes.passport_attestations.to_vec(),
+            hub_registrations: lanes.hub_registrations.to_vec(),
+            grant_registrations: lanes.grant_registrations.to_vec(),
+            mission_registrations: lanes.mission_registrations.to_vec(),
+            treasury_disbursements: lanes.treasury_disbursements.to_vec(),
+            vesting_unlocks: lanes.vesting_unlocks.to_vec(),
         };
         if let Some(ctx) = self.auth.as_ref() {
             agora_types::materialize_drc_multisign_attachments(

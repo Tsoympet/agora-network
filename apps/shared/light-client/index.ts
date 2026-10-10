@@ -116,6 +116,13 @@ export {
 } from "./typed-lanes";
 export {
   DRC_FAMILY_SENDERS,
+  DRC_WALLET_FAMILY_LANES,
+  drcFamilyNeedsAmount,
+  drcFamilyNeedsIssued,
+  drcFamilyNeedsObjectId,
+  drcFamilyNeedsRecipient,
+  sendDrcWalletFamily,
+  type DrcWalletFamilyLane,
   buildSignedDrcAccountPolicy,
   buildSignedDrcChannelClaim,
   buildSignedDrcChannelClose,
@@ -166,6 +173,38 @@ export {
   sendPassportAttestation,
   type PassportCategoryName,
 } from "./typed-lanes-passport";
+export {
+  COMMUNITY_GRANT_KINDS,
+  GRANT_REGISTRATION_DOMAIN,
+  HUB_REGISTRATION_DOMAIN,
+  MISSION_REGISTRATION_DOMAIN,
+  TREASURY_IDS,
+  buildSignedGrantRegistration,
+  buildSignedHubRegistration,
+  buildSignedMissionRegistration,
+  communityGrantKindDiscriminant,
+  encodeGrantRegistrationBody,
+  encodeHubRegistrationBody,
+  encodeMissionRegistrationBody,
+  sendGrantRegistration,
+  sendHubRegistration,
+  sendMissionRegistration,
+  type CommunityGrantKindName,
+  type TreasuryIdName,
+} from "./typed-lanes-community";
+export {
+  TREASURY_DISBURSEMENT_DOMAIN,
+  buildSignedTreasuryDisbursement,
+  encodeTreasuryDisbursementBody,
+  sendTreasuryDisbursement,
+} from "./typed-lanes-treasury";
+export {
+  VESTING_UNLOCK_DOMAIN,
+  NATIVE_ASSET_TLT,
+  buildSignedVestingUnlock,
+  encodeVestingUnlockBody,
+  sendVestingUnlock,
+} from "./typed-lanes-vesting";
 export {
   RAW_EVM_DEV_CHAIN_ID,
   RAW_EVM_KEY_SPLIT,

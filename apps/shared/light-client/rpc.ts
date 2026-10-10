@@ -135,12 +135,18 @@ export type LightNodeInfo = {
   hot_window: number;
   allow_fund: boolean;
   miner_address: string | null;
-  /** Hex id of Block 0 when reported by the node. */
+  /** Hex id of Block 0 when reported by the node (`BlockHeader` / gossip). */
   genesis_hash: string | null;
   /** Network-bound signing chain id (`agora-testnet-1`, …). */
   chain_id?: string | null;
   /** Minimum mempool relay fee when reported. */
   min_relay_fee?: number;
+  /** TridentHeader commitment hash. Absent on frozen v2. Not a gossip parent. */
+  trident_header_hash?: string | null;
+  /** Artifact identity used in the Trident network fingerprint. */
+  artifact_identity?: string | null;
+  /** Offline Block 0 manifest commitment. */
+  block_zero_commitment?: string | null;
 };
 
 /** JSON-safe base units. Nodes may encode large amounts as decimal strings. */
@@ -199,6 +205,8 @@ export type LightProtocolTreasuries = {
     id: string;
     asset: NativeAssetTicker;
     balance: LightAmount;
+    nonce?: number;
+    controller?: string | null;
   }>;
 };
 
@@ -367,6 +375,51 @@ export type LightClient = {
     issuer: string;
     nonce: number;
   }>;
+  getHubRegistration: (registrationId: string) => Promise<{
+    registration_id: string;
+    status: string;
+    hub: unknown | null;
+  }>;
+  getHubCoordinatorNonce: (coordinator: string) => Promise<{
+    coordinator: string;
+    nonce: number;
+  }>;
+  getGrantRegistration: (registrationId: string) => Promise<{
+    registration_id: string;
+    status: string;
+    grant: unknown | null;
+  }>;
+  getGrantRegistrarNonce: (registrar: string) => Promise<{
+    registrar: string;
+    nonce: number;
+  }>;
+  getMissionRegistration: (registrationId: string) => Promise<{
+    registration_id: string;
+    status: string;
+    mission: unknown | null;
+  }>;
+  getMissionSponsorNonce: (sponsor: string) => Promise<{
+    sponsor: string;
+    nonce: number;
+  }>;
+  getTreasuryDisbursement: (disbursementId: string) => Promise<{
+    disbursement_id: string;
+    status: string;
+    disbursement: unknown | null;
+  }>;
+  getTreasuryNonce: (treasury: string) => Promise<{
+    treasury: string;
+    nonce: number;
+  }>;
+  getVestingUnlock: (unlockId: string) => Promise<{
+    unlock_id: string;
+    status: string;
+    unlock: unknown | null;
+  }>;
+  getVestingNonce: (beneficiary: string) => Promise<{
+    beneficiary: string;
+    nonce: number;
+  }>;
   getDrcObject: (objectId: string) => Promise<{
     object_id: string;
     status: "live" | "unknown";
@@ -462,6 +515,21 @@ export type LightClient = {
   submitDrcIssuedClawback: (tx: unknown) => Promise<{ clawback_tx_id: string }>;
   submitPassportAttestation: (attestation: unknown) => Promise<{
     attestation_id: string;
+  }>;
+  submitHubRegistration: (registration: unknown) => Promise<{
+    registration_id: string;
+  }>;
+  submitGrantRegistration: (registration: unknown) => Promise<{
+    registration_id: string;
+  }>;
+  submitMissionRegistration: (registration: unknown) => Promise<{
+    registration_id: string;
+  }>;
+  submitTreasuryDisbursement: (disbursement: unknown) => Promise<{
+    disbursement_id: string;
+  }>;
+  submitVestingUnlock: (unlock: unknown) => Promise<{
+    unlock_id: string;
   }>;
   getConstitution: () => Promise<LightConstitution>;
   getGovernance: () => Promise<LightGovernance>;
@@ -562,6 +630,59 @@ export function createLightClient(config: LightClientConfig): LightClient {
         "agora_getPassportIssuerNonce",
         { issuer },
       ),
+    getHubRegistration: (registrationId) =>
+      call<{
+        registration_id: string;
+        status: string;
+        hub: unknown | null;
+      }>("agora_getHubRegistration", { registration_id: registrationId }),
+    getHubCoordinatorNonce: (coordinator) =>
+      call<{ coordinator: string; nonce: number }>(
+        "agora_getHubCoordinatorNonce",
+        { coordinator },
+      ),
+    getGrantRegistration: (registrationId) =>
+      call<{
+        registration_id: string;
+        status: string;
+        grant: unknown | null;
+      }>("agora_getGrantRegistration", { registration_id: registrationId }),
+    getGrantRegistrarNonce: (registrar) =>
+      call<{ registrar: string; nonce: number }>(
+        "agora_getGrantRegistrarNonce",
+        { registrar },
+      ),
+    getMissionRegistration: (registrationId) =>
+      call<{
+        registration_id: string;
+        status: string;
+        mission: unknown | null;
+      }>("agora_getMissionRegistration", { registration_id: registrationId }),
+    getMissionSponsorNonce: (sponsor) =>
+      call<{ sponsor: string; nonce: number }>(
+        "agora_getMissionSponsorNonce",
+        { sponsor },
+      ),
+    getTreasuryDisbursement: (disbursementId) =>
+      call<{
+        disbursement_id: string;
+        status: string;
+        disbursement: unknown | null;
+      }>("agora_getTreasuryDisbursement", { disbursement_id: disbursementId }),
+    getTreasuryNonce: (treasury) =>
+      call<{ treasury: string; nonce: number }>("agora_getTreasuryNonce", {
+        treasury,
+      }),
+    getVestingUnlock: (unlockId) =>
+      call<{
+        unlock_id: string;
+        status: string;
+        unlock: unknown | null;
+      }>("agora_getVestingUnlock", { unlock_id: unlockId }),
+    getVestingNonce: (beneficiary) =>
+      call<{ beneficiary: string; nonce: number }>("agora_getVestingNonce", {
+        beneficiary,
+      }),
     getDrcObject: (objectId) =>
       call<{
         object_id: string;
@@ -754,6 +875,24 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<{ attestation_id: string }>("agora_submitPassportAttestation", {
         attestation,
       }),
+    submitHubRegistration: (registration) =>
+      call<{ registration_id: string }>("agora_submitHubRegistration", {
+        registration,
+      }),
+    submitGrantRegistration: (registration) =>
+      call<{ registration_id: string }>("agora_submitGrantRegistration", {
+        registration,
+      }),
+    submitMissionRegistration: (registration) =>
+      call<{ registration_id: string }>("agora_submitMissionRegistration", {
+        registration,
+      }),
+    submitTreasuryDisbursement: (disbursement) =>
+      call<{ disbursement_id: string }>("agora_submitTreasuryDisbursement", {
+        disbursement,
+      }),
+    submitVestingUnlock: (unlock) =>
+      call<{ unlock_id: string }>("agora_submitVestingUnlock", { unlock }),
     getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
     getGovernance: () => call<LightGovernance>("agora_getGovernance", []),
     listProposals: (limit = 64) =>

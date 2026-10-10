@@ -7,28 +7,29 @@
 use std::collections::BTreeSet;
 
 use agora_consensus::{DaaConfig, EmissionSchedule, GhostdagConfig, PowAlgorithm};
-use agora_crypto::parse_compressed_public_key;
+use agora_crypto::{parse_compressed_public_key, KeyPair};
 use agora_types::{Address, Hash, NativeAssetId};
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::monetary::{AssetMonetaryPolicy, EmissionKind, TridentMonetaryPolicy};
-use crate::network::NetworkId;
-use crate::staking::{StakingParams, MAX_VALIDATOR_COMMISSION_BPS};
+use crate::{
+    monetary::{AssetMonetaryPolicy, EmissionKind, TridentMonetaryPolicy},
+    network::NetworkId,
+    staking::{StakingParams, MAX_VALIDATOR_COMMISSION_BPS},
+};
 
 pub const TRIDENT_GENESIS_SCHEMA: &str = "agora-trident-genesis-v3";
 /// State-transition version committed into the Trident network fingerprint.
-pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v22";
+pub const TRIDENT_STATE_TRANSITION_VERSION: &str = "agora-trident-state-v24";
 /// Consensus-policy version string for Trident.
 pub const TRIDENT_CONSENSUS_POLICY_VERSION: &str = "agora-trident-consensus-v2";
 pub const TRIDENT_NET_FP_DOMAIN: &[u8] = b"agora-trident-net-fp-v1";
 pub const TRIDENT_GENESIS_ID_DOMAIN: &[u8] = b"agora-trident-genesis-identity-v2";
 pub const TRIDENT_CONSENSUS_POLICY_DOMAIN: &[u8] = b"agora-trident-consensus-policy-v2";
-/// v28 appends `NetworkMessage::DrcMultisignAttachment` so typed compact can
-/// inflate detached DRC multisign short ids. v27 named-lane compact, v26
-/// raw-EVM, v25 DA gossip, schema-22 OVL wei / OVL-EVM-v1, and DRC object
-/// indexing stay in force.
-pub const TRIDENT_PROTOCOL_VERSION: u32 = 29;
+/// v32 appends vesting-unlock gossip. v31 appends treasury disbursement
+/// gossip. Prior compact / DA / raw-EVM / passport / community versions
+/// stay in force.
+pub const TRIDENT_PROTOCOL_VERSION: u32 = 32;
 pub const TRIDENT_TX_SIGNING_VERSION: &str = "agora-trident-tx-v9";
 const UNFROZEN: &str = "UNFROZEN";
 
@@ -974,6 +975,109 @@ fn is_placeholder(value: &str) -> bool {
         || value.to_ascii_lowercase().contains("placeholder")
 }
 
+/// Distinct from the UNFROZEN public draft `agora-trident-testnet-1`.
+pub const EXPERIMENTAL_PUBLIC_TESTNET_CHAIN_ID: &str = "agora-trident-experimental-testnet-1";
+/// Fixed Experimental timestamp. Not a ceremony clock.
+pub const EXPERIMENTAL_PUBLIC_TESTNET_TIMESTAMP_MS: u64 = 1_720_000_000_000;
+
+/// Generated Experimental public-testnet freeze-ready artifact.
+///
+/// Deterministic secp256k1 validators and allocations. RandomX-only. Dual-PoS
+/// genesis sets are populated so finality can fire after the PoW threshold.
+/// Not mainnet. Not ceremony-final. The UNFROZEN public draft stays untouched.
+pub fn experimental_public_testnet_artifact() -> TridentGenesisArtifact {
+    const DRAFT: &str = include_str!("../../../../docs/genesis/trident.testnet.genesis.draft.json");
+    let mut artifact = TridentGenesisArtifact::from_json(DRAFT).expect("public draft parses");
+    artifact.maturity = "Experimental".into();
+    artifact.chain_name = "Agora Trident Experimental Public Testnet".into();
+    artifact.chain_id = EXPERIMENTAL_PUBLIC_TESTNET_CHAIN_ID.into();
+    artifact.timestamp_ms = EXPERIMENTAL_PUBLIC_TESTNET_TIMESTAMP_MS;
+    artifact.bits = Some(0);
+    artifact.wallet.coin_type_status = "registered".into();
+    artifact.wallet.notes =
+        "Experimental public-testnet BIP-44. Generated keys. Not ceremony-final.".into();
+    artifact.governance_constitution_hash = agora_governance::constitution_v1_hash_hex();
+    artifact.emergency_policy_hash = Hash::hash_borsh(&"agora-experimental-emergency-v1").to_hex();
+    artifact.finality.pow_work_threshold_policy = "minimum-blue-score-depth-v1".into();
+    artifact.finality.pow_work_threshold = Some(8);
+    artifact.assets.tlt.treasury_allocation = 1_000_000_000;
+    artifact.assets.ovl.genesis_allocation = 2_000_000_000;
+    artifact.assets.ovl.treasury_allocation = 1_000_000_000;
+    artifact.assets.ovl.emission.notes = Some(
+        "Experimental public-testnet staking reserve. Not ceremony-final. Never PoW minted.".into(),
+    );
+    artifact.assets.drc.genesis_allocation = 2_000_000_000;
+    artifact.assets.drc.treasury_allocation = 1_000_000_000;
+    artifact.assets.drc.emission.notes = Some(
+        "Experimental public-testnet staking reserve. Not ceremony-final. Never PoW minted.".into(),
+    );
+    artifact.treasuries.tlt_security.allocation = 1_000_000_000;
+    artifact.treasuries.ovl_builder.allocation = 1_000_000_000;
+    artifact.treasuries.drc_community.allocation = 1_000_000_000;
+    artifact.treasuries.tlt_security.control = "governance-v1".into();
+    artifact.treasuries.ovl_builder.control = "governance-v1".into();
+    artifact.treasuries.drc_community.control = "governance-v1".into();
+
+    let ovl = KeyPair::from_secret_bytes(&[0xa1; 32]).expect("experimental OVL key");
+    let drc = KeyPair::from_secret_bytes(&[0xa2; 32]).expect("experimental DRC key");
+    let tlt = KeyPair::from_secret_bytes(&[0xa3; 32]).expect("experimental TLT key");
+    let hrp = artifact.wallet.address_hrp.as_str();
+    let ovl_addr = ovl.address().to_bech32_hrp(hrp);
+    let drc_addr = drc.address().to_bech32_hrp(hrp);
+    let tlt_addr = tlt.address().to_bech32_hrp(hrp);
+    artifact.initial_allocations = vec![
+        TridentInitialAllocation {
+            asset: "TLT".into(),
+            address: tlt_addr,
+            amount: artifact.assets.tlt.genesis_allocation,
+        },
+        TridentInitialAllocation {
+            asset: "OVL".into(),
+            address: ovl_addr.clone(),
+            amount: artifact.assets.ovl.genesis_allocation,
+        },
+        TridentInitialAllocation {
+            asset: "DRC".into(),
+            address: drc_addr.clone(),
+            amount: artifact.assets.drc.genesis_allocation,
+        },
+    ];
+    let ovl_validator = TridentGenesisValidator {
+        consensus_public_key: hex::encode(ovl.public_key_bytes()),
+        withdrawal_address: ovl_addr,
+        self_bond: 1_000_000_000,
+        commission_bps: Some(100),
+        metadata_hash: Some(Hash::hash_borsh(&"agora-experimental-ovl-validator-v1").to_hex()),
+    };
+    let drc_validator = TridentGenesisValidator {
+        consensus_public_key: hex::encode(drc.public_key_bytes()),
+        withdrawal_address: drc_addr,
+        self_bond: 1_000_000_000,
+        commission_bps: Some(100),
+        metadata_hash: Some(Hash::hash_borsh(&"agora-experimental-drc-validator-v1").to_hex()),
+    };
+    for (set, validator) in [
+        (&mut artifact.ovl_validators, ovl_validator),
+        (&mut artifact.drc_validators, drc_validator),
+    ] {
+        set.max_validators = 16;
+        set.min_self_bond = 1_000_000_000;
+        set.unbonding_period_checkpoints = 8;
+        set.max_commission_bps = Some(2_000);
+        set.max_concentration_bps = Some(10_000);
+        set.genesis_set = vec![validator];
+    }
+    artifact.notes = vec![
+        "Experimental public-testnet freeze-ready artifact.".into(),
+        "Generated secp256k1 validators and allocations. RandomX-only.".into(),
+        "Dual-PoS genesis validators are present so finality can fire after the PoW work threshold.".into(),
+        "Not ceremony-final. Not mainnet.".into(),
+    ];
+    artifact.genesis_hash = artifact.consensus_identity_hash().to_hex();
+    artifact.network_fingerprint = artifact.compute_network_fingerprint().to_hex();
+    artifact
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1266,5 +1370,65 @@ mod tests {
         artifact.pow.ghostdag_k += 1;
         let error = artifact.to_runtime_policy().unwrap_err();
         assert!(error.contains("genesis_hash mismatch"));
+    }
+
+    #[test]
+    fn experimental_public_testnet_is_freeze_ready_and_distinct_from_the_public_draft() {
+        let artifact = experimental_public_testnet_artifact();
+        artifact.validate_freeze_ready().unwrap();
+        let runtime = artifact.to_runtime_policy().unwrap();
+        assert_eq!(artifact.chain_id, EXPERIMENTAL_PUBLIC_TESTNET_CHAIN_ID);
+        assert_eq!(
+            artifact.timestamp_ms,
+            EXPERIMENTAL_PUBLIC_TESTNET_TIMESTAMP_MS
+        );
+        assert_eq!(artifact.maturity, "Experimental");
+        assert_eq!(artifact.bits, Some(0));
+        assert_eq!(artifact.pow.algorithm, "randomx");
+        assert_eq!(runtime.pow_algorithm, PowAlgorithm::RandomX);
+        assert_eq!(runtime.finality.min_pow_depth, 8);
+        assert_eq!(runtime.ovl_staking.min_self_bond, 1_000_000_000);
+        assert_eq!(runtime.drc_staking.min_self_bond, 1_000_000_000);
+        assert_eq!(artifact.ovl_validators.genesis_set.len(), 1);
+        assert_eq!(artifact.drc_validators.genesis_set.len(), 1);
+        assert_ne!(artifact.chain_id, "agora-trident-testnet-1");
+        assert_ne!(artifact.genesis_hash, "UNFROZEN");
+        assert_ne!(artifact.network_fingerprint, "UNFROZEN");
+        assert!(artifact.notes.iter().all(|note| {
+            let note = note.to_ascii_lowercase();
+            !note.contains("draft") && !note.contains("unfrozen") && !note.contains("placeholder")
+        }));
+
+        let draft = TridentGenesisArtifact::from_json(DRAFT).unwrap();
+        assert_ne!(
+            artifact.consensus_identity_hash(),
+            draft.consensus_identity_hash()
+        );
+    }
+
+    #[test]
+    fn checked_in_experimental_public_testnet_matches_builder() {
+        const JSON: &str =
+            include_str!("../../../../docs/genesis/trident.experimental.public-testnet.json");
+        let file = TridentGenesisArtifact::from_json(JSON).unwrap();
+        let builder = experimental_public_testnet_artifact();
+        file.validate_freeze_ready().unwrap();
+        assert_eq!(file.genesis_hash, builder.genesis_hash);
+        assert_eq!(file.network_fingerprint, builder.network_fingerprint);
+        assert_eq!(file.chain_id, builder.chain_id);
+        assert_eq!(file.timestamp_ms, builder.timestamp_ms);
+        assert_eq!(file.maturity, "Experimental");
+        assert_eq!(
+            file.ovl_validators.genesis_set[0].consensus_public_key,
+            builder.ovl_validators.genesis_set[0].consensus_public_key
+        );
+        assert_eq!(
+            file.drc_validators.genesis_set[0].consensus_public_key,
+            builder.drc_validators.genesis_set[0].consensus_public_key
+        );
+        assert_eq!(
+            file.to_json_pretty().unwrap(),
+            builder.to_json_pretty().unwrap()
+        );
     }
 }
