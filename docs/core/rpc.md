@@ -59,7 +59,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
 | `agora_getBlockTemplate` | Mining template block (tips as parents + coinbase) |
 | `agora_submitBlock` | Admit a mined block (PoW verify + store + gossip) |
-| `agora_getFinality` | Trident checkpoint certificate / state for a block hash |
+| `agora_getFinality` | Trident checkpoint certificate / state for a block hash. Includes a signable `body` when the block is known |
 | `agora_getFinalizedTip` | Finalized blue-score frontier |
 | `agora_submitAttestation` | Admit + gossip an OVL/DRC checkpoint attestation |
 | `agora_getValidatorSet` | OVL/DRC validator snapshot (`asset`, optional `epoch`) |

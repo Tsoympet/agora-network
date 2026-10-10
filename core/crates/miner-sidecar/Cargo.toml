@@ -11,10 +11,16 @@ repository.workspace = true
 name = "agora-miner"
 path = "src/main.rs"
 
+[features]
+default = ["randomx"]
+# Official RandomX (cmake + libstdc++). Without this feature the sidecar uses
+# the same SHA-256 CI fallback as `agora-node --no-default-features`.
+randomx = ["agora-consensus/randomx"]
+
 [dependencies]
 agora-types = { workspace = true }
 agora-crypto = { workspace = true }
-agora-consensus = { workspace = true, features = ["randomx"] }
+agora-consensus = { workspace = true }
 agora-rpc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

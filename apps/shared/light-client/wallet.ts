@@ -204,6 +204,27 @@ export function addressBech32FromMnemonic(
  * BIP-44 account derivation.
  * @param change `0` = external (receive), `1` = internal (change)
  */
+/** Load a 32-byte secp256k1 secret (Experimental generated keys, not BIP-44). */
+export function accountFromSecretHex(
+  secretHex: string,
+  network = "testnet",
+): WalletAccount {
+  const secretKey = hexToBytes(secretHex);
+  if (secretKey.length !== 32) {
+    throw new Error("secret must be 32 bytes");
+  }
+  const publicKey = secp.getPublicKey(secretKey, true);
+  const addressHex = addressFromPubkey(publicKey);
+  const hrp = addressHrpForNetwork(network) || ADDRESS_HRP;
+  return {
+    index: 0,
+    addressHex,
+    addressBech32: encodeAddress(addressHex, hrp),
+    publicKey,
+    secretKey,
+  };
+}
+
 export function deriveAccount(
   mnemonic: string,
   index = 0,
@@ -436,6 +457,100 @@ export async function sendTransfer(
     utxos,
     spendChange,
   });
+  const result = await client.submitTransaction(built.tx);
+  return { tx_id: result.tx_id, built };
+}
+
+/** Sign and submit a TLT spend from an explicit secp256k1 secret (device-local). */
+export async function sendTransferFromAccount(
+  client: LightClient,
+  options: {
+    secretHex: string;
+    toAddressHex: string;
+    amount: number;
+    fee?: number;
+    network?: string;
+  },
+): Promise<{ tx_id: string; built: BuiltTransfer }> {
+  const network = options.network ?? "testnet";
+  const account = accountFromSecretHex(options.secretHex, network);
+  let fee = options.fee;
+  if (fee === undefined) {
+    try {
+      const est = await client.estimateFee();
+      fee = est.suggested_fee;
+    } catch {
+      fee = 1;
+    }
+  }
+  const utxos = (await client.getUtxos(account.addressHex)).utxos;
+  const need = options.amount + fee;
+  const total = utxos.reduce((sum, utxo) => sum + utxo.value, 0);
+  if (total < need) {
+    throw new Error(
+      `insufficient TLT (have ${total}, need ${need}) for ${account.addressBech32}`,
+    );
+  }
+  const info = await client.getNodeInfo();
+  const genesisHash = info.genesis_hash;
+  if (!genesisHash) {
+    throw new Error("agora_getNodeInfo did not return genesis_hash");
+  }
+  const chainId = info.chain_id ?? chainIdForNetwork(info.network || network);
+  const toHex = parseAddress(options.toAddressHex, info.network || network);
+  const to = hexToBytes(toHex);
+  if (to.length !== 20) throw new Error("to address must be 20 bytes");
+  const selected = selectTltCoins(utxos, options.amount, fee);
+  const totalIn = selected.reduce((sum, utxo) => sum + utxo.value, 0);
+  const change = totalIn - need;
+  const outputs: { value: number; address: Uint8Array }[] = [
+    { value: options.amount, address: to },
+  ];
+  if (change > 0) {
+    outputs.push({
+      value: change,
+      address: hexToBytes(account.addressHex),
+    });
+  }
+  const inputs = selected.map((u) => ({
+    tx_id: hexToBytes(u.tx_id),
+    index: u.index,
+  }));
+  const version = 1;
+  const nonce = Date.now();
+  const body = { version, inputs, outputs, nonce };
+  const { publicKey, signature } = await signTransactionBound(
+    account.secretKey,
+    chainId,
+    genesisHash,
+    body,
+  );
+  const tx = {
+    version,
+    inputs: selected.map((u) => ({
+      previous_outpoint: {
+        tx_id: Array.from(hexToBytes(u.tx_id)),
+        index: u.index,
+      },
+    })),
+    outputs: outputs.map((o) => ({
+      value: o.value,
+      address: Array.from(o.address),
+    })),
+    nonce,
+    public_key: Array.from(publicKey),
+    signature: Array.from(signature),
+  };
+  const built: BuiltTransfer = {
+    tx,
+    from: account.addressHex,
+    fromBech32: account.addressBech32,
+    to: toHex,
+    toBech32: encodeAddress(toHex, addressHrpForNetwork(info.network || network)),
+    amount: options.amount,
+    change,
+    fee,
+  };
   const result = await client.submitTransaction(built.tx);
   return { tx_id: result.tx_id, built };
 }

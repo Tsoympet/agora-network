@@ -30,13 +30,18 @@ import {
   sendDrcOfferCancel,
   sendDrcOfferCreate,
   sendDrcPayment,
+  DRC_ACCOUNT_POLICY_ACTIONS,
   DRC_WALLET_FAMILY_LANES,
   drcFamilyNeedsAmount,
+  drcFamilyNeedsExtraHex,
   drcFamilyNeedsIssued,
   drcFamilyNeedsObjectId,
+  drcFamilyNeedsPolicyAction,
   drcFamilyNeedsRecipient,
+  drcFamilyNeedsSignerList,
   sendDrcWalletFamily,
   sendOvlExecution,
+  type DrcAccountPolicyAction,
   type DrcWalletFamilyLane,
   sendTltCovenant,
   sendTransfer,
@@ -46,6 +51,7 @@ import {
   walletNetworkFromNode,
   watchTransaction,
   type LightAccountBalances,
+  type LightDrcOfferPage,
   type LightNodeInfo,
   type LightTxLookup,
   type LightUtxo,
@@ -109,10 +115,26 @@ export default function App() {
   const [offerCurrency, setOfferCurrency] = useState("USD");
   const [offerGets, setOfferGets] = useState("1");
   const [offerId, setOfferId] = useState("");
+  const [extraHex, setExtraHex] = useState("");
+  const [settleDelay, setSettleDelay] = useState("1");
+  const [quorum, setQuorum] = useState("1");
+  const [signerEntries, setSignerEntries] = useState("");
+  const [signerAction, setSignerAction] = useState<"set" | "delete">("set");
+  const [policyAction, setPolicyAction] = useState<DrcAccountPolicyAction>(
+    "set_require_destination_tag",
+  );
   const [sendBusy, setSendBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastTxId, setLastTxId] = useState<string | null>(null);
   const [txLookup, setTxLookup] = useState<LightTxLookup | null>(null);
+  const [bookIssuer, setBookIssuer] = useState("");
+  const [bookCurrency, setBookCurrency] = useState("USD");
+  const [bookDirection, setBookDirection] = useState<"drc-pays" | "issued-pays">(
+    "drc-pays",
+  );
+  const [bookBusy, setBookBusy] = useState(false);
+  const [bookError, setBookError] = useState<string | null>(null);
+  const [bookPage, setBookPage] = useState<LightDrcOfferPage | null>(null);
   const [receiveBech32, setReceiveBech32] = useState<string | null>(null);
   const [receiveHex, setReceiveHex] = useState<string | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
@@ -450,6 +472,12 @@ export default function App() {
             objectId: offerId.trim(),
             issuer: offerIssuer.trim(),
             currency: offerCurrency,
+            extraHex: extraHex.trim(),
+            settleDelay: Math.floor(Number(settleDelay)),
+            quorum: Math.floor(Number(quorum)),
+            signerEntries,
+            signerAction,
+            policyAction,
           },
         );
         id = submitted;
@@ -474,6 +502,33 @@ export default function App() {
       setSendBusy(false);
     }
   }
+
+  async function onBook() {
+    const issuer = bookIssuer.trim();
+    const currency = bookCurrency.trim();
+    if (!issuer || !currency) {
+      setBookError("Issuer and currency are required.");
+      return;
+    }
+    setBookBusy(true);
+    setBookError(null);
+    setBookPage(null);
+    const issued = { type: "issued" as const, issuer, currency };
+    const native = { type: "native_drc" as const };
+    const book =
+      bookDirection === "drc-pays"
+        ? { pays: native, gets: issued }
+        : { pays: issued, gets: native };
+    try {
+      setBookPage(await client.getDrcBookOffers({ book, limit: 16 }));
+    } catch (err) {
+      setBookError(err instanceof Error ? err.message : "book lookup failed");
+    } finally {
+      setBookBusy(false);
+    }
+  }
+
+  const bookOffers = Array.isArray(bookPage?.offers) ? bookPage.offers : [];
 
   return (
     <View style={styles.shell}>
@@ -780,6 +835,87 @@ export default function App() {
             style={styles.input}
           />
         ) : null}
+        {drcFamilyNeedsExtraHex(sendLane) ? (
+          <>
+            <TextInput
+              value={extraHex}
+              onChangeText={setExtraHex}
+              placeholder={
+                sendLane === "drc-channel-create"
+                  ? "claim public key hex"
+                  : "claim signature hex"
+              }
+              placeholderTextColor={agoraBrand.colors.inkMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
+            {sendLane === "drc-channel-create" ? (
+              <TextInput
+                value={settleDelay}
+                onChangeText={setSettleDelay}
+                placeholder="settle delay"
+                placeholderTextColor={agoraBrand.colors.inkMuted}
+                keyboardType="numeric"
+                style={styles.input}
+              />
+            ) : null}
+          </>
+        ) : null}
+        {drcFamilyNeedsSignerList(sendLane) ? (
+          <>
+            <View style={styles.actions}>
+              {(["set", "delete"] as const).map((action) => (
+                <Pressable
+                  key={action}
+                  onPress={() => setSignerAction(action)}
+                  style={styles.lookupBtn}
+                >
+                  <Text style={styles.lookupLabel}>
+                    {signerAction === action ? `· ${action}` : action}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            {signerAction === "set" ? (
+              <>
+                <TextInput
+                  value={quorum}
+                  onChangeText={setQuorum}
+                  placeholder="quorum"
+                  placeholderTextColor={agoraBrand.colors.inkMuted}
+                  keyboardType="numeric"
+                  style={styles.input}
+                />
+                <TextInput
+                  value={signerEntries}
+                  onChangeText={setSignerEntries}
+                  placeholder={"address,weight\none signer per line"}
+                  placeholderTextColor={agoraBrand.colors.inkMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  multiline
+                  style={styles.input}
+                />
+              </>
+            ) : null}
+          </>
+        ) : null}
+        {drcFamilyNeedsPolicyAction(sendLane) ? (
+          <View style={styles.actions}>
+            {DRC_ACCOUNT_POLICY_ACTIONS.map((action) => (
+              <Pressable
+                key={action.id}
+                onPress={() => setPolicyAction(action.id)}
+                style={styles.lookupBtn}
+              >
+                <Text style={styles.lookupLabel}>
+                  {policyAction === action.id ? `· ${action.label}` : action.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
         {sendLane === "drc-offer" || drcFamilyNeedsIssued(sendLane) ? (
           <>
             <TextInput
@@ -851,6 +987,61 @@ export default function App() {
               ? ` @ ${shortHash(txLookup.block_id)}`
               : ""}
             {txLookup?.fee != null ? ` · fee ${txLookup.fee}` : ""}
+          </Text>
+        ) : null}
+        <Text style={styles.netLabel}>DRC native DEX book</Text>
+        <Text style={styles.netHrp}>Read-only. Order entry stays in send.</Text>
+        <TextInput
+          value={bookIssuer}
+          onChangeText={setBookIssuer}
+          placeholder="issued issuer"
+          placeholderTextColor={agoraBrand.colors.inkMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={styles.input}
+        />
+        <TextInput
+          value={bookCurrency}
+          onChangeText={setBookCurrency}
+          placeholder="USD"
+          placeholderTextColor={agoraBrand.colors.inkMuted}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          style={styles.input}
+        />
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+          <Pressable
+            onPress={() => setBookDirection("drc-pays")}
+            style={[
+              styles.lookupBtn,
+              bookDirection !== "drc-pays" ? { opacity: 0.5 } : null,
+            ]}
+          >
+            <Text style={styles.lookupLabel}>Pays DRC</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setBookDirection("issued-pays")}
+            style={[
+              styles.lookupBtn,
+              bookDirection !== "issued-pays" ? { opacity: 0.5 } : null,
+            ]}
+          >
+            <Text style={styles.lookupLabel}>Pays issued</Text>
+          </Pressable>
+        </View>
+        <Pressable
+          onPress={onBook}
+          disabled={bookBusy || !networkReady}
+          style={styles.lookupBtn}
+        >
+          <Text style={styles.lookupLabel}>
+            {bookBusy ? "Looking up…" : "Lookup book"}
+          </Text>
+        </Pressable>
+        {bookError ? <Text style={styles.error}>{bookError}</Text> : null}
+        {bookPage ? (
+          <Text style={[styles.tipRow, { color: agoraBrand.colors.cyan }]}>
+            {bookOffers.length} offer{bookOffers.length === 1 ? "" : "s"}
           </Text>
         ) : null}
       </ScrollView>
