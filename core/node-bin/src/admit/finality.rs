@@ -6,7 +6,7 @@
 
 use agora_consensus::{
     assert_reorg_allowed, detect_double_checkpoint, note_pow_progress, note_signed_stake,
-    refresh_certificate, FinalityPowPolicy, SlashPolicy,
+    refresh_certificate, SlashPolicy,
 };
 use agora_crypto::verify_checkpoint_attestation;
 use agora_state_machine::{
@@ -77,7 +77,7 @@ impl ChainState {
             cert.drc_signed_stake = prev_drc.0;
             cert.drc_active_stake = prev_drc.1;
         }
-        note_pow_progress(&mut cert, score, &FinalityPowPolicy::default());
+        note_pow_progress(&mut cert, score, &self.finality_pow);
         refresh_certificate(&mut cert);
         let mut batch = WriteBatch::new();
         put_certificate_into(&mut batch, &cert).map_err(|e| AdmitError::Storage(e.to_string()))?;
@@ -170,7 +170,7 @@ impl ChainState {
         if cert.body != expected {
             cert = FinalityCertificate::new(expected.clone());
         }
-        note_pow_progress(&mut cert, local_score, &FinalityPowPolicy::default());
+        note_pow_progress(&mut cert, local_score, &self.finality_pow);
         note_signed_stake(
             &mut cert,
             &expected,
@@ -296,5 +296,35 @@ mod tests {
         store.write_batch(batch).unwrap();
 
         assert!(chain.guard_reorg_vs_finality(genesis, genesis).is_ok());
+    }
+
+    #[test]
+    fn artifact_pow_threshold_holds_genesis_below_depth() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis_block = GenesisBuilder::default().build_block();
+        let genesis = genesis_block.id();
+        GenesisBuilder::default()
+            .ignite(store.as_ref())
+            .expect("ignite");
+        let boot = ChainBootConfig {
+            pow: PowAlgorithm::RandomX,
+            initial_bits: 0,
+            chain_id: "agora-dev".into(),
+            finality_pow: agora_consensus::FinalityPowPolicy { min_pow_depth: 8 },
+            ..ChainBootConfig::default()
+        };
+        let chain =
+            ChainState::bootstrap_with(store.clone(), genesis, boot, StoragePolicy::default())
+                .unwrap();
+        chain.note_pow_on_virtual_tip(genesis).unwrap();
+        let cert = chain
+            .finality_certificate(&genesis)
+            .unwrap()
+            .expect("virtual tip certificate");
+        assert!(
+            !cert.pow_work_met,
+            "genesis blue_score must stay below artifact min_pow_depth=8"
+        );
+        assert_eq!(cert.state, CheckpointState::Proposed);
     }
 }

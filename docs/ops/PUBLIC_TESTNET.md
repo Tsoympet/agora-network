@@ -53,7 +53,7 @@ Recorded on this host (2026-10-10), `agora-node --no-default-features`
 | Peers | First-boot simultaneous seeder dials failed Noise handshake. Stagger / `AGORA_BOOTSTRAP` from B→A connected (`connected_peers=1`). Headers-first IBD at genesis reported the peer was not ahead. |
 | Tx | Device-local TLT spend from generated key `0xa3…` admitted on A (`pending`). Two-peer gossipsub did **not** put the tx in B’s mempool. |
 | Mine + IBD | `agora-miner --no-default-features` found a SHA-256 fallback solution at `daa_min_level=8` (`00997c73…`). B’s tip set matched A. The spend was `confirmed` on B via the block (not via mempool gossip). |
-| Dual-PoS | `agora_getFinality` returned a signable checkpoint body. OVL (`0xa1…`) then DRC (`0xa2…`) attestations finalized the tip on A; B converged to `Finalized` over gossip. Admit still uses `FinalityPowPolicy::default()` (`min_pow_depth=1`), not the artifact’s threshold `8`. |
+    | Dual-PoS | `agora_getFinality` returned a signable checkpoint body. OVL (`0xa1…`) then DRC (`0xa2…`) attestations finalized the tip on A; B converged to `Finalized` over gossip. That recorded run used then-default `min_pow_depth=1` (tip blue_score 2). Subsequent code copies the artifact threshold (`8`) into live admit. |
 
 This is a local Experimental lab mesh. It is **not** Public testnet, not
 ceremony-final, and not a RandomX public-network proof. Default compose

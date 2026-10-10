@@ -205,9 +205,10 @@ These are real unfinished paths, not parity slogans:
    finalized after OVL+DRC attestations (`docs/ops/PUBLIC_TESTNET.md`).
    That run is not a RandomX public mesh (this host cannot link
    `libstdc++` / `rust-randomx`). Frozen v2 TLT peers still never
-   finalize (empty OVL/DRC genesis sets). Live admit still uses
-   `FinalityPowPolicy::default()` (`min_pow_depth=1`) instead of the
-   artifact `pow_work_threshold`.
+   finalize (empty OVL/DRC genesis sets). Trident boot now copies the
+   artifact `pow_work_threshold` into live `FinalityPowPolicy`
+   (`minimum-blue-score-depth-v1`). The recorded host run used the
+   previous default depth `1`.
 2. **Civic votes stay local-admin** — `CivicSnapshot` / forum / Ecclesia
    RPC cannot honestly become a consensus lane. Types have no secp256k1
    envelope, vote weight is caller-supplied (`raw_balance` /
@@ -317,4 +318,5 @@ This audit close-out adds:
   `scripts/experimental_trident_smoke.mjs`. `agora-miner-sidecar`
   `--no-default-features` matches a SHA-256 RandomX-fallback node.
   Recorded host results (boot / IBD / inclusion / dual-PoS) are in
-  `docs/ops/PUBLIC_TESTNET.md`. Not Public testnet.
+  `docs/ops/PUBLIC_TESTNET.md`. Not Public testnet. Trident boot now
+  applies artifact `pow_work_threshold` as live `FinalityPowPolicy`.

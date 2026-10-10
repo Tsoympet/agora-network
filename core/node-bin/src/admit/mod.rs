@@ -24,8 +24,9 @@ use std::{
 
 use agora_consensus::{
     median_time_past, next_difficulty_weighted, work_from_bits, ConsensusLimits, DaaConfig,
-    DaaSample, Dag, Difficulty, EmissionSchedule, Ghostdag, GhostdagConfig, GhostdagSnapshot,
-    KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher,
+    DaaSample, Dag, Difficulty, EmissionSchedule, FinalityPowPolicy, Ghostdag, GhostdagConfig,
+    GhostdagSnapshot, KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier,
+    RandomXPowHasher,
 };
 use agora_state_machine::{
     apply_block_batched_virtual_at_blue_score, ghostdag_key, index_block_transactions_into,
@@ -143,6 +144,8 @@ pub struct ChainState {
     auth: Option<TxAuthContext>,
     /// Canonical consensus-policy hash bound into checkpoint bodies.
     consensus_policy_hash: Hash,
+    /// Artifact `pow_work_threshold` (minimum-blue-score-depth-v1). Default 1.
+    finality_pow: FinalityPowPolicy,
 }
 
 /// Runtime consensus knobs loaded from [`agora_state_machine::ChainParams`].
@@ -161,6 +164,8 @@ pub struct ChainBootConfig {
     /// always sets this from the live network fingerprint; inclusion still burns
     /// [`agora_types::DA_INCLUSION_FEE_TLT`] from the operator's TLT UTXOs.
     pub data_availability_network_fingerprint: Option<Hash>,
+    /// PoW leg of dual-PoS finality. Trident boot copies artifact `min_pow_depth`.
+    pub finality_pow: FinalityPowPolicy,
 }
 
 impl Default for ChainBootConfig {
@@ -177,6 +182,7 @@ impl Default for ChainBootConfig {
             chain_id: String::new(),
             consensus_policy_hash: Hash::ZERO,
             data_availability_network_fingerprint: None,
+            finality_pow: FinalityPowPolicy::default(),
         }
     }
 }
@@ -195,6 +201,7 @@ impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
             chain_id: params.network.chain_id().into(),
             consensus_policy_hash,
             data_availability_network_fingerprint: None,
+            finality_pow: FinalityPowPolicy::default(),
         }
     }
 }
@@ -303,6 +310,7 @@ impl ChainState {
             limits: ConsensusLimits::default(),
             auth,
             consensus_policy_hash: boot.consensus_policy_hash,
+            finality_pow: boot.finality_pow,
         };
         // Fresh / upgraded datadirs: ensure virtual tip meta exists.
         if chain.load_virtual_tip()?.is_none() {
