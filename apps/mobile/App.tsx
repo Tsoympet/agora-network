@@ -51,6 +51,7 @@ import {
   walletNetworkFromNode,
   watchTransaction,
   type LightAccountBalances,
+  type LightDrcOfferPage,
   type LightNodeInfo,
   type LightTxLookup,
   type LightUtxo,
@@ -126,6 +127,14 @@ export default function App() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastTxId, setLastTxId] = useState<string | null>(null);
   const [txLookup, setTxLookup] = useState<LightTxLookup | null>(null);
+  const [bookIssuer, setBookIssuer] = useState("");
+  const [bookCurrency, setBookCurrency] = useState("USD");
+  const [bookDirection, setBookDirection] = useState<"drc-pays" | "issued-pays">(
+    "drc-pays",
+  );
+  const [bookBusy, setBookBusy] = useState(false);
+  const [bookError, setBookError] = useState<string | null>(null);
+  const [bookPage, setBookPage] = useState<LightDrcOfferPage | null>(null);
   const [receiveBech32, setReceiveBech32] = useState<string | null>(null);
   const [receiveHex, setReceiveHex] = useState<string | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
@@ -493,6 +502,33 @@ export default function App() {
       setSendBusy(false);
     }
   }
+
+  async function onBook() {
+    const issuer = bookIssuer.trim();
+    const currency = bookCurrency.trim();
+    if (!issuer || !currency) {
+      setBookError("Issuer and currency are required.");
+      return;
+    }
+    setBookBusy(true);
+    setBookError(null);
+    setBookPage(null);
+    const issued = { type: "issued" as const, issuer, currency };
+    const native = { type: "native_drc" as const };
+    const book =
+      bookDirection === "drc-pays"
+        ? { pays: native, gets: issued }
+        : { pays: issued, gets: native };
+    try {
+      setBookPage(await client.getDrcBookOffers({ book, limit: 16 }));
+    } catch (err) {
+      setBookError(err instanceof Error ? err.message : "book lookup failed");
+    } finally {
+      setBookBusy(false);
+    }
+  }
+
+  const bookOffers = Array.isArray(bookPage?.offers) ? bookPage.offers : [];
 
   return (
     <View style={styles.shell}>
@@ -951,6 +987,61 @@ export default function App() {
               ? ` @ ${shortHash(txLookup.block_id)}`
               : ""}
             {txLookup?.fee != null ? ` · fee ${txLookup.fee}` : ""}
+          </Text>
+        ) : null}
+        <Text style={styles.netLabel}>DRC native DEX book</Text>
+        <Text style={styles.netHrp}>Read-only. Order entry stays in send.</Text>
+        <TextInput
+          value={bookIssuer}
+          onChangeText={setBookIssuer}
+          placeholder="issued issuer"
+          placeholderTextColor={agoraBrand.colors.inkMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={styles.input}
+        />
+        <TextInput
+          value={bookCurrency}
+          onChangeText={setBookCurrency}
+          placeholder="USD"
+          placeholderTextColor={agoraBrand.colors.inkMuted}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          style={styles.input}
+        />
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+          <Pressable
+            onPress={() => setBookDirection("drc-pays")}
+            style={[
+              styles.lookupBtn,
+              bookDirection !== "drc-pays" ? { opacity: 0.5 } : null,
+            ]}
+          >
+            <Text style={styles.lookupLabel}>Pays DRC</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setBookDirection("issued-pays")}
+            style={[
+              styles.lookupBtn,
+              bookDirection !== "issued-pays" ? { opacity: 0.5 } : null,
+            ]}
+          >
+            <Text style={styles.lookupLabel}>Pays issued</Text>
+          </Pressable>
+        </View>
+        <Pressable
+          onPress={onBook}
+          disabled={bookBusy || !networkReady}
+          style={styles.lookupBtn}
+        >
+          <Text style={styles.lookupLabel}>
+            {bookBusy ? "Looking up…" : "Lookup book"}
+          </Text>
+        </Pressable>
+        {bookError ? <Text style={styles.error}>{bookError}</Text> : null}
+        {bookPage ? (
+          <Text style={[styles.tipRow, { color: agoraBrand.colors.cyan }]}>
+            {bookOffers.length} offer{bookOffers.length === 1 ? "" : "s"}
           </Text>
         ) : null}
       </ScrollView>

@@ -108,7 +108,7 @@ There is no `agora_submitDrcExecution` or generic `agora_submitExecution`.
 | Surface | What it does | Honest gap |
 | --- | --- | --- |
 | `apps/shared/light-client` | Tip sync, TLT coinselect/Merkle, vault, `sendTransfer`, typed-lane builders for every admitted DRC family plus TLT covenant P2PKH, OVL transfer/execution v1, signed passport attestations, signed Hub/Grant/Mission registrations, treasury disbursements, and vesting unlocks, Trident light-finality helper, native three-asset balance query, TLT covenant + DRC DEX/object reads, DA get/submit wrappers, canonical `eth_*` reads, opt-in raw-EVM signer | Keys stay on device. No RandomX recompute. Raw EVM uses an explicit key, not the mnemonic vault |
-| Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel, and DRC families including escrow, Checks, ticket, regular key, deposit preauth, trust line, issued transfer/clawback, payment channels (create/fund/claim/close), signer list, and account policy via `sendDrcWalletFamily` | No on-device DEX book browser. Offer create is native DRC vs one issued asset. Channel claim takes an explicit claim-signature hex; keys stay in the vault |
+| Desktop / mobile wallets | TLT UTXO send, TLT covenant P2PKH, OVL transfer/execution v1, DRC payment v4, DRC offer create/cancel, read-only native DEX book page, and DRC families including escrow, Checks, ticket, regular key, deposit preauth, trust line, issued transfer/clawback, payment channels (create/fund/claim/close), signer list, and account policy via `sendDrcWalletFamily` | Offer create is native DRC vs one issued asset. Channel claim takes an explicit claim-signature hex; keys stay in the vault |
 | Explorer | DAG, tx lookup, protocol-lane reads (covenant/offer/escrow/check/DA/passport/hub/grant/mission/treasury/vesting), DRC account objects, DEX book page, mempool, node, governance panel | Read-only book. Order-entry stays in wallets |
 | `agora-layers` HTTP | Historical lab; loopback | Non-canonical; mixed unauthenticated mutations |
 
@@ -320,3 +320,5 @@ This audit close-out adds:
   Recorded host results (boot / IBD / inclusion / dual-PoS) are in
   `docs/ops/PUBLIC_TESTNET.md`. Not Public testnet. Trident boot now
   applies artifact `pow_work_threshold` as live `FinalityPowPolicy`.
+  Desktop/mobile include a read-only `agora_getDrcBookOffers` page
+  (native DRC vs one issued asset). Order-entry stays in the send form.
