@@ -10,7 +10,7 @@
 #   ./scripts/experimental_trident_mesh.sh node-a
 #   ./scripts/experimental_trident_mesh.sh node-b
 #   ./scripts/experimental_trident_mesh.sh wait-peers
-#   ./scripts/experimental_trident_mesh.sh smoke-tx
+#   ./scripts/experimental_trident_mesh.sh smoke-tx    # A admit → B pending / mempool
 #   ./scripts/experimental_trident_mesh.sh smoke-ibd
 #   ./scripts/experimental_trident_mesh.sh smoke-finality
 #
