@@ -137,7 +137,7 @@ committed state has not been materialized.
 stable across accepted restarts for the same legacy datadir. An existing
 malformed identity file is rejected without overwrite.
 
-Integration test `two_node_gossip` dials two local nodes and exchanges a signed transaction.
+Integration test `two_node_gossip` dials two local nodes and exchanges a signed transaction (unbound lab signature). `agora-node` `experimental_bound_spend_gossips_into_peer_mempool` additionally admits a Trident-bound TLT spend on A and requires B’s `agora_getTransaction` / `agora_getMempool` to show `pending` before any block. Gossip admission must use `ChainState::auth_context()` (Trident `boot.chain_id`), not `ChainParams::network.chain_id()`.
 
 ## Connection limits
 
