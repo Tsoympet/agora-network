@@ -136,6 +136,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_trust_line_set_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -243,6 +244,7 @@ impl Mempool {
         }
 
         self.drc_issued_transfer_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 

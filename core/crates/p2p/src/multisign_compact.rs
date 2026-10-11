@@ -29,6 +29,7 @@ impl Mempool {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
         self.drc_multisign_attachments.insert(id, attachment);
+        self.persist_best_effort();
         Ok(id)
     }
 

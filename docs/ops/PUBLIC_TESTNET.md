@@ -46,7 +46,9 @@ Recorded on this host (2026-10-10), `agora-node --no-default-features`
 (then in-memory store; RandomX hasher falls back to SHA-256 because
 `libstdc++` headers are missing and `rust-randomx` / default
 `rocksdb+randomx` do not compile). Subsequent `--no-default-features`
-boots persist `$AGORA_DATA/portable/state.bin` (not RocksDB):
+boots persist `$AGORA_DATA/portable/state.bin` and
+`$AGORA_DATA/portable/mempool.bin` (not RocksDB; Experimental local datadir
+only, not a public-testnet durability claim):
 
 | Step | Result |
 | --- | --- |

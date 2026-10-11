@@ -44,6 +44,7 @@ impl Mempool {
         }
         self.reserved_treasury_ids.insert(spend.treasury, id);
         self.treasury_disbursements.insert(id, spend);
+        self.persist_best_effort();
         Ok(id)
     }
 

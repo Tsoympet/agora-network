@@ -45,6 +45,7 @@ impl Mempool {
         self.reserved_vesting_beneficiaries
             .insert(claim.beneficiary, id);
         self.vesting_unlocks.insert(id, claim);
+        self.persist_best_effort();
         Ok(id)
     }
 

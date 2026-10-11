@@ -161,6 +161,7 @@ impl Mempool {
             }
         }
         self.drc_offer_create_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -202,6 +203,7 @@ impl Mempool {
             return Err(error);
         }
         self.drc_offer_cancel_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 

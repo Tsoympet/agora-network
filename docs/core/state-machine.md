@@ -160,7 +160,7 @@ is a misconfigured signing context, not a fee-policy placeholder.
 ## Storage backends
 
 - [`StateStore::open_in_memory`] — ephemeral map for unit tests / portable CI
-- [`StateStore::open(path)`] — **RocksDB** when built with `--features rocksdb` (enabled by default on `agora-node`); otherwise a portable snapshot at `$path/portable/state.bin` so `--no-default-features` nodes keep UTXO, headers, orphans, and Block 0 across restart. [`StateStore::open_portable`] is always available for that path.
+- [`StateStore::open(path)`] — **RocksDB** when built with `--features rocksdb` (enabled by default on `agora-node`); otherwise a portable snapshot at `$path/portable/state.bin` so `--no-default-features` nodes keep UTXO, headers, orphans, and Block 0 across restart. [`StateStore::open_portable`] is always available for that path. The same portable directory holds `$path/portable/mempool.bin` (`AGORAMP1`) so pending TLT and lane envelopes survive process exit on that node. That file is not RocksDB and is not a public-testnet durability claim.
 
 `agora-node` defaults to RocksDB under `AGORA_DATA` (default
 `data/agora-node`). On boot it opens and verifies storage through

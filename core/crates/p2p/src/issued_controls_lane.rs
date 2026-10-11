@@ -98,6 +98,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_issued_asset_policy_set_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -152,6 +153,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_trust_line_issuer_control_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -205,6 +207,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_issued_clawback_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 

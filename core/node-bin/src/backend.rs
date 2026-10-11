@@ -5524,6 +5524,9 @@ mod drc_payment_channel_rpc_integration_tests;
 #[cfg(test)]
 #[path = "mempool_gossip_tests.rs"]
 mod mempool_gossip_tests;
+#[cfg(test)]
+#[path = "mempool_persist_tests.rs"]
+mod mempool_persist_tests;
 
 #[cfg(test)]
 #[path = "drc_issued_controls_public_helpers.rs"]
