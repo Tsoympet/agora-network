@@ -43,9 +43,10 @@ Host RPC for that profile: `http://127.0.0.1:8555/rpc`. Clear
 `agora-node` processes against the Experimental artifact without Docker.
 
 Recorded on this host (2026-10-10), `agora-node --no-default-features`
-(in-memory store; RandomX hasher falls back to SHA-256 because
+(then in-memory store; RandomX hasher falls back to SHA-256 because
 `libstdc++` headers are missing and `rust-randomx` / default
-`rocksdb+randomx` do not compile):
+`rocksdb+randomx` do not compile). Subsequent `--no-default-features`
+boots persist `$AGORA_DATA/portable/state.bin` (not RocksDB):
 
 | Step | Result |
 | --- | --- |

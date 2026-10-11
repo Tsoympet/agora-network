@@ -137,8 +137,9 @@ Experimental Trident local mesh
   AGORA_GENESIS_FILE is unset (v2 loader off)
 
 Honest limits:
-  --no-default-features node uses in-memory state + SHA-256 RandomX fallback
-  unless agora-node was built with rocksdb+randomx (needs libstdc++).
+  --no-default-features node uses portable \$AGORA_DATA/portable/state.bin
+  + SHA-256 RandomX fallback unless agora-node was built with
+  rocksdb+randomx (needs libstdc++). Not RocksDB.
   Not ceremony-final. Not Public testnet. Not mainnet.
 EOF
 }
