@@ -1,4 +1,8 @@
 //! Durable civic snapshot (governance + community) for node Meta CF.
+//!
+//! JSON only. Not a Borsh consensus object, not network-bound, not included
+//! in `governance_treasury_root`. Do not add a gossip discriminant for this
+//! type; vote weight is not recoverable from the snapshot alone.
 
 use serde::{Deserialize, Serialize};
 

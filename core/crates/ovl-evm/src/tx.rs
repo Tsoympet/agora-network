@@ -666,4 +666,40 @@ mod tests {
         agora.copy_from_slice(&digest[..20]);
         assert_ne!(eth, agora);
     }
+
+    #[test]
+    fn raw_evm_dev_key_legacy_and_eip1559_hex_are_locked() {
+        let key = dev_signing_key();
+        let to = [0x22u8; 20];
+        let legacy = sign_legacy(&key, 74_000, 3, 2, 21_000, Some(to), [0u8; 32], &[]);
+        let typed = sign_eip1559(
+            &key,
+            74_000,
+            4,
+            1,
+            2,
+            21_000,
+            Some(to),
+            [0u8; 32],
+            &[0x01],
+            &[],
+        );
+        assert_eq!(
+            hex::encode(ethereum_address_from_signing_key(&key)),
+            "19e7e376e7c213b7e7e7e46cc70a5dd086daff2a"
+        );
+        assert_eq!(
+            hex::encode(&legacy),
+            "f8620302825208942222222222222222222222222222222222222222808083024243a0e5a1285a76a3c2748c5218cf70425d5baaf6fcd98937b0564e531f37d2f55b7ea05b9dd476c30c8f668ef932b8ee33db9e0ae3579b2f5959895676eb997e285cf0"
+        );
+        assert_eq!(
+            hex::encode(&typed),
+            "02f865830121100401028252089422222222222222222222222222222222222222228001c080a06bcbec0ea4d0d685339e55f72721115589e2e8bf99300422018aa727eb059f93a01fc26256b1d7347f0d31b6fa1bd7ebb937d2f921bfa8d404fb15608ea134284a"
+        );
+        assert_eq!(
+            parse_raw_transaction(&legacy).unwrap().caller,
+            ethereum_address_from_signing_key(&key)
+        );
+        assert_eq!(parse_raw_transaction(&typed).unwrap().tx_type, 2);
+    }
 }

@@ -1,63 +1,73 @@
 //! Apply / revert consensus-ordered blocks against multi-lane Trident state.
 
-use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 use agora_crypto::{address_from_pubkey, signer_address, verify_transaction_bound, PublicKeyBytes};
 use agora_types::{
-    Address, Amount, Block, Hash, NativeAssetId, OutPoint, Transaction, TransactionAcceptance,
-    TxOut,
+    da_fee_change_outpoint, Address, Amount, Block, Hash, NativeAssetId, OutPoint, Transaction,
+    TransactionAcceptance, TxOut, DA_INCLUSION_FEE_TLT,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::acceptance::BlockAcceptanceRecord;
-use crate::accounts::{
-    apply_account_transfer_checked, load_account, put_account_into, AccountJournal, AccountState,
+use crate::{
+    acceptance::BlockAcceptanceRecord,
+    accounts::{
+        apply_account_transfer_checked, load_account, put_account_into, AccountJournal,
+        AccountState,
+    },
+    apply_treasury_disbursement_into, apply_vesting_unlock_into,
+    columns::ColumnFamily,
+    data_availability::{apply_data_commitment, revert_data_commitment_meta_into},
+    drc_check::{
+        apply_drc_check_cancel, apply_drc_check_cash, apply_drc_check_create,
+        check_meta_keys_for_create, check_meta_keys_for_settlement, load_drc_check_live,
+    },
+    drc_deposit_preauth::{apply_drc_deposit_preauth, drc_deposit_preauth_meta_keys},
+    drc_escrow::{
+        apply_drc_escrow_cancel, apply_drc_escrow_create, apply_drc_escrow_finish,
+        escrow_meta_keys_for_create, escrow_meta_keys_for_settlement, load_drc_escrow_live,
+    },
+    drc_issued_controls::{
+        apply_drc_issued_asset_policy_set, apply_drc_issued_clawback,
+        apply_drc_trust_line_issuer_control, issued_controls_meta_keys_for_clawback,
+        issued_controls_meta_keys_for_issuer_control, issued_controls_meta_keys_for_policy,
+    },
+    drc_master_key_recovery::assert_drc_recovery_invariant,
+    drc_offer::{apply_drc_offer_cancel, apply_drc_offer_create, DrcOfferApplyLimits},
+    drc_payment_channel::{
+        apply_drc_payment_channel_claim, apply_drc_payment_channel_close,
+        apply_drc_payment_channel_create, apply_drc_payment_channel_fund,
+        load_drc_payment_channel_live, payment_channel_meta_keys_for_claim,
+        payment_channel_meta_keys_for_create, payment_channel_meta_keys_for_fund,
+        payment_channel_meta_keys_for_mutating, payment_channel_meta_keys_for_schedule_close,
+    },
+    drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys},
+    drc_regular_key::{apply_drc_regular_key, drc_regular_key_meta_keys},
+    drc_signer_list::{apply_drc_signer_list, drc_signer_list_meta_keys},
+    drc_ticket::{apply_drc_ticket_create, drc_ticket_meta_keys},
+    drc_trust_line::{
+        apply_drc_issued_transfer, apply_drc_trust_line_set, issued_transfer_meta_keys,
+        trust_line_set_meta_keys,
+    },
+    execution::{apply_ovl_execution_with_block, OvlSelectedOrder},
+    ovl_evm_state::OVL_EVM_WORLD_KEY,
+    payments::{apply_drc_payment_with_blue_score, payment_meta_keys},
+    register_passport_attestation_into, register_signed_grant_into, register_signed_hub_into,
+    register_signed_mission_into,
+    staking::{
+        apply_signed_stake_tx, credit_fee_share_to_reward_pool, reward_pool_meta_key,
+        snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
+    },
+    store::WriteBatch,
+    supply::{burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key},
+    treasury_balance_key, treasury_disbursement_record_key, treasury_nonce_record_key,
+    utxo::outpoint_key,
+    vesting_claim_record_key, vesting_nonce_record_key, vesting_unlocked_record_key, StateError,
+    StateStore,
 };
-use crate::columns::ColumnFamily;
-use crate::data_availability::{apply_data_commitment, revert_data_commitment_meta_into};
-use crate::drc_check::{
-    apply_drc_check_cancel, apply_drc_check_cash, apply_drc_check_create,
-    check_meta_keys_for_create, check_meta_keys_for_settlement, load_drc_check_live,
-};
-use crate::drc_deposit_preauth::{apply_drc_deposit_preauth, drc_deposit_preauth_meta_keys};
-use crate::drc_escrow::{
-    apply_drc_escrow_cancel, apply_drc_escrow_create, apply_drc_escrow_finish,
-    escrow_meta_keys_for_create, escrow_meta_keys_for_settlement, load_drc_escrow_live,
-};
-use crate::drc_issued_controls::{
-    apply_drc_issued_asset_policy_set, apply_drc_issued_clawback,
-    apply_drc_trust_line_issuer_control, issued_controls_meta_keys_for_clawback,
-    issued_controls_meta_keys_for_issuer_control, issued_controls_meta_keys_for_policy,
-};
-use crate::drc_master_key_recovery::assert_drc_recovery_invariant;
-use crate::drc_offer::{apply_drc_offer_cancel, apply_drc_offer_create, DrcOfferApplyLimits};
-use crate::drc_payment_channel::{
-    apply_drc_payment_channel_claim, apply_drc_payment_channel_close,
-    apply_drc_payment_channel_create, apply_drc_payment_channel_fund,
-    load_drc_payment_channel_live, payment_channel_meta_keys_for_claim,
-    payment_channel_meta_keys_for_create, payment_channel_meta_keys_for_fund,
-    payment_channel_meta_keys_for_mutating, payment_channel_meta_keys_for_schedule_close,
-};
-use crate::drc_policy::{apply_drc_account_policy, drc_account_policy_meta_keys};
-use crate::drc_regular_key::{apply_drc_regular_key, drc_regular_key_meta_keys};
-use crate::drc_signer_list::{apply_drc_signer_list, drc_signer_list_meta_keys};
-use crate::drc_ticket::{apply_drc_ticket_create, drc_ticket_meta_keys};
-use crate::drc_trust_line::{
-    apply_drc_issued_transfer, apply_drc_trust_line_set, issued_transfer_meta_keys,
-    trust_line_set_meta_keys,
-};
-use crate::execution::{apply_ovl_execution_with_block, OvlSelectedOrder};
-use crate::ovl_evm_state::OVL_EVM_WORLD_KEY;
-use crate::payments::{apply_drc_payment_with_blue_score, payment_meta_keys};
-use crate::staking::{
-    apply_signed_stake_tx, credit_fee_share_to_reward_pool, reward_pool_meta_key,
-    snapshot_meta_keys, stake_meta_keys_touched, StakingParams,
-};
-use crate::store::WriteBatch;
-use crate::supply::{burn_drc_fee_into, burned_supply_key};
-use crate::utxo::outpoint_key;
-use crate::{StateError, StateStore};
 
 /// Result of applying one block's UTXO transition (journal + typed acceptance + batch).
 pub struct BlockApplyResult {
@@ -68,8 +78,9 @@ pub struct BlockApplyResult {
 
 /// Network domain for transaction signatures (`chain_id` + genesis).
 ///
-/// `data_availability_network_fingerprint` is `None` until a reviewed Trident
-/// TLT base-fee/inclusion policy activates the block-only DA lane.
+/// `data_availability_network_fingerprint` is bound on default Experimental
+/// boot. `None` rejects DA admission (signing-context error, not a fee
+/// placeholder). Accepted DA authorizations burn [`DA_INCLUSION_FEE_TLT`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TxAuthContext {
     pub chain_id: String,
@@ -126,6 +137,8 @@ pub struct UtxoJournal {
     pub tlt_covenant_created: Vec<OutPoint>,
     /// Script outputs spent by this block's covenant lane (revert restores them).
     pub tlt_covenant_spent: Vec<(OutPoint, crate::tlt_covenant::TltCovenantUtxoRecord)>,
+    /// Community passport / hub / grant / mission keys before Accepted signed writes.
+    pub passport_meta_before: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 /// Journal layout before the offer lane. Trailing offer snapshots must not be
@@ -179,6 +192,11 @@ impl BorshSerialize for UtxoJournal {
         BorshSerialize::serialize(&self.drc_offer_meta_before, writer)?;
         BorshSerialize::serialize(&self.tlt_covenant_created, writer)?;
         BorshSerialize::serialize(&self.tlt_covenant_spent, writer)?;
+        // Empty passport meta stays off the pre-passport journal wire so
+        // default journals still end with the two covenant length prefixes.
+        if !self.passport_meta_before.is_empty() {
+            BorshSerialize::serialize(&self.passport_meta_before, writer)?;
+        }
         Ok(())
     }
 }
@@ -208,10 +226,14 @@ impl BorshDeserialize for UtxoJournal {
             drc_offer_meta_before: Vec::deserialize_reader(reader)?,
             tlt_covenant_created: Vec::new(),
             tlt_covenant_spent: Vec::new(),
+            passport_meta_before: Vec::new(),
         };
         if let Some(created) = read_optional_vec(reader)? {
             journal.tlt_covenant_created = created;
             journal.tlt_covenant_spent = Vec::deserialize_reader(reader)?;
+            if let Some(passports) = read_optional_vec(reader)? {
+                journal.passport_meta_before = passports;
+            }
         }
         Ok(journal)
     }
@@ -508,6 +530,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v14) = UtxoJournalV14Trust::try_from_slice(bytes) {
@@ -534,6 +557,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v13) = UtxoJournalV13Paychan::try_from_slice(bytes) {
@@ -560,6 +584,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v12) = UtxoJournalV12::try_from_slice(bytes) {
@@ -586,6 +611,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v11) = UtxoJournalV11::try_from_slice(bytes) {
@@ -612,6 +638,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v10) = UtxoJournalV10::try_from_slice(bytes) {
@@ -638,6 +665,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v9) = UtxoJournalV9::try_from_slice(bytes) {
@@ -664,6 +692,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v8) = UtxoJournalV8::try_from_slice(bytes) {
@@ -690,6 +719,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v7) = UtxoJournalV7::try_from_slice(bytes) {
@@ -716,6 +746,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v6) = UtxoJournalV6::try_from_slice(bytes) {
@@ -742,6 +773,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v5) = UtxoJournalV5::try_from_slice(bytes) {
@@ -768,6 +800,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v4) = UtxoJournalV4::try_from_slice(bytes) {
@@ -794,6 +827,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v3) = UtxoJournalV3::try_from_slice(bytes) {
@@ -820,6 +854,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         if let Ok(v2) = UtxoJournalV2::try_from_slice(bytes) {
@@ -846,6 +881,7 @@ impl UtxoJournal {
                 drc_offer_meta_before: Vec::new(),
                 tlt_covenant_created: Vec::new(),
                 tlt_covenant_spent: Vec::new(),
+                passport_meta_before: Vec::new(),
             });
         }
         let legacy = LegacyUtxoJournal::try_from_slice(bytes)
@@ -873,6 +909,7 @@ impl UtxoJournal {
             drc_offer_meta_before: Vec::new(),
             tlt_covenant_created: Vec::new(),
             tlt_covenant_spent: Vec::new(),
+            passport_meta_before: Vec::new(),
         })
     }
 }
@@ -1282,6 +1319,8 @@ fn apply_block_batched_mode(
         mode,
         &mut batch,
         &mut journal,
+        &mut spent_in_block,
+        &mut created_in_block,
     )?;
 
     let acceptance = BlockAcceptanceRecord {
@@ -1496,6 +1535,7 @@ type TridentLaneAcceptances = (
 );
 
 /// Apply canonical Trident lanes and settle fees only for Accepted operations.
+#[allow(clippy::too_many_arguments)]
 fn apply_trident_lanes(
     store: &StateStore,
     block: &Block,
@@ -1504,6 +1544,8 @@ fn apply_trident_lanes(
     mode: ApplyMode,
     batch: &mut WriteBatch,
     journal: &mut UtxoJournal,
+    spent_in_block: &mut HashSet<OutPoint>,
+    created_in_block: &mut HashMap<OutPoint, TxOut>,
 ) -> Result<TridentLaneAcceptances, StateError> {
     // Validate the detached lane even when no typed operation is present. This
     // prevents orphan or cross-kind authorization bytes from becoming inert,
@@ -1555,6 +1597,12 @@ fn apply_trident_lanes(
         && block.drc_regular_keys.is_empty()
         && block.drc_signer_lists.is_empty()
         && block.stake_ops.is_empty()
+        && block.passport_attestations.is_empty()
+        && block.hub_registrations.is_empty()
+        && block.grant_registrations.is_empty()
+        && block.mission_registrations.is_empty()
+        && block.treasury_disbursements.is_empty()
+        && block.vesting_unlocks.is_empty()
     {
         return Ok((
             Vec::new(),
@@ -1621,6 +1669,30 @@ fn apply_trident_lanes(
     if !block.data_commitments.is_empty() && auth.is_none() {
         return Err(StateError::InvalidTx(
             "data commitments require network-bound auth".into(),
+        ));
+    }
+    if !block.passport_attestations.is_empty() && auth.is_none() {
+        return Err(StateError::InvalidTx(
+            "passport attestations require network-bound auth".into(),
+        ));
+    }
+    if (!block.hub_registrations.is_empty()
+        || !block.grant_registrations.is_empty()
+        || !block.mission_registrations.is_empty())
+        && auth.is_none()
+    {
+        return Err(StateError::InvalidTx(
+            "hub/grant/mission registrations require network-bound auth".into(),
+        ));
+    }
+    if !block.treasury_disbursements.is_empty() && auth.is_none() {
+        return Err(StateError::InvalidTx(
+            "treasury disbursements require network-bound auth".into(),
+        ));
+    }
+    if !block.vesting_unlocks.is_empty() && auth.is_none() {
+        return Err(StateError::InvalidTx(
+            "vesting unlocks require network-bound auth".into(),
         ));
     }
     if block.data_commitments.len() > agora_consensus::MAX_DATA_COMMITMENTS_PER_BLOCK {
@@ -3017,9 +3089,7 @@ fn apply_trident_lanes(
             .as_ref()
             .filter(|fingerprint| **fingerprint != Hash::ZERO)
             .ok_or_else(|| {
-                StateError::InvalidTx(
-                    "data commitment lane disabled pending TLT base-fee policy".into(),
-                )
+                StateError::InvalidTx("data commitment requires a DA network fingerprint".into())
             })?;
         for authorization in &block.data_commitments {
             let mut op_batch = WriteBatch::new();
@@ -3036,6 +3106,16 @@ fn apply_trident_lanes(
             )?;
             match status {
                 TransactionAcceptance::Accepted => {
+                    debit_da_inclusion_fee(
+                        &lane,
+                        &authorization.operator,
+                        authorization.authorization_id(),
+                        &mut op_batch,
+                        journal,
+                        spent_in_block,
+                        created_in_block,
+                        &mut meta_before,
+                    )?;
                     lane.write_batch(op_batch.clone())?;
                     batch.append(op_batch);
                     journal.data_availability_meta_before.extend(meta_before);
@@ -3057,6 +3137,202 @@ fn apply_trident_lanes(
                     ));
                 }
             }
+        }
+    }
+
+    if !block.passport_attestations.is_empty() {
+        let ctx = auth.expect("passport auth checked above");
+        let mut seen_ids = std::collections::HashSet::new();
+        for attestation in &block.passport_attestations {
+            let id = attestation.attestation_id();
+            if !seen_ids.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate passport attestation in block".into(),
+                ));
+            }
+            let keys = vec![
+                crate::passport_record_key(&id),
+                crate::passport_issuer_nonce_key(&attestation.issuer),
+                crate::community_summary_key(),
+            ];
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            let mut op_batch = WriteBatch::new();
+            register_passport_attestation_into(&mut op_batch, &lane, attestation, ctx)?;
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+    }
+
+    if !block.hub_registrations.is_empty()
+        || !block.grant_registrations.is_empty()
+        || !block.mission_registrations.is_empty()
+    {
+        let ctx = auth.expect("community registration auth checked above");
+        let mut seen_hubs = std::collections::HashSet::new();
+        for registration in &block.hub_registrations {
+            let id = registration.registration_id();
+            if !seen_hubs.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate hub registration in block".into(),
+                ));
+            }
+            let coordinator = registration
+                .first_coordinator()
+                .ok_or_else(|| StateError::InvalidTx("hub coordinators must be nonempty".into()))?;
+            let mut keys = vec![
+                crate::hub_record_key(&id),
+                crate::hub_coordinator_nonce_key(&coordinator),
+                crate::community_summary_key(),
+            ];
+            for coordinator in &registration.coordinators {
+                keys.push(crate::active_hub_coordinator_key(coordinator));
+            }
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            let mut op_batch = WriteBatch::new();
+            register_signed_hub_into(&mut op_batch, &lane, registration, ctx)?;
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+        let mut seen_grants = std::collections::HashSet::new();
+        for registration in &block.grant_registrations {
+            let id = registration.registration_id();
+            if !seen_grants.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate grant registration in block".into(),
+                ));
+            }
+            let keys = vec![
+                crate::grant_record_key(&id),
+                crate::grant_registrar_nonce_key(&registration.registrar),
+                crate::community_summary_key(),
+            ];
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            let mut op_batch = WriteBatch::new();
+            register_signed_grant_into(&mut op_batch, &lane, registration, ctx)?;
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+        let mut seen_missions = std::collections::HashSet::new();
+        for registration in &block.mission_registrations {
+            let id = registration.registration_id();
+            if !seen_missions.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate mission registration in block".into(),
+                ));
+            }
+            let keys = vec![
+                crate::mission_record_key(&id),
+                crate::mission_sponsor_nonce_key(&registration.sponsor),
+                crate::community_summary_key(),
+            ];
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            let mut op_batch = WriteBatch::new();
+            register_signed_mission_into(&mut op_batch, &lane, registration, ctx)?;
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+    }
+
+    if !block.treasury_disbursements.is_empty() {
+        let ctx = auth.expect("treasury disbursement auth checked above");
+        let mut seen_ids = std::collections::HashSet::new();
+        for spend in &block.treasury_disbursements {
+            let id = spend.disbursement_id();
+            if !seen_ids.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate treasury disbursement in block".into(),
+                ));
+            }
+            let mut keys = vec![
+                treasury_balance_key(spend.treasury),
+                treasury_nonce_record_key(spend.treasury),
+                treasury_disbursement_record_key(&id),
+            ];
+            if matches!(
+                spend.treasury.asset(),
+                NativeAssetId::OVL | NativeAssetId::DRC
+            ) {
+                keys.push(crate::accounts::account_key(
+                    spend.treasury.asset(),
+                    &spend.beneficiary,
+                ));
+            }
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            if matches!(
+                spend.treasury.asset(),
+                NativeAssetId::OVL | NativeAssetId::DRC
+            ) {
+                let prior = load_account(&lane, spend.treasury.asset(), &spend.beneficiary)?;
+                journal
+                    .account_before
+                    .push((spend.treasury.asset(), spend.beneficiary, prior));
+            }
+            let mut op_batch = WriteBatch::new();
+            let created = apply_treasury_disbursement_into(&mut op_batch, &lane, spend, ctx)?;
+            if let Some(op) = created {
+                journal.created.push(op);
+                created_in_block.insert(
+                    op,
+                    TxOut {
+                        value: spend.amount,
+                        address: spend.beneficiary,
+                    },
+                );
+            }
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
+        }
+    }
+
+    if !block.vesting_unlocks.is_empty() {
+        let ctx = auth.expect("vesting unlock auth checked above");
+        let now_ms = block.header.timestamp_ms;
+        let mut seen_ids = std::collections::HashSet::new();
+        for claim in &block.vesting_unlocks {
+            let id = claim.unlock_id();
+            if !seen_ids.insert(id) {
+                return Err(StateError::InvalidTx(
+                    "duplicate vesting unlock in block".into(),
+                ));
+            }
+            let mut keys = vec![
+                vesting_unlocked_record_key(&claim.schedule_id),
+                vesting_nonce_record_key(&claim.beneficiary),
+                vesting_claim_record_key(&id),
+            ];
+            if matches!(claim.asset, NativeAssetId::OVL | NativeAssetId::DRC) {
+                keys.push(crate::accounts::account_key(
+                    claim.asset,
+                    &claim.beneficiary,
+                ));
+            }
+            let meta_before = snapshot_meta_keys(&lane, &keys)?;
+            if matches!(claim.asset, NativeAssetId::OVL | NativeAssetId::DRC) {
+                let prior = load_account(&lane, claim.asset, &claim.beneficiary)?;
+                journal
+                    .account_before
+                    .push((claim.asset, claim.beneficiary, prior));
+            }
+            let mut op_batch = WriteBatch::new();
+            let created = apply_vesting_unlock_into(&mut op_batch, &lane, claim, ctx, now_ms)?;
+            if let Some(op) = created {
+                journal.created.push(op);
+                created_in_block.insert(
+                    op,
+                    TxOut {
+                        value: claim.amount,
+                        address: claim.beneficiary,
+                    },
+                );
+            }
+            lane.write_batch(op_batch.clone())?;
+            batch.append(op_batch);
+            journal.passport_meta_before.extend(meta_before);
         }
     }
 
@@ -3332,6 +3608,131 @@ fn verify_and_signer(
     }
 }
 
+/// Collect spendable TLT UTXOs for `address`, skipping already-spent outpoints.
+pub fn collect_address_utxos(
+    store: &StateStore,
+    address: &Address,
+    spent_in_block: &HashSet<OutPoint>,
+) -> Result<Vec<(OutPoint, TxOut)>, StateError> {
+    let mut found = Vec::new();
+    store.for_each_cf(ColumnFamily::Utxo, |key, value| {
+        let out = TxOut::try_from_slice(value).map_err(|e| StateError::Storage(e.to_string()))?;
+        if &out.address != address || out.value.as_base_units() == 0 {
+            return Ok(());
+        }
+        let op = outpoint_from_utxo_key(key)?;
+        if spent_in_block.contains(&op) {
+            return Ok(());
+        }
+        found.push((op, out));
+        Ok(())
+    })?;
+    found.sort_by_key(|a| outpoint_key(&a.0));
+    Ok(found)
+}
+
+fn outpoint_from_utxo_key(key: &[u8]) -> Result<OutPoint, StateError> {
+    if key.len() != 36 {
+        return Err(StateError::Storage("malformed UTXO key".into()));
+    }
+    let mut tx_id = [0u8; 32];
+    tx_id.copy_from_slice(&key[..32]);
+    let mut index_bytes = [0u8; 4];
+    index_bytes.copy_from_slice(&key[32..]);
+    Ok(OutPoint {
+        tx_id: Hash(tx_id),
+        index: u32::from_le_bytes(index_bytes),
+    })
+}
+
+/// Burn [`DA_INCLUSION_FEE_TLT`] from the operator's TLT UTXOs.
+#[allow(clippy::too_many_arguments)]
+fn debit_da_inclusion_fee(
+    store: &StateStore,
+    operator: &Address,
+    authorization_id: Hash,
+    batch: &mut WriteBatch,
+    journal: &mut UtxoJournal,
+    spent_in_block: &mut HashSet<OutPoint>,
+    created_in_block: &mut HashMap<OutPoint, TxOut>,
+    meta_before: &mut Vec<(Vec<u8>, Option<Vec<u8>>)>,
+) -> Result<(), StateError> {
+    let fee = DA_INCLUSION_FEE_TLT;
+    let mut selected = Vec::new();
+    let mut total = 0u64;
+    for (op, out) in collect_address_utxos(store, operator, spent_in_block)? {
+        if created_in_block.contains_key(&op) {
+            continue;
+        }
+        total = total
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("DA fee input overflow".into()))?;
+        selected.push((op, out));
+        if total >= fee {
+            break;
+        }
+    }
+    let mut from_block: Vec<(OutPoint, TxOut)> = created_in_block
+        .iter()
+        .filter(|(op, out)| {
+            &out.address == operator
+                && !spent_in_block.contains(*op)
+                && selected.iter().all(|(existing, _)| existing != *op)
+        })
+        .map(|(op, out)| (*op, out.clone()))
+        .collect();
+    from_block.sort_by_key(|a| outpoint_key(&a.0));
+    for (op, out) in from_block {
+        if total >= fee {
+            break;
+        }
+        total = total
+            .checked_add(out.value.as_base_units())
+            .ok_or_else(|| StateError::InvalidTx("DA fee input overflow".into()))?;
+        selected.push((op, out));
+    }
+    if total < fee {
+        return Err(StateError::InvalidTx(format!(
+            "DA inclusion fee: insufficient TLT (need {fee}, have {total})"
+        )));
+    }
+    selected.sort_by_key(|a| outpoint_key(&a.0));
+    let burned_key = burned_supply_key(NativeAssetId::TLT);
+    meta_before.extend(snapshot_meta_keys(store, &[burned_key])?);
+    burn_tlt_fee_into(store, batch, fee)?;
+    for (op, out) in &selected {
+        spend_utxo(batch, op, out, journal, spent_in_block, created_in_block);
+    }
+    let change = total - fee;
+    if change > 0 {
+        let change_op = da_fee_change_outpoint(&authorization_id);
+        if spent_in_block.contains(&change_op) || created_in_block.contains_key(&change_op) {
+            return Err(StateError::DuplicateOutpoint(format!(
+                "{}:{}",
+                change_op.tx_id.to_hex(),
+                change_op.index
+            )));
+        }
+        let change_out = TxOut {
+            value: Amount::from_base_units(change),
+            address: *operator,
+        };
+        let key = outpoint_key(&change_op);
+        if store.get_cf(ColumnFamily::Utxo, &key)?.is_some() {
+            return Err(StateError::DuplicateOutpoint(format!(
+                "{}:{} (already in utxo set)",
+                change_op.tx_id.to_hex(),
+                change_op.index
+            )));
+        }
+        let bytes = borsh::to_vec(&change_out).map_err(|e| StateError::Storage(e.to_string()))?;
+        batch.put_cf(ColumnFamily::Utxo, &key, &bytes);
+        journal.created.push(change_op);
+        created_in_block.insert(change_op, change_out);
+    }
+    Ok(())
+}
+
 pub(crate) fn load_utxo(store: &StateStore, op: &OutPoint) -> Result<TxOut, StateError> {
     let key = outpoint_key(op);
     let bytes = store
@@ -3502,6 +3903,12 @@ pub fn revert_journal_batched(journal: &UtxoJournal) -> Result<WriteBatch, State
     }
     crate::tlt_covenant::revert_covenant_outputs(&mut batch, journal)?;
     revert_data_commitment_meta_into(&mut batch, &journal.data_availability_meta_before);
+    for (key, prior) in journal.passport_meta_before.iter().rev() {
+        match prior {
+            Some(value) => batch.put_cf(ColumnFamily::Meta, key, value),
+            None => batch.delete_cf(ColumnFamily::Meta, key),
+        }
+    }
     Ok(batch)
 }
 
@@ -3760,6 +4167,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
 
         let journal = apply_block(&store, &block, 0).unwrap();
@@ -3974,6 +4387,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         apply_block(&store, &block, emission).unwrap();
         assert_eq!(
@@ -4097,6 +4516,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         apply_block(&store, &block, 0).unwrap();
         assert_eq!(
@@ -4187,6 +4612,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         assert!(matches!(
             apply_block(&store, &block, 50),
@@ -4286,6 +4717,12 @@ mod tests {
                 drc_offer_cancels: vec![],
                 drc_multisign_attachments: vec![],
                 tlt_covenants: Vec::new(),
+                passport_attestations: Vec::new(),
+                hub_registrations: Vec::new(),
+                grant_registrations: Vec::new(),
+                mission_registrations: Vec::new(),
+                treasury_disbursements: Vec::new(),
+                vesting_unlocks: Vec::new(),
             },
             1,
             None,
@@ -4384,6 +4821,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         let result = apply_block_batched_virtual(&store, &block, 1, None).unwrap();
         store.write_batch(result.batch).unwrap();
@@ -4500,6 +4943,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         assert!(matches!(
             apply_block_batched_virtual(&store, &block, 1, None),
@@ -4509,8 +4958,10 @@ mod tests {
 
     #[test]
     fn account_transfer_fee_credits_reward_pool_on_accept() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::staking::load_reward_pool;
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            staking::load_reward_pool,
+        };
         use agora_crypto::sign_account_transfer_bound;
         use agora_types::{AccountTransfer, NativeAssetId};
 
@@ -4598,6 +5049,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         let mut block = block;
         block.header.tx_root = block.compute_body_root();
@@ -4625,9 +5082,11 @@ mod tests {
 
     #[test]
     fn ovl_execution_accepts_credits_fee_and_reverts() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::execution::OVL_INTRINSIC_GAS;
-        use crate::staking::load_reward_pool;
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            execution::OVL_INTRINSIC_GAS,
+            staking::load_reward_pool,
+        };
         use agora_crypto::sign_ovl_execution_bound;
         use agora_types::{NativeAssetId, OvlExecutionTx};
 
@@ -4710,6 +5169,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -4757,13 +5222,15 @@ mod tests {
 
     #[test]
     fn drc_payment_accepts_emits_outbox_and_reverts() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::payments::{
-            drc_payment_root, load_drc_outbox_event, load_drc_payment_by_invoice,
-            load_drc_payment_receipt,
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            payments::{
+                drc_payment_root, load_drc_outbox_event, load_drc_payment_by_invoice,
+                load_drc_payment_receipt,
+            },
+            staking::load_reward_pool,
+            supply::{load_burned_supply, native_supply_root, put_issued_supply_into},
         };
-        use crate::staking::load_reward_pool;
-        use crate::supply::{load_burned_supply, native_supply_root, put_issued_supply_into};
         use agora_crypto::sign_drc_payment_bound;
         use agora_types::{DrcPaymentTx, NativeAssetId};
 
@@ -4851,6 +5318,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -4922,10 +5395,12 @@ mod tests {
 
     #[test]
     fn drc_policy_precedes_payments_and_reorg_restores_policy() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::drc_policy::load_drc_account_policy;
-        use crate::staking::load_reward_pool;
-        use crate::supply::{load_burned_supply, put_issued_supply_into};
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            drc_policy::load_drc_account_policy,
+            staking::load_reward_pool,
+            supply::{load_burned_supply, put_issued_supply_into},
+        };
         use agora_crypto::{sign_drc_account_policy_bound, sign_drc_payment_bound};
         use agora_types::{DrcAccountPolicyTx, DrcPaymentTx, NativeAssetId};
 
@@ -5131,11 +5606,13 @@ mod tests {
 
     #[test]
     fn drc_deposit_auth_same_block_order_shared_nonce_and_reorg_are_deterministic() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::drc_deposit_preauth::load_drc_deposit_preauth;
-        use crate::drc_policy::load_drc_account_policy;
-        use crate::staking::load_reward_pool;
-        use crate::supply::put_issued_supply_into;
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            drc_deposit_preauth::load_drc_deposit_preauth,
+            drc_policy::load_drc_account_policy,
+            staking::load_reward_pool,
+            supply::put_issued_supply_into,
+        };
         use agora_crypto::{
             sign_drc_account_policy_bound, sign_drc_deposit_preauth_bound, sign_drc_payment_bound,
         };
@@ -5423,8 +5900,10 @@ mod tests {
 
     #[test]
     fn stake_op_in_block_body_bonds_validator() {
-        use crate::accounts::{credit_account_into, load_account};
-        use crate::staking::{load_validator, StakingParams};
+        use crate::{
+            accounts::{credit_account_into, load_account},
+            staking::{load_validator, StakingParams},
+        };
         use agora_crypto::sign_stake_tx_bound;
         use agora_types::{NativeAssetId, SignedStakeTx};
 
@@ -5513,6 +5992,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         block.header.tx_root = block.compute_body_root();
 
@@ -5598,11 +6083,17 @@ mod tests {
 
     #[test]
     fn data_commitment_lane_orders_duplicates_and_reverts_atomically() {
-        use crate::{data_availability_root, load_data_commitment, load_data_commitment_nonce};
+        use crate::{
+            data_availability_root, load_burned_supply, load_data_commitment,
+            load_data_commitment_nonce,
+        };
 
         let store = StateStore::open_in_memory();
-        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
         let keypair = KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(keypair.address())
+            .ignite(&store)
+            .unwrap();
         let fingerprint = Hash([9; 32]);
         let context = TxAuthContext {
             chain_id: "agora-trident-testnet-1".into(),
@@ -5612,6 +6103,8 @@ mod tests {
         let first = signed_data_commitment(&keypair, 4, 0, 11, &genesis, &fingerprint);
         let conflict = signed_data_commitment(&keypair, 4, 1, 12, &genesis, &fingerprint);
         let root_before = data_availability_root(&store).unwrap();
+        let burned_before = load_burned_supply(&store, NativeAssetId::TLT).unwrap();
+        let balance_before = balance_of(&store, &keypair.address()).unwrap();
         let coinbase = Transaction::unsigned(
             1,
             vec![],
@@ -5661,6 +6154,16 @@ mod tests {
             first
         );
         assert_ne!(data_availability_root(&store).unwrap(), root_before);
+        assert_eq!(
+            load_burned_supply(&store, NativeAssetId::TLT).unwrap(),
+            burned_before + DA_INCLUSION_FEE_TLT
+        );
+        assert_eq!(
+            balance_of(&store, &keypair.address())
+                .unwrap()
+                .as_base_units(),
+            balance_before.as_base_units() - DA_INCLUSION_FEE_TLT
+        );
 
         store
             .write_batch(revert_journal_batched(&journal).unwrap())
@@ -5669,6 +6172,14 @@ mod tests {
         assert_eq!(
             load_data_commitment_nonce(&store, &keypair.address()).unwrap(),
             0
+        );
+        assert_eq!(
+            load_burned_supply(&store, NativeAssetId::TLT).unwrap(),
+            burned_before
+        );
+        assert_eq!(
+            balance_of(&store, &keypair.address()).unwrap(),
+            balance_before
         );
     }
 
@@ -5714,15 +6225,544 @@ mod tests {
         let disabled_err = apply_block_batched_virtual(&store, &block, 0, Some(&disabled))
             .err()
             .expect("disabled DA lane must reject");
-        assert!(disabled_err.to_string().contains("base-fee policy"));
+        assert!(disabled_err.to_string().contains("DA network fingerprint"));
+
+        let unfunded = TxAuthContext {
+            chain_id: disabled.chain_id.clone(),
+            genesis: disabled.genesis,
+            data_availability_network_fingerprint: Some(fingerprint),
+        };
+        let unfunded_err = apply_block_batched_virtual(&store, &block, 0, Some(&unfunded))
+            .err()
+            .expect("unfunded DA operator must reject");
+        assert!(unfunded_err.to_string().contains("insufficient TLT"));
 
         let enabled = TxAuthContext {
+            chain_id: disabled.chain_id.clone(),
+            genesis: disabled.genesis,
             data_availability_network_fingerprint: Some(fingerprint),
-            ..disabled
         };
         assert!(apply_block_batched_virtual(&store, &block, 0, Some(&enabled)).is_err());
         assert!(load_data_commitment(&store, valid.commitment.source, 4)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn data_commitment_invalid_auth_discards_funded_partial_batch() {
+        use crate::load_data_commitment;
+
+        let store = StateStore::open_in_memory();
+        let keypair = KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(keypair.address())
+            .ignite(&store)
+            .unwrap();
+        let fingerprint = Hash([9; 32]);
+        let valid = signed_data_commitment(&keypair, 4, 0, 11, &genesis, &fingerprint);
+        let mut invalid = signed_data_commitment(&keypair, 5, 1, 12, &genesis, &fingerprint);
+        invalid.signature[0] ^= 1;
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.data_commitments = vec![valid.clone(), invalid];
+        block.header.tx_root = block.compute_body_root();
+        let enabled = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: Some(fingerprint),
+        };
+        assert!(apply_block_batched_virtual(&store, &block, 0, Some(&enabled)).is_err());
+        assert!(load_data_commitment(&store, valid.commitment.source, 4)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            balance_of(&store, &keypair.address())
+                .unwrap()
+                .as_base_units(),
+            Amount::from_whole(10_000_000).unwrap().as_base_units()
+        );
+    }
+
+    #[test]
+    fn signed_passport_lane_applies_and_reverts() {
+        use crate::{
+            canonical_community_root, load_canonical_community_summary, load_passport_attestation,
+            load_passport_issuer_nonce, register_hub_into,
+        };
+        use agora_crypto::sign_passport_attestation_bound;
+        use agora_governance::{HubAccreditationStatus, HubRecord};
+        use agora_types::{PassportAttestation, PassportCategory};
+
+        let store = StateStore::open_in_memory();
+        let issuer = KeyPair::from_secret_bytes(&[11; 32]).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let hub = HubRecord {
+            id: Hash([1; 32]),
+            public_name: "Agora Hub 1".into(),
+            classification: "Geographic".into(),
+            charter_hash: Hash([2; 32]),
+            coordinators: vec![issuer.address()],
+            treasury_multisig: Address([3; 20]),
+            election_term_epochs: 12,
+            reporting_interval_epochs: 3,
+            coi_disclosure_root: Hash([4; 32]),
+            deliverables_root: Hash([5; 32]),
+            accreditation_proposal_id: 1,
+            status: HubAccreditationStatus::Active,
+        };
+        let mut hub_batch = WriteBatch::new();
+        register_hub_into(&mut hub_batch, &store, &hub).unwrap();
+        store.write_batch(hub_batch).unwrap();
+        let root_before = canonical_community_root(&store).unwrap();
+        let summary_before = load_canonical_community_summary(&store).unwrap();
+
+        let mut attestation = PassportAttestation::unsigned(
+            issuer.address(),
+            Address([7; 20]),
+            PassportCategory::CommunitySupport,
+            Hash([3; 32]),
+            Hash([4; 32]),
+            10,
+            Some(20),
+            0,
+        );
+        sign_passport_attestation_bound(&mut attestation, &issuer, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let id = attestation.attestation_id();
+
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.passport_attestations = vec![attestation.clone()];
+        block.header.tx_root = block.compute_body_root();
+
+        let missing_hub_store = StateStore::open_in_memory();
+        GenesisBuilder::default()
+            .ignite(&missing_hub_store)
+            .unwrap();
+        assert!(apply_block_batched_with_auth(&missing_hub_store, &block, 0, Some(&auth)).is_err());
+
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(
+            load_passport_attestation(&store, &id).unwrap().unwrap(),
+            attestation
+        );
+        assert_eq!(
+            load_passport_issuer_nonce(&store, &issuer.address()).unwrap(),
+            1
+        );
+        let summary = load_canonical_community_summary(&store).unwrap();
+        assert_eq!(summary.hub_count, 1);
+        assert_eq!(summary.passport_count, 1);
+        assert_ne!(canonical_community_root(&store).unwrap(), root_before);
+
+        store
+            .write_batch(revert_journal_batched(&result.journal).unwrap())
+            .unwrap();
+        assert!(load_passport_attestation(&store, &id).unwrap().is_none());
+        assert_eq!(
+            load_passport_issuer_nonce(&store, &issuer.address()).unwrap(),
+            0
+        );
+        assert_eq!(
+            load_canonical_community_summary(&store).unwrap(),
+            summary_before
+        );
+        assert_eq!(canonical_community_root(&store).unwrap(), root_before);
+    }
+
+    #[test]
+    fn signed_hub_grant_mission_lanes_apply_and_revert() {
+        use crate::{
+            canonical_community_root, load_canonical_community_summary, load_grant_registration,
+            load_hub_coordinator_nonce, load_hub_registration, load_mission_registration,
+        };
+        use agora_crypto::{
+            sign_grant_registration_bound, sign_hub_registration_bound,
+            sign_mission_registration_bound,
+        };
+        use agora_types::{
+            CommunityGrantKind, GrantRegistration, HubRegistration, MissionRegistration, TreasuryId,
+        };
+
+        let store = StateStore::open_in_memory();
+        let coordinator = KeyPair::from_secret_bytes(&[12; 32]).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let mut hub = HubRegistration::unsigned(
+            "Agora Hub 2".into(),
+            "Geographic".into(),
+            Hash([2; 32]),
+            vec![coordinator.address()],
+            Address([3; 20]),
+            12,
+            3,
+            Hash([4; 32]),
+            Hash([5; 32]),
+            1,
+            0,
+        );
+        sign_hub_registration_bound(&mut hub, &coordinator, &auth.chain_id, &auth.genesis).unwrap();
+        let mut grant = GrantRegistration::unsigned(
+            coordinator.address(),
+            7,
+            TreasuryId::OvlBuilder,
+            Address([6; 20]),
+            Amount::from_base_units(100),
+            CommunityGrantKind::Micro,
+            vec![],
+            Hash::ZERO,
+            0,
+        );
+        sign_grant_registration_bound(&mut grant, &coordinator, &auth.chain_id, &auth.genesis)
+            .unwrap();
+        let mut mission = MissionRegistration::unsigned(
+            coordinator.address(),
+            TreasuryId::OvlBuilder,
+            Amount::from_base_units(50),
+            Hash([10; 32]),
+            0,
+        );
+        sign_mission_registration_bound(&mut mission, &coordinator, &auth.chain_id, &auth.genesis)
+            .unwrap();
+
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.hub_registrations = vec![hub.clone()];
+        block.grant_registrations = vec![grant.clone()];
+        block.mission_registrations = vec![mission.clone()];
+        block.header.tx_root = block.compute_body_root();
+
+        let root_before = canonical_community_root(&store).unwrap();
+        let summary_before = load_canonical_community_summary(&store).unwrap();
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        store.write_batch(result.batch).unwrap();
+        assert!(load_hub_registration(&store, &hub.registration_id())
+            .unwrap()
+            .is_some());
+        assert!(load_grant_registration(&store, &grant.registration_id())
+            .unwrap()
+            .is_some());
+        assert!(
+            load_mission_registration(&store, &mission.registration_id())
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            load_hub_coordinator_nonce(&store, &coordinator.address()).unwrap(),
+            1
+        );
+        assert_ne!(canonical_community_root(&store).unwrap(), root_before);
+
+        store
+            .write_batch(revert_journal_batched(&result.journal).unwrap())
+            .unwrap();
+        assert!(load_hub_registration(&store, &hub.registration_id())
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            load_canonical_community_summary(&store).unwrap(),
+            summary_before
+        );
+        assert_eq!(canonical_community_root(&store).unwrap(), root_before);
+    }
+
+    #[test]
+    fn signed_treasury_disbursement_debits_and_reverts() {
+        use crate::governance_state::{
+            authorization_policy_root, load_protocol_treasury, load_treasury_disbursement,
+            load_treasury_nonce, put_treasury_controller_into, put_treasury_into,
+        };
+        use agora_crypto::sign_treasury_disbursement_bound;
+        use agora_types::{TreasuryBalance, TreasuryDisbursement, TreasuryId};
+
+        let store = StateStore::open_in_memory();
+        let controller = KeyPair::from_secret_bytes(&[21; 32]).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let mut fund = WriteBatch::new();
+        put_treasury_into(
+            &mut fund,
+            &TreasuryBalance::new(
+                TreasuryId::OvlBuilder,
+                NativeAssetId::OVL,
+                Amount::from_base_units(1_000),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        put_treasury_controller_into(&mut fund, TreasuryId::OvlBuilder, controller.address())
+            .unwrap();
+        store.write_batch(fund).unwrap();
+
+        let beneficiary = Address([9; 20]);
+        let mut spend = TreasuryDisbursement::unsigned(
+            TreasuryId::OvlBuilder,
+            beneficiary,
+            Amount::from_base_units(250),
+            Hash([3; 32]),
+            authorization_policy_root(),
+            0,
+        );
+        sign_treasury_disbursement_bound(&mut spend, &controller, &auth.chain_id, &auth.genesis)
+            .unwrap();
+
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.treasury_disbursements = vec![spend.clone()];
+        block.header.tx_root = block.compute_body_root();
+
+        let before = load_protocol_treasury(&store, TreasuryId::OvlBuilder).unwrap();
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(
+            load_protocol_treasury(&store, TreasuryId::OvlBuilder)
+                .unwrap()
+                .balance,
+            Amount::from_base_units(750)
+        );
+        assert_eq!(
+            load_treasury_nonce(&store, TreasuryId::OvlBuilder).unwrap(),
+            1
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &beneficiary)
+                .unwrap()
+                .balance,
+            250
+        );
+        assert_eq!(
+            load_treasury_disbursement(&store, &spend.disbursement_id())
+                .unwrap()
+                .unwrap(),
+            spend
+        );
+
+        store
+            .write_batch(revert_journal_batched(&result.journal).unwrap())
+            .unwrap();
+        assert_eq!(
+            load_protocol_treasury(&store, TreasuryId::OvlBuilder).unwrap(),
+            before
+        );
+        assert_eq!(
+            load_treasury_nonce(&store, TreasuryId::OvlBuilder).unwrap(),
+            0
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &beneficiary)
+                .unwrap()
+                .balance,
+            0
+        );
+        assert!(load_treasury_disbursement(&store, &spend.disbursement_id())
+            .unwrap()
+            .is_none());
+
+        let mut wrong_root = spend.clone();
+        wrong_root.authorization_root = Hash([8; 32]);
+        let mut reject = block.clone();
+        reject.treasury_disbursements = vec![wrong_root];
+        reject.header.tx_root = reject.compute_body_root();
+        assert!(apply_block_batched_with_auth(&store, &reject, 0, Some(&auth)).is_err());
+    }
+
+    #[test]
+    fn signed_vesting_unlock_credits_and_reverts() {
+        use crate::block_zero::BlockZeroVesting;
+        use crate::governance_state::{
+            load_vesting_nonce, load_vesting_unlock, load_vesting_unlocked,
+            put_vesting_schedules_into,
+        };
+        use agora_crypto::sign_vesting_unlock_bound;
+        use agora_types::{vesting_schedule_id, VestingUnlock};
+
+        let store = StateStore::open_in_memory();
+        let beneficiary = KeyPair::from_secret_bytes(&[22; 32]).unwrap();
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let auth = TxAuthContext {
+            chain_id: "agora-trident-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let schedule = BlockZeroVesting {
+            asset: NativeAssetId::OVL,
+            address: beneficiary.address(),
+            amount: 100,
+            start_timestamp_ms: 10,
+            cliff_timestamp_ms: 20,
+            end_timestamp_ms: 30,
+        };
+        let schedule_id = vesting_schedule_id(
+            schedule.asset,
+            &schedule.address,
+            schedule.amount,
+            schedule.start_timestamp_ms,
+            schedule.cliff_timestamp_ms,
+            schedule.end_timestamp_ms,
+        );
+        let mut fund = WriteBatch::new();
+        put_vesting_schedules_into(&mut fund, &[schedule]).unwrap();
+        store.write_batch(fund).unwrap();
+
+        let mut claim = VestingUnlock::unsigned(
+            NativeAssetId::OVL,
+            beneficiary.address(),
+            schedule_id,
+            Amount::from_base_units(50),
+            0,
+        );
+        sign_vesting_unlock_bound(&mut claim, &beneficiary, &auth.chain_id, &auth.genesis).unwrap();
+
+        let coinbase = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::ZERO,
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![genesis],
+                timestamp_ms: 20,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![coinbase],
+        );
+        block.vesting_unlocks = vec![claim.clone()];
+        block.header.tx_root = block.compute_body_root();
+
+        let result = apply_block_batched_with_auth(&store, &block, 0, Some(&auth)).unwrap();
+        store.write_batch(result.batch).unwrap();
+        assert_eq!(load_vesting_unlocked(&store, &schedule_id).unwrap(), 50);
+        assert_eq!(
+            load_vesting_nonce(&store, &beneficiary.address()).unwrap(),
+            1
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &beneficiary.address())
+                .unwrap()
+                .balance,
+            50
+        );
+        assert_eq!(
+            load_vesting_unlock(&store, &claim.unlock_id())
+                .unwrap()
+                .unwrap(),
+            claim
+        );
+
+        store
+            .write_batch(revert_journal_batched(&result.journal).unwrap())
+            .unwrap();
+        assert_eq!(load_vesting_unlocked(&store, &schedule_id).unwrap(), 0);
+        assert_eq!(
+            load_vesting_nonce(&store, &beneficiary.address()).unwrap(),
+            0
+        );
+        assert_eq!(
+            load_account(&store, NativeAssetId::OVL, &beneficiary.address())
+                .unwrap()
+                .balance,
+            0
+        );
+        assert!(load_vesting_unlock(&store, &claim.unlock_id())
+            .unwrap()
+            .is_none());
+
+        let mut early = block.clone();
+        early.header.timestamp_ms = 19;
+        early.header.tx_root = early.compute_body_root();
+        assert!(apply_block_batched_with_auth(&store, &early, 0, Some(&auth)).is_err());
     }
 }

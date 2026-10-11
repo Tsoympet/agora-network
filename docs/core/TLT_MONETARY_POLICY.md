@@ -26,7 +26,8 @@ Premine is issued at genesis and is exempt from coinbase maturity. Later issuanc
 
 - A ceremony-frozen mainnet subsidy, if it will differ from the working 50 TLT schedule.
 - A fee split from the miner to the security treasury. The policy hook exists in `docs/assets/MONETARY_POLICY.md`. Live coinbase still takes the full TLT transfer fee.
-- A TLT base fee for data-availability bytes. DA admission stays fail-closed until that rule is reviewed.
+- A broader TLT base fee for arbitrary data-availability bytes beyond the
+  current per-authorization burn (`DA_INCLUSION_FEE_TLT` = 0.01 TLT).
 - Whether covenant transactions, once activated, change the fee or the maturity rule. They do not today.
 
 ## Invariants

@@ -9,20 +9,70 @@ Offline v3 draft/freeze-readiness commands are documented in
 [`../genesis/README.md`](../genesis/README.md). They cannot boot Trident, and
 their existence does not make Trident Public testnet ready.
 
-Do not point `AGORA_GENESIS_FILE` at the checked-in Trident draft. Node loading
-remains v2-only while Trident runtime policy and Block 0 live-state wiring are
-incomplete. A candidate Block 0 Meta envelope can now be staged and verified
-without writing live balances. Its versioned Borsh datadir identity is committed
-atomically with the envelope and checked byte-for-byte on reopen. The historical
-v2 node intentionally refuses any complete or partial Trident identity before
-loading/creating `$AGORA_DATA/p2p/identity.key`, accessing a seeder, building a
-swarm, or binding RPC; do not try to reuse one datadir for both protocols.
+Do not point `AGORA_GENESIS_FILE` at the checked-in Trident draft. That file is
+UNFROZEN and fails freeze-ready. Node v2 loading remains `AGORA_GENESIS_FILE`
+plus `prepare_legacy_datadir`. A freeze-ready v3 artifact (not the public
+draft) can be materialized with `AGORA_TRIDENT_GENESIS_FILE` /
+`agora-node genesis trident materialize`; that path writes live balances and
+refuses to load a libp2p key until freeze-ready checks pass. Do not combine the
+two genesis env vars. Do not reuse one datadir for both protocols.
 
-Boot still does not consume the Trident candidate as live state. The remaining
-blocker is lossless Block 0 body, UTXO, account, treasury, vesting, validator,
-and finality materialization whose recomputed state root equals the committed
-header, followed by explicit runtime activation gates. This prerequisite does
-not make Trident Public testnet ready.
+Public Trident testnet is still **not** declared: the checked-in v3 draft is
+UNFROZEN, default docker-compose still boots frozen v2, and a ceremony freeze
+of `agora-trident-testnet-1` has not happened. Frozen v2 peers boot, IBD, and
+send TLT, but they never finalize.
+
+An **Experimental public-testnet** freeze-ready artifact exists at
+[`../genesis/trident.experimental.public-testnet.json`](../genesis/trident.experimental.public-testnet.json).
+It uses generated secp256k1 validators, a distinct
+`chain_id` (`agora-trident-experimental-testnet-1`), RandomX-only PoW, and
+dual-PoS genesis sets so finality can fire after the PoW work threshold. It
+is not ceremony-final and not mainnet. Default compose must stay on frozen
+v2. Opt in explicitly:
+
+```bash
+docker compose --profile experimental-trident up --build seeder experimental-trident-a
+```
+
+Host RPC for that profile: `http://127.0.0.1:8555/rpc`. Clear
+`AGORA_GENESIS_FILE` when setting `AGORA_TRIDENT_GENESIS_FILE`.
+
+### Local host demonstration (this tree)
+
+`scripts/experimental_trident_mesh.sh` boots a seeder plus two
+`agora-node` processes against the Experimental artifact without Docker.
+
+Recorded on this host (2026-10-10), `agora-node --no-default-features`
+(in-memory store; RandomX hasher falls back to SHA-256 because
+`libstdc++` headers are missing and `rust-randomx` / default
+`rocksdb+randomx` do not compile):
+
+| Step | Result |
+| --- | --- |
+| Boot | Both nodes materialized freeze-ready Block 0. `chain_id` = `agora-trident-experimental-testnet-1`. Gossip `genesis_hash` = `d81e0f9c…` (live `BlockHeader` id). `artifact_identity` = `68b3c7af…`. Fingerprint prefix `52b5fc85…`. |
+| Peers | First-boot simultaneous seeder dials failed Noise handshake. Stagger / `AGORA_BOOTSTRAP` from B→A connected (`connected_peers=1`). Headers-first IBD at genesis reported the peer was not ahead. |
+| Tx | Device-local TLT spend from generated key `0xa3…` admitted on A (`pending`). Two-peer gossipsub did **not** put the tx in B’s mempool. |
+| Mine + IBD | `agora-miner --no-default-features` found a SHA-256 fallback solution at `daa_min_level=8` (`00997c73…`). B’s tip set matched A. The spend was `confirmed` on B via the block (not via mempool gossip). |
+    | Dual-PoS | `agora_getFinality` returned a signable checkpoint body. OVL (`0xa1…`) then DRC (`0xa2…`) attestations finalized the tip on A; B converged to `Finalized` over gossip. That recorded run used then-default `min_pow_depth=1` (tip blue_score 2). Subsequent code copies the artifact threshold (`8`) into live admit. |
+
+This is a local Experimental lab mesh. It is **not** Public testnet, not
+ceremony-final, and not a RandomX public-network proof. Default compose
+stays on frozen v2.
+
+```bash
+cargo build -p agora-node --no-default-features -p agora-dns-seeder
+cargo build -p agora-miner-sidecar --no-default-features
+./scripts/experimental_trident_mesh.sh wipe
+./scripts/experimental_trident_mesh.sh seeder          # terminal 0
+./scripts/experimental_trident_mesh.sh node-a          # terminal 1
+# wait until A is listening, then:
+AGORA_BOOTSTRAP=/ip4/127.0.0.1/tcp/16121/p2p/<node-a-peerid> \
+  ./scripts/experimental_trident_mesh.sh node-b        # terminal 2
+./scripts/experimental_trident_mesh.sh wait-peers
+./scripts/experimental_trident_mesh.sh smoke-tx        # A admit; B mempool may miss
+./scripts/experimental_trident_mesh.sh smoke-ibd       # mine 1 + tip converge
+./scripts/experimental_trident_mesh.sh smoke-finality  # OVL+DRC attest
+```
 
 ## Quick start (Docker)
 

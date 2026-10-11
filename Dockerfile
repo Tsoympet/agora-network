@@ -25,6 +25,7 @@ COPY --from=builder /src/target/release/agora-dns-seeder /usr/local/bin/
 COPY --from=builder /src/target/release/agora-miner /usr/local/bin/
 COPY --from=builder /src/target/release/agora-testnet-faucet /usr/local/bin/
 COPY docs/genesis/testnet.genesis.json /agora/genesis/testnet.genesis.json
+COPY docs/genesis/trident.experimental.public-testnet.json /agora/genesis/trident.experimental.public-testnet.json
 ENV AGORA_NETWORK=testnet \
     AGORA_DATA=/data \
     AGORA_RPC_BIND=0.0.0.0:8545 \

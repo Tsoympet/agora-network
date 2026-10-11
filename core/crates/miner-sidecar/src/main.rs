@@ -37,8 +37,13 @@ async fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0u64);
 
-    info!(%rpc_url, poll_ms, max_blocks, "agora-miner RandomX sidecar starting");
+    info!(%rpc_url, poll_ms, max_blocks, "agora-miner sidecar starting");
+    #[cfg(feature = "randomx")]
     println!("agora-miner: RandomX loop → {rpc_url} (max_blocks={max_blocks})");
+    #[cfg(not(feature = "randomx"))]
+    println!(
+        "agora-miner: SHA-256 RandomX-fallback loop → {rpc_url} (max_blocks={max_blocks}); not a public RandomX mesh"
+    );
 
     let hasher = RandomXPowHasher;
     let mut nonce_cursor = 0u64;

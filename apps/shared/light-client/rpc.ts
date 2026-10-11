@@ -62,6 +62,21 @@ export type LightTltCovenantLookup = {
   transaction: unknown | null;
 };
 
+export type LightDataCommitmentLookup = {
+  authorization_id: string;
+  status: string;
+  block_id: string | null;
+  index: number | null;
+  confirmations: number | null;
+  finalized: boolean;
+  pow_work_met: boolean;
+  acceptance: string | null;
+  lane_enabled: boolean;
+  canonical_l1?: boolean;
+  lab_record_da?: boolean;
+  authorization: unknown | null;
+};
+
 export type LightDrcOfferLookup = {
   offer_id?: string;
   status?: string;
@@ -120,18 +135,35 @@ export type LightNodeInfo = {
   hot_window: number;
   allow_fund: boolean;
   miner_address: string | null;
-  /** Hex id of Block 0 when reported by the node. */
+  /** Hex id of Block 0 when reported by the node (`BlockHeader` / gossip). */
   genesis_hash: string | null;
   /** Network-bound signing chain id (`agora-testnet-1`, …). */
   chain_id?: string | null;
   /** Minimum mempool relay fee when reported. */
   min_relay_fee?: number;
+  /** TridentHeader commitment hash. Absent on frozen v2. Not a gossip parent. */
+  trident_header_hash?: string | null;
+  /** Artifact identity used in the Trident network fingerprint. */
+  artifact_identity?: string | null;
+  /** Offline Block 0 manifest commitment. */
+  block_zero_commitment?: string | null;
 };
 
 /** JSON-safe base units. Nodes may encode large amounts as decimal strings. */
 export type LightAmount = number | string;
 
 export type NativeAssetTicker = "TLT" | "OVL" | "DRC";
+
+export type LightFinalityBody = {
+  chain_id: string;
+  genesis_hash: string;
+  consensus_policy_hash: string;
+  state_transition_version: string;
+  blue_score: number;
+  block_hash: string;
+  state_root: string;
+  validator_epoch: number;
+};
 
 export type LightFinality = {
   block_hash: string;
@@ -144,6 +176,8 @@ export type LightFinality = {
   drc_active_stake?: LightAmount;
   finalized: boolean;
   finalized_tip_blue_score: number;
+  /** Present when the block is known. Required to sign a checkpoint attestation. */
+  body?: LightFinalityBody | null;
 };
 
 export type LightValidatorSet = {
@@ -184,6 +218,8 @@ export type LightProtocolTreasuries = {
     id: string;
     asset: NativeAssetTicker;
     balance: LightAmount;
+    nonce?: number;
+    controller?: string | null;
   }>;
 };
 
@@ -343,6 +379,60 @@ export type LightClient = {
   ) => Promise<LightNativeAssetSupply>;
   getProtocolTreasuries: () => Promise<LightProtocolTreasuries>;
   getCommunityRegistry: (limit?: number) => Promise<LightCommunityRegistry>;
+  getPassportAttestation: (attestationId: string) => Promise<{
+    attestation_id: string;
+    status: string;
+    attestation: unknown | null;
+  }>;
+  getPassportIssuerNonce: (issuer: string) => Promise<{
+    issuer: string;
+    nonce: number;
+  }>;
+  getHubRegistration: (registrationId: string) => Promise<{
+    registration_id: string;
+    status: string;
+    hub: unknown | null;
+  }>;
+  getHubCoordinatorNonce: (coordinator: string) => Promise<{
+    coordinator: string;
+    nonce: number;
+  }>;
+  getGrantRegistration: (registrationId: string) => Promise<{
+    registration_id: string;
+    status: string;
+    grant: unknown | null;
+  }>;
+  getGrantRegistrarNonce: (registrar: string) => Promise<{
+    registrar: string;
+    nonce: number;
+  }>;
+  getMissionRegistration: (registrationId: string) => Promise<{
+    registration_id: string;
+    status: string;
+    mission: unknown | null;
+  }>;
+  getMissionSponsorNonce: (sponsor: string) => Promise<{
+    sponsor: string;
+    nonce: number;
+  }>;
+  getTreasuryDisbursement: (disbursementId: string) => Promise<{
+    disbursement_id: string;
+    status: string;
+    disbursement: unknown | null;
+  }>;
+  getTreasuryNonce: (treasury: string) => Promise<{
+    treasury: string;
+    nonce: number;
+  }>;
+  getVestingUnlock: (unlockId: string) => Promise<{
+    unlock_id: string;
+    status: string;
+    unlock: unknown | null;
+  }>;
+  getVestingNonce: (beneficiary: string) => Promise<{
+    beneficiary: string;
+    nonce: number;
+  }>;
   getDrcObject: (objectId: string) => Promise<{
     object_id: string;
     status: "live" | "unknown";
@@ -368,6 +458,11 @@ export type LightClient = {
   getBalance: (address: string) => Promise<LightBalance>;
   getAccountBalances: (address: string) => Promise<LightAccountBalances>;
   getTltCovenant: (txId: string) => Promise<LightTltCovenantLookup>;
+  getDataCommitment: (args: {
+    authorization_id?: string;
+    source?: unknown;
+    sequence?: number;
+  }) => Promise<LightDataCommitmentLookup>;
   getDrcOffer: (offerId: string) => Promise<LightDrcOfferLookup>;
   getDrcAccountOffers: (args: {
     account: string;
@@ -393,15 +488,69 @@ export type LightClient = {
   getEthChainId: () => Promise<unknown>;
   getEthBlockNumber: () => Promise<unknown>;
   getEthBalance: (address: string, blockTag?: string) => Promise<unknown>;
+  sendRawEvmTransaction: (rawHex: string) => Promise<string>;
   getUtxos: (address: string) => Promise<LightUtxoSet>;
   /** Submit a signed transaction JSON body (native serde / byte-array hashes). */
   submitTransaction: (tx: unknown) => Promise<SubmitTxResult>;
   submitTltCovenant: (tx: unknown) => Promise<{ tx_id: string }>;
+  submitAccountTransfer: (tx: unknown) => Promise<{ account_tx_id: string }>;
+  submitOvlExecution: (tx: unknown) => Promise<{ execution_tx_id: string }>;
+  submitDrcPayment: (tx: unknown) => Promise<{ payment_id: string }>;
+  submitDataCommitment: (authorization: unknown) => Promise<{
+    authorization_id: string;
+  }>;
   submitDrcOfferCreate: (tx: unknown) => Promise<{
     offer_id: string;
     simulated_fill: boolean;
   }>;
   submitDrcOfferCancel: (tx: unknown) => Promise<{ cancel_tx_id: string }>;
+  submitDrcEscrowCreate: (tx: unknown) => Promise<{ escrow_id: string }>;
+  submitDrcEscrowFinish: (tx: unknown) => Promise<{ finish_tx_id: string }>;
+  submitDrcEscrowCancel: (tx: unknown) => Promise<{ cancel_tx_id: string }>;
+  submitDrcCheckCreate: (tx: unknown) => Promise<{ check_id: string }>;
+  submitDrcCheckCash: (tx: unknown) => Promise<{ cash_tx_id: string }>;
+  submitDrcCheckCancel: (tx: unknown) => Promise<{ cancel_tx_id: string }>;
+  submitDrcPaymentChannelCreate: (tx: unknown) => Promise<{ channel_id: string }>;
+  submitDrcPaymentChannelFund: (tx: unknown) => Promise<{ fund_tx_id: string }>;
+  submitDrcPaymentChannelClaim: (tx: unknown) => Promise<{ claim_tx_id: string }>;
+  submitDrcPaymentChannelClose: (tx: unknown) => Promise<{ close_tx_id: string }>;
+  submitDrcTicketCreate: (tx: unknown) => Promise<{ ticket_create_tx_id: string }>;
+  submitDrcRegularKey: (tx: unknown) => Promise<{ regular_key_tx_id: string }>;
+  submitDrcSignerList: (tx: unknown) => Promise<{ signer_list_tx_id: string }>;
+  submitDrcDepositPreauth: (tx: unknown) => Promise<{ preauth_tx_id: string }>;
+  submitDrcAccountPolicy: (tx: unknown) => Promise<{ policy_tx_id: string }>;
+  submitDrcTrustLineSet: (tx: unknown) => Promise<{ trust_line_set_tx_id: string }>;
+  submitDrcIssuedTransfer: (tx: unknown) => Promise<{ issued_transfer_tx_id: string }>;
+  submitDrcIssuedAssetPolicySet: (tx: unknown) => Promise<{ policy_set_tx_id: string }>;
+  submitDrcTrustLineIssuerControl: (tx: unknown) => Promise<{
+    issuer_control_tx_id: string;
+  }>;
+  submitDrcIssuedClawback: (tx: unknown) => Promise<{ clawback_tx_id: string }>;
+  submitAttestation: (attestation: unknown) => Promise<{
+    block_hash: string;
+    state: string;
+    finalized: boolean;
+    ovl_signed_stake?: LightAmount;
+    drc_signed_stake?: LightAmount;
+  }>;
+  submitPassportAttestation: (attestation: unknown) => Promise<{
+    attestation_id: string;
+  }>;
+  submitHubRegistration: (registration: unknown) => Promise<{
+    registration_id: string;
+  }>;
+  submitGrantRegistration: (registration: unknown) => Promise<{
+    registration_id: string;
+  }>;
+  submitMissionRegistration: (registration: unknown) => Promise<{
+    registration_id: string;
+  }>;
+  submitTreasuryDisbursement: (disbursement: unknown) => Promise<{
+    disbursement_id: string;
+  }>;
+  submitVestingUnlock: (unlock: unknown) => Promise<{
+    unlock_id: string;
+  }>;
   getConstitution: () => Promise<LightConstitution>;
   getGovernance: () => Promise<LightGovernance>;
   listProposals: (limit?: number) => Promise<LightProposalList>;
@@ -490,6 +639,70 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<LightProtocolTreasuries>("agora_getProtocolTreasuries", []),
     getCommunityRegistry: (limit = 64) =>
       call<LightCommunityRegistry>("agora_getCommunityRegistry", { limit }),
+    getPassportAttestation: (attestationId) =>
+      call<{
+        attestation_id: string;
+        status: string;
+        attestation: unknown | null;
+      }>("agora_getPassportAttestation", { attestation_id: attestationId }),
+    getPassportIssuerNonce: (issuer) =>
+      call<{ issuer: string; nonce: number }>(
+        "agora_getPassportIssuerNonce",
+        { issuer },
+      ),
+    getHubRegistration: (registrationId) =>
+      call<{
+        registration_id: string;
+        status: string;
+        hub: unknown | null;
+      }>("agora_getHubRegistration", { registration_id: registrationId }),
+    getHubCoordinatorNonce: (coordinator) =>
+      call<{ coordinator: string; nonce: number }>(
+        "agora_getHubCoordinatorNonce",
+        { coordinator },
+      ),
+    getGrantRegistration: (registrationId) =>
+      call<{
+        registration_id: string;
+        status: string;
+        grant: unknown | null;
+      }>("agora_getGrantRegistration", { registration_id: registrationId }),
+    getGrantRegistrarNonce: (registrar) =>
+      call<{ registrar: string; nonce: number }>(
+        "agora_getGrantRegistrarNonce",
+        { registrar },
+      ),
+    getMissionRegistration: (registrationId) =>
+      call<{
+        registration_id: string;
+        status: string;
+        mission: unknown | null;
+      }>("agora_getMissionRegistration", { registration_id: registrationId }),
+    getMissionSponsorNonce: (sponsor) =>
+      call<{ sponsor: string; nonce: number }>(
+        "agora_getMissionSponsorNonce",
+        { sponsor },
+      ),
+    getTreasuryDisbursement: (disbursementId) =>
+      call<{
+        disbursement_id: string;
+        status: string;
+        disbursement: unknown | null;
+      }>("agora_getTreasuryDisbursement", { disbursement_id: disbursementId }),
+    getTreasuryNonce: (treasury) =>
+      call<{ treasury: string; nonce: number }>("agora_getTreasuryNonce", {
+        treasury,
+      }),
+    getVestingUnlock: (unlockId) =>
+      call<{
+        unlock_id: string;
+        status: string;
+        unlock: unknown | null;
+      }>("agora_getVestingUnlock", { unlock_id: unlockId }),
+    getVestingNonce: (beneficiary) =>
+      call<{ beneficiary: string; nonce: number }>("agora_getVestingNonce", {
+        beneficiary,
+      }),
     getDrcObject: (objectId) =>
       call<{
         object_id: string;
@@ -522,6 +735,14 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<LightAccountBalances>("agora_getAccountBalances", { address }),
     getTltCovenant: (txId: string) =>
       call<LightTltCovenantLookup>("agora_getTltCovenant", { tx_id: txId }),
+    getDataCommitment: (args) =>
+      call<LightDataCommitmentLookup>("agora_getDataCommitment", {
+        ...(args.authorization_id === undefined
+          ? {}
+          : { authorization_id: args.authorization_id }),
+        ...(args.source === undefined ? {} : { source: args.source }),
+        ...(args.sequence === undefined ? {} : { sequence: args.sequence }),
+      }),
     getDrcOffer: (offerId: string) =>
       call<LightDrcOfferLookup>("agora_getDrcOffer", { offer_id: offerId }),
     getDrcAccountOffers: (args) =>
@@ -556,12 +777,30 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getEthBlockNumber: () => call("eth_blockNumber", []),
     getEthBalance: (address, blockTag = "latest") =>
       call("eth_getBalance", [address, blockTag]),
+    sendRawEvmTransaction: (rawHex) => {
+      const hex = rawHex.startsWith("0x") || rawHex.startsWith("0X") ? rawHex : `0x${rawHex}`;
+      return call<string>("eth_sendRawTransaction", [hex]);
+    },
     getUtxos: (address: string) =>
       call<LightUtxoSet>("agora_getUtxos", { address }),
     submitTransaction: (tx: unknown) =>
       call<SubmitTxResult>("agora_submitTransaction", { tx }),
     submitTltCovenant: (tx) =>
       call<{ tx_id: string }>("agora_submitTltCovenant", { covenant: tx }),
+    submitAccountTransfer: (tx) =>
+      call<{ account_tx_id: string }>("agora_submitAccountTransfer", {
+        account_transfer: tx,
+      }),
+    submitOvlExecution: (tx) =>
+      call<{ execution_tx_id: string }>("agora_submitOvlExecution", {
+        execution: tx,
+      }),
+    submitDrcPayment: (tx) =>
+      call<{ payment_id: string }>("agora_submitDrcPayment", { payment: tx }),
+    submitDataCommitment: (authorization) =>
+      call<{ authorization_id: string }>("agora_submitDataCommitment", {
+        authorization,
+      }),
     submitDrcOfferCreate: (tx) =>
       call<{ offer_id: string; simulated_fill: boolean }>(
         "agora_submitDrcOfferCreate",
@@ -571,6 +810,117 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<{ cancel_tx_id: string }>("agora_submitDrcOfferCancel", {
         offer_cancel: tx,
       }),
+    submitDrcEscrowCreate: (tx) =>
+      call<{ escrow_id: string }>("agora_submitDrcEscrowCreate", {
+        escrow_create: tx,
+      }),
+    submitDrcEscrowFinish: (tx) =>
+      call<{ finish_tx_id: string }>("agora_submitDrcEscrowFinish", {
+        escrow_finish: tx,
+      }),
+    submitDrcEscrowCancel: (tx) =>
+      call<{ cancel_tx_id: string }>("agora_submitDrcEscrowCancel", {
+        escrow_cancel: tx,
+      }),
+    submitDrcCheckCreate: (tx) =>
+      call<{ check_id: string }>("agora_submitDrcCheckCreate", {
+        check_create: tx,
+      }),
+    submitDrcCheckCash: (tx) =>
+      call<{ cash_tx_id: string }>("agora_submitDrcCheckCash", {
+        check_cash: tx,
+      }),
+    submitDrcCheckCancel: (tx) =>
+      call<{ cancel_tx_id: string }>("agora_submitDrcCheckCancel", {
+        check_cancel: tx,
+      }),
+    submitDrcPaymentChannelCreate: (tx) =>
+      call<{ channel_id: string }>("agora_submitDrcPaymentChannelCreate", {
+        payment_channel_create: tx,
+      }),
+    submitDrcPaymentChannelFund: (tx) =>
+      call<{ fund_tx_id: string }>("agora_submitDrcPaymentChannelFund", {
+        payment_channel_fund: tx,
+      }),
+    submitDrcPaymentChannelClaim: (tx) =>
+      call<{ claim_tx_id: string }>("agora_submitDrcPaymentChannelClaim", {
+        payment_channel_claim: tx,
+      }),
+    submitDrcPaymentChannelClose: (tx) =>
+      call<{ close_tx_id: string }>("agora_submitDrcPaymentChannelClose", {
+        payment_channel_close: tx,
+      }),
+    submitDrcTicketCreate: (tx) =>
+      call<{ ticket_create_tx_id: string }>("agora_submitDrcTicketCreate", {
+        ticket_create: tx,
+      }),
+    submitDrcRegularKey: (tx) =>
+      call<{ regular_key_tx_id: string }>("agora_submitDrcRegularKey", {
+        regular_key: tx,
+      }),
+    submitDrcSignerList: (tx) =>
+      call<{ signer_list_tx_id: string }>("agora_submitDrcSignerList", {
+        signer_list: tx,
+      }),
+    submitDrcDepositPreauth: (tx) =>
+      call<{ preauth_tx_id: string }>("agora_submitDrcDepositPreauth", {
+        preauth: tx,
+      }),
+    submitDrcAccountPolicy: (tx) =>
+      call<{ policy_tx_id: string }>("agora_submitDrcAccountPolicy", {
+        policy: tx,
+      }),
+    submitDrcTrustLineSet: (tx) =>
+      call<{ trust_line_set_tx_id: string }>("agora_submitDrcTrustLineSet", {
+        trust_line_set: tx,
+      }),
+    submitDrcIssuedTransfer: (tx) =>
+      call<{ issued_transfer_tx_id: string }>("agora_submitDrcIssuedTransfer", {
+        issued_transfer: tx,
+      }),
+    submitDrcIssuedAssetPolicySet: (tx) =>
+      call<{ policy_set_tx_id: string }>("agora_submitDrcIssuedAssetPolicySet", {
+        issued_asset_policy_set: tx,
+      }),
+    submitDrcTrustLineIssuerControl: (tx) =>
+      call<{ issuer_control_tx_id: string }>(
+        "agora_submitDrcTrustLineIssuerControl",
+        { trust_line_issuer_control: tx },
+      ),
+    submitDrcIssuedClawback: (tx) =>
+      call<{ clawback_tx_id: string }>("agora_submitDrcIssuedClawback", {
+        issued_clawback: tx,
+      }),
+    submitAttestation: (attestation) =>
+      call<{
+        block_hash: string;
+        state: string;
+        finalized: boolean;
+        ovl_signed_stake?: LightAmount;
+        drc_signed_stake?: LightAmount;
+      }>("agora_submitAttestation", { attestation }),
+    submitPassportAttestation: (attestation) =>
+      call<{ attestation_id: string }>("agora_submitPassportAttestation", {
+        attestation,
+      }),
+    submitHubRegistration: (registration) =>
+      call<{ registration_id: string }>("agora_submitHubRegistration", {
+        registration,
+      }),
+    submitGrantRegistration: (registration) =>
+      call<{ registration_id: string }>("agora_submitGrantRegistration", {
+        registration,
+      }),
+    submitMissionRegistration: (registration) =>
+      call<{ registration_id: string }>("agora_submitMissionRegistration", {
+        registration,
+      }),
+    submitTreasuryDisbursement: (disbursement) =>
+      call<{ disbursement_id: string }>("agora_submitTreasuryDisbursement", {
+        disbursement,
+      }),
+    submitVestingUnlock: (unlock) =>
+      call<{ unlock_id: string }>("agora_submitVestingUnlock", { unlock }),
     getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
     getGovernance: () => call<LightGovernance>("agora_getGovernance", []),
     listProposals: (limit = 64) =>

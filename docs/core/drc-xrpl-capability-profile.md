@@ -85,8 +85,8 @@ accepted-operation lookup. Remaining material gaps are:
 
 - native three-asset balances exist as `agora_getAccountBalances`; that is not
   XRPL `account_info` and does not change TLT `agora_getBalance`;
-- generated types exist, but shared/desktop/mobile wallets still cannot
-  construct or sign most DRC operations;
+- shared light-client builders now sign the remaining DRC families; that is
+  not XRPL `rippled` wallet parity and does not add per-family screens;
 - no frozen Trident genesis, live v3 loader, in-place schema migration CLI, or
   invariant-verification command; and
 - no DEX settlement convergence suite.
@@ -120,9 +120,9 @@ public-testnet readiness or XRPL parity.
 | Ledger-object directory | Ten closed live-object kinds have domain-separated IDs, validated descriptors, point lookup, and bounded owner/kind pagination | Agora Borsh/SHA-256 IDs and semantic owners; no XRPL key/hash or reserve parity | Executable · Experimental |
 | Public submission RPC | Typed submit methods exist for implemented DRC families | Agora JSON over Borsh-shaped types; no `submit` wire parity | Executable · Experimental |
 | Public query RPC | Family point queries, common object/account-object/operation/transaction reads, plus account-offer and book-offer pages | Agora response shapes, not XRPL `account_offers` / `book_offers` parity; funded size is not a simulated fill | Executable reads · Experimental |
-| Wallet/client | Generated types plus shared light-client queries for native balances, TLT covenants, DEX offers, escrow/check/ticket/trust-line reads, and OVL `eth_*` reads; explorer and wallets display those reads | No broad typed construction/signing/submission UX | Partial · Experimental |
+| Wallet/client | Generated types plus shared light-client queries and device-local builders for native balances, TLT covenants, DEX offers, escrow/Checks/channels/tickets/regular key/signer list/preauth/policy/trust lines/issued controls, and OVL `eth_*` reads; explorer and wallets display those reads; desktop/mobile call `DRC_FAMILY_SENDERS` | No per-family wallet screens; no XRPL `rippled` UX | Executable library · Experimental |
 | Mempool/template | Shared nonce/Ticket and family-specific object reservations; deterministic lane order; full-body templates | Same-block dependencies are often intentionally fail-closed in public admission | Executable · Experimental |
-| P2P/IBD | Typed operation gossip and full multi-lane block relay; compact blocks fall back to full body | No XRPL peer/wire protocol | Executable · Experimental |
+| P2P/IBD | Typed operation gossip, named-lane typed compact, and GetBlock on miss | No XRPL peer/wire protocol | Executable · Experimental |
 | Reorg/restart | Common objects and accepted receipts share the atomic journal; orphan receipts disappear and exact resubmission/reapply is deterministic | Included typed operations generally require explicit resubmission after reorg | Executable core · Experimental |
 | Genesis/migration | Draft v3 commits versions/policy; schema 19→20 initializes burn counters and 20→21 rebuilds objects/receipts and rewrites historical journals | Draft is unfrozen; schema-20 migration requires retained canonical bodies/acceptance/journals; no operator CLI exists | Experimental |
 | Smart contracts | DRC selectors/payloads/generic execution routes reject; OVL execution remains separate | Permanent exclusion | Enforced |
@@ -353,8 +353,9 @@ execution path working.
    Experimental. Path payments, autobridging, rippling, and AMM stay excluded.
 5. Broader public account/object/transaction/receipt pagination beyond the
    current point and page queries.
-6. Shared wallet typed construction/signing/query support, then desktop/mobile
-   UX.
+6. Completed: shared wallet typed construction/signing/submit for the remaining
+   DRC families (library-complete; desktop/mobile use shared helpers, not a
+   screen per family). Foreign-chain wallet parity stays incomplete.
 7. Multi-node deterministic settlement/convergence and adversarial load/crash
    matrices.
 8. Frozen genesis activation and explicit migration/reindex/invariant tooling.

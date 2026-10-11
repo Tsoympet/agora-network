@@ -194,6 +194,28 @@ pub fn burn_drc_fee_into(
     Ok(())
 }
 
+/// Destroy accepted DA inclusion fees in TLT. Circulating UTXOs are spent by
+/// the DA debit; this counter keeps net-supply honest.
+pub fn burn_tlt_fee_into(
+    store: &StateStore,
+    batch: &mut WriteBatch,
+    fee: u64,
+) -> Result<(), StateError> {
+    if fee == 0 {
+        return Ok(());
+    }
+    let issued = load_issued_supply(store, NativeAssetId::TLT)?;
+    let burned = load_burned_supply(store, NativeAssetId::TLT)?;
+    let next = burned
+        .checked_add(fee)
+        .ok_or_else(|| StateError::InvalidTx("TLT burned-supply overflow".into()))?;
+    if next > issued {
+        return Err(StateError::BurnedSupplyExceedsIssued);
+    }
+    put_burned_supply_into(batch, NativeAssetId::TLT, next);
+    Ok(())
+}
+
 /// Root-commit max, issued, burned, and net supply for all native assets.
 pub fn native_supply_root(store: &StateStore) -> Result<Hash, StateError> {
     let mut entries = Vec::with_capacity(NativeAssetId::ALL.len());
@@ -384,6 +406,36 @@ mod tests {
         assert!(matches!(
             burn_drc_fee_into(&store, &mut overflow, 1),
             Err(StateError::InvalidTx(message)) if message.contains("overflow")
+        ));
+    }
+
+    #[test]
+    fn tlt_fee_burn_tracks_net_supply() {
+        let store = StateStore::open_in_memory();
+        let mut batch = WriteBatch::new();
+        put_schema_version_into(&mut batch, DRC_FEE_BURN_SCHEMA_VERSION);
+        put_max_supply_into(&mut batch, NativeAssetId::TLT, 100);
+        put_issued_supply_into(&mut batch, NativeAssetId::TLT, 10);
+        put_burned_supply_into(&mut batch, NativeAssetId::TLT, 0);
+        store.write_batch(batch).unwrap();
+
+        let mut burn = WriteBatch::new();
+        burn_tlt_fee_into(&store, &mut burn, 4).unwrap();
+        store.write_batch(burn).unwrap();
+        assert_eq!(
+            load_native_supply_state(&store, NativeAssetId::TLT).unwrap(),
+            NativeSupplyState {
+                asset: NativeAssetId::TLT,
+                maximum_supply: 100,
+                issued_supply: 10,
+                burned_supply: 4,
+                net_supply: 6,
+            }
+        );
+        let mut overburn = WriteBatch::new();
+        assert!(matches!(
+            burn_tlt_fee_into(&store, &mut overburn, 7),
+            Err(StateError::BurnedSupplyExceedsIssued)
         ));
     }
 

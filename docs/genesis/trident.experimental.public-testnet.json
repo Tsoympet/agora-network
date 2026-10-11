@@ -1,0 +1,179 @@
+{
+  "network": "testnet",
+  "version": 3,
+  "schema": "agora-trident-genesis-v3",
+  "maturity": "Experimental",
+  "chain_name": "Agora Trident Experimental Public Testnet",
+  "chain_id": "agora-trident-experimental-testnet-1",
+  "timestamp_ms": 1720000000000,
+  "bits": 0,
+  "genesis_hash": "68b3c7afd712c5fc37825ff49e885364461b09dc7c4c40ee164cafe023e9b79b",
+  "network_fingerprint": "52b5fc85d7e4b5c710c23273f96494bbff4efbc99fc50f57be7c6eacba3e6ef6",
+  "state_transition_version": "agora-trident-state-v24",
+  "consensus_policy_version": "agora-trident-consensus-v2",
+  "governance_constitution_hash": "82ef5b8fd16f576cc5fd07f702637b29915d863f261b39ecd2fdce7b79577118",
+  "emergency_policy_hash": "b3c6b8f5dc813e2deb5c1b128ece242caed8a10adbcea7add46c090ae042d102",
+  "decimals": 8,
+  "wallet": {
+    "address_hrp": "agoratest",
+    "coin_type": 8888,
+    "coin_type_status": "registered",
+    "bip44_path_account0": "m/44'/8888'/0'/0/0",
+    "notes": "Experimental public-testnet BIP-44. Generated keys. Not ceremony-final."
+  },
+  "assets": {
+    "TLT": {
+      "id": "0x00",
+      "name": "Talanton",
+      "max_supply": 10000000000000000,
+      "decimals": 8,
+      "mineable": true,
+      "pow_algorithm": "randomx",
+      "genesis_allocation": 1000000000000000,
+      "staking_reward_reserve": 0,
+      "treasury_allocation": 1000000000,
+      "emission": {
+        "kind": null,
+        "initial_reward": 5000000000,
+        "halving_interval": 210000,
+        "reserve_base_units": null,
+        "epoch_reserve_drip": null,
+        "notes": null
+      },
+      "role": "L1 settlement / PoW security / base network fees"
+    },
+    "OVL": {
+      "id": "0x01",
+      "name": "Ovolos",
+      "max_supply": 2100000000000000000,
+      "decimals": 8,
+      "mineable": false,
+      "pow_algorithm": null,
+      "genesis_allocation": 2000000000,
+      "staking_reward_reserve": 210000000000000000,
+      "treasury_allocation": 1000000000,
+      "emission": {
+        "kind": "staking_reserve",
+        "initial_reward": null,
+        "halving_interval": null,
+        "reserve_base_units": 210000000000000000,
+        "epoch_reserve_drip": 1000000000,
+        "notes": "Experimental public-testnet staking reserve. Not ceremony-final. Never PoW minted."
+      },
+      "role": "L1 execution gas / OVL validators / builder economy"
+    },
+    "DRC": {
+      "id": "0x02",
+      "name": "Drachma",
+      "max_supply": 600000000000000000,
+      "decimals": 8,
+      "mineable": false,
+      "pow_algorithm": null,
+      "genesis_allocation": 2000000000,
+      "staking_reward_reserve": 60000000000000000,
+      "treasury_allocation": 1000000000,
+      "emission": {
+        "kind": "staking_community_reserve",
+        "initial_reward": null,
+        "halving_interval": null,
+        "reserve_base_units": 60000000000000000,
+        "epoch_reserve_drip": 1000000000,
+        "notes": "Experimental public-testnet staking reserve. Not ceremony-final. Never PoW minted."
+      },
+      "role": "L1 payments / DRC validators / community economy"
+    }
+  },
+  "treasuries": {
+    "tlt_security": {
+      "asset": "TLT",
+      "control": "governance-v1",
+      "allocation": 1000000000
+    },
+    "ovl_builder": {
+      "asset": "OVL",
+      "control": "governance-v1",
+      "allocation": 1000000000
+    },
+    "drc_community": {
+      "asset": "DRC",
+      "control": "governance-v1",
+      "allocation": 1000000000
+    }
+  },
+  "pow": {
+    "algorithm": "randomx",
+    "ghostdag_k": 18,
+    "target_block_time_ms": 1000,
+    "daa_window_size": 90,
+    "daa_max_adjustment_bits": 1,
+    "daa_min_level": 8,
+    "daa_max_level": 128
+  },
+  "finality": {
+    "model": "pow_plus_dual_pos",
+    "pow_work_threshold_policy": "minimum-blue-score-depth-v1",
+    "pow_work_threshold": 8,
+    "ovl_quorum_numerator": 2,
+    "ovl_quorum_denominator": 3,
+    "drc_quorum_numerator": 2,
+    "drc_quorum_denominator": 3,
+    "combine_stakes_by_price": false,
+    "admin_bypass": false
+  },
+  "ovl_validators": {
+    "max_validators": 16,
+    "min_self_bond": 1000000000,
+    "unbonding_period_checkpoints": 8,
+    "max_commission_bps": 2000,
+    "max_concentration_bps": 10000,
+    "genesis_set": [
+      {
+        "consensus_public_key": "03ab5d2e79cfd621b1b027ffb24e2453ed7fb571ba9a841ff0e2473466cabd168d",
+        "withdrawal_address": "agoratest1nxl2x9dfxlj70ld0zy5lw9rj6pf69zflgqwutf",
+        "self_bond": 1000000000,
+        "commission_bps": 100,
+        "metadata_hash": "ce3957693ea83f45f563e168845ecf1d631390cb63be96ab2f75c474033e936b"
+      }
+    ]
+  },
+  "drc_validators": {
+    "max_validators": 16,
+    "min_self_bond": 1000000000,
+    "unbonding_period_checkpoints": 8,
+    "max_commission_bps": 2000,
+    "max_concentration_bps": 10000,
+    "genesis_set": [
+      {
+        "consensus_public_key": "036b7eb04e07af07b5d82e463660f9e3e4eaf9c854e5aa47391d6daa8e9ac01a35",
+        "withdrawal_address": "agoratest15z98c7ty5ujam6r5yyfxdy33p6dljegtglnrm9",
+        "self_bond": 1000000000,
+        "commission_bps": 100,
+        "metadata_hash": "c8d4a471d6c1039aa62867db6ab260031c9362c2ff5dd759136b9f2c4936f41f"
+      }
+    ]
+  },
+  "vesting_schedules": [],
+  "initial_allocations": [
+    {
+      "asset": "TLT",
+      "address": "agoratest1e2eqe8pw7w094srjmulracnh7qn8xz9k4z8234",
+      "amount": 1000000000000000
+    },
+    {
+      "asset": "OVL",
+      "address": "agoratest1nxl2x9dfxlj70ld0zy5lw9rj6pf69zflgqwutf",
+      "amount": 2000000000
+    },
+    {
+      "asset": "DRC",
+      "address": "agoratest15z98c7ty5ujam6r5yyfxdy33p6dljegtglnrm9",
+      "amount": 2000000000
+    }
+  ],
+  "notes": [
+    "Experimental public-testnet freeze-ready artifact.",
+    "Generated secp256k1 validators and allocations. RandomX-only.",
+    "Dual-PoS genesis validators are present so finality can fire after the PoW work threshold.",
+    "Not ceremony-final. Not mainnet."
+  ]
+}

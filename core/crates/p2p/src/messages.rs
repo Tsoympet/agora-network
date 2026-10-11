@@ -6,7 +6,7 @@ use agora_types::{
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::ibd::short_ids_for_block;
+use crate::{ibd::short_ids_for_block, typed_compact::TypedCompactBody};
 
 /// Wire envelopes for gossip payloads.
 #[allow(clippy::large_enum_variant)]
@@ -83,6 +83,26 @@ pub enum NetworkMessage {
     DrcOfferCancel(agora_types::DrcOfferCancelTx),
     /// Appended after offer gossip; TLT covenant spends on the transaction topic.
     TltCovenant(agora_types::TltCovenantTx),
+    /// Appended in Trident protocol v25; signed DA authorization on the tx topic.
+    DataCommitment(agora_types::DataCommitmentAuthorization),
+    /// Appended in Trident protocol v26; raw Ethereum bytes (version 2). Not Agora-signed.
+    OvlRawExecution(agora_types::OvlExecutionTx),
+    /// Appended in Trident protocol v27; named-lane compact body (not UTXO short ids).
+    TypedCompactBlock(TypedCompactBody),
+    /// Appended in Trident protocol v28; detached DRC multisign attachments on the tx topic.
+    DrcMultisignAttachment(agora_types::DrcMultisignBlockAttachment),
+    /// Appended in Trident protocol v29; signed Hub-coordinator passport attestation.
+    PassportAttestation(agora_types::PassportAttestation),
+    /// Appended in Trident protocol v30; first-coordinator-signed hub registration.
+    HubRegistration(agora_types::HubRegistration),
+    /// Appended in Trident protocol v30; hub-coordinator-signed grant registration.
+    GrantRegistration(agora_types::GrantRegistration),
+    /// Appended in Trident protocol v30; hub-coordinator-signed mission registration.
+    MissionRegistration(agora_types::MissionRegistration),
+    /// Appended in Trident protocol v31; controller-signed protocol treasury spend.
+    TreasuryDisbursement(agora_types::TreasuryDisbursement),
+    /// Appended in Trident protocol v32; beneficiary-signed vesting unlock.
+    VestingUnlock(agora_types::VestingUnlock),
 }
 
 impl NetworkMessage {
@@ -94,18 +114,21 @@ impl NetworkMessage {
         borsh::from_slice(bytes)
     }
 
-    /// Build compact gossip for UTXO-only blocks.
+    /// Build compact gossip.
     ///
-    /// Multi-lane blocks use the full body until a versioned compact format can
-    /// commit lane kinds without ambiguity.
+    /// UTXO-only blocks keep `CompactBlock`. Named typed lanes, including
+    /// detached DRC multisign attachments, use `TypedCompactBlock`. A miss
+    /// or unknown kind still falls back to GetBlock.
     pub fn compact_from_block(block: &Block) -> Self {
-        if block.requires_full_body_gossip() {
-            Self::Block(block.clone())
-        } else {
+        if !block.requires_full_body_gossip() {
             Self::CompactBlock {
                 header: block.header.clone(),
                 short_ids: short_ids_for_block(block),
             }
+        } else if let Some(body) = TypedCompactBody::from_block(block) {
+            Self::TypedCompactBlock(body)
+        } else {
+            Self::Block(block.clone())
         }
     }
 }
@@ -113,10 +136,23 @@ impl NetworkMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::typed_compact::TYPED_COMPACT_VERSION;
     use agora_types::{
         Address, Amount, DataAvailabilityCommitment, DataCommitmentAuthorization,
         DrcAccountPolicyTx, Hash,
     };
+
+    fn assert_typed_compact(block: &Block) {
+        match NetworkMessage::compact_from_block(block) {
+            NetworkMessage::TypedCompactBlock(body) => {
+                assert_eq!(body.version, TYPED_COMPACT_VERSION);
+                let msg = NetworkMessage::TypedCompactBlock(body);
+                assert_eq!(NetworkMessage::decode(&msg.encode()).unwrap(), msg);
+                assert_eq!(msg.encode()[0], 35);
+            }
+            other => panic!("expected typed compact, got {other:?}"),
+        }
+    }
 
     #[test]
     fn compact_and_get_block_roundtrip() {
@@ -184,8 +220,7 @@ mod tests {
             ));
         block.header.tx_root = block.compute_body_root();
 
-        let message = NetworkMessage::compact_from_block(&block);
-        assert_eq!(message, NetworkMessage::Block(block));
+        assert_typed_compact(&block);
     }
 
     #[test]
@@ -221,7 +256,7 @@ mod tests {
         block.header.tx_root = block.compute_body_root();
 
         let message = NetworkMessage::compact_from_block(&block);
-        assert_eq!(message, NetworkMessage::Block(block.clone()));
+        assert_typed_compact(&block);
         assert_eq!(NetworkMessage::decode(&message.encode()).unwrap(), message);
     }
 
@@ -312,8 +347,7 @@ mod tests {
             multisign: None,
         });
         block.header.tx_root = block.compute_body_root();
-        let message = NetworkMessage::compact_from_block(&block);
-        assert_eq!(message, NetworkMessage::Block(block));
+        assert_typed_compact(&block);
     }
 
     #[test]
@@ -336,8 +370,7 @@ mod tests {
         );
         block.drc_ticket_creates.push(create);
         block.header.tx_root = block.compute_body_root();
-        let full = NetworkMessage::compact_from_block(&block);
-        assert_eq!(full, NetworkMessage::Block(block));
+        assert_typed_compact(&block);
     }
 
     #[test]
@@ -363,6 +396,153 @@ mod tests {
         assert_eq!(gossip.encode()[0], 32);
         assert_eq!(NetworkMessage::decode(&gossip.encode()).unwrap(), gossip);
 
+        let da = NetworkMessage::DataCommitment(DataCommitmentAuthorization::unsigned(
+            Address([7; 20]),
+            0,
+            DataAvailabilityCommitment::agora_layers_ovolos_batch(
+                "agora-ovolos-testnet-1".into(),
+                Hash([1; 32]),
+                Hash([2; 32]),
+                3,
+                Hash([4; 32]),
+                Hash([5; 32]),
+                Hash([6; 32]),
+                7,
+                8,
+            ),
+        ));
+        assert_eq!(da.encode()[0], 33);
+        assert_eq!(NetworkMessage::decode(&da.encode()).unwrap(), da);
+
+        let raw = NetworkMessage::OvlRawExecution(agora_types::OvlExecutionTx::raw_ethereum(vec![
+            0x02, 0xc0,
+        ]));
+        assert_eq!(raw.encode()[0], 34);
+        assert_eq!(NetworkMessage::decode(&raw.encode()).unwrap(), raw);
+
+        let compact = NetworkMessage::TypedCompactBlock(crate::typed_compact::TypedCompactBody {
+            version: TYPED_COMPACT_VERSION,
+            header: BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            lanes: vec![],
+        });
+        assert_eq!(compact.encode()[0], 35);
+
+        let attachment =
+            NetworkMessage::DrcMultisignAttachment(agora_types::DrcMultisignBlockAttachment {
+                version: 1,
+                key: agora_types::DrcMultisignAttachmentKey {
+                    version: 1,
+                    kind: agora_types::DrcMultisignOperationKind::DrcPayment,
+                    signing_commitment: Hash([9; 32]),
+                },
+                auth: agora_types::DrcMultisignAuth {
+                    version: 1,
+                    signing_for: Address([9; 20]),
+                    signatures: vec![agora_types::DrcMultisignEntry {
+                        signer: Address([10; 20]),
+                        public_key: vec![2; 33],
+                        signature: vec![3; 64],
+                    }],
+                },
+            });
+        assert_eq!(attachment.encode()[0], 36);
+        assert_eq!(
+            NetworkMessage::decode(&attachment.encode()).unwrap(),
+            attachment
+        );
+
+        let passport = NetworkMessage::PassportAttestation(agora_types::PassportAttestation {
+            version: 1,
+            issuer: Address([1; 20]),
+            subject: Address([2; 20]),
+            category: agora_types::PassportCategory::Code,
+            evidence_hash: Hash([3; 32]),
+            issuer_policy_hash: Hash([4; 32]),
+            issued_epoch: 5,
+            expires_epoch: Some(10),
+            nonce: 0,
+            public_key: vec![1; 33],
+            signature: vec![2; 64],
+        });
+        assert_eq!(passport.encode()[0], 37);
+        assert_eq!(
+            NetworkMessage::decode(&passport.encode()).unwrap(),
+            passport
+        );
+
+        let hub = NetworkMessage::HubRegistration(agora_types::HubRegistration::unsigned(
+            "Agora Hub".into(),
+            "Geographic".into(),
+            Hash([2; 32]),
+            vec![Address([3; 20])],
+            Address([4; 20]),
+            12,
+            3,
+            Hash([5; 32]),
+            Hash([6; 32]),
+            1,
+            0,
+        ));
+        assert_eq!(hub.encode()[0], 38);
+        assert_eq!(NetworkMessage::decode(&hub.encode()).unwrap(), hub);
+
+        let grant = NetworkMessage::GrantRegistration(agora_types::GrantRegistration::unsigned(
+            Address([1; 20]),
+            7,
+            agora_types::TreasuryId::OvlBuilder,
+            Address([2; 20]),
+            agora_types::Amount::from_base_units(10),
+            agora_types::CommunityGrantKind::Micro,
+            vec![],
+            Hash::ZERO,
+            0,
+        ));
+        assert_eq!(grant.encode()[0], 39);
+        assert_eq!(NetworkMessage::decode(&grant.encode()).unwrap(), grant);
+
+        let mission =
+            NetworkMessage::MissionRegistration(agora_types::MissionRegistration::unsigned(
+                Address([1; 20]),
+                agora_types::TreasuryId::DrcCommunity,
+                agora_types::Amount::from_base_units(5),
+                Hash([3; 32]),
+                0,
+            ));
+        assert_eq!(mission.encode()[0], 40);
+        assert_eq!(NetworkMessage::decode(&mission.encode()).unwrap(), mission);
+
+        let treasury =
+            NetworkMessage::TreasuryDisbursement(agora_types::TreasuryDisbursement::unsigned(
+                agora_types::TreasuryId::OvlBuilder,
+                Address([1; 20]),
+                agora_types::Amount::from_base_units(10),
+                Hash([2; 32]),
+                Hash([3; 32]),
+                0,
+            ));
+        assert_eq!(treasury.encode()[0], 41);
+        assert_eq!(
+            NetworkMessage::decode(&treasury.encode()).unwrap(),
+            treasury
+        );
+
+        let vesting = NetworkMessage::VestingUnlock(agora_types::VestingUnlock::unsigned(
+            agora_types::NativeAssetId::OVL,
+            Address([1; 20]),
+            Hash([2; 32]),
+            agora_types::Amount::from_base_units(10),
+            0,
+        ));
+        assert_eq!(vesting.encode()[0], 42);
+        assert_eq!(NetworkMessage::decode(&vesting.encode()).unwrap(), vesting);
+
         let mut block = Block::utxo(
             BlockHeader {
                 version: 1,
@@ -376,8 +556,7 @@ mod tests {
         );
         block.tlt_covenants.push(tx);
         block.header.tx_root = block.compute_body_root();
-        let full = NetworkMessage::compact_from_block(&block);
-        assert_eq!(full, NetworkMessage::Block(block));
+        assert_typed_compact(&block);
     }
 
     #[test]
@@ -419,8 +598,7 @@ mod tests {
             multisign: None,
         });
         block.header.tx_root = block.compute_body_root();
-        let full = NetworkMessage::compact_from_block(&block);
-        assert_eq!(full, NetworkMessage::Block(block));
+        assert_typed_compact(&block);
         let empty = Block::utxo(
             BlockHeader {
                 version: 1,

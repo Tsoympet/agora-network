@@ -3,6 +3,8 @@
 //! This type deliberately does not replace [`crate::BlockHeader`] or appear in
 //! [`crate::Block`]. Its Borsh representation is a domain/version envelope so a
 //! future runtime can select Trident semantics without changing frozen v2 bytes.
+//! IBD, mining, compact gossip, and `agora_getNodeInfo.genesis_hash` stay on
+//! [`crate::Block::id`]. `commitment_hash` is a Meta identity only.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use thiserror::Error;

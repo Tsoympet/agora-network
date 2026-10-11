@@ -152,9 +152,10 @@ in [`drc-ledger-objects.md`](drc-ledger-objects.md).
 - `UtxoJournal.data_availability_meta_before` restores both key families in the
   same crash-safe reorg batches as the other lanes.
 
-The live node leaves DA policy activation unset because no TLT byte/state fee
-or sponsorship rule is frozen. This state consumer is therefore block-only and
-fail-closed outside explicitly activated Trident contexts.
+Accepted authorizations burn [`DA_INCLUSION_FEE_TLT`](../core/data-availability.md)
+from the operator's TLT UTXOs and increment the TLT burned-supply counter. Default
+Experimental boot binds the DA fingerprint to the live mesh; missing fingerprint
+is a misconfigured signing context, not a fee-policy placeholder.
 
 ## Storage backends
 

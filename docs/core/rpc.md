@@ -59,14 +59,17 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | `agora_fundAddress` | Dev/testnet mint: write a spendable `cf_utxo` (needs `AGORA_RPC_ALLOW_FUND`; **permanently disabled on mainnet**) |
 | `agora_getBlockTemplate` | Mining template block (tips as parents + coinbase) |
 | `agora_submitBlock` | Admit a mined block (PoW verify + store + gossip) |
-| `agora_getFinality` | Trident checkpoint certificate / state for a block hash |
+| `agora_getFinality` | Trident checkpoint certificate / state for a block hash. Includes a signable `body` when the block is known |
 | `agora_getFinalizedTip` | Finalized blue-score frontier |
 | `agora_submitAttestation` | Admit + gossip an OVL/DRC checkpoint attestation |
 | `agora_getValidatorSet` | OVL/DRC validator snapshot (`asset`, optional `epoch`) |
 | `agora_getValidator` | One validator record |
 | `agora_getRewardPool` | Slash/reward pool balance for OVL or DRC |
 | `agora_getNativeAssetSupply` | Read maximum, issued, lifetime burned, and checked net supply for TLT/OVL/DRC as decimal strings |
-| `agora_getProtocolTreasuries` | Canonical governance policy/root and asset-isolated treasury balances |
+| `agora_getProtocolTreasuries` | Canonical governance policy/root, asset-isolated treasury balances, controller, and nonce |
+| `agora_submitTreasuryDisbursement` | Admit a controller-signed protocol treasury spend (no mint) |
+| `agora_getTreasuryDisbursement` | Pending mempool or accepted disbursement envelope |
+| `agora_getTreasuryNonce` | Next consensus nonce for one protocol treasury |
 | `agora_getCommunityRegistry` | Read canonical Hub, Passport, Grant, and Mission registry summary/records |
 | `agora_submitStakeTx` | Validate, reserve, and gossip a secp256k1-signed stake tx for block inclusion |
 | `agora_getConstitution` | Enacted constitution id, content hash, body |
@@ -104,7 +107,9 @@ Public reads when `AGORA_RPC_TOKEN` is set include `web3_clientVersion`,
 `eth_call`, `eth_estimateGas`, `eth_feeHistory`, `eth_getTransactionByHash`,
 `eth_getTransactionReceipt`, `eth_getBlockByNumber`, `eth_getBlockByHash`,
 `eth_getLogs`, the block transaction-count methods, and the transaction-by-index
-methods. `eth_sendRawTransaction` requires the token and the dev/test gate.
+methods. `eth_sendRawTransaction` requires the token and the dev/test gate;
+it admits the raw gossip pool (`OvlRawExecution`, protocol v26) rather than
+the Agora-signed `OvlExecution` pool.
 `eth_getProof` is not implemented. See [`ovl-evm.md`](ovl-evm.md).
 
 DRC payment, escrow, Check, payment-channel, trust-line, issued-asset,

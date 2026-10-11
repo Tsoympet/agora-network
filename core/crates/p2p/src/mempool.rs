@@ -2,31 +2,47 @@ use std::collections::{HashMap, HashSet};
 
 use agora_types::{
     resolve_drc_account_sequence, sequence_signals_rbf, AccountTransfer, Address, Block,
-    DrcAccountPolicyTx, DrcAccountSequence, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
-    DrcDepositPreauthAction, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx,
-    DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx, DrcIssuedClawbackTx, DrcIssuedTransferTx,
-    DrcOfferCancelTx, DrcOfferCreateTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    DataCommitmentAuthorization, DrcAccountPolicyTx, DrcAccountSequence, DrcCheckCancelTx,
+    DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthAction, DrcDepositPreauthTx,
+    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedAssetPolicySetTx,
+    DrcIssuedClawbackTx, DrcIssuedTransferTx, DrcMultisignBlockAttachment, DrcOfferCancelTx,
+    DrcOfferCreateTx, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx, DrcRegularKeyTx,
-    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx, Hash,
-    NativeAssetId, OutPoint, OvlExecutionTx, SignedStakeTx, TltCovenantTx, Transaction,
-    ACCOUNT_TRANSFER_DRC_TICKET_VERSION, DRC_ACCOUNT_POLICY_TICKET_TX_VERSION,
-    DRC_CHECK_CANCEL_TICKET_VERSION, DRC_CHECK_CASH_TICKET_VERSION,
-    DRC_CHECK_CREATE_TICKET_VERSION, DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION,
-    DRC_ESCROW_CANCEL_TICKET_VERSION, DRC_ESCROW_CREATE_TICKET_VERSION,
-    DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
+    DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx, DrcTrustLineSetTx,
+    GrantRegistration, Hash, HubRegistration, MissionRegistration, NativeAssetId, OutPoint,
+    OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx, Transaction,
+    TreasuryDisbursement, TreasuryId, VestingUnlock, ACCOUNT_TRANSFER_DRC_TICKET_VERSION,
+    DRC_ACCOUNT_POLICY_TICKET_TX_VERSION, DRC_CHECK_CANCEL_TICKET_VERSION,
+    DRC_CHECK_CASH_TICKET_VERSION, DRC_CHECK_CREATE_TICKET_VERSION,
+    DRC_DEPOSIT_PREAUTH_TICKET_TX_VERSION, DRC_ESCROW_CANCEL_TICKET_VERSION,
+    DRC_ESCROW_CREATE_TICKET_VERSION, DRC_ESCROW_FINISH_TICKET_VERSION, DRC_PAYMENT_TICKET_VERSION,
     DRC_REGULAR_KEY_TICKET_TX_VERSION, DRC_SIGNER_LIST_TICKET_TX_VERSION, STAKE_TX_TICKET_VERSION,
 };
 
 use crate::P2pError;
 
+#[path = "community_lane.rs"]
+mod community_lane;
+#[path = "da_lane.rs"]
+mod da_lane;
 #[path = "issued_controls_lane.rs"]
 mod issued_controls_lane;
+#[path = "multisign_compact.rs"]
+mod multisign_compact;
 #[path = "offer_lane.rs"]
 mod offer_lane;
+#[path = "ovl_raw_lane.rs"]
+mod ovl_raw_lane;
+#[path = "passport_lane.rs"]
+mod passport_lane;
 #[path = "payment_channel_lane.rs"]
 mod payment_channel_lane;
+#[path = "treasury_lane.rs"]
+mod treasury_lane;
 #[path = "trust_line_lane.rs"]
 mod trust_line_lane;
+#[path = "vesting_lane.rs"]
+mod vesting_lane;
 
 /// Default cap on how many transfer txs a mining template pulls from the pool.
 pub const DEFAULT_TEMPLATE_TX_LIMIT: usize = 128;
@@ -59,6 +75,8 @@ pub struct Mempool {
     account_txs: HashMap<Hash, AccountTransfer>,
     stake_txs: HashMap<Hash, SignedStakeTx>,
     ovl_execution_txs: HashMap<Hash, OvlExecutionTx>,
+    /// Version-2 raw Ethereum envelopes. Not Agora-signed; not nonce-reserved.
+    ovl_raw_execution_txs: HashMap<Hash, OvlExecutionTx>,
     payment_txs: HashMap<Hash, DrcPaymentTx>,
     drc_policy_txs: HashMap<Hash, DrcAccountPolicyTx>,
     drc_deposit_preauth_txs: HashMap<Hash, DrcDepositPreauthTx>,
@@ -91,6 +109,25 @@ pub struct Mempool {
     drc_offer_create_txs: HashMap<Hash, DrcOfferCreateTx>,
     drc_offer_cancel_txs: HashMap<Hash, DrcOfferCancelTx>,
     pending_offer_cancels: HashMap<Hash, Hash>,
+    /// Signed DA authorizations. Inclusion burns the TLT inclusion fee at apply.
+    data_commitments: HashMap<Hash, DataCommitmentAuthorization>,
+    reserved_da_sequences: HashMap<(u8, u64), Hash>,
+    reserved_da_operators: HashMap<Address, Hash>,
+    /// Detached DRC multisign attachments indexed by `body_commitment_id`.
+    drc_multisign_attachments: HashMap<Hash, DrcMultisignBlockAttachment>,
+    /// Signed Hub-coordinator passport attestations.
+    passport_attestations: HashMap<Hash, PassportAttestation>,
+    reserved_passport_issuers: HashMap<Address, Hash>,
+    hub_registrations: HashMap<Hash, HubRegistration>,
+    reserved_hub_coordinators: HashMap<Address, Hash>,
+    grant_registrations: HashMap<Hash, GrantRegistration>,
+    reserved_grant_registrars: HashMap<Address, Hash>,
+    mission_registrations: HashMap<Hash, MissionRegistration>,
+    reserved_mission_sponsors: HashMap<Address, Hash>,
+    treasury_disbursements: HashMap<Hash, TreasuryDisbursement>,
+    reserved_treasury_ids: HashMap<TreasuryId, Hash>,
+    vesting_unlocks: HashMap<Hash, VestingUnlock>,
+    reserved_vesting_beneficiaries: HashMap<Address, Hash>,
     pending_native_offer_lock: HashMap<Address, u64>,
     pending_issued_offer_reserve: HashMap<(Address, Hash), u64>,
     reserved_asset_policy_assets: HashMap<Hash, Hash>,
@@ -126,6 +163,12 @@ enum DrcSlotReservation {
     },
 }
 
+fn map_by_short_id<'a, T>(map: &'a HashMap<Hash, T>, short_id: &[u8; 8]) -> Option<&'a T> {
+    map.iter()
+        .find(|(id, _)| &id.as_bytes()[..8] == short_id.as_slice())
+        .map(|(_, value)| value)
+}
+
 impl Mempool {
     pub fn new(max_size: usize) -> Self {
         Self {
@@ -137,6 +180,7 @@ impl Mempool {
             account_txs: HashMap::new(),
             stake_txs: HashMap::new(),
             ovl_execution_txs: HashMap::new(),
+            ovl_raw_execution_txs: HashMap::new(),
             payment_txs: HashMap::new(),
             drc_policy_txs: HashMap::new(),
             drc_deposit_preauth_txs: HashMap::new(),
@@ -167,6 +211,22 @@ impl Mempool {
             drc_offer_create_txs: HashMap::new(),
             drc_offer_cancel_txs: HashMap::new(),
             pending_offer_cancels: HashMap::new(),
+            data_commitments: HashMap::new(),
+            reserved_da_sequences: HashMap::new(),
+            reserved_da_operators: HashMap::new(),
+            drc_multisign_attachments: HashMap::new(),
+            passport_attestations: HashMap::new(),
+            reserved_passport_issuers: HashMap::new(),
+            hub_registrations: HashMap::new(),
+            reserved_hub_coordinators: HashMap::new(),
+            grant_registrations: HashMap::new(),
+            reserved_grant_registrars: HashMap::new(),
+            mission_registrations: HashMap::new(),
+            reserved_mission_sponsors: HashMap::new(),
+            treasury_disbursements: HashMap::new(),
+            reserved_treasury_ids: HashMap::new(),
+            vesting_unlocks: HashMap::new(),
+            reserved_vesting_beneficiaries: HashMap::new(),
             pending_native_offer_lock: HashMap::new(),
             pending_issued_offer_reserve: HashMap::new(),
             reserved_asset_policy_assets: HashMap::new(),
@@ -193,6 +253,7 @@ impl Mempool {
             + self.account_txs.len()
             + self.stake_txs.len()
             + self.ovl_execution_txs.len()
+            + self.ovl_raw_maps_len()
             + self.payment_txs.len()
             + self.drc_policy_txs.len()
             + self.drc_deposit_preauth_txs.len()
@@ -209,6 +270,14 @@ impl Mempool {
             + self.trust_line_maps_len()
             + self.issued_controls_maps_len()
             + self.offer_maps_len()
+            + self.data_commitment_maps_len()
+            + self.drc_multisign_attachments.len()
+            + self.passport_attestations.len()
+            + self.hub_registrations.len()
+            + self.grant_registrations.len()
+            + self.mission_registrations.len()
+            + self.treasury_disbursements.len()
+            + self.vesting_unlocks.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -221,6 +290,7 @@ impl Mempool {
             || self.account_txs.contains_key(tx_id)
             || self.stake_txs.contains_key(tx_id)
             || self.ovl_execution_txs.contains_key(tx_id)
+            || self.ovl_raw_maps_contains(tx_id)
             || self.payment_txs.contains_key(tx_id)
             || self.drc_policy_txs.contains_key(tx_id)
             || self.drc_deposit_preauth_txs.contains_key(tx_id)
@@ -237,6 +307,8 @@ impl Mempool {
             || self.trust_line_maps_contains(tx_id)
             || self.issued_controls_maps_contains(tx_id)
             || self.offer_maps_contains(tx_id)
+            || self.data_commitment_maps_contains(tx_id)
+            || self.drc_multisign_attachments.contains_key(tx_id)
     }
 
     pub fn ticket_consumer_reserved(&self, owner: &Address, ticket_sequence: u64) -> bool {
@@ -1453,10 +1525,165 @@ impl Mempool {
 
     /// Lookup by first 8 bytes of `tx_id` for compact-block inflation.
     pub fn get_by_short_id(&self, short_id: &[u8; 8]) -> Option<&Transaction> {
-        self.txs
-            .iter()
-            .find(|(id, _)| &id.as_bytes()[..8] == short_id.as_slice())
-            .map(|(_, tx)| tx)
+        map_by_short_id(&self.txs, short_id)
+    }
+
+    /// Named-lane compact inflation. OVL v1 and raw v2 share one lane kind.
+    pub fn clone_typed_lane_item(
+        &self,
+        kind: u8,
+        short_id: &[u8; 8],
+    ) -> Option<crate::typed_compact::CompactLaneItem> {
+        use crate::typed_compact::{
+            CompactLaneItem as Item, COMPACT_LANE_ACCOUNT, COMPACT_LANE_DATA_COMMITMENT,
+            COMPACT_LANE_DRC_ASSET_POLICY, COMPACT_LANE_DRC_CHANNEL_CLAIM,
+            COMPACT_LANE_DRC_CHANNEL_CLOSE, COMPACT_LANE_DRC_CHANNEL_CREATE,
+            COMPACT_LANE_DRC_CHANNEL_FUND, COMPACT_LANE_DRC_CHECK_CANCEL,
+            COMPACT_LANE_DRC_CHECK_CASH, COMPACT_LANE_DRC_CHECK_CREATE, COMPACT_LANE_DRC_CLAWBACK,
+            COMPACT_LANE_DRC_ESCROW_CANCEL, COMPACT_LANE_DRC_ESCROW_CREATE,
+            COMPACT_LANE_DRC_ESCROW_FINISH, COMPACT_LANE_DRC_ISSUED_TRANSFER,
+            COMPACT_LANE_DRC_ISSUER_CONTROL, COMPACT_LANE_DRC_MULTISIGN,
+            COMPACT_LANE_DRC_OFFER_CANCEL, COMPACT_LANE_DRC_OFFER_CREATE, COMPACT_LANE_DRC_PAYMENT,
+            COMPACT_LANE_DRC_POLICY, COMPACT_LANE_DRC_PREAUTH, COMPACT_LANE_DRC_REGULAR_KEY,
+            COMPACT_LANE_DRC_SIGNER_LIST, COMPACT_LANE_DRC_TICKET, COMPACT_LANE_DRC_TRUST_LINE,
+            COMPACT_LANE_GRANT, COMPACT_LANE_HUB, COMPACT_LANE_MISSION, COMPACT_LANE_OVL_EXECUTION,
+            COMPACT_LANE_PASSPORT, COMPACT_LANE_STAKE, COMPACT_LANE_TLT_COVENANT,
+            COMPACT_LANE_TREASURY, COMPACT_LANE_UTXO, COMPACT_LANE_VESTING,
+        };
+        match kind {
+            COMPACT_LANE_UTXO => map_by_short_id(&self.txs, short_id)
+                .cloned()
+                .map(Item::Utxo),
+            COMPACT_LANE_ACCOUNT => map_by_short_id(&self.account_txs, short_id)
+                .cloned()
+                .map(Item::Account),
+            COMPACT_LANE_STAKE => map_by_short_id(&self.stake_txs, short_id)
+                .cloned()
+                .map(Item::Stake),
+            COMPACT_LANE_OVL_EXECUTION => map_by_short_id(&self.ovl_execution_txs, short_id)
+                .cloned()
+                .or_else(|| map_by_short_id(&self.ovl_raw_execution_txs, short_id).cloned())
+                .map(Item::OvlExecution),
+            COMPACT_LANE_DRC_PAYMENT => map_by_short_id(&self.payment_txs, short_id)
+                .cloned()
+                .map(Item::DrcPayment),
+            COMPACT_LANE_DATA_COMMITMENT => map_by_short_id(&self.data_commitments, short_id)
+                .cloned()
+                .map(Item::DataCommitment),
+            COMPACT_LANE_DRC_POLICY => map_by_short_id(&self.drc_policy_txs, short_id)
+                .cloned()
+                .map(Item::DrcPolicy),
+            COMPACT_LANE_DRC_PREAUTH => map_by_short_id(&self.drc_deposit_preauth_txs, short_id)
+                .cloned()
+                .map(Item::DrcPreauth),
+            COMPACT_LANE_DRC_REGULAR_KEY => map_by_short_id(&self.drc_regular_key_txs, short_id)
+                .cloned()
+                .map(Item::DrcRegularKey),
+            COMPACT_LANE_DRC_SIGNER_LIST => map_by_short_id(&self.drc_signer_list_txs, short_id)
+                .cloned()
+                .map(Item::DrcSignerList),
+            COMPACT_LANE_DRC_TICKET => map_by_short_id(&self.drc_ticket_create_txs, short_id)
+                .cloned()
+                .map(Item::DrcTicket),
+            COMPACT_LANE_DRC_ESCROW_CREATE => {
+                map_by_short_id(&self.drc_escrow_create_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcEscrowCreate)
+            }
+            COMPACT_LANE_DRC_ESCROW_FINISH => {
+                map_by_short_id(&self.drc_escrow_finish_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcEscrowFinish)
+            }
+            COMPACT_LANE_DRC_ESCROW_CANCEL => {
+                map_by_short_id(&self.drc_escrow_cancel_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcEscrowCancel)
+            }
+            COMPACT_LANE_DRC_CHECK_CREATE => map_by_short_id(&self.drc_check_create_txs, short_id)
+                .cloned()
+                .map(Item::DrcCheckCreate),
+            COMPACT_LANE_DRC_CHECK_CASH => map_by_short_id(&self.drc_check_cash_txs, short_id)
+                .cloned()
+                .map(Item::DrcCheckCash),
+            COMPACT_LANE_DRC_CHECK_CANCEL => map_by_short_id(&self.drc_check_cancel_txs, short_id)
+                .cloned()
+                .map(Item::DrcCheckCancel),
+            COMPACT_LANE_DRC_CHANNEL_CREATE => {
+                map_by_short_id(&self.drc_payment_channel_create_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcChannelCreate)
+            }
+            COMPACT_LANE_DRC_CHANNEL_FUND => {
+                map_by_short_id(&self.drc_payment_channel_fund_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcChannelFund)
+            }
+            COMPACT_LANE_DRC_CHANNEL_CLAIM => {
+                map_by_short_id(&self.drc_payment_channel_claim_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcChannelClaim)
+            }
+            COMPACT_LANE_DRC_CHANNEL_CLOSE => {
+                map_by_short_id(&self.drc_payment_channel_close_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcChannelClose)
+            }
+            COMPACT_LANE_DRC_TRUST_LINE => map_by_short_id(&self.drc_trust_line_set_txs, short_id)
+                .cloned()
+                .map(Item::DrcTrustLine),
+            COMPACT_LANE_DRC_ISSUED_TRANSFER => {
+                map_by_short_id(&self.drc_issued_transfer_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcIssuedTransfer)
+            }
+            COMPACT_LANE_DRC_ASSET_POLICY => {
+                map_by_short_id(&self.drc_issued_asset_policy_set_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcAssetPolicy)
+            }
+            COMPACT_LANE_DRC_ISSUER_CONTROL => {
+                map_by_short_id(&self.drc_trust_line_issuer_control_txs, short_id)
+                    .cloned()
+                    .map(Item::DrcIssuerControl)
+            }
+            COMPACT_LANE_DRC_CLAWBACK => map_by_short_id(&self.drc_issued_clawback_txs, short_id)
+                .cloned()
+                .map(Item::DrcClawback),
+            COMPACT_LANE_DRC_OFFER_CREATE => map_by_short_id(&self.drc_offer_create_txs, short_id)
+                .cloned()
+                .map(Item::DrcOfferCreate),
+            COMPACT_LANE_DRC_OFFER_CANCEL => map_by_short_id(&self.drc_offer_cancel_txs, short_id)
+                .cloned()
+                .map(Item::DrcOfferCancel),
+            COMPACT_LANE_TLT_COVENANT => map_by_short_id(&self.covenant_txs, short_id)
+                .cloned()
+                .map(Item::TltCovenant),
+            COMPACT_LANE_DRC_MULTISIGN => {
+                map_by_short_id(&self.drc_multisign_attachments, short_id)
+                    .cloned()
+                    .map(Item::DrcMultisign)
+            }
+            COMPACT_LANE_PASSPORT => map_by_short_id(&self.passport_attestations, short_id)
+                .cloned()
+                .map(Item::Passport),
+            COMPACT_LANE_HUB => map_by_short_id(&self.hub_registrations, short_id)
+                .cloned()
+                .map(Item::Hub),
+            COMPACT_LANE_GRANT => map_by_short_id(&self.grant_registrations, short_id)
+                .cloned()
+                .map(Item::Grant),
+            COMPACT_LANE_MISSION => map_by_short_id(&self.mission_registrations, short_id)
+                .cloned()
+                .map(Item::Mission),
+            COMPACT_LANE_TREASURY => map_by_short_id(&self.treasury_disbursements, short_id)
+                .cloned()
+                .map(Item::Treasury),
+            COMPACT_LANE_VESTING => map_by_short_id(&self.vesting_unlocks, short_id)
+                .cloned()
+                .map(Item::Vesting),
+            _ => None,
+        }
     }
 
     pub fn remove(&mut self, tx_id: &Hash) -> Option<Transaction> {
@@ -1682,6 +1909,10 @@ impl Mempool {
             }
         }
         for tx in &block.ovl_executions {
+            if tx.version == agora_types::OVL_EXECUTION_RAW_EVM_VERSION {
+                self.evict_ovl_raw(tx);
+                continue;
+            }
             consumed_account_nonces.insert((NativeAssetId::OVL, tx.from));
             let id = tx.tx_id();
             if self.ovl_execution_txs.remove(&id).is_some() {
@@ -1780,6 +2011,12 @@ impl Mempool {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.submitter));
         }
         self.evict_offer_lanes_from_block(block);
+        self.evict_data_commitment_lanes_from_block(block);
+        self.evict_drc_multisign_attachments_from_block(block);
+        self.evict_passport_attestations_from_block(block);
+        self.evict_community_registrations_from_block(block);
+        self.evict_treasury_disbursements_from_block(block);
+        self.evict_vesting_unlocks_from_block(block);
         for tx in &block.drc_account_policies {
             consumed_account_nonces.insert((NativeAssetId::DRC, tx.account));
             let id = tx.policy_tx_id();
@@ -2262,6 +2499,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&included.tx_id()));
@@ -2346,6 +2589,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.contains(&account_id));
@@ -3170,6 +3419,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         pool.evict_for_block(&block);
         assert!(!pool.pending_check_create(&id));
@@ -3223,6 +3478,31 @@ mod tests {
         let mut pool = Mempool::new(8);
         let err = pool.admit_ovl_execution(tx).unwrap_err();
         assert!(err.to_string().contains("not admitted"));
+    }
+
+    #[test]
+    fn raw_evm_evicts_from_raw_pool_without_agora_nonce() {
+        use agora_types::Block;
+
+        let tx = agora_types::OvlExecutionTx::raw_ethereum(vec![0x02, 0x01]);
+        let mut pool = Mempool::new(8);
+        pool.admit_ovl_raw_execution(tx.clone()).unwrap();
+        assert!(pool.contains(&tx.tx_id()));
+        let mut block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 0,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![],
+        );
+        block.ovl_executions.push(tx.clone());
+        pool.evict_for_block(&block);
+        assert!(pool.select_ovl_raw_executions(8).is_empty());
+        assert!(!pool.contains(&tx.tx_id()));
     }
 
     fn covenant(index: u32, sequence: u32, nonce: u64) -> agora_types::TltCovenantTx {

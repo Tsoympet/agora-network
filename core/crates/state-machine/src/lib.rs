@@ -9,6 +9,7 @@ mod acceptance;
 mod accounts;
 mod apply;
 mod block_zero;
+mod block_zero_live;
 mod columns;
 mod community_state;
 mod data_availability;
@@ -166,9 +167,10 @@ pub use accounts::{
 pub use apply::{
     apply_block, apply_block_batched, apply_block_batched_virtual,
     apply_block_batched_virtual_at_blue_score, apply_block_batched_with_auth,
-    apply_block_batched_with_auth_at_blue_score, apply_block_with_auth, balance_of, revert_journal,
-    revert_journal_batched, sum_transfer_fees, transfer_fee, validate_mempool_tx,
-    validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult, TxAuthContext, UtxoJournal,
+    apply_block_batched_with_auth_at_blue_score, apply_block_with_auth, balance_of,
+    collect_address_utxos, revert_journal, revert_journal_batched, sum_transfer_fees, transfer_fee,
+    validate_mempool_tx, validate_mempool_tx_with_auth, ApplyMode, BlockApplyResult, TxAuthContext,
+    UtxoJournal,
 };
 pub use block_zero::{
     ensure_legacy_v2_datadir, load_verified_trident_block_zero, verify_trident_datadir_identity,
@@ -179,11 +181,22 @@ pub use block_zero::{
     TRIDENT_BLOCK_ZERO_STATE_VERSION, TRIDENT_BLOCK_ZERO_STORAGE_VERSION,
     TRIDENT_DATADIR_IDENTITY_VERSION,
 };
+pub use block_zero_live::{
+    load_or_materialize_trident_block_zero, materialize_trident_block_zero_live,
+    TridentBlockZeroLiveMaterialization,
+};
 pub use columns::{meta_keys, ColumnFamily, OVL_EVM_SCHEMA_VERSION, SCHEMA_VERSION};
 pub use community_state::{
-    canonical_community_root, init_canonical_community_into, list_grants, list_hubs, list_missions,
-    list_passport_attestations, load_canonical_community_summary, register_grant_into,
+    active_hub_coordinator_key, canonical_community_root, community_summary_key, grant_record_key,
+    grant_registrar_nonce_key, hub_coordinator_nonce_key, hub_record_key,
+    init_canonical_community_into, issuer_is_active_hub_coordinator, list_grants, list_hubs,
+    list_missions, list_passport_attestations, load_canonical_community_summary,
+    load_grant_registrar_nonce, load_grant_registration, load_hub_coordinator_nonce,
+    load_hub_registration, load_mission_registration, load_mission_sponsor_nonce,
+    load_passport_attestation, load_passport_issuer_nonce, mission_record_key,
+    mission_sponsor_nonce_key, passport_issuer_nonce_key, passport_record_key, register_grant_into,
     register_hub_into, register_mission_into, register_passport_attestation_into,
+    register_signed_grant_into, register_signed_hub_into, register_signed_mission_into,
     CanonicalCommunitySummary, CANONICAL_COMMUNITY_VERSION,
 };
 pub use data_availability::{
@@ -279,9 +292,15 @@ pub use ghostdag_store::{
     ghostdag_key, load_ghostdag_record, store_ghostdag_record, GhostdagRecord,
 };
 pub use governance_state::{
-    authorization_policy_root, governance_treasury_root, init_canonical_governance_into,
+    apply_treasury_disbursement_into, apply_vesting_unlock_into, authorization_policy_root,
+    governance_treasury_root, init_canonical_governance_into, init_trident_governance_into,
     load_canonical_governance_policy, load_protocol_treasuries, load_protocol_treasury,
-    CanonicalGovernancePolicy, CANONICAL_GOVERNANCE_VERSION,
+    load_treasury_controller, load_treasury_disbursement, load_treasury_nonce, load_vesting_nonce,
+    load_vesting_progress, load_vesting_schedules, load_vesting_unlock, load_vesting_unlocked,
+    put_treasury_controller_into, treasury_balance_key, treasury_controller_record_key,
+    treasury_disbursement_record_key, treasury_nonce_record_key, vesting_claim_record_key,
+    vesting_nonce_record_key, vesting_unlocked_record_key, CanonicalGovernancePolicy,
+    CANONICAL_GOVERNANCE_VERSION,
 };
 pub use headers::{header_key, load_header, store_header, store_header_into};
 pub use marks::{default_token_marks, TokenMark};
@@ -325,25 +344,29 @@ pub use state_root::{
 };
 pub use store::{StateStore, WriteBatch};
 pub use supply::{
-    burn_drc_fee_into, burned_supply_key, ignite_trident_supply, issued_supply_key,
-    load_burned_supply, load_issued_supply, load_max_supply, load_native_supply_state,
-    load_schema_version, max_supply_key, migrate_drc_fee_burn_schema, native_supply_root,
-    put_burned_supply_into, put_issued_supply_into, put_max_supply_into, put_schema_version_into,
-    verify_supply_invariants, NativeSupplyState, DRC_FEE_BURN_SCHEMA_VERSION,
+    burn_drc_fee_into, burn_tlt_fee_into, burned_supply_key, ignite_trident_supply,
+    issued_supply_key, load_burned_supply, load_issued_supply, load_max_supply,
+    load_native_supply_state, load_schema_version, max_supply_key, migrate_drc_fee_burn_schema,
+    native_supply_root, put_burned_supply_into, put_issued_supply_into, put_max_supply_into,
+    put_schema_version_into, verify_supply_invariants, NativeSupplyState,
+    DRC_FEE_BURN_SCHEMA_VERSION,
 };
 pub use tlt_covenant::{load_covenant_utxo, validate_mempool_covenant, TltCovenantUtxoRecord};
 pub use trident_genesis::{
-    TridentFinalityPolicy, TridentGenesisArtifact, TridentGenesisValidator,
-    TridentRuntimeFinalityPolicy, TridentRuntimePolicy, TridentValidatorGenesis,
-    TRIDENT_CONSENSUS_POLICY_DOMAIN, TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA,
-    TRIDENT_NET_FP_DOMAIN, TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION,
-    TRIDENT_TX_SIGNING_VERSION,
+    experimental_public_testnet_artifact, TridentFinalityPolicy, TridentGenesisArtifact,
+    TridentGenesisValidator, TridentRuntimeFinalityPolicy, TridentRuntimePolicy,
+    TridentValidatorGenesis, EXPERIMENTAL_PUBLIC_TESTNET_CHAIN_ID,
+    EXPERIMENTAL_PUBLIC_TESTNET_TIMESTAMP_MS, TRIDENT_CONSENSUS_POLICY_DOMAIN,
+    TRIDENT_CONSENSUS_POLICY_VERSION, TRIDENT_GENESIS_SCHEMA, TRIDENT_NET_FP_DOMAIN,
+    TRIDENT_PROTOCOL_VERSION, TRIDENT_STATE_TRANSITION_VERSION, TRIDENT_TX_SIGNING_VERSION,
 };
 pub use tx_index::{
-    covenant_tx_inclusion_key, covenant_tx_index_key, decode_tx_location, encode_tx_location,
-    index_block_transactions, index_block_transactions_into, list_covenant_tx_inclusions,
-    list_tx_inclusions, lookup_covenant_tx_location, lookup_tx_location,
-    set_primary_covenant_tx_location, set_primary_tx_location, tx_inclusion_key, tx_index_key,
+    covenant_tx_inclusion_key, covenant_tx_index_key, data_commitment_inclusion_key,
+    data_commitment_index_key, decode_tx_location, encode_tx_location, index_block_transactions,
+    index_block_transactions_into, list_covenant_tx_inclusions, list_data_commitment_inclusions,
+    list_tx_inclusions, lookup_covenant_tx_location, lookup_data_commitment_location,
+    lookup_tx_location, set_primary_covenant_tx_location, set_primary_data_commitment_location,
+    set_primary_tx_location, tx_inclusion_key, tx_index_key,
 };
 pub use utxo::{outpoint_key, outpoint_key_parts};
 pub use utxo_diff::{delete_utxo_journal, load_utxo_journal, store_utxo_journal, utxo_diff_key};

@@ -84,6 +84,7 @@ mod tests {
             drc_offer_meta_before: Vec::new(),
             tlt_covenant_created: Vec::new(),
             tlt_covenant_spent: Vec::new(),
+            passport_meta_before: Vec::new(),
         };
         store_utxo_journal(&store, &hash, &journal).unwrap();
         let loaded = load_utxo_journal(&store, &hash).unwrap().unwrap();

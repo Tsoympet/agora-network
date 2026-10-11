@@ -5,6 +5,14 @@
 #
 # For a second peer on the same compose network:
 #   docker compose up node-b
+#
+# Default services boot frozen v2 TLT (AGORA_GENESIS_FILE). They are not
+# Trident v3 and never finalize (no OVL/DRC genesis validators).
+#
+# Experimental public-testnet profile (generated keys, not ceremony-final,
+# not mainnet). Unsets the v2 genesis file so only AGORA_TRIDENT_GENESIS_FILE
+# is set:
+#   docker compose --profile experimental-trident up --build seeder experimental-trident-a
 
 services:
   seeder:
@@ -77,6 +85,49 @@ services:
       - node-a
     profiles: ["mine"]
 
+  experimental-trident-a:
+    build: .
+    profiles: ["experimental-trident"]
+    environment:
+      AGORA_NETWORK: testnet
+      AGORA_DATA: /data
+      AGORA_RPC_BIND: 0.0.0.0:8545
+      AGORA_RPC_ALLOW_PUBLIC_BIND: "1"
+      AGORA_LISTEN: /ip4/0.0.0.0/tcp/16111
+      AGORA_DNS_SEEDER: http://seeder:18080
+      AGORA_GENESIS_FILE: ""
+      AGORA_TRIDENT_GENESIS_FILE: /agora/genesis/trident.experimental.public-testnet.json
+      AGORA_ARCHIVAL: "1"
+    volumes:
+      - experimental-trident-a-data:/data
+    ports:
+      - "8555:8545"
+      - "16121:16111"
+    depends_on:
+      - seeder
+
+  experimental-trident-b:
+    build: .
+    profiles: ["experimental-trident"]
+    environment:
+      AGORA_NETWORK: testnet
+      AGORA_DATA: /data
+      AGORA_RPC_BIND: 0.0.0.0:8546
+      AGORA_RPC_ALLOW_PUBLIC_BIND: "1"
+      AGORA_LISTEN: /ip4/0.0.0.0/tcp/16112
+      AGORA_DNS_SEEDER: http://seeder:18080
+      AGORA_GENESIS_FILE: ""
+      AGORA_TRIDENT_GENESIS_FILE: /agora/genesis/trident.experimental.public-testnet.json
+    volumes:
+      - experimental-trident-b-data:/data
+    ports:
+      - "8556:8546"
+      - "16122:16112"
+    depends_on:
+      - seeder
+
 volumes:
   node-a-data:
   node-b-data:
+  experimental-trident-a-data:
+  experimental-trident-b-data:

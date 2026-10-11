@@ -9,7 +9,9 @@ use crate::{
     DrcMultisignBlockAttachment, DrcOfferCancelTx, DrcOfferCreateTx, DrcPaymentChannelClaimTx,
     DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentTx,
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineIssuerControlTx,
-    DrcTrustLineSetTx, Hash, OvlExecutionTx, SignedStakeTx, TltCovenantTx, Transaction,
+    DrcTrustLineSetTx, GrantRegistration, Hash, HubRegistration, MissionRegistration,
+    OvlExecutionTx, PassportAttestation, SignedStakeTx, TltCovenantTx, Transaction,
+    TreasuryDisbursement, VestingUnlock,
 };
 
 /// Explicit version/domain for bodies carrying native DRC offer operations.
@@ -21,6 +23,18 @@ pub const TRIDENT_BLOCK_BODY_V18_DOMAIN: &[u8] = b"agora-block-body-v18";
 /// cannot share that wrap: both prototypes used the same trailing slot.
 pub const TRIDENT_BLOCK_BODY_V19_VERSION: u16 = 19;
 pub const TRIDENT_BLOCK_BODY_V19_DOMAIN: &[u8] = b"agora-block-body-v19";
+/// Combined trailing lane when signed passport attestations are present.
+pub const TRIDENT_BLOCK_BODY_V20_VERSION: u16 = 20;
+pub const TRIDENT_BLOCK_BODY_V20_DOMAIN: &[u8] = b"agora-block-body-v20";
+/// Combined trailing lane when signed Hub / Grant / Mission registrations are present.
+pub const TRIDENT_BLOCK_BODY_V21_VERSION: u16 = 21;
+pub const TRIDENT_BLOCK_BODY_V21_DOMAIN: &[u8] = b"agora-block-body-v21";
+/// Combined trailing lane when signed treasury disbursements are present.
+pub const TRIDENT_BLOCK_BODY_V22_VERSION: u16 = 22;
+pub const TRIDENT_BLOCK_BODY_V22_DOMAIN: &[u8] = b"agora-block-body-v22";
+/// Combined trailing lane when signed vesting unlocks are present.
+pub const TRIDENT_BLOCK_BODY_V23_VERSION: u16 = 23;
+pub const TRIDENT_BLOCK_BODY_V23_DOMAIN: &[u8] = b"agora-block-body-v23";
 /// Explicit version/domain for bodies carrying issued-control operations.
 pub const TRIDENT_BLOCK_BODY_V17_VERSION: u16 = 17;
 pub const TRIDENT_BLOCK_BODY_V17_DOMAIN: &[u8] = b"agora-block-body-v17";
@@ -171,6 +185,24 @@ pub struct Block {
     /// TLT covenant spends. Absent from the wire when empty so v1 block bytes stay frozen.
     #[serde(default)]
     pub tlt_covenants: Vec<TltCovenantTx>,
+    /// Signed Hub-coordinator passport attestations. Empty stays off the frozen wire.
+    #[serde(default)]
+    pub passport_attestations: Vec<PassportAttestation>,
+    /// Signed hub registrations. Empty stays off the frozen wire.
+    #[serde(default)]
+    pub hub_registrations: Vec<HubRegistration>,
+    /// Signed grant registrations. Empty stays off the frozen wire.
+    #[serde(default)]
+    pub grant_registrations: Vec<GrantRegistration>,
+    /// Signed mission registrations. Empty stays off the frozen wire.
+    #[serde(default)]
+    pub mission_registrations: Vec<MissionRegistration>,
+    /// Signed protocol treasury spends. Empty stays off the frozen wire.
+    #[serde(default)]
+    pub treasury_disbursements: Vec<TreasuryDisbursement>,
+    /// Signed vesting unlock claims. Empty stays off the frozen wire.
+    #[serde(default)]
+    pub vesting_unlocks: Vec<VestingUnlock>,
 }
 
 impl Block {
@@ -208,6 +240,12 @@ impl Block {
             drc_offer_cancels: Vec::new(),
             drc_multisign_attachments: Vec::new(),
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         }
     }
 
@@ -241,16 +279,29 @@ impl Block {
             || !self.drc_offer_creates.is_empty()
             || !self.drc_offer_cancels.is_empty()
             || !self.tlt_covenants.is_empty()
+            || !self.passport_attestations.is_empty()
+            || !self.hub_registrations.is_empty()
+            || !self.grant_registrations.is_empty()
+            || !self.mission_registrations.is_empty()
+            || !self.treasury_disbursements.is_empty()
+            || !self.vesting_unlocks.is_empty()
     }
 
-    /// Compact gossip is UTXO-only. Any typed lane needs the full body until a
-    /// versioned short-id format can name lane kinds without ambiguity.
+    /// Compact gossip is UTXO-only unless a versioned typed compact names each
+    /// lane. Typed compact names every live body field, including detached DRC
+    /// multisign attachments (protocol v28 gossip + lane 29).
     pub fn requires_full_body_gossip(&self) -> bool {
         !self.account_transfers.is_empty()
             || !self.stake_ops.is_empty()
             || !self.ovl_executions.is_empty()
             || !self.drc_payments.is_empty()
             || self.has_post_v4_body_lanes()
+    }
+
+    /// Historical name: every current lane is named. Kept so callers can still
+    /// fail closed if a future body field is added without a compact kind.
+    pub fn typed_compact_unnamed_lanes(&self) -> bool {
+        false
     }
 
     /// Compute a simple pairwise tx merkle root (duplicate last leaf when odd).
@@ -471,6 +522,73 @@ impl Block {
                 TRIDENT_BLOCK_BODY_V19_VERSION,
                 inner,
                 covenant_ids,
+            ));
+        }
+        if !self.passport_attestations.is_empty() {
+            let ids: Vec<Hash> = self
+                .passport_attestations
+                .iter()
+                .map(PassportAttestation::attestation_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V20_DOMAIN,
+                TRIDENT_BLOCK_BODY_V20_VERSION,
+                inner,
+                ids,
+            ));
+        }
+        if !self.hub_registrations.is_empty()
+            || !self.grant_registrations.is_empty()
+            || !self.mission_registrations.is_empty()
+        {
+            let hub_ids: Vec<Hash> = self
+                .hub_registrations
+                .iter()
+                .map(HubRegistration::registration_id)
+                .collect();
+            let grant_ids: Vec<Hash> = self
+                .grant_registrations
+                .iter()
+                .map(GrantRegistration::registration_id)
+                .collect();
+            let mission_ids: Vec<Hash> = self
+                .mission_registrations
+                .iter()
+                .map(MissionRegistration::registration_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V21_DOMAIN,
+                TRIDENT_BLOCK_BODY_V21_VERSION,
+                inner,
+                hub_ids,
+                grant_ids,
+                mission_ids,
+            ));
+        }
+        if !self.treasury_disbursements.is_empty() {
+            let ids: Vec<Hash> = self
+                .treasury_disbursements
+                .iter()
+                .map(TreasuryDisbursement::disbursement_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V22_DOMAIN,
+                TRIDENT_BLOCK_BODY_V22_VERSION,
+                inner,
+                ids,
+            ));
+        }
+        if !self.vesting_unlocks.is_empty() {
+            let ids: Vec<Hash> = self
+                .vesting_unlocks
+                .iter()
+                .map(VestingUnlock::unlock_id)
+                .collect();
+            inner = Hash::hash_borsh(&(
+                TRIDENT_BLOCK_BODY_V23_DOMAIN,
+                TRIDENT_BLOCK_BODY_V23_VERSION,
+                inner,
+                ids,
             ));
         }
         inner
@@ -696,16 +814,56 @@ impl BorshSerialize for Block {
         BorshSerialize::serialize(&self.drc_trust_line_issuer_controls, writer)?;
         BorshSerialize::serialize(&self.drc_issued_clawbacks, writer)?;
         BorshSerialize::serialize(&self.drc_multisign_attachments, writer)?;
+        let has_community_registrations = !self.hub_registrations.is_empty()
+            || !self.grant_registrations.is_empty()
+            || !self.mission_registrations.is_empty();
+        let has_treasury = !self.treasury_disbursements.is_empty();
+        let has_vesting = !self.vesting_unlocks.is_empty();
         if self.drc_offer_creates.is_empty()
             && self.drc_offer_cancels.is_empty()
             && self.tlt_covenants.is_empty()
+            && self.passport_attestations.is_empty()
+            && !has_community_registrations
+            && !has_treasury
+            && !has_vesting
         {
             return Ok(());
         }
         BorshSerialize::serialize(&self.drc_offer_creates, writer)?;
         BorshSerialize::serialize(&self.drc_offer_cancels, writer)?;
-        if !self.tlt_covenants.is_empty() {
+        if !self.tlt_covenants.is_empty()
+            || !self.passport_attestations.is_empty()
+            || has_community_registrations
+            || has_treasury
+            || has_vesting
+        {
             BorshSerialize::serialize(&self.tlt_covenants, writer)?;
+        }
+        if !self.passport_attestations.is_empty()
+            || has_community_registrations
+            || has_treasury
+            || has_vesting
+        {
+            BorshSerialize::serialize(&self.passport_attestations, writer)?;
+        }
+        if has_community_registrations || has_treasury || has_vesting {
+            BorshSerialize::serialize(&self.hub_registrations, writer)?;
+        }
+        if !self.grant_registrations.is_empty()
+            || !self.mission_registrations.is_empty()
+            || has_treasury
+            || has_vesting
+        {
+            BorshSerialize::serialize(&self.grant_registrations, writer)?;
+        }
+        if !self.mission_registrations.is_empty() || has_treasury || has_vesting {
+            BorshSerialize::serialize(&self.mission_registrations, writer)?;
+        }
+        if has_treasury || has_vesting {
+            BorshSerialize::serialize(&self.treasury_disbursements, writer)?;
+        }
+        if has_vesting {
+            BorshSerialize::serialize(&self.vesting_unlocks, writer)?;
         }
         Ok(())
     }
@@ -745,6 +903,12 @@ impl BorshDeserialize for Block {
             drc_offer_creates: deserialize_trailing_vec(reader)?,
             drc_offer_cancels: deserialize_trailing_vec(reader)?,
             tlt_covenants: deserialize_trailing_vec(reader)?,
+            passport_attestations: deserialize_trailing_vec(reader)?,
+            hub_registrations: deserialize_trailing_vec(reader)?,
+            grant_registrations: deserialize_trailing_vec(reader)?,
+            mission_registrations: deserialize_trailing_vec(reader)?,
+            treasury_disbursements: deserialize_trailing_vec(reader)?,
+            vesting_unlocks: deserialize_trailing_vec(reader)?,
         })
     }
 }

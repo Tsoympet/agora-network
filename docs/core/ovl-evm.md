@@ -107,13 +107,22 @@ gate returns an error. Backends with no execution world return method-not-found
 rather than a stand-in balance. HTTP reads stay public when `AGORA_RPC_TOKEN`
 is set. `eth_sendRawTransaction` requires the token.
 
+Device-local `apps/shared/light-client/raw-evm.ts` can sign those envelopes
+from an **explicit** 32-byte secp256k1 scalar the caller supplies. It is not
+the Agora BIP-44 vault: Agora addresses are SHA-256/Bech32m; EVM addresses
+are keccak of the uncompressed public key. Do not derive one from the other
+or mix a vault mnemonic into this helper.
+
 `eth_sendRawTransaction` validates a legacy, type-1, or type-2 envelope and
 stores it in a process-local inbox. It does not commit the world. A dev or
 test node whose gate is active may place inbox envelopes that pass the Shanghai
-preflight onto its own block template. Mainnet labels reject submission. Public
-gossip of those raw envelopes is **PLANNED**. Version 2 is rejected by the
-Agora-signed mempool, and the existing P2P fingerprint has no separate raw-EVM
-topic, so publishing them on the signed-execution topic would only be dropped.
+preflight onto its own block template and admit them to the raw gossip pool.
+Mainnet labels reject submission. Protocol v26 appends
+`NetworkMessage::OvlRawExecution` (Borsh discriminant 34) on the transaction
+topic. Version 2 is still rejected by the Agora-signed `OvlExecution` pool so
+it cannot reserve the OVL account nonce. Authorization is the Ethereum
+secp256k1 signature inside the RLP bytes. This is not Ethereum txpool
+equivalence.
 
 `eth_syncing` is `false` while the node has no IBD cursor. It is not a
 synthetic progress object. `net_listening` follows whether this process has a

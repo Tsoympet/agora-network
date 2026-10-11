@@ -159,6 +159,7 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getBlock"
             | "agora_getTransaction"
             | "agora_getTltCovenant"
+            | "agora_getDataCommitment"
             | "agora_getDrcPayment"
             | "agora_getDrcPaymentByInvoice"
             | "agora_getDrcAccountPolicy"
@@ -207,6 +208,14 @@ pub fn method_requires_token(method: &str) -> bool {
             | "agora_getNativeAssetSupply"
             | "agora_getProtocolTreasuries"
             | "agora_getCommunityRegistry"
+            | "agora_getPassportAttestation"
+            | "agora_getPassportIssuerNonce"
+            | "agora_getHubRegistration"
+            | "agora_getHubCoordinatorNonce"
+            | "agora_getGrantRegistration"
+            | "agora_getGrantRegistrarNonce"
+            | "agora_getMissionRegistration"
+            | "agora_getMissionSponsorNonce"
     )
 }
 
@@ -355,6 +364,8 @@ mod tests {
         assert!(!method_requires_token("agora_getTransaction"));
         assert!(!method_requires_token("agora_getTltCovenant"));
         assert!(method_requires_token("agora_submitTltCovenant"));
+        assert!(!method_requires_token("agora_getDataCommitment"));
+        assert!(method_requires_token("agora_submitDataCommitment"));
         assert!(!method_requires_token("agora_getDrcPayment"));
         assert!(!method_requires_token("agora_getDrcPaymentByInvoice"));
         assert!(!method_requires_token("agora_getDrcAccountPolicy"));
@@ -422,5 +433,74 @@ mod tests {
         assert!(lim.allow(ip, 2));
         assert!(!lim.allow(ip, 2));
         assert!(lim.allow(ip, 0)); // disabled
+    }
+
+    /// `agora_getNodeInfo` and `agora_getBlockTemplate` hold `chain` and used
+    /// to re-enter it via `tx_auth()`. That hung the crash-suite RPC thread.
+    #[test]
+    fn node_info_and_template_do_not_reenter_chain_lock() {
+        use std::sync::atomic::AtomicU32;
+        use std::sync::mpsc;
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        use agora_consensus::PowAlgorithm;
+        use agora_p2p::Mempool;
+        use agora_rpc::{RpcDispatcher, RpcRequest};
+        use agora_state_machine::{GenesisBuilder, StateStore};
+        use agora_types::Address;
+        use serde_json::json;
+
+        use crate::admit::ChainState;
+        use crate::backend::{NodeBackend, NodeBackendConfig};
+
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let store = Arc::new(StateStore::open_in_memory());
+            let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+            let chain = Arc::new(Mutex::new(
+                ChainState::bootstrap(
+                    store.clone(),
+                    genesis,
+                    PowAlgorithm::RandomX,
+                    0,
+                    crate::storage_policy::StoragePolicy::default(),
+                )
+                .unwrap(),
+            ));
+            let backend = NodeBackend::new(
+                chain,
+                store,
+                Arc::new(Mutex::new(Mempool::new(8))),
+                NodeBackendConfig {
+                    net: None,
+                    allow_fund: false,
+                    miner_address: Address::ZERO,
+                    connected_peers: Arc::new(AtomicU32::new(0)),
+                    network: "dev".into(),
+                    genesis_hash: genesis,
+                },
+            );
+            let mut rpc = RpcDispatcher::new(backend);
+            let info = rpc.handle(RpcRequest {
+                id: Some(json!(1)),
+                method: "agora_getNodeInfo".into(),
+                params: json!([]),
+            });
+            let template = rpc.handle(RpcRequest {
+                id: Some(json!(2)),
+                method: "agora_getBlockTemplate".into(),
+                params: json!([]),
+            });
+            let _ = tx.send((info, template));
+        });
+        let (info, template) = rx
+            .recv_timeout(Duration::from_secs(15))
+            .expect("RPC re-entered the chain mutex");
+        let info = info.result.expect("agora_getNodeInfo");
+        assert_eq!(info["network"], json!("dev"));
+        assert!(info["chain_id"].as_str().is_some());
+        assert!(template.error.is_none(), "{template:?}");
+        assert!(template.result.unwrap().get("block").is_some());
     }
 }

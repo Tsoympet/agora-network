@@ -7,12 +7,13 @@ mod error;
 mod methods;
 
 pub use drc_trust_line_params::{
-    parse_holder_issuer_asset, parse_issued_asset_id, parse_issued_currency_code,
+    parse_drc_book_asset, parse_drc_offer_book, parse_holder_issuer_asset, parse_issued_asset_id,
+    parse_issued_currency_code,
 };
 
 pub use backend::{
-    AccountBalances, DrcDepositPreauthStatus, FeeEstimate, InMemoryBackend, MempoolEntry, NodeInfo,
-    RpcBackend, TltCovenantLookup, TxLookup, TxStatus, UtxoEntry,
+    AccountBalances, DataCommitmentLookup, DrcDepositPreauthStatus, FeeEstimate, InMemoryBackend,
+    MempoolEntry, NodeInfo, RpcBackend, TltCovenantLookup, TxLookup, TxStatus, UtxoEntry,
 };
 pub use dispatch::RpcDispatcher;
 pub use error::RpcError;

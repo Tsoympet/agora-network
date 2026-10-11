@@ -1,8 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import type {
   LightAccountBalances,
-  LightDrcOfferLookup,
-  LightTltCovenantLookup,
+  LightDrcOfferPage,
   RpcStatus,
 } from "../../../shared/light-client";
 import { getClient, rpcUrl } from "../lib/rpc";
@@ -14,6 +13,26 @@ function formatAmount(value: number | string | undefined): string {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+function lookupStatus(value: unknown): string | null {
+  if (value == null || typeof value !== "object") return null;
+  const status = (value as { status?: unknown }).status;
+  if (typeof status !== "string") return null;
+  if (status === "unknown" || status === "not_found") return null;
+  return status;
+}
+
+function hasLivePayload(value: unknown): boolean {
+  if (value == null || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (lookupStatus(value)) return true;
+  if (Array.isArray(record.offers) && record.offers.length > 0) return true;
+  if (Array.isArray(record.objects) && record.objects.length > 0) return true;
+  if (record.object != null || record.authorization != null) return true;
+  return false;
+}
+
+type LaneHit = { label: string; status: string; detail: unknown };
+
 export function ProtocolLanes() {
   const client = getClient();
   const [ethChain, setEthChain] = useState<string | null>(null);
@@ -22,14 +41,26 @@ export function ProtocolLanes() {
 
   const [account, setAccount] = useState("");
   const [balances, setBalances] = useState<LightAccountBalances | null>(null);
+  const [accountOffers, setAccountOffers] = useState<LightDrcOfferPage | null>(
+    null,
+  );
+  const [accountObjects, setAccountObjects] = useState<unknown>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
 
   const [laneId, setLaneId] = useState("");
-  const [covenant, setCovenant] = useState<LightTltCovenantLookup | null>(null);
-  const [offer, setOffer] = useState<LightDrcOfferLookup | null>(null);
+  const [laneHits, setLaneHits] = useState<LaneHit[]>([]);
   const [laneError, setLaneError] = useState<string | null>(null);
   const [laneBusy, setLaneBusy] = useState(false);
+
+  const [bookIssuer, setBookIssuer] = useState("");
+  const [bookCurrency, setBookCurrency] = useState("USD");
+  const [bookDirection, setBookDirection] = useState<"drc-pays" | "issued-pays">(
+    "drc-pays",
+  );
+  const [bookPage, setBookPage] = useState<LightDrcOfferPage | null>(null);
+  const [bookError, setBookError] = useState<string | null>(null);
+  const [bookBusy, setBookBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,9 +90,17 @@ export function ProtocolLanes() {
     setAccountBusy(true);
     setAccountError(null);
     setBalances(null);
+    setAccountOffers(null);
+    setAccountObjects(null);
     try {
       const next = await client.getAccountBalances(account.trim());
       setBalances(next);
+      const [offers, objects] = await Promise.all([
+        client.getDrcAccountOffers({ account: account.trim(), limit: 16 }),
+        client.getDrcAccountObjects({ account: account.trim() }),
+      ]);
+      setAccountOffers(offers);
+      setAccountObjects(objects);
     } catch (err) {
       setAccountError(err instanceof Error ? err.message : "account lookup failed");
     } finally {
@@ -73,28 +112,76 @@ export function ProtocolLanes() {
     e.preventDefault();
     const raw = laneId.trim();
     if (!HEX64.test(raw)) {
-      setLaneError("Enter a 64-hex covenant or offer id.");
-      setCovenant(null);
-      setOffer(null);
+      setLaneError("Enter a 64-hex object, attestation, or envelope id.");
+      setLaneHits([]);
       return;
     }
     setLaneBusy(true);
     setLaneError(null);
-    setCovenant(null);
-    setOffer(null);
+    setLaneHits([]);
+    const queries: Array<[string, Promise<unknown>]> = [
+      ["TLT covenant", client.getTltCovenant(raw)],
+      ["DRC offer", client.getDrcOffer(raw)],
+      ["DRC escrow", client.getDrcEscrow(raw)],
+      ["DRC check", client.getDrcCheck(raw)],
+      ["DRC ledger object", client.getDrcObject(raw)],
+      ["DA commitment", client.getDataCommitment({ authorization_id: raw })],
+      ["Passport attestation", client.getPassportAttestation(raw)],
+      ["Hub registration", client.getHubRegistration(raw)],
+      ["Grant registration", client.getGrantRegistration(raw)],
+      ["Mission registration", client.getMissionRegistration(raw)],
+      ["Treasury disbursement", client.getTreasuryDisbursement(raw)],
+      ["Vesting unlock", client.getVestingUnlock(raw)],
+    ];
+    const settled = await Promise.allSettled(
+      queries.map(async ([label, promise]) => {
+        const value = await promise;
+        const status = lookupStatus(value);
+        if (!status && !hasLivePayload(value)) return null;
+        return { label, status: status ?? "live", detail: value } satisfies LaneHit;
+      }),
+    );
+    const hits = settled.flatMap((result) =>
+      result.status === "fulfilled" && result.value ? [result.value] : [],
+    );
+    setLaneHits(hits);
+    if (hits.length === 0) {
+      setLaneError("No live typed-lane object for that id on this node.");
+    }
+    setLaneBusy(false);
+  }
+
+  async function onBook(e: FormEvent) {
+    e.preventDefault();
+    const issuer = bookIssuer.trim();
+    const currency = bookCurrency.trim();
+    if (!issuer || !currency) {
+      setBookError("Issuer and uppercase currency (or 40-hex) are required.");
+      return;
+    }
+    setBookBusy(true);
+    setBookError(null);
+    setBookPage(null);
+    const issued = { type: "issued" as const, issuer, currency };
+    const native = { type: "native_drc" as const };
+    const book =
+      bookDirection === "drc-pays"
+        ? { pays: native, gets: issued }
+        : { pays: issued, gets: native };
     try {
-      const [covenantLookup, offerLookup] = await Promise.all([
-        client.getTltCovenant(raw),
-        client.getDrcOffer(raw),
-      ]);
-      setCovenant(covenantLookup);
-      setOffer(offerLookup);
+      const page = await client.getDrcBookOffers({ book, limit: 16 });
+      setBookPage(page);
     } catch (err) {
-      setLaneError(err instanceof Error ? err.message : "lane lookup failed");
+      setBookError(err instanceof Error ? err.message : "book lookup failed");
     } finally {
-      setLaneBusy(false);
+      setBookBusy(false);
     }
   }
+
+  const bookOffers = Array.isArray(bookPage?.offers) ? bookPage.offers : [];
+  const ownedOffers = Array.isArray(accountOffers?.offers)
+    ? accountOffers.offers
+    : [];
 
   return (
     <div className="relative">
@@ -105,9 +192,10 @@ export function ProtocolLanes() {
             TLT · DRC · OVL reads
           </h2>
           <p className="agora-lede mt-4">
-            Experimental queries for native three-asset balances, TLT covenants,
-            DRC offers, and canonical OVL Ethereum JSON-RPC. Compact gossip
-            still uses the full body for every non-UTXO lane.
+            Experimental queries for native balances, every wired typed-lane
+            id, DRC account objects, and the native DEX book. Compact gossip
+            still uses the full body for every non-UTXO lane. Explorer never
+            signs.
           </p>
         </div>
         <p className="font-mono text-xs text-mist opacity-80">{rpcUrl()}</p>
@@ -151,7 +239,7 @@ export function ProtocolLanes() {
             disabled={accountBusy || !account.trim()}
             className="agora-btn agora-btn-primary self-start disabled:opacity-50"
           >
-            {accountBusy ? "Looking up…" : "agora_getAccountBalances"}
+            {accountBusy ? "Looking up…" : "Balances + DRC objects"}
           </button>
           {accountError ? (
             <p className="text-sm text-[var(--agora-danger)]">{accountError}</p>
@@ -174,6 +262,20 @@ export function ProtocolLanes() {
                   {formatAmount(balances.drc.balance)} / {balances.drc.nonce}
                 </dd>
               </div>
+              <div>
+                <dt className="text-mist">DRC offers</dt>
+                <dd>{ownedOffers.length}</dd>
+              </div>
+              <div>
+                <dt className="text-mist">DRC objects</dt>
+                <dd>
+                  {accountObjects &&
+                  typeof accountObjects === "object" &&
+                  Array.isArray((accountObjects as { objects?: unknown }).objects)
+                    ? (accountObjects as { objects: unknown[] }).objects.length
+                    : "—"}
+                </dd>
+              </div>
             </dl>
           ) : null}
         </form>
@@ -181,7 +283,10 @@ export function ProtocolLanes() {
 
       <form onSubmit={onLane} className="mt-10 flex flex-col gap-4 md:flex-row md:items-end">
         <label className="flex min-w-0 flex-1 flex-col gap-2">
-          <span className="text-sm text-mist">Covenant tx or offer id</span>
+          <span className="text-sm text-mist">
+            Typed-lane id (covenant, offer, escrow, check, DA, passport, hub,
+            grant, mission, treasury, vesting)
+          </span>
           <input
             type="text"
             spellCheck={false}
@@ -203,24 +308,77 @@ export function ProtocolLanes() {
       {laneError ? (
         <p className="mt-4 text-sm text-[var(--agora-danger)]">{laneError}</p>
       ) : null}
-      {covenant ? (
-        <p className="mt-4 font-mono text-sm">
-          TLT covenant{" "}
-          <span className="text-[var(--agora-cyan)]">{covenant.status}</span>
-          {covenant.confirmations != null
-            ? ` · ${covenant.confirmations} conf`
-            : ""}
+      {laneHits.map((hit) => (
+        <p key={hit.label} className="mt-3 font-mono text-sm">
+          {hit.label}{" "}
+          <span className="text-[var(--agora-cyan)]">{hit.status}</span>
         </p>
-      ) : null}
-      {offer ? (
-        <p className="mt-2 font-mono text-sm">
-          DRC offer{" "}
-          <span className="text-[var(--agora-cyan)]">
-            {String(offer.status ?? "unknown")}
-          </span>
-          {offer.simulated_fill === false ? " · simulated_fill false" : ""}
+      ))}
+
+      <form onSubmit={onBook} className="mt-12 flex flex-col gap-4">
+        <p className="agora-eyebrow">DRC native DEX book</p>
+        <p className="text-sm text-mist">
+          Read-only book page. Order entry stays in wallets. Native DRC versus
+          one issued asset.
         </p>
-      ) : null}
+        <div className="grid gap-4 md:grid-cols-3">
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Issued issuer</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="Bech32m or 40-hex"
+              value={bookIssuer}
+              onChange={(e) => setBookIssuer(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Currency</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="USD or 40-hex"
+              value={bookCurrency}
+              onChange={(e) => setBookCurrency(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Taker direction</span>
+            <select
+              value={bookDirection}
+              onChange={(e) =>
+                setBookDirection(e.target.value as "drc-pays" | "issued-pays")
+              }
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            >
+              <option value="drc-pays">Pays native DRC, gets issued</option>
+              <option value="issued-pays">Pays issued, gets native DRC</option>
+            </select>
+          </label>
+        </div>
+        <button
+          type="submit"
+          disabled={bookBusy || !bookIssuer.trim() || !bookCurrency.trim()}
+          className="agora-btn agora-btn-primary self-start disabled:opacity-50"
+        >
+          {bookBusy ? "Looking up…" : "agora_getDrcBookOffers"}
+        </button>
+        {bookError ? (
+          <p className="text-sm text-[var(--agora-danger)]">{bookError}</p>
+        ) : null}
+        {bookPage ? (
+          <p className="font-mono text-sm">
+            Book page{" "}
+            <span className="text-[var(--agora-cyan)]">{bookOffers.length}</span>
+            {" offers"}
+            {bookPage.simulated_fill === false ? " · simulated_fill false" : ""}
+          </p>
+        ) : null}
+      </form>
     </div>
   );
 }

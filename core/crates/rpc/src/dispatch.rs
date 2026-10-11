@@ -1,17 +1,20 @@
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx,
-    DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
-    DrcIssuedTransferTx, DrcLedgerObjectKind, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
+    AccountTransfer, Address, Amount, Block, DataCommitmentAuthorization, DataCommitmentSource,
+    DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx,
+    DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedTransferTx,
+    DrcLedgerObjectKind, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
     DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
     DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OvlExecutionTx,
     TltCovenantTx, Transaction,
 };
 use serde_json::{json, Value};
 
-use crate::backend::RpcBackend;
-use crate::drc_trust_line_params::{parse_holder_issuer_asset, parse_issued_asset_id};
-use crate::error::RpcError;
-use crate::methods::{RpcMethod, RpcRequest, RpcResponse};
+use crate::{
+    backend::RpcBackend,
+    drc_trust_line_params::{parse_holder_issuer_asset, parse_issued_asset_id},
+    error::RpcError,
+    methods::{RpcMethod, RpcRequest, RpcResponse},
+};
 
 /// Dispatches JSON-RPC style requests against an [`RpcBackend`].
 #[derive(Debug)]
@@ -113,6 +116,28 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let tx_id = param_hash(&req.params, "tx_id")?;
                 let lookup = self.backend.get_tlt_covenant(&tx_id)?;
                 Ok(covenant_lookup_to_json(&lookup))
+            }
+            RpcMethod::SubmitDataCommitment => {
+                let raw = req
+                    .params
+                    .get("authorization")
+                    .cloned()
+                    .unwrap_or_else(|| req.params.clone());
+                let authorization: DataCommitmentAuthorization = serde_json::from_value(raw)
+                    .map_err(|e| RpcError::InvalidParams(e.to_string()))?;
+                let id = self.backend.submit_data_commitment(authorization)?;
+                Ok(json!({ "authorization_id": id.to_hex() }))
+            }
+            RpcMethod::GetDataCommitment => {
+                let authorization_id = optional_hash(&req.params, "authorization_id")?;
+                let source = optional_data_commitment_source(&req.params)?;
+                let sequence = optional_u64_opt(&req.params, "sequence")?;
+                let lookup = self.backend.get_data_commitment(
+                    authorization_id.as_ref(),
+                    source,
+                    sequence,
+                )?;
+                Ok(data_commitment_lookup_to_json(&lookup))
             }
             RpcMethod::SubmitAccountTransfer => {
                 let raw = req
@@ -614,10 +639,16 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 self.backend.get_drc_account_offers(&account, cursor, limit)
             }
             RpcMethod::GetDrcBookOffers => {
-                let book: agora_types::DrcOfferBook = serde_json::from_value(req.params.clone())
-                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
-                book.validate()
-                    .map_err(|error| RpcError::InvalidParams(error.to_string()))?;
+                let book = crate::drc_trust_line_params::parse_drc_offer_book(&req.params)
+                    .or_else(|typed| {
+                        serde_json::from_value::<agora_types::DrcOfferBook>(req.params.clone())
+                            .map_err(|_| typed)
+                            .and_then(|book| {
+                                book.validate()
+                                    .map(|_| book)
+                                    .map_err(|error| RpcError::InvalidParams(error.to_string()))
+                            })
+                    })?;
                 let cursor = match req.params.get("cursor") {
                     Some(value) if !value.is_null() => Some(
                         serde_json::from_value(value.clone())
@@ -788,6 +819,115 @@ impl<B: RpcBackend> RpcDispatcher<B> {
                 let limit = optional_limit(&req.params, 64)?;
                 self.backend.get_community_registry(limit)
             }
+            RpcMethod::SubmitPassportAttestation => {
+                let raw =
+                    req.params.get("attestation").cloned().ok_or_else(|| {
+                        RpcError::InvalidParams("missing attestation object".into())
+                    })?;
+                let attestation: agora_types::PassportAttestation = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_passport_attestation(attestation)?;
+                Ok(json!({ "attestation_id": id.to_hex() }))
+            }
+            RpcMethod::GetPassportAttestation => {
+                let id = param_hash(&req.params, "attestation_id")?;
+                self.backend.get_passport_attestation(&id)
+            }
+            RpcMethod::GetPassportIssuerNonce => {
+                let issuer = param_address(&req.params, "issuer")?;
+                self.backend.get_passport_issuer_nonce(&issuer)
+            }
+            RpcMethod::SubmitHubRegistration => {
+                let raw =
+                    req.params.get("registration").cloned().ok_or_else(|| {
+                        RpcError::InvalidParams("missing registration object".into())
+                    })?;
+                let registration: agora_types::HubRegistration = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_hub_registration(registration)?;
+                Ok(json!({ "registration_id": id.to_hex() }))
+            }
+            RpcMethod::GetHubRegistration => {
+                let id = param_hash(&req.params, "registration_id")?;
+                self.backend.get_hub_registration(&id)
+            }
+            RpcMethod::GetHubCoordinatorNonce => {
+                let coordinator = param_address(&req.params, "coordinator")?;
+                self.backend.get_hub_coordinator_nonce(&coordinator)
+            }
+            RpcMethod::SubmitGrantRegistration => {
+                let raw =
+                    req.params.get("registration").cloned().ok_or_else(|| {
+                        RpcError::InvalidParams("missing registration object".into())
+                    })?;
+                let registration: agora_types::GrantRegistration = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_grant_registration(registration)?;
+                Ok(json!({ "registration_id": id.to_hex() }))
+            }
+            RpcMethod::GetGrantRegistration => {
+                let id = param_hash(&req.params, "registration_id")?;
+                self.backend.get_grant_registration(&id)
+            }
+            RpcMethod::GetGrantRegistrarNonce => {
+                let registrar = param_address(&req.params, "registrar")?;
+                self.backend.get_grant_registrar_nonce(&registrar)
+            }
+            RpcMethod::SubmitMissionRegistration => {
+                let raw =
+                    req.params.get("registration").cloned().ok_or_else(|| {
+                        RpcError::InvalidParams("missing registration object".into())
+                    })?;
+                let registration: agora_types::MissionRegistration = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_mission_registration(registration)?;
+                Ok(json!({ "registration_id": id.to_hex() }))
+            }
+            RpcMethod::GetMissionRegistration => {
+                let id = param_hash(&req.params, "registration_id")?;
+                self.backend.get_mission_registration(&id)
+            }
+            RpcMethod::GetMissionSponsorNonce => {
+                let sponsor = param_address(&req.params, "sponsor")?;
+                self.backend.get_mission_sponsor_nonce(&sponsor)
+            }
+            RpcMethod::SubmitTreasuryDisbursement => {
+                let raw =
+                    req.params.get("disbursement").cloned().ok_or_else(|| {
+                        RpcError::InvalidParams("missing disbursement object".into())
+                    })?;
+                let spend: agora_types::TreasuryDisbursement = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_treasury_disbursement(spend)?;
+                Ok(json!({ "disbursement_id": id.to_hex() }))
+            }
+            RpcMethod::GetTreasuryDisbursement => {
+                let id = param_hash(&req.params, "disbursement_id")?;
+                self.backend.get_treasury_disbursement(&id)
+            }
+            RpcMethod::GetTreasuryNonce => {
+                let treasury = parse_treasury_id(&param_string(&req.params, "treasury")?)?;
+                self.backend.get_treasury_nonce(treasury)
+            }
+            RpcMethod::SubmitVestingUnlock => {
+                let raw = req
+                    .params
+                    .get("unlock")
+                    .cloned()
+                    .ok_or_else(|| RpcError::InvalidParams("missing unlock object".into()))?;
+                let claim: agora_types::VestingUnlock = serde_json::from_value(raw)
+                    .map_err(|err| RpcError::InvalidParams(err.to_string()))?;
+                let id = self.backend.submit_vesting_unlock(claim)?;
+                Ok(json!({ "unlock_id": id.to_hex() }))
+            }
+            RpcMethod::GetVestingUnlock => {
+                let id = param_hash(&req.params, "unlock_id")?;
+                self.backend.get_vesting_unlock(&id)
+            }
+            RpcMethod::GetVestingNonce => {
+                let beneficiary = param_address(&req.params, "beneficiary")?;
+                self.backend.get_vesting_nonce(&beneficiary)
+            }
             RpcMethod::SubmitStakeTx => {
                 let stake_tx = req
                     .params
@@ -938,6 +1078,25 @@ fn covenant_lookup_to_json(lookup: &crate::backend::TltCovenantLookup) -> Value 
     })
 }
 
+fn data_commitment_lookup_to_json(lookup: &crate::backend::DataCommitmentLookup) -> Value {
+    json!({
+        "authorization_id": lookup.authorization_id.to_hex(),
+        "status": lookup.status,
+        "block_id": lookup.block_id.map(|h| h.to_hex()),
+        "index": lookup.index,
+        "confirmations": lookup.confirmations,
+        "finalized": lookup.finalized,
+        "pow_work_met": lookup.pow_work_met,
+        "acceptance": lookup.acceptance,
+        "lane_enabled": lookup.lane_enabled,
+        "canonical_l1": true,
+        "lab_record_da": false,
+        "authorization": lookup.authorization.as_ref().map(|authorization| {
+            serde_json::to_value(authorization).unwrap_or(Value::Null)
+        }),
+    })
+}
+
 fn tx_lookup_to_json(lookup: &crate::backend::TxLookup) -> Value {
     json!({
         "tx_id": lookup.tx_id.to_hex(),
@@ -999,6 +1158,9 @@ fn node_info_to_json(info: &crate::backend::NodeInfo) -> Value {
         "genesis_hash": info.genesis_hash,
         "chain_id": info.chain_id,
         "min_relay_fee": info.min_relay_fee,
+        "trident_header_hash": info.trident_header_hash,
+        "artifact_identity": info.artifact_identity,
+        "block_zero_commitment": info.block_zero_commitment,
     })
 }
 
@@ -1154,6 +1316,30 @@ fn block_param(params: &Value) -> Result<Value, RpcError> {
 fn param_hash(params: &Value, key: &str) -> Result<Hash, RpcError> {
     let v = single_or_named(params, key)?;
     parse_hash_value(&v, key)
+}
+
+fn optional_hash(params: &Value, key: &str) -> Result<Option<Hash>, RpcError> {
+    let Some(value) = params.as_object().and_then(|object| object.get(key)) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    parse_hash_value(value, key).map(Some)
+}
+
+fn optional_data_commitment_source(
+    params: &Value,
+) -> Result<Option<DataCommitmentSource>, RpcError> {
+    let Some(value) = params.as_object().and_then(|object| object.get("source")) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    serde_json::from_value(value.clone())
+        .map(Some)
+        .map_err(|err| RpcError::InvalidParams(format!("invalid DA source: {err}")))
 }
 
 fn parse_hash_value(v: &Value, key: &str) -> Result<Hash, RpcError> {
@@ -1318,6 +1504,17 @@ fn optional_u64_opt(params: &Value, key: &str) -> Result<Option<u64>, RpcError> 
     }
 }
 
+fn parse_treasury_id(name: &str) -> Result<agora_types::TreasuryId, RpcError> {
+    match name {
+        "tlt_security" | "TltSecurity" => Ok(agora_types::TreasuryId::TltSecurity),
+        "ovl_builder" | "OvlBuilder" => Ok(agora_types::TreasuryId::OvlBuilder),
+        "drc_community" | "DrcCommunity" => Ok(agora_types::TreasuryId::DrcCommunity),
+        other => Err(RpcError::InvalidParams(format!(
+            "unknown treasury `{other}`"
+        ))),
+    }
+}
+
 fn param_string(params: &Value, key: &str) -> Result<String, RpcError> {
     let v = if let Some(obj) = params.as_object() {
         obj.get(key)
@@ -1367,8 +1564,7 @@ fn param_topic_category(params: &Value) -> Result<agora_governance::TopicCategor
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::InMemoryBackend;
-    use crate::methods::RpcMethod;
+    use crate::{backend::InMemoryBackend, methods::RpcMethod};
     use agora_types::{
         AccountTransfer, Amount, Block, BlockHeader, DrcAcceptedOperationReceipt, DrcAccountPolicy,
         DrcAccountPolicyTx, DrcDepositPreauth, DrcLedgerObject, DrcLedgerObjectDescriptor,
@@ -1606,6 +1802,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         let genesis_id = genesis.id();
         backend.insert_block(genesis);
@@ -1772,6 +1974,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         let mined_id = mined.id();
         rpc.backend_mut().insert_block(mined);
@@ -1827,6 +2035,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         rpc.backend_mut().insert_block(child);
         let deeper = rpc.handle(RpcRequest {
@@ -2447,6 +2661,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2518,6 +2738,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2588,6 +2814,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2659,6 +2891,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         };
         backend.insert_block(genesis);
         let mut rpc = RpcDispatcher::new(backend);
@@ -2748,5 +2986,72 @@ mod tests {
         assert_eq!(found["status"], "pending");
         assert_eq!(found["tx_id"], tx.tx_id().to_hex());
         assert!(RpcMethod::parse("agora_submitTltCovenant").is_some());
+    }
+
+    #[test]
+    fn submit_and_query_data_commitment() {
+        use agora_types::DataAvailabilityCommitment;
+
+        let authorization = DataCommitmentAuthorization::unsigned(
+            Address([7; 20]),
+            0,
+            DataAvailabilityCommitment::agora_layers_ovolos_batch(
+                "agora-ovolos-testnet-1".into(),
+                Hash([1; 32]),
+                Hash([2; 32]),
+                3,
+                Hash([4; 32]),
+                Hash([5; 32]),
+                Hash([6; 32]),
+                7,
+                8,
+            ),
+        );
+        let mut signed = authorization.clone();
+        signed.public_key = vec![1; 33];
+        signed.signature = vec![2; 64];
+        let mut rpc = RpcDispatcher::new(InMemoryBackend::new());
+        let submitted = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_submitDataCommitment".into(),
+            params: json!({ "authorization": signed }),
+        });
+        assert!(submitted.error.is_none(), "{submitted:?}");
+        let id = submitted.result.unwrap()["authorization_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let queried = rpc.handle(RpcRequest {
+            id: Some(json!(2)),
+            method: "agora_getDataCommitment".into(),
+            params: json!({ "authorization_id": id }),
+        });
+        let found = queried.result.unwrap();
+        assert_eq!(found["status"], "pending");
+        assert_eq!(found["lab_record_da"], false);
+        assert_eq!(found["finalized"], false);
+        assert!(RpcMethod::parse("agora_submitDataCommitment").is_some());
+        assert!(RpcMethod::parse("agora_getDataCommitment").is_some());
+    }
+
+    #[test]
+    fn book_offers_accept_human_readable_sides() {
+        let issuer = Address::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let mut rpc = RpcDispatcher::new(InMemoryBackend::new());
+        let page = rpc.handle(RpcRequest {
+            id: Some(json!(1)),
+            method: "agora_getDrcBookOffers".into(),
+            params: json!({
+                "pays": { "type": "native_drc" },
+                "gets": {
+                    "type": "issued",
+                    "issuer": issuer.to_bech32_hrp("agoratest"),
+                    "currency": "USD"
+                },
+                "limit": 8
+            }),
+        });
+        assert!(page.error.is_none(), "{page:?}");
+        assert_eq!(page.result.unwrap()["offers"], json!([]));
     }
 }

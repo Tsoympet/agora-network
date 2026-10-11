@@ -16,14 +16,17 @@
 
 mod finality;
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use agora_consensus::{
     median_time_past, next_difficulty_weighted, work_from_bits, ConsensusLimits, DaaConfig,
-    DaaSample, Dag, Difficulty, EmissionSchedule, Ghostdag, GhostdagConfig, GhostdagSnapshot,
-    KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier, RandomXPowHasher,
+    DaaSample, Dag, Difficulty, EmissionSchedule, FinalityPowPolicy, Ghostdag, GhostdagConfig,
+    GhostdagSnapshot, KHeavyHashPowHasher, LeadingZeroPow, PowAlgorithm, PowHasher, PowVerifier,
+    RandomXPowHasher,
 };
 use agora_state_machine::{
     apply_block_batched_virtual_at_blue_score, ghostdag_key, index_block_transactions_into,
@@ -141,6 +144,8 @@ pub struct ChainState {
     auth: Option<TxAuthContext>,
     /// Canonical consensus-policy hash bound into checkpoint bodies.
     consensus_policy_hash: Hash,
+    /// Artifact `pow_work_threshold` (minimum-blue-score-depth-v1). Default 1.
+    finality_pow: FinalityPowPolicy,
 }
 
 /// Runtime consensus knobs loaded from [`agora_state_machine::ChainParams`].
@@ -155,9 +160,12 @@ pub struct ChainBootConfig {
     pub chain_id: String,
     /// Bound into Trident checkpoint bodies (from [`agora_state_machine::GenesisConsensusPolicy`]).
     pub consensus_policy_hash: Hash,
-    /// `None` keeps DA inclusion fail-closed until a reviewed TLT fee policy
-    /// explicitly activates this Trident-only block lane.
+    /// Mesh fingerprint bound into DA authorizations. Default Experimental boot
+    /// always sets this from the live network fingerprint; inclusion still burns
+    /// [`agora_types::DA_INCLUSION_FEE_TLT`] from the operator's TLT UTXOs.
     pub data_availability_network_fingerprint: Option<Hash>,
+    /// PoW leg of dual-PoS finality. Trident boot copies artifact `min_pow_depth`.
+    pub finality_pow: FinalityPowPolicy,
 }
 
 impl Default for ChainBootConfig {
@@ -174,6 +182,7 @@ impl Default for ChainBootConfig {
             chain_id: String::new(),
             consensus_policy_hash: Hash::ZERO,
             data_availability_network_fingerprint: None,
+            finality_pow: FinalityPowPolicy::default(),
         }
     }
 }
@@ -192,6 +201,7 @@ impl From<&agora_state_machine::ChainParams> for ChainBootConfig {
             chain_id: params.network.chain_id().into(),
             consensus_policy_hash,
             data_availability_network_fingerprint: None,
+            finality_pow: FinalityPowPolicy::default(),
         }
     }
 }
@@ -231,6 +241,12 @@ pub struct BlockTemplateLanes<'a> {
     pub drc_offer_creates: &'a [agora_types::DrcOfferCreateTx],
     pub drc_offer_cancels: &'a [agora_types::DrcOfferCancelTx],
     pub tlt_covenants: &'a [agora_types::TltCovenantTx],
+    pub passport_attestations: &'a [agora_types::PassportAttestation],
+    pub hub_registrations: &'a [agora_types::HubRegistration],
+    pub grant_registrations: &'a [agora_types::GrantRegistration],
+    pub mission_registrations: &'a [agora_types::MissionRegistration],
+    pub treasury_disbursements: &'a [agora_types::TreasuryDisbursement],
+    pub vesting_unlocks: &'a [agora_types::VestingUnlock],
 }
 
 impl ChainState {
@@ -294,6 +310,7 @@ impl ChainState {
             limits: ConsensusLimits::default(),
             auth,
             consensus_policy_hash: boot.consensus_policy_hash,
+            finality_pow: boot.finality_pow,
         };
         // Fresh / upgraded datadirs: ensure virtual tip meta exists.
         if chain.load_virtual_tip()?.is_none() {
@@ -509,6 +526,10 @@ impl ChainState {
         Ok(self.load_header(hash)?.is_some() || self.dag.contains(hash))
     }
 
+    pub fn auth_context(&self) -> Option<TxAuthContext> {
+        self.auth.clone()
+    }
+
     /// Parents of `block` that are not yet in the local DAG / store.
     pub fn missing_parents_of(&self, block: &Block) -> Vec<Hash> {
         block
@@ -631,6 +652,12 @@ impl ChainState {
             drc_offer_cancels: lanes.drc_offer_cancels.to_vec(),
             drc_multisign_attachments: Vec::new(),
             tlt_covenants: included_covenants.to_vec(),
+            passport_attestations: lanes.passport_attestations.to_vec(),
+            hub_registrations: lanes.hub_registrations.to_vec(),
+            grant_registrations: lanes.grant_registrations.to_vec(),
+            mission_registrations: lanes.mission_registrations.to_vec(),
+            treasury_disbursements: lanes.treasury_disbursements.to_vec(),
+            vesting_unlocks: lanes.vesting_unlocks.to_vec(),
         };
         if let Some(ctx) = self.auth.as_ref() {
             agora_types::materialize_drc_multisign_attachments(
@@ -1486,6 +1513,13 @@ impl ChainState {
                 for tx in &block.tlt_covenants {
                     self.repoint_primary_covenant(&mut tip_batch, &tx.tx_id(), &target)?;
                 }
+                for authorization in &block.data_commitments {
+                    self.repoint_primary_data_commitment(
+                        &mut tip_batch,
+                        &authorization.authorization_id(),
+                        &target,
+                    )?;
+                }
             }
         }
         for hash in &target[prefix..] {
@@ -1500,6 +1534,14 @@ impl ChainState {
                     agora_state_machine::set_primary_covenant_tx_location(
                         &mut tip_batch,
                         &tx.tx_id(),
+                        hash,
+                        index as u32,
+                    );
+                }
+                for (index, authorization) in block.data_commitments.iter().enumerate() {
+                    agora_state_machine::set_primary_data_commitment_location(
+                        &mut tip_batch,
+                        &authorization.authorization_id(),
                         hash,
                         index as u32,
                     );
@@ -1578,6 +1620,23 @@ impl ChainState {
         if let Some((block_id, index)) = inclusions.into_iter().find(|(b, _)| blue_set.contains(b))
         {
             agora_state_machine::set_primary_covenant_tx_location(batch, tx_id, &block_id, index);
+        }
+        Ok(())
+    }
+
+    fn repoint_primary_data_commitment(
+        &self,
+        batch: &mut WriteBatch,
+        id: &Hash,
+        virtual_blues: &[Hash],
+    ) -> Result<(), AdmitError> {
+        let inclusions =
+            agora_state_machine::list_data_commitment_inclusions(self.store.as_ref(), id)
+                .map_err(|e| AdmitError::Storage(e.to_string()))?;
+        let blue_set: HashSet<Hash> = virtual_blues.iter().copied().collect();
+        if let Some((block_id, index)) = inclusions.into_iter().find(|(b, _)| blue_set.contains(b))
+        {
+            agora_state_machine::set_primary_data_commitment_location(batch, id, &block_id, index);
         }
         Ok(())
     }
@@ -2124,6 +2183,7 @@ impl ChainState {
                 drc_offer_meta_before: journal.drc_offer_meta_before,
                 tlt_covenant_created: journal.tlt_covenant_created,
                 tlt_covenant_spent: journal.tlt_covenant_spent,
+                passport_meta_before: journal.passport_meta_before,
             };
             let bytes = borsh::to_vec(&repaired).map_err(|e| AdmitError::Storage(e.to_string()))?;
             self.store
@@ -3363,7 +3423,11 @@ mod tests {
         use agora_types::TransactionAcceptance;
 
         let store = Arc::new(StateStore::open_in_memory());
-        let genesis = GenesisBuilder::default().ignite(store.as_ref()).unwrap();
+        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(operator.address())
+            .ignite(store.as_ref())
+            .unwrap();
         let fingerprint = Hash([9; 32]);
         let boot = ChainBootConfig {
             initial_bits: 0,
@@ -3378,7 +3442,6 @@ mod tests {
             StoragePolicy::default(),
         )
         .unwrap();
-        let operator = agora_crypto::KeyPair::from_secret_bytes(&[7; 32]).unwrap();
         let first = signed_da_authorization(&operator, &genesis, &fingerprint, 4, 0, 11);
         let conflict = signed_da_authorization(&operator, &genesis, &fingerprint, 4, 0, 12);
 

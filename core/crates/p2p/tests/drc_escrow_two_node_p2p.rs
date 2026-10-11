@@ -8,7 +8,7 @@ use agora_crypto::{
 };
 use agora_p2p::{
     dial_addr, fingerprint_topic_tag, trident_network_fingerprint, NetworkConfig, NetworkEvent,
-    NetworkMessage, NetworkNode,
+    NetworkMessage, NetworkNode, COMPACT_LANE_DRC_MULTISIGN,
 };
 use agora_state_machine::{
     apply_block_batched_with_auth_at_blue_score, apply_drc_signer_list, credit_account_into,
@@ -301,10 +301,15 @@ async fn attachment_escrow_block_uses_full_block_getblock_and_apply() {
     block.header.tx_root = block.compute_body_root();
     let hash = block.id();
 
-    assert!(matches!(
-        NetworkMessage::compact_from_block(&block),
-        NetworkMessage::Block(_)
-    ));
+    match NetworkMessage::compact_from_block(&block) {
+        NetworkMessage::TypedCompactBlock(body) => {
+            assert!(body
+                .lanes
+                .iter()
+                .any(|lane| lane.kind == COMPACT_LANE_DRC_MULTISIGN));
+        }
+        other => panic!("expected typed compact, got {other:?}"),
+    }
 
     handle_b
         .publish_message(NetworkMessage::Block(block.clone()))

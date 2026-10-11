@@ -7,8 +7,10 @@
 //! [`OrphanPool`] holds blocks whose parents are not yet local so multi-hop
 //! IBD can fetch ancestors and re-admit children in order.
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::{Duration, Instant};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    time::{Duration, Instant},
+};
 
 use agora_types::{Block, BlockHeader, Hash, Transaction};
 use libp2p::PeerId;
@@ -35,6 +37,8 @@ pub enum ReconstructError {
     MissingShortIds(usize),
     /// Reassembled txs do not match `header.tx_root`.
     TxRootMismatch,
+    /// Typed compact version or lane kind this node cannot name.
+    UnsupportedLane(u8),
 }
 
 /// Rebuild a full block from a compact header + short ids via mempool lookup.
@@ -462,6 +466,12 @@ mod tests {
             drc_offer_cancels: vec![],
             drc_multisign_attachments: vec![],
             tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
         }
     }
 

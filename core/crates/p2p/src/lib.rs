@@ -17,6 +17,7 @@ mod network;
 mod scoring;
 mod seeder;
 mod topics;
+mod typed_compact;
 
 pub use config::NetworkConfig;
 pub use error::P2pError;
@@ -55,4 +56,9 @@ pub use seeder::{
 pub use topics::{
     blocks_topic, transactions_topic, NetworkTopics, TOPIC_BLOCKS, TOPIC_TRANSACTIONS,
     TOPIC_VERSION,
+};
+pub use typed_compact::{
+    reconstruct_typed_compact, CompactLaneItem, TypedCompactBody, TypedCompactLane,
+    COMPACT_LANE_DRC_MULTISIGN, COMPACT_LANE_GRANT, COMPACT_LANE_HUB, COMPACT_LANE_MISSION,
+    COMPACT_LANE_PASSPORT, COMPACT_LANE_TREASURY, COMPACT_LANE_VESTING, TYPED_COMPACT_VERSION,
 };
