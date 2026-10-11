@@ -745,10 +745,10 @@ mod tests {
         let file = dir.path().join("portable").join("state.bin");
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(&file, b"NOPE").unwrap();
-        let err = StateStore::open_portable(dir.path()).unwrap_err();
-        match err {
-            StateError::Storage(msg) => assert!(msg.contains("AGORAP01")),
-            other => panic!("unexpected {other}"),
+        match StateStore::open_portable(dir.path()) {
+            Err(StateError::Storage(msg)) => assert!(msg.contains("AGORAP01")),
+            Err(other) => panic!("unexpected {other}"),
+            Ok(_) => panic!("expected truncated snapshot to fail"),
         }
     }
 }
