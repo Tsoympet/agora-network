@@ -17,13 +17,18 @@ import {
   sendDrcOfferCancel,
   sendDrcOfferCreate,
   sendDrcPayment,
+  DRC_ACCOUNT_POLICY_ACTIONS,
   DRC_WALLET_FAMILY_LANES,
   drcFamilyNeedsAmount,
+  drcFamilyNeedsExtraHex,
   drcFamilyNeedsIssued,
   drcFamilyNeedsObjectId,
+  drcFamilyNeedsPolicyAction,
   drcFamilyNeedsRecipient,
+  drcFamilyNeedsSignerList,
   sendDrcWalletFamily,
   sendOvlExecution,
+  type DrcAccountPolicyAction,
   type DrcWalletFamilyLane,
   sendTltCovenant,
   sendTransfer,
@@ -33,6 +38,7 @@ import {
   walletNetworkFromNode,
   watchTransaction,
   type LightAccountBalances,
+  type LightDrcOfferPage,
   type LightNodeInfo,
   type LightTxLookup,
   type LightUtxo,
@@ -114,6 +120,14 @@ export function App() {
   const [offerCurrency, setOfferCurrency] = useState("USD");
   const [offerGets, setOfferGets] = useState("1");
   const [offerId, setOfferId] = useState("");
+  const [extraHex, setExtraHex] = useState("");
+  const [settleDelay, setSettleDelay] = useState("1");
+  const [quorum, setQuorum] = useState("1");
+  const [signerEntries, setSignerEntries] = useState("");
+  const [signerAction, setSignerAction] = useState<"set" | "delete">("set");
+  const [policyAction, setPolicyAction] = useState<DrcAccountPolicyAction>(
+    "set_require_destination_tag",
+  );
   const [sendBusy, setSendBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [lastTxId, setLastTxId] = useState<string | null>(null);
@@ -121,6 +135,14 @@ export function App() {
   const [receiveBech32, setReceiveBech32] = useState<string | null>(null);
   const [receiveHex, setReceiveHex] = useState<string | null>(null);
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  const [bookIssuer, setBookIssuer] = useState("");
+  const [bookCurrency, setBookCurrency] = useState("USD");
+  const [bookDirection, setBookDirection] = useState<"drc-pays" | "issued-pays">(
+    "drc-pays",
+  );
+  const [bookBusy, setBookBusy] = useState(false);
+  const [bookError, setBookError] = useState<string | null>(null);
+  const [bookPage, setBookPage] = useState<LightDrcOfferPage | null>(null);
 
   useEffect(() => startTipSync({ client, pollMs, onUpdate: setSnap }), [client]);
 
@@ -454,6 +476,12 @@ export function App() {
             objectId: offerId.trim(),
             issuer: offerIssuer.trim(),
             currency: offerCurrency,
+            extraHex: extraHex.trim(),
+            settleDelay: Math.floor(Number(settleDelay)),
+            quorum: Math.floor(Number(quorum)),
+            signerEntries,
+            signerAction,
+            policyAction,
           },
         );
         id = submitted;
@@ -478,6 +506,34 @@ export function App() {
       setSendBusy(false);
     }
   }
+
+  async function onBook(e: FormEvent) {
+    e.preventDefault();
+    const issuer = bookIssuer.trim();
+    const currency = bookCurrency.trim();
+    if (!issuer || !currency) {
+      setBookError("Issuer and currency are required.");
+      return;
+    }
+    setBookBusy(true);
+    setBookError(null);
+    setBookPage(null);
+    const issued = { type: "issued" as const, issuer, currency };
+    const native = { type: "native_drc" as const };
+    const book =
+      bookDirection === "drc-pays"
+        ? { pays: native, gets: issued }
+        : { pays: issued, gets: native };
+    try {
+      setBookPage(await client.getDrcBookOffers({ book, limit: 16 }));
+    } catch (err) {
+      setBookError(err instanceof Error ? err.message : "book lookup failed");
+    } finally {
+      setBookBusy(false);
+    }
+  }
+
+  const bookOffers = Array.isArray(bookPage?.offers) ? bookPage.offers : [];
 
   const fieldStyle = {
     width: "100%" as const,
@@ -940,6 +996,84 @@ export function App() {
               style={fieldStyle}
             />
           ) : null}
+          {drcFamilyNeedsExtraHex(sendLane) ? (
+            <>
+              <input
+                value={extraHex}
+                onChange={(e) => setExtraHex(e.target.value)}
+                placeholder={
+                  sendLane === "drc-channel-create"
+                    ? "claim public key (compressed secp256k1 hex)"
+                    : "claim signature (hex)"
+                }
+                aria-label="Extra hex key"
+                spellCheck={false}
+                style={fieldStyle}
+              />
+              {sendLane === "drc-channel-create" ? (
+                <input
+                  value={settleDelay}
+                  onChange={(e) => setSettleDelay(e.target.value)}
+                  placeholder="settle delay"
+                  aria-label="Settle delay"
+                  inputMode="numeric"
+                  style={fieldStyle}
+                />
+              ) : null}
+            </>
+          ) : null}
+          {drcFamilyNeedsSignerList(sendLane) ? (
+            <>
+              <select
+                value={signerAction}
+                onChange={(e) =>
+                  setSignerAction(e.target.value as "set" | "delete")
+                }
+                aria-label="Signer list action"
+                style={fieldStyle}
+              >
+                <option value="set">Set signer list</option>
+                <option value="delete">Delete signer list</option>
+              </select>
+              {signerAction === "set" ? (
+                <>
+                  <input
+                    value={quorum}
+                    onChange={(e) => setQuorum(e.target.value)}
+                    placeholder="quorum"
+                    aria-label="Signer quorum"
+                    inputMode="numeric"
+                    style={fieldStyle}
+                  />
+                  <textarea
+                    value={signerEntries}
+                    onChange={(e) => setSignerEntries(e.target.value)}
+                    placeholder="one signer per line: address,weight"
+                    aria-label="Signer entries"
+                    spellCheck={false}
+                    rows={3}
+                    style={fieldStyle}
+                  />
+                </>
+              ) : null}
+            </>
+          ) : null}
+          {drcFamilyNeedsPolicyAction(sendLane) ? (
+            <select
+              value={policyAction}
+              onChange={(e) =>
+                setPolicyAction(e.target.value as DrcAccountPolicyAction)
+              }
+              aria-label="Account policy action"
+              style={fieldStyle}
+            >
+              {DRC_ACCOUNT_POLICY_ACTIONS.map((action) => (
+                <option key={action.id} value={action.id}>
+                  {action.label}
+                </option>
+              ))}
+            </select>
+          ) : null}
           {sendLane === "drc-offer" || drcFamilyNeedsIssued(sendLane) ? (
             <>
               <input
@@ -1021,6 +1155,67 @@ export function App() {
               ? ` @ ${shortHash(txLookup.block_id)}`
               : null}
             {txLookup?.fee != null ? ` · fee ${txLookup.fee}` : null}
+          </p>
+        ) : null}
+      </section>
+
+      <section style={{ marginTop: "1.5rem" }}>
+        <p className="agora-eyebrow">DRC native DEX book</p>
+        <p style={{ fontSize: "0.85rem", color: "var(--agora-mist)", margin: "0.35rem 0 0.75rem" }}>
+          Read-only page. Order entry stays in the send form above.
+        </p>
+        <form onSubmit={onBook} style={{ display: "grid", gap: "0.75rem" }}>
+          <input
+            value={bookIssuer}
+            onChange={(e) => setBookIssuer(e.target.value)}
+            placeholder="issued issuer (Bech32m or 40-hex)"
+            aria-label="Book issuer"
+            spellCheck={false}
+            style={fieldStyle}
+          />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <input
+              value={bookCurrency}
+              onChange={(e) => setBookCurrency(e.target.value)}
+              placeholder="USD"
+              aria-label="Book currency"
+              style={fieldStyle}
+            />
+            <select
+              value={bookDirection}
+              onChange={(e) =>
+                setBookDirection(e.target.value as "drc-pays" | "issued-pays")
+              }
+              aria-label="Book direction"
+              style={fieldStyle}
+            >
+              <option value="drc-pays">Pays DRC, gets issued</option>
+              <option value="issued-pays">Pays issued, gets DRC</option>
+            </select>
+          </div>
+          <button
+            type="submit"
+            disabled={bookBusy || !networkReady}
+            style={{ ...btnStyle, cursor: bookBusy ? "wait" : "pointer" }}
+          >
+            {bookBusy ? "Looking up…" : "Lookup book"}
+          </button>
+        </form>
+        {bookError ? (
+          <p style={{ marginTop: "0.65rem", color: "var(--agora-danger)", fontSize: "0.9rem" }}>
+            {bookError}
+          </p>
+        ) : null}
+        {bookPage ? (
+          <p
+            style={{
+              marginTop: "0.65rem",
+              fontFamily: "ui-monospace, monospace",
+              fontSize: "0.8rem",
+              color: "var(--agora-cyan)",
+            }}
+          >
+            {bookOffers.length} offer{bookOffers.length === 1 ? "" : "s"}
           </p>
         ) : null}
       </section>

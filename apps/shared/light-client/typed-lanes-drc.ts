@@ -1878,6 +1878,26 @@ export async function sendDrcIssuedClawback(
   );
 }
 
+export type DrcAccountPolicyAction =
+  | "set_require_destination_tag"
+  | "clear_require_destination_tag"
+  | "set_deposit_auth_required"
+  | "clear_deposit_auth_required"
+  | "set_master_key_disabled"
+  | "clear_master_key_disabled";
+
+export const DRC_ACCOUNT_POLICY_ACTIONS: {
+  id: DrcAccountPolicyAction;
+  label: string;
+}[] = [
+  { id: "set_require_destination_tag", label: "Require destination tag" },
+  { id: "clear_require_destination_tag", label: "Clear destination tag" },
+  { id: "set_deposit_auth_required", label: "Require deposit auth" },
+  { id: "clear_deposit_auth_required", label: "Clear deposit auth" },
+  { id: "set_master_key_disabled", label: "Disable master key" },
+  { id: "clear_master_key_disabled", label: "Enable master key" },
+];
+
 export type DrcWalletFamilyLane =
   | "drc-escrow-create"
   | "drc-escrow-finish"
@@ -1890,7 +1910,13 @@ export type DrcWalletFamilyLane =
   | "drc-deposit-preauth"
   | "drc-trust-line"
   | "drc-issued-transfer"
-  | "drc-issued-clawback";
+  | "drc-issued-clawback"
+  | "drc-channel-create"
+  | "drc-channel-fund"
+  | "drc-channel-claim"
+  | "drc-channel-close"
+  | "drc-signer-list"
+  | "drc-account-policy";
 
 export const DRC_WALLET_FAMILY_LANES: { id: DrcWalletFamilyLane; label: string }[] =
   [
@@ -1906,6 +1932,12 @@ export const DRC_WALLET_FAMILY_LANES: { id: DrcWalletFamilyLane; label: string }
     { id: "drc-trust-line", label: "DRC trust line set" },
     { id: "drc-issued-transfer", label: "DRC issued transfer" },
     { id: "drc-issued-clawback", label: "DRC issued clawback" },
+    { id: "drc-channel-create", label: "DRC channel create" },
+    { id: "drc-channel-fund", label: "DRC channel fund" },
+    { id: "drc-channel-claim", label: "DRC channel claim" },
+    { id: "drc-channel-close", label: "DRC channel close" },
+    { id: "drc-signer-list", label: "DRC signer list" },
+    { id: "drc-account-policy", label: "DRC account policy" },
   ];
 
 export function drcFamilyNeedsAmount(lane: string): boolean {
@@ -1914,7 +1946,10 @@ export function drcFamilyNeedsAmount(lane: string): boolean {
     lane === "drc-check-create" ||
     lane === "drc-trust-line" ||
     lane === "drc-issued-transfer" ||
-    lane === "drc-issued-clawback"
+    lane === "drc-issued-clawback" ||
+    lane === "drc-channel-create" ||
+    lane === "drc-channel-fund" ||
+    lane === "drc-channel-claim"
   );
 }
 
@@ -1923,7 +1958,10 @@ export function drcFamilyNeedsObjectId(lane: string): boolean {
     lane === "drc-escrow-finish" ||
     lane === "drc-escrow-cancel" ||
     lane === "drc-check-cash" ||
-    lane === "drc-check-cancel"
+    lane === "drc-check-cancel" ||
+    lane === "drc-channel-fund" ||
+    lane === "drc-channel-claim" ||
+    lane === "drc-channel-close"
   );
 }
 
@@ -1942,8 +1980,44 @@ export function drcFamilyNeedsRecipient(lane: string): boolean {
     lane === "drc-regular-key" ||
     lane === "drc-deposit-preauth" ||
     lane === "drc-issued-transfer" ||
-    lane === "drc-issued-clawback"
+    lane === "drc-issued-clawback" ||
+    lane === "drc-channel-create"
   );
+}
+
+export function drcFamilyNeedsExtraHex(lane: string): boolean {
+  return lane === "drc-channel-create" || lane === "drc-channel-claim";
+}
+
+export function drcFamilyNeedsSignerList(lane: string): boolean {
+  return lane === "drc-signer-list";
+}
+
+export function drcFamilyNeedsPolicyAction(lane: string): boolean {
+  return lane === "drc-account-policy";
+}
+
+export function parseDrcSignerEntries(
+  text: string,
+): { signer: string; weight: number }[] {
+  const entries = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [signer, rawWeight] = line.split(/[,\s]+/).filter(Boolean);
+      const weight = Number(rawWeight);
+      if (!signer || !Number.isFinite(weight) || weight <= 0) {
+        throw new Error(
+          "signer list lines must be `address,weight` with a positive weight",
+        );
+      }
+      return { signer, weight: Math.floor(weight) };
+    });
+  if (entries.length === 0) {
+    throw new Error("signer list needs at least one address,weight line");
+  }
+  return entries;
 }
 
 /** Wallet form dispatcher for families that share recipient/amount/id/issuer fields. */
@@ -1959,6 +2033,12 @@ export async function sendDrcWalletFamily(
     objectId?: string;
     issuer?: string;
     currency?: string;
+    extraHex?: string;
+    settleDelay?: number;
+    quorum?: number;
+    signerEntries?: string;
+    signerAction?: "set" | "delete";
+    policyAction?: DrcAccountPolicyAction;
   },
 ) {
   const common = {
@@ -2034,6 +2114,47 @@ export async function sendDrcWalletFamily(
         holder: options.recipient ?? "",
         currency: options.currency ?? "USD",
         amount: options.amount ?? 0,
+      });
+    case "drc-channel-create":
+      return sendDrcChannelCreate(client, {
+        ...common,
+        destination: options.recipient ?? "",
+        amount: options.amount ?? 0,
+        claimPublicKey: hexToBytes(options.extraHex ?? ""),
+        settleDelay: options.settleDelay ?? 1,
+      });
+    case "drc-channel-fund":
+      return sendDrcChannelFund(client, {
+        ...common,
+        channelId: options.objectId ?? "",
+        amount: options.amount ?? 0,
+      });
+    case "drc-channel-claim":
+      return sendDrcChannelClaim(client, {
+        ...common,
+        channelId: options.objectId ?? "",
+        cumulativeAuthorized: options.amount ?? 0,
+        claimSignature: hexToBytes(options.extraHex ?? ""),
+      });
+    case "drc-channel-close":
+      return sendDrcChannelClose(client, {
+        ...common,
+        channelId: options.objectId ?? "",
+      });
+    case "drc-signer-list":
+      return sendDrcSignerList(client, {
+        ...common,
+        action: options.signerAction ?? "set",
+        quorum: options.quorum ?? 1,
+        entries:
+          (options.signerAction ?? "set") === "delete"
+            ? []
+            : parseDrcSignerEntries(options.signerEntries ?? ""),
+      });
+    case "drc-account-policy":
+      return sendDrcAccountPolicy(client, {
+        ...common,
+        action: options.policyAction ?? "set_require_destination_tag",
       });
   }
 }

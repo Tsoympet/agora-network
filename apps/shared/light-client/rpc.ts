@@ -154,6 +154,17 @@ export type LightAmount = number | string;
 
 export type NativeAssetTicker = "TLT" | "OVL" | "DRC";
 
+export type LightFinalityBody = {
+  chain_id: string;
+  genesis_hash: string;
+  consensus_policy_hash: string;
+  state_transition_version: string;
+  blue_score: number;
+  block_hash: string;
+  state_root: string;
+  validator_epoch: number;
+};
+
 export type LightFinality = {
   block_hash: string;
   blue_score?: number;
@@ -165,6 +176,8 @@ export type LightFinality = {
   drc_active_stake?: LightAmount;
   finalized: boolean;
   finalized_tip_blue_score: number;
+  /** Present when the block is known. Required to sign a checkpoint attestation. */
+  body?: LightFinalityBody | null;
 };
 
 export type LightValidatorSet = {
@@ -513,6 +526,13 @@ export type LightClient = {
     issuer_control_tx_id: string;
   }>;
   submitDrcIssuedClawback: (tx: unknown) => Promise<{ clawback_tx_id: string }>;
+  submitAttestation: (attestation: unknown) => Promise<{
+    block_hash: string;
+    state: string;
+    finalized: boolean;
+    ovl_signed_stake?: LightAmount;
+    drc_signed_stake?: LightAmount;
+  }>;
   submitPassportAttestation: (attestation: unknown) => Promise<{
     attestation_id: string;
   }>;
@@ -871,6 +891,14 @@ export function createLightClient(config: LightClientConfig): LightClient {
       call<{ clawback_tx_id: string }>("agora_submitDrcIssuedClawback", {
         issued_clawback: tx,
       }),
+    submitAttestation: (attestation) =>
+      call<{
+        block_hash: string;
+        state: string;
+        finalized: boolean;
+        ovl_signed_stake?: LightAmount;
+        drc_signed_stake?: LightAmount;
+      }>("agora_submitAttestation", { attestation }),
     submitPassportAttestation: (attestation) =>
       call<{ attestation_id: string }>("agora_submitPassportAttestation", {
         attestation,

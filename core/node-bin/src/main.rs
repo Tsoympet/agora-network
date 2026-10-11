@@ -560,6 +560,9 @@ async fn main() {
         boot.emission = runtime.tlt_emission;
         boot.chain_id = runtime.chain_id.clone();
         boot.consensus_policy_hash = runtime.consensus_policy_hash;
+        boot.finality_pow = agora_consensus::FinalityPowPolicy {
+            min_pow_depth: runtime.finality.min_pow_depth,
+        };
         let net_fp = agora_p2p::trident_network_fingerprint(
             &runtime.chain_id,
             &runtime.artifact_identity,

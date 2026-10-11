@@ -3044,6 +3044,24 @@ impl RpcBackend for NodeBackend {
         let finalized_tip = chain
             .finalized_blue_score()
             .map_err(|e| RpcError::Internal(e.to_string()))?;
+        let body = match cert.as_ref() {
+            Some(c) => Some(c.body.clone()),
+            None => chain
+                .checkpoint_body_of(*block_hash)
+                .map_err(|e| RpcError::Internal(e.to_string()))?,
+        };
+        let body_json = body.as_ref().map(|b| {
+            json!({
+                "chain_id": b.chain_id,
+                "genesis_hash": b.genesis_hash.to_hex(),
+                "consensus_policy_hash": b.consensus_policy_hash.to_hex(),
+                "state_transition_version": b.state_transition_version,
+                "blue_score": b.blue_score,
+                "block_hash": b.block_hash.to_hex(),
+                "state_root": b.state_root.to_hex(),
+                "validator_epoch": b.validator_epoch,
+            })
+        });
         match cert {
             Some(c) => Ok(json!({
                 "block_hash": c.body.block_hash.to_hex(),
@@ -3056,13 +3074,16 @@ impl RpcBackend for NodeBackend {
                 "drc_active_stake": c.drc_active_stake,
                 "finalized": c.state.is_finalized(),
                 "finalized_tip_blue_score": finalized_tip,
+                "body": body_json,
             })),
             None => Ok(json!({
                 "block_hash": block_hash.to_hex(),
+                "blue_score": body.as_ref().map(|b| b.blue_score),
                 "state": "Proposed",
                 "pow_work_met": false,
                 "finalized": false,
                 "finalized_tip_blue_score": finalized_tip,
+                "body": body_json,
             })),
         }
     }
