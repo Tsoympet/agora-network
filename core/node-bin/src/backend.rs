@@ -98,6 +98,29 @@ fn fallback_tx_auth(network: &str, genesis: Hash) -> TxAuthContext {
     }
 }
 
+/// Gossip admission must reuse the live [`ChainState`] snapshot that
+/// [`NodeBackend::new`] captures for RPC.
+///
+/// Trident Experimental boot binds `boot.chain_id` =
+/// `agora-trident-experimental-testnet-1` while `AGORA_NETWORK=testnet`
+/// still reports `agora-testnet-1` on `ChainParams`. Wallets sign from
+/// `agora_getNodeInfo.chain_id` (the snapshot). If gossip verifies against
+/// the network label instead, B rejects a tx A already admitted and the
+/// spend only appears on B after mine+IBD.
+pub(crate) fn resolve_gossip_tx_auth(
+    chain: &Mutex<ChainState>,
+    network: &str,
+    genesis: Hash,
+    da_fingerprint: Option<Hash>,
+) -> TxAuthContext {
+    if let Some(auth) = chain.lock().ok().and_then(|guard| guard.auth_context()) {
+        return auth;
+    }
+    let mut auth = fallback_tx_auth(network, genesis);
+    auth.data_availability_network_fingerprint = da_fingerprint;
+    auth
+}
+
 fn map_drc_index_error(error: agora_state_machine::StateError) -> RpcError {
     match error {
         agora_state_machine::StateError::InvalidTx(message) => RpcError::InvalidParams(message),
@@ -4659,6 +4682,112 @@ mod tests {
     }
 
     #[test]
+    fn gossip_tx_auth_prefers_trident_boot_chain_id_over_network_label() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let genesis = GenesisBuilder::default().ignite(&store).unwrap();
+        let experimental = "agora-trident-experimental-testnet-1";
+        let chain = Mutex::new(
+            ChainState::bootstrap_with(
+                store.clone(),
+                genesis,
+                crate::admit::ChainBootConfig {
+                    chain_id: experimental.into(),
+                    ..crate::admit::ChainBootConfig::default()
+                },
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        );
+        let auth = resolve_gossip_tx_auth(&chain, "testnet", genesis, None);
+        assert_eq!(auth.chain_id, experimental);
+        assert_eq!(auth.genesis, genesis);
+
+        let empty = Mutex::new(
+            ChainState::bootstrap_with(
+                store,
+                genesis,
+                crate::admit::ChainBootConfig::default(),
+                crate::storage_policy::StoragePolicy::default(),
+            )
+            .unwrap(),
+        );
+        let fallback = resolve_gossip_tx_auth(&empty, "testnet", genesis, None);
+        assert_eq!(fallback.chain_id, "agora-testnet-1");
+    }
+
+    #[test]
+    fn trident_bound_spend_admits_on_boot_auth_and_rejects_network_chain_id() {
+        let store = Arc::new(StateStore::open_in_memory());
+        let mempool = Arc::new(Mutex::new(Mempool::new(64)));
+        let seed = seed_from_mnemonic(PHRASE, "").unwrap();
+        let from = derive_bip44(&seed, &Bip44Path::external(0)).unwrap();
+        let to = derive_bip44(&seed, &Bip44Path::external(1))
+            .unwrap()
+            .address();
+        let genesis = GenesisBuilder::default()
+            .with_premine_address(from.address())
+            .ignite(&store)
+            .unwrap();
+        let genesis_block = {
+            let bytes = store
+                .get_cf(ColumnFamily::Hot, genesis.as_bytes())
+                .unwrap()
+                .unwrap();
+            Block::try_from_slice(&bytes).unwrap()
+        };
+        let premine_txid = genesis_block.transactions[0].tx_id();
+        let experimental = "agora-trident-experimental-testnet-1";
+        let live = TxAuthContext {
+            chain_id: experimental.into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let network_label = TxAuthContext {
+            chain_id: "agora-testnet-1".into(),
+            genesis,
+            data_availability_network_fingerprint: None,
+        };
+        let premine = Amount::from_whole(10_000_000).unwrap();
+        let pay = Amount::from_whole(1).unwrap().as_base_units();
+        let fee = 1u64;
+        let mut spend = Transaction::unsigned(
+            1,
+            vec![TxIn {
+                previous_outpoint: OutPoint {
+                    tx_id: premine_txid,
+                    index: 0,
+                },
+            }],
+            vec![
+                TxOut {
+                    value: Amount::from_base_units(pay),
+                    address: to,
+                },
+                TxOut {
+                    value: Amount::from_base_units(premine.as_base_units() - pay - fee),
+                    address: from.address(),
+                },
+            ],
+            2,
+        );
+        sign_transaction_bound(&mut spend, &from, experimental, &genesis).unwrap();
+
+        let wrong = admit_transaction(store.as_ref(), &mempool, spend.clone(), &network_label);
+        match wrong {
+            Err(RpcError::Rejected(msg)) => {
+                assert!(
+                    msg.contains("utxo") || msg.contains("signature") || msg.contains("auth"),
+                    "expected bound-signature reject, got {msg}"
+                );
+            }
+            other => panic!("expected reject on agora-testnet-1 auth, got {other:?}"),
+        }
+        let id = admit_transaction(store.as_ref(), &mempool, spend.clone(), &live).unwrap();
+        assert_eq!(id, spend.tx_id());
+        assert!(mempool.lock().unwrap().contains(&id));
+    }
+
+    #[test]
     fn submit_transaction_requires_live_utxo() {
         let store = Arc::new(StateStore::open_in_memory());
         let mempool = Arc::new(Mutex::new(Mempool::new(64)));
@@ -5392,6 +5521,12 @@ mod drc_payment_channel_reorg_reservation_tests;
 #[cfg(test)]
 #[path = "drc_payment_channel_rpc_integration_tests.rs"]
 mod drc_payment_channel_rpc_integration_tests;
+#[cfg(test)]
+#[path = "mempool_gossip_tests.rs"]
+mod mempool_gossip_tests;
+#[cfg(test)]
+#[path = "mempool_persist_tests.rs"]
+mod mempool_persist_tests;
 
 #[cfg(test)]
 #[path = "drc_issued_controls_public_helpers.rs"]

@@ -51,7 +51,8 @@ use crate::{
         admit_drc_trust_line_set, admit_grant_registration, admit_hub_registration,
         admit_mission_registration, admit_ovl_execution, admit_ovl_raw_execution,
         admit_passport_attestation, admit_stake_tx, admit_tlt_covenant, admit_transaction,
-        admit_treasury_disbursement, admit_vesting_unlock, NodeBackend, NodeBackendConfig,
+        admit_treasury_disbursement, admit_vesting_unlock, resolve_gossip_tx_auth, NodeBackend,
+        NodeBackendConfig,
     },
     http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig},
     startup::{p2p_identity_path, prepare_legacy_datadir, prepare_trident_datadir},
@@ -652,7 +653,19 @@ async fn main() {
         hot_window = storage.hot_window,
         "state store opened"
     );
-    let mempool = Arc::new(Mutex::new(Mempool::new(10_000)));
+    let mempool_path = agora_p2p::mempool_persist_path(&data_dir);
+    let mempool = Arc::new(Mutex::new(
+        Mempool::open_persistent(&mempool_path, 10_000).unwrap_or_else(|err| {
+            warn!(
+                error = %err,
+                path = %mempool_path.display(),
+                "portable mempool snapshot rejected; starting empty"
+            );
+            let mut pool = Mempool::new(10_000);
+            pool.set_persist_path(&mempool_path);
+            pool
+        }),
+    ));
 
     let mut seeder_book = net_cfg.dns_seeder_url.as_ref().map(|url| {
         SeederBook::new(
@@ -757,11 +770,13 @@ async fn main() {
     let net = handle.clone();
     let local_peer = handle.peer_id();
     let orphan_store = store.clone();
-    let tx_auth = agora_state_machine::TxAuthContext {
-        chain_id: chain_params.network.chain_id().into(),
-        genesis: genesis_hash,
-        data_availability_network_fingerprint: boot.data_availability_network_fingerprint,
-    };
+    // Same snapshot as NodeBackend / agora_getNodeInfo — not ChainParams.network.
+    let tx_auth = resolve_gossip_tx_auth(
+        &chain,
+        chain_params.network.as_str(),
+        genesis_hash,
+        boot.data_availability_network_fingerprint,
+    );
     tokio::spawn(async move {
         let mut pending = PendingFetches::new(Duration::from_secs(30));
         let mut orphans = OrphanPool::new(Duration::from_secs(120), 1_024);

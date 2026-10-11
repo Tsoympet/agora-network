@@ -1,17 +1,21 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::columns::ColumnFamily;
 use crate::{StateError, StateZone};
 
 /// State backend used by the node.
 ///
-/// - [`StateStore::open_in_memory`] — portable tests / CI without a C++ toolchain
+/// - [`StateStore::open_in_memory`] — ephemeral map for isolated tests
 /// - [`StateStore::open`] — RocksDB when built with `--features rocksdb` (node default);
-///   otherwise falls back to an in-memory map (path ignored)
+///   otherwise a portable snapshot under `$path/portable/state.bin`
 pub struct StateStore {
     inner: Inner,
+    /// When set, Memory mutations flush an atomic snapshot to this file.
+    persist: Option<PathBuf>,
 }
 
 /// In-memory backend map: `(cf, key) -> value`.
@@ -86,6 +90,7 @@ impl StateStore {
     pub fn open_in_memory() -> Self {
         Self {
             inner: Inner::Memory(Arc::new(Mutex::new(BTreeMap::new()))),
+            persist: None,
         }
     }
 
@@ -99,6 +104,7 @@ impl StateStore {
                 base,
                 delta: Arc::new(Mutex::new(BTreeMap::new())),
             },
+            persist: None,
         }
     }
 
@@ -109,6 +115,7 @@ impl StateStore {
     pub fn cow_overlay(&self) -> Self {
         Self::open_cow_overlay(Arc::new(Self {
             inner: self.clone_inner(),
+            persist: None,
         }))
     }
 
@@ -124,7 +131,11 @@ impl StateStore {
         }
     }
 
-    /// Open durable storage at `path` when the `rocksdb` feature is enabled.
+    /// Open durable storage at `path`.
+    ///
+    /// RocksDB when the `rocksdb` feature is on. Otherwise a portable
+    /// snapshot file so `--no-default-features` nodes survive restart
+    /// (orphans, headers, UTXO, Block 0) without libstdc++.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StateError> {
         #[cfg(feature = "rocksdb")]
         {
@@ -132,9 +143,21 @@ impl StateStore {
         }
         #[cfg(not(feature = "rocksdb"))]
         {
-            let _ = path;
-            Ok(Self::open_in_memory())
+            Self::open_portable(path)
         }
+    }
+
+    /// File-backed Memory map. Always available so RocksDB builds still
+    /// test the portable crash path used by Experimental mesh hosts.
+    pub fn open_portable(path: impl AsRef<Path>) -> Result<Self, StateError> {
+        let dir = path.as_ref();
+        std::fs::create_dir_all(dir).map_err(|e| StateError::Storage(e.to_string()))?;
+        let file = portable_state_file(dir);
+        let map = load_portable_snapshot(&file)?;
+        Ok(Self {
+            inner: Inner::Memory(Arc::new(Mutex::new(map))),
+            persist: Some(file),
+        })
     }
 
     #[cfg(feature = "rocksdb")]
@@ -157,6 +180,7 @@ impl StateStore {
 
         Ok(Self {
             inner: Inner::Rocks(Arc::new(db)),
+            persist: None,
         })
     }
 
@@ -167,7 +191,8 @@ impl StateStore {
                     .lock()
                     .map_err(|_| StateError::Storage("lock poisoned".into()))?;
                 guard.insert((cf as u8, key.to_vec()), value.to_vec());
-                Ok(())
+                drop(guard);
+                self.flush_portable()
             }
             #[cfg(feature = "rocksdb")]
             Inner::Rocks(db) => {
@@ -219,7 +244,8 @@ impl StateStore {
                     .lock()
                     .map_err(|_| StateError::Storage("lock poisoned".into()))?;
                 guard.remove(&(cf as u8, key.to_vec()));
-                Ok(())
+                drop(guard);
+                self.flush_portable()
             }
             #[cfg(feature = "rocksdb")]
             Inner::Rocks(db) => {
@@ -400,7 +426,8 @@ impl StateStore {
                         }
                     }
                 }
-                Ok(())
+                drop(guard);
+                self.flush_portable()
             }
             #[cfg(feature = "rocksdb")]
             Inner::Rocks(db) => {
@@ -502,7 +529,79 @@ impl StateStore {
             }
         }
     }
+
+    fn flush_portable(&self) -> Result<(), StateError> {
+        let Some(path) = self.persist.as_ref() else {
+            return Ok(());
+        };
+        let Inner::Memory(map) = &self.inner else {
+            return Ok(());
+        };
+        let guard = map
+            .lock()
+            .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+        write_portable_snapshot(path, &guard)
+    }
 }
+
+const PORTABLE_MAGIC: &[u8; 8] = b"AGORAP01";
+
+fn portable_state_file(dir: &Path) -> PathBuf {
+    dir.join("portable").join("state.bin")
+}
+
+fn write_portable_snapshot(path: &Path, map: &MemStoreMap) -> Result<(), StateError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| StateError::Storage(e.to_string()))?;
+    }
+    let rows: Vec<PortableRow> = map
+        .iter()
+        .map(|((cf, key), value)| PortableRow {
+            cf: *cf,
+            key: key.clone(),
+            value: value.clone(),
+        })
+        .collect();
+    let payload = borsh::to_vec(&rows).map_err(|e| StateError::Storage(e.to_string()))?;
+    let mut bytes = Vec::with_capacity(PORTABLE_MAGIC.len() + payload.len());
+    bytes.extend_from_slice(PORTABLE_MAGIC);
+    bytes.extend_from_slice(&payload);
+    let tmp = path.with_extension("bin.tmp");
+    std::fs::write(&tmp, &bytes).map_err(|e| StateError::Storage(e.to_string()))?;
+    if let Ok(file) = std::fs::File::open(&tmp) {
+        let _ = file.sync_all();
+    }
+    std::fs::rename(&tmp, path).map_err(|e| StateError::Storage(e.to_string()))?;
+    Ok(())
+}
+
+fn load_portable_snapshot(path: &Path) -> Result<MemStoreMap, StateError> {
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+    let bytes = std::fs::read(path).map_err(|e| StateError::Storage(e.to_string()))?;
+    if bytes.len() < PORTABLE_MAGIC.len() || !bytes.starts_with(PORTABLE_MAGIC) {
+        return Err(StateError::Storage(
+            "portable state snapshot is missing AGORAP01 magic".into(),
+        ));
+    }
+    let rows = Vec::<PortableRow>::try_from_slice(&bytes[PORTABLE_MAGIC.len()..])
+        .map_err(|e| StateError::Storage(e.to_string()))?;
+    let mut map = BTreeMap::new();
+    for row in rows {
+        map.insert((row.cf, row.key), row.value);
+    }
+    Ok(map)
+}
+
+#[derive(BorshSerialize, BorshDeserialize)]
+struct PortableRow {
+    cf: u8,
+    key: Vec<u8>,
+    value: Vec<u8>,
+}
+
+type MemStoreMap = BTreeMap<(u8, Vec<u8>), Vec<u8>>;
 
 #[cfg(test)]
 mod tests {
@@ -587,5 +686,69 @@ mod tests {
             );
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn portable_store_persists_put_delete_and_batch_across_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let store = StateStore::open_portable(dir.path()).unwrap();
+            store
+                .put_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH, &[7u8; 32])
+                .unwrap();
+            store.put_cf(ColumnFamily::Utxo, b"spent", b"old").unwrap();
+            store.delete_cf(ColumnFamily::Utxo, b"spent").unwrap();
+            let mut batch = WriteBatch::new();
+            batch.put_cf(ColumnFamily::Warm, b"orphan/a", b"body");
+            batch.put_cf(ColumnFamily::Hot, b"tip", b"1");
+            store.write_batch(batch).unwrap();
+        }
+        let store = StateStore::open_portable(dir.path()).unwrap();
+        assert_eq!(
+            store
+                .get_cf(ColumnFamily::Meta, meta_keys::GENESIS_HASH)
+                .unwrap(),
+            Some(vec![7u8; 32])
+        );
+        assert_eq!(store.get_cf(ColumnFamily::Utxo, b"spent").unwrap(), None);
+        assert_eq!(
+            store.get_cf(ColumnFamily::Warm, b"orphan/a").unwrap(),
+            Some(b"body".to_vec())
+        );
+        assert_eq!(
+            store.get_cf(ColumnFamily::Hot, b"tip").unwrap(),
+            Some(b"1".to_vec())
+        );
+        assert!(dir.path().join("portable").join("state.bin").is_file());
+    }
+
+    #[test]
+    fn portable_store_cow_writes_do_not_flush() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = Arc::new(StateStore::open_portable(dir.path()).unwrap());
+        base.put_cf(ColumnFamily::Utxo, b"a", b"1").unwrap();
+        let overlay = StateStore::open_cow_overlay(base);
+        overlay.put_cf(ColumnFamily::Utxo, b"a", b"2").unwrap();
+        overlay.put_cf(ColumnFamily::Utxo, b"b", b"3").unwrap();
+        drop(overlay);
+        let reopened = StateStore::open_portable(dir.path()).unwrap();
+        assert_eq!(
+            reopened.get_cf(ColumnFamily::Utxo, b"a").unwrap(),
+            Some(b"1".to_vec())
+        );
+        assert_eq!(reopened.get_cf(ColumnFamily::Utxo, b"b").unwrap(), None);
+    }
+
+    #[test]
+    fn portable_store_rejects_truncated_magic() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("portable").join("state.bin");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, b"NOPE").unwrap();
+        match StateStore::open_portable(dir.path()) {
+            Err(StateError::Storage(msg)) => assert!(msg.contains("AGORAP01")),
+            Err(other) => panic!("unexpected {other}"),
+            Ok(_) => panic!("expected truncated snapshot to fail"),
+        }
     }
 }

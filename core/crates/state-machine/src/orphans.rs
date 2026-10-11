@@ -107,4 +107,63 @@ mod tests {
         delete_orphan(&store, &id).unwrap();
         assert!(list_orphans(&store).unwrap().is_empty());
     }
+
+    #[test]
+    fn orphan_survives_portable_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let block = Block {
+            header: BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 11,
+                bits: 0,
+                nonce: 2,
+                tx_root: Hash::ZERO,
+            },
+            transactions: vec![],
+            account_transfers: vec![],
+            stake_ops: vec![],
+            ovl_executions: vec![],
+            drc_payments: vec![],
+            data_commitments: vec![],
+            drc_account_policies: vec![],
+            drc_deposit_preauths: vec![],
+            drc_regular_keys: vec![],
+            drc_signer_lists: vec![],
+            drc_ticket_creates: vec![],
+            drc_escrow_creates: vec![],
+            drc_escrow_finishes: vec![],
+            drc_escrow_cancels: vec![],
+            drc_check_creates: vec![],
+            drc_check_cashes: vec![],
+            drc_check_cancels: vec![],
+            drc_payment_channel_creates: vec![],
+            drc_payment_channel_funds: vec![],
+            drc_payment_channel_claims: vec![],
+            drc_payment_channel_closes: vec![],
+            drc_trust_line_sets: vec![],
+            drc_issued_transfers: vec![],
+            drc_issued_asset_policy_sets: vec![],
+            drc_trust_line_issuer_controls: vec![],
+            drc_issued_clawbacks: vec![],
+            drc_offer_creates: vec![],
+            drc_offer_cancels: vec![],
+            drc_multisign_attachments: vec![],
+            tlt_covenants: Vec::new(),
+            passport_attestations: Vec::new(),
+            hub_registrations: Vec::new(),
+            grant_registrations: Vec::new(),
+            mission_registrations: Vec::new(),
+            treasury_disbursements: Vec::new(),
+            vesting_unlocks: Vec::new(),
+        };
+        let id = block.id();
+        {
+            let store = StateStore::open_portable(dir.path()).unwrap();
+            store_orphan(&store, &block).unwrap();
+        }
+        let store = StateStore::open_portable(dir.path()).unwrap();
+        assert_eq!(load_orphan(&store, &id).unwrap().unwrap().id(), id);
+        assert_eq!(list_orphans(&store).unwrap().len(), 1);
+    }
 }

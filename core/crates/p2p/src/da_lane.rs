@@ -94,6 +94,7 @@ impl Mempool {
         self.reserved_da_operators
             .insert(authorization.operator, id);
         self.data_commitments.insert(id, authorization);
+        self.persist_best_effort();
         Ok(id)
     }
 

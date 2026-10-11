@@ -91,6 +91,12 @@ pool; accepted DRC typed-operation fees increment committed lifetime burned
 supply. On block admit, `evict_for_block` drops included operations and releases
 reservations.
 
+`--no-default-features` nodes persist admitted envelopes to
+`$AGORA_DATA/portable/mempool.bin` (`AGORAMP1`, sibling of the portable
+state snapshot). Reservations are rebuilt by re-admit on open. This is a
+local Experimental datadir file, not RocksDB and not a public-testnet
+durability claim. In-memory tests and COW overlays stay ephemeral.
+
 Typed consensus lanes append `NetworkMessage` discriminants. Protocol v25
 adds `DataCommitment` (33); v26 adds `OvlRawExecution` (34) for version-2
 raw Ethereum envelopes on a separate mempool that does not reserve the OVL
@@ -137,7 +143,7 @@ committed state has not been materialized.
 stable across accepted restarts for the same legacy datadir. An existing
 malformed identity file is rejected without overwrite.
 
-Integration test `two_node_gossip` dials two local nodes and exchanges a signed transaction.
+Integration test `two_node_gossip` dials two local nodes and exchanges a signed transaction (unbound lab signature). `agora-node` `experimental_bound_spend_gossips_into_peer_mempool` additionally admits a Trident-bound TLT spend on A and requires B’s `agora_getTransaction` / `agora_getMempool` to show `pending` before any block. Gossip admission must use `ChainState::auth_context()` (Trident `boot.chain_id`), not `ChainParams::network.chain_id()`.
 
 ## Connection limits
 

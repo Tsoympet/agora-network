@@ -43,6 +43,7 @@ impl Mempool {
         self.reserved_passport_issuers
             .insert(attestation.issuer, id);
         self.passport_attestations.insert(id, attestation);
+        self.persist_best_effort();
         Ok(id)
     }
 

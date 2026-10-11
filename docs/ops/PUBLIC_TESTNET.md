@@ -43,16 +43,19 @@ Host RPC for that profile: `http://127.0.0.1:8555/rpc`. Clear
 `agora-node` processes against the Experimental artifact without Docker.
 
 Recorded on this host (2026-10-10), `agora-node --no-default-features`
-(in-memory store; RandomX hasher falls back to SHA-256 because
+(then in-memory store; RandomX hasher falls back to SHA-256 because
 `libstdc++` headers are missing and `rust-randomx` / default
-`rocksdb+randomx` do not compile):
+`rocksdb+randomx` do not compile). Subsequent `--no-default-features`
+boots persist `$AGORA_DATA/portable/state.bin` and
+`$AGORA_DATA/portable/mempool.bin` (not RocksDB; Experimental local datadir
+only, not a public-testnet durability claim):
 
 | Step | Result |
 | --- | --- |
 | Boot | Both nodes materialized freeze-ready Block 0. `chain_id` = `agora-trident-experimental-testnet-1`. Gossip `genesis_hash` = `d81e0f9c…` (live `BlockHeader` id). `artifact_identity` = `68b3c7af…`. Fingerprint prefix `52b5fc85…`. |
 | Peers | First-boot simultaneous seeder dials failed Noise handshake. Stagger / `AGORA_BOOTSTRAP` from B→A connected (`connected_peers=1`). Headers-first IBD at genesis reported the peer was not ahead. |
-| Tx | Device-local TLT spend from generated key `0xa3…` admitted on A (`pending`). Two-peer gossipsub did **not** put the tx in B’s mempool. |
-| Mine + IBD | `agora-miner --no-default-features` found a SHA-256 fallback solution at `daa_min_level=8` (`00997c73…`). B’s tip set matched A. The spend was `confirmed` on B via the block (not via mempool gossip). |
+| Tx | Device-local TLT spend from generated key `0xa3…` admitted on A (`pending`). A 2026-10-10 lab run missed B’s mempool because gossip verified against `agora-testnet-1` while RPC/wallets used `agora-trident-experimental-testnet-1`. Gossip now reuses [`ChainState::auth_context`] (same snapshot as `NodeBackend`). `agora-node` regression: `experimental_bound_spend_gossips_into_peer_mempool`. |
+| Mine + IBD | `agora-miner --no-default-features` found a SHA-256 fallback solution at `daa_min_level=8` (`00997c73…`). B’s tip set matched A. The earlier recorded spend was `confirmed` on B via the block because mempool gossip had been rejected. |
     | Dual-PoS | `agora_getFinality` returned a signable checkpoint body. OVL (`0xa1…`) then DRC (`0xa2…`) attestations finalized the tip on A; B converged to `Finalized` over gossip. That recorded run used then-default `min_pow_depth=1` (tip blue_score 2). Subsequent code copies the artifact threshold (`8`) into live admit. |
 
 This is a local Experimental lab mesh. It is **not** Public testnet, not
@@ -69,7 +72,7 @@ cargo build -p agora-miner-sidecar --no-default-features
 AGORA_BOOTSTRAP=/ip4/127.0.0.1/tcp/16121/p2p/<node-a-peerid> \
   ./scripts/experimental_trident_mesh.sh node-b        # terminal 2
 ./scripts/experimental_trident_mesh.sh wait-peers
-./scripts/experimental_trident_mesh.sh smoke-tx        # A admit; B mempool may miss
+./scripts/experimental_trident_mesh.sh smoke-tx        # A admit → B pending / mempool
 ./scripts/experimental_trident_mesh.sh smoke-ibd       # mine 1 + tip converge
 ./scripts/experimental_trident_mesh.sh smoke-finality  # OVL+DRC attest
 ```

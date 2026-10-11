@@ -37,7 +37,7 @@ Highest status used for this change is **TESTED**. Nothing here is **PRODUCTION 
 | Conflicts | first-seen / RBF | Consensus: first blue spend wins. Mempool: reject or opted-in replace | virtual apply, RBF tests | TESTED |
 | P2P identity | network magic | libp2p Agora fingerprint. No Bitcoin magic | `fingerprint_changes_with_policy` | TESTED |
 | IBD and headers | headers-first | GetHeaders, compact blocks, UTXO follow of blues | p2p ibd tests | TESTED |
-| Restart / recovery | peers, mempool | Durable orphan bodies, datadir identity | orphan restore test | TESTED |
+| Restart / recovery | peers, mempool | Durable orphan bodies, datadir identity, portable mempool snapshot (`AGORAMP1`) | orphan restore + `tlt_survives_portable_reopen` / `pending_tlt_survives_reopen_and_rpc_lookup` | TESTED |
 | Addresses | base58 / bech32 bc | Bech32m `agora` / `agoratest` / `agoradev` | hrp tests | TESTED |
 | HD / mnemonic | BIP32 / BIP39 | BIP39 + BIP44 coin type 8888, secp256k1 | `wallet_derivation_and_tx_sign_verify_roundtrip` | TESTED |
 | Explorer / API | REST | RPC balance, UTXO, template, supply, finality, plus covenant submit and query | `submit_and_query_tlt_covenant` | TESTED |

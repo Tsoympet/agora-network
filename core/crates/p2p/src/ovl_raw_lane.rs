@@ -51,6 +51,7 @@ impl Mempool {
             return Err(P2pError::MempoolRejected("mempool full".into()));
         }
         self.ovl_raw_execution_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 

@@ -24,3 +24,4 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 tracing-subscriber = "0.3"
 agora-state-machine = { workspace = true }
 borsh = { workspace = true }
+tempfile = "3"
