@@ -50,6 +50,7 @@ impl Mempool {
         }
         self.reserved_hub_coordinators.insert(coordinator, id);
         self.hub_registrations.insert(id, registration);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -85,6 +86,7 @@ impl Mempool {
         self.reserved_grant_registrars
             .insert(registration.registrar, id);
         self.grant_registrations.insert(id, registration);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -120,6 +122,7 @@ impl Mempool {
         self.reserved_mission_sponsors
             .insert(registration.sponsor, id);
         self.mission_registrations.insert(id, registration);
+        self.persist_best_effort();
         Ok(id)
     }
 

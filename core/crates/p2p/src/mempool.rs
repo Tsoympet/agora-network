@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use agora_types::{
     resolve_drc_account_sequence, sequence_signals_rbf, AccountTransfer, Address, Block,
@@ -37,12 +38,15 @@ mod ovl_raw_lane;
 mod passport_lane;
 #[path = "payment_channel_lane.rs"]
 mod payment_channel_lane;
+#[path = "mempool_persist.rs"]
+mod persist;
 #[path = "treasury_lane.rs"]
 mod treasury_lane;
 #[path = "trust_line_lane.rs"]
 mod trust_line_lane;
 #[path = "vesting_lane.rs"]
 mod vesting_lane;
+pub use persist::mempool_persist_path;
 
 /// Default cap on how many transfer txs a mining template pulls from the pool.
 pub const DEFAULT_TEMPLATE_TX_LIMIT: usize = 128;
@@ -151,6 +155,7 @@ pub struct Mempool {
     /// Every OVL/DRC account lane shares the same per-asset account nonce.
     reserved_accounts: HashSet<(NativeAssetId, Address)>,
     max_size: usize,
+    persist_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,6 +249,7 @@ impl Mempool {
             deposit_preauthorized_payments: HashSet::new(),
             reserved_accounts: HashSet::new(),
             max_size,
+            persist_path: None,
         }
     }
 
@@ -468,6 +474,7 @@ impl Mempool {
         }
         self.fees.insert(id, fee);
         self.txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -486,6 +493,7 @@ impl Mempool {
         if rbf_opt_in && !already {
             self.rbf_opt_in.insert(id);
         }
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -647,6 +655,7 @@ impl Mempool {
         }
         self.fees.insert(id, fee);
         self.covenant_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -805,6 +814,7 @@ impl Mempool {
             }
         }
         self.account_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -835,6 +845,7 @@ impl Mempool {
             }
         }
         self.stake_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -862,6 +873,7 @@ impl Mempool {
             ));
         }
         self.ovl_execution_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -981,6 +993,7 @@ impl Mempool {
             self.deposit_preauthorized_payments.insert(id);
         }
         self.payment_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1040,6 +1053,7 @@ impl Mempool {
                 self.deposit_auth_required_payments.extend(guarded);
             }
         }
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1061,6 +1075,7 @@ impl Mempool {
         )?;
         self.reserve_drc_slot(id, tx.owner, reservation)?;
         self.drc_regular_key_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1081,6 +1096,7 @@ impl Mempool {
         )?;
         self.reserve_drc_slot(id, tx.owner, reservation)?;
         self.drc_signer_list_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1119,6 +1135,7 @@ impl Mempool {
                 self.remove_payment(&payment_id);
             }
         }
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1150,6 +1167,7 @@ impl Mempool {
             DrcSlotReservation::TicketCreate { ticket_sequence },
         )?;
         self.drc_ticket_create_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1223,6 +1241,7 @@ impl Mempool {
         self.reserve_drc_slot(id, tx.owner, reservation)?;
         self.pending_escrow_ids.insert(id);
         self.drc_escrow_create_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1260,6 +1279,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_escrow_finish_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1297,6 +1317,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_escrow_cancel_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1362,6 +1383,7 @@ impl Mempool {
         self.reserve_drc_slot(id, tx.owner, reservation)?;
         self.pending_check_ids.insert(id);
         self.drc_check_create_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1399,6 +1421,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_check_cash_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -1436,6 +1459,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_check_cancel_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -2178,6 +2202,7 @@ impl Mempool {
         for id in drop_covenants {
             self.remove_covenant(&id);
         }
+        self.persist_best_effort();
     }
 
     /// Reconcile a block and evict payments stale at the advanced virtual score.
@@ -2199,6 +2224,7 @@ impl Mempool {
         for id in expired {
             self.remove_payment(&id);
         }
+        self.persist_best_effort();
     }
 
     fn reconcile_payments_for_block_policies(&mut self, block: &Block) {

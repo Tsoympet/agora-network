@@ -66,6 +66,7 @@ impl Mempool {
         self.reserve_drc_slot(id, tx.owner, reservation)?;
         self.pending_payment_channel_ids.insert(id);
         self.drc_payment_channel_create_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -109,6 +110,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_payment_channel_fund_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -152,6 +154,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_payment_channel_claim_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 
@@ -195,6 +198,7 @@ impl Mempool {
             return Err(e);
         }
         self.drc_payment_channel_close_txs.insert(id, tx);
+        self.persist_best_effort();
         Ok(id)
     }
 

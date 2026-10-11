@@ -91,6 +91,12 @@ pool; accepted DRC typed-operation fees increment committed lifetime burned
 supply. On block admit, `evict_for_block` drops included operations and releases
 reservations.
 
+`--no-default-features` nodes persist admitted envelopes to
+`$AGORA_DATA/portable/mempool.bin` (`AGORAMP1`, sibling of the portable
+state snapshot). Reservations are rebuilt by re-admit on open. This is a
+local Experimental datadir file, not RocksDB and not a public-testnet
+durability claim. In-memory tests and COW overlays stay ephemeral.
+
 Typed consensus lanes append `NetworkMessage` discriminants. Protocol v25
 adds `DataCommitment` (33); v26 adds `OvlRawExecution` (34) for version-2
 raw Ethereum envelopes on a separate mempool that does not reserve the OVL
