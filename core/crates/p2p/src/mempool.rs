@@ -1710,6 +1710,30 @@ impl Mempool {
         }
     }
 
+    /// Inflate a UTXO `CompactBlock` from envelopes in this pool.
+    ///
+    /// After a portable reopen the same short-ids must resolve here so a peer
+    /// does not fall back to GetBlock solely because the process restarted.
+    pub fn inflate_compact_block(
+        &self,
+        header: agora_types::BlockHeader,
+        short_ids: &[[u8; 8]],
+    ) -> Result<Block, crate::ibd::ReconstructError> {
+        crate::ibd::reconstruct_compact_block(header, short_ids, |sid| {
+            self.get_by_short_id(sid).cloned()
+        })
+    }
+
+    /// Inflate a `TypedCompactBlock` from envelopes in this pool.
+    pub fn inflate_typed_compact(
+        &self,
+        body: crate::typed_compact::TypedCompactBody,
+    ) -> Result<Block, crate::ibd::ReconstructError> {
+        crate::typed_compact::reconstruct_typed_compact(body, |kind, sid| {
+            self.clone_typed_lane_item(kind, sid)
+        })
+    }
+
     pub fn remove(&mut self, tx_id: &Hash) -> Option<Transaction> {
         let tx = self.txs.remove(tx_id)?;
         self.fees.remove(tx_id);

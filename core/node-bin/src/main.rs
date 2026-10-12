@@ -25,10 +25,9 @@ use std::{
 use agora_consensus::PowAlgorithm;
 use agora_p2p::{
     dial_addr, drain_orphans_after, fetch_seeder_peers_best_effort, load_or_generate_identity,
-    merge_bootstrap_peers, reconstruct_compact_block, reconstruct_typed_compact,
-    validate_header_chain, FetchReason, GetHeadersRequest, Mempool, NetworkConfig, NetworkEvent,
-    NetworkHandle, NetworkMessage, NetworkNode, OrphanPool, PeerId, PendingFetches,
-    ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
+    merge_bootstrap_peers, validate_header_chain, FetchReason, GetHeadersRequest, Mempool,
+    NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage, NetworkNode, OrphanPool, PeerId,
+    PendingFetches, ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{
@@ -1003,13 +1002,11 @@ async fn main() {
                             pending.complete(&hash);
                             continue;
                         }
-                        let lookup = |sid: &[u8; 8]| {
-                            mempool
-                                .lock()
-                                .ok()
-                                .and_then(|pool| pool.get_by_short_id(sid).cloned())
+                        let reconstructed = match mempool.lock() {
+                            Ok(pool) => pool.inflate_compact_block(header, &short_ids),
+                            Err(_) => Err(ReconstructError::MissingShortIds(short_ids.len())),
                         };
-                        match reconstruct_compact_block(header, &short_ids, lookup) {
+                        match reconstructed {
                             Ok(block) => {
                                 pending.complete(&hash);
                                 if relay_drop_stale_parents(&chain, &block) {
@@ -1093,13 +1090,11 @@ async fn main() {
                             pending.complete(&hash);
                             continue;
                         }
-                        let lookup = |kind: u8, sid: &[u8; 8]| {
-                            mempool
-                                .lock()
-                                .ok()
-                                .and_then(|pool| pool.clone_typed_lane_item(kind, sid))
+                        let reconstructed = match mempool.lock() {
+                            Ok(pool) => pool.inflate_typed_compact(body),
+                            Err(_) => Err(ReconstructError::MissingShortIds(1)),
                         };
-                        match reconstruct_typed_compact(body, lookup) {
+                        match reconstructed {
                             Ok(block) => {
                                 pending.complete(&hash);
                                 if relay_drop_stale_parents(&chain, &block) {
