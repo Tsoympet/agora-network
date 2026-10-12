@@ -469,6 +469,88 @@ mod tests {
     }
 
     #[test]
+    fn compact_inflate_survives_portable_reopen() {
+        use crate::ibd::{short_ids_for_block, ReconstructError};
+        use crate::typed_compact::COMPACT_LANE_ACCOUNT;
+        use crate::NetworkMessage;
+        use agora_types::{AccountTransfer, Address, BlockHeader, NativeAssetId};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = mempool_persist_path(dir.path());
+        let tx = signed_spend(1, 2);
+        let account = AccountTransfer::unsigned_with_fee(
+            NativeAssetId::OVL,
+            Address::ZERO,
+            Address([1; 20]),
+            Amount::from_base_units(2),
+            Amount::from_base_units(1),
+            0,
+        );
+        {
+            let mut pool = Mempool::open_persistent(&path, 16).unwrap();
+            pool.admit_priced(tx.clone(), 3).unwrap();
+            pool.admit_account(account.clone()).unwrap();
+        }
+
+        let pool = Mempool::open_persistent(&path, 16).unwrap();
+
+        let mut utxo = agora_types::Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 4,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![tx.clone()],
+        );
+        utxo.header.tx_root = agora_types::Block::compute_tx_root(&utxo.transactions);
+        match NetworkMessage::compact_from_block(&utxo) {
+            NetworkMessage::CompactBlock { header, short_ids } => {
+                assert_eq!(short_ids, short_ids_for_block(&utxo));
+                let rebuilt = pool.inflate_compact_block(header, &short_ids).unwrap();
+                assert_eq!(rebuilt.transactions, vec![tx.clone()]);
+            }
+            other => panic!("expected UTXO CompactBlock, got {other:?}"),
+        }
+
+        let mut typed = agora_types::Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 5,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![tx.clone()],
+        );
+        typed.account_transfers.push(account.clone());
+        typed.header.tx_root = typed.compute_body_root();
+        match NetworkMessage::compact_from_block(&typed) {
+            NetworkMessage::TypedCompactBlock(body) => {
+                assert!(body
+                    .lanes
+                    .iter()
+                    .any(|lane| lane.kind == COMPACT_LANE_ACCOUNT));
+                let rebuilt = pool.inflate_typed_compact(body).unwrap();
+                assert_eq!(rebuilt.transactions, vec![tx]);
+                assert_eq!(rebuilt.account_transfers, vec![account]);
+            }
+            other => panic!("expected TypedCompactBlock, got {other:?}"),
+        }
+
+        let empty =
+            Mempool::open_persistent(mempool_persist_path(dir.path().join("empty")), 8).unwrap();
+        let sid = crate::ibd::tx_short_id(&signed_spend(9, 9).tx_id());
+        let err = empty
+            .inflate_compact_block(utxo.header.clone(), &[sid])
+            .unwrap_err();
+        assert!(matches!(err, ReconstructError::MissingShortIds(1)));
+    }
+
+    #[test]
     fn truncated_magic_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let path = mempool_persist_path(dir.path());
