@@ -142,6 +142,7 @@ mod network;
 mod orphans;
 mod ovl_evm_state;
 mod payments;
+mod portable_wal;
 mod staking;
 mod state_root;
 mod store;
