@@ -5,6 +5,9 @@ use std::sync::{Arc, Mutex};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::columns::ColumnFamily;
+use crate::portable_wal::{
+    replay_wal, wal_path_for_snapshot, PortableWalOp, PortableWalWriter, DEFAULT_CHECKPOINT_EVERY,
+};
 use crate::{StateError, StateZone};
 
 /// State backend used by the node.
@@ -14,8 +17,14 @@ use crate::{StateError, StateZone};
 ///   otherwise a portable snapshot under `$path/portable/state.bin`
 pub struct StateStore {
     inner: Inner,
-    /// When set, Memory mutations flush an atomic snapshot to this file.
-    persist: Option<PathBuf>,
+    /// Portable `--no-default-features` persistence: WAL + periodic snapshot.
+    persist: Option<PortablePersist>,
+}
+
+/// File-backed Memory persistence. COW overlays leave this unset.
+struct PortablePersist {
+    snapshot: PathBuf,
+    wal: Mutex<PortableWalWriter>,
 }
 
 /// In-memory backend map: `(cf, key) -> value`.
@@ -153,10 +162,27 @@ impl StateStore {
         let dir = path.as_ref();
         std::fs::create_dir_all(dir).map_err(|e| StateError::Storage(e.to_string()))?;
         let file = portable_state_file(dir);
-        let map = load_portable_snapshot(&file)?;
+        let wal_path = wal_path_for_snapshot(&file);
+        let mut map = load_portable_snapshot(&file)?;
+        let replayed = replay_wal(&wal_path)?;
+        for op in &replayed {
+            apply_wal_op(&mut map, op);
+        }
+        if !file.exists() {
+            write_portable_snapshot(&file, &map)?;
+        }
+        let mut wal = PortableWalWriter::open(&wal_path)?;
+        wal.ops_since_checkpoint = u32::try_from(replayed.len()).unwrap_or(u32::MAX);
+        if wal.ops_since_checkpoint >= DEFAULT_CHECKPOINT_EVERY {
+            write_portable_snapshot(&file, &map)?;
+            wal.truncate()?;
+        }
         Ok(Self {
             inner: Inner::Memory(Arc::new(Mutex::new(map))),
-            persist: Some(file),
+            persist: Some(PortablePersist {
+                snapshot: file,
+                wal: Mutex::new(wal),
+            }),
         })
     }
 
@@ -192,7 +218,11 @@ impl StateStore {
                     .map_err(|_| StateError::Storage("lock poisoned".into()))?;
                 guard.insert((cf as u8, key.to_vec()), value.to_vec());
                 drop(guard);
-                self.flush_portable()
+                self.persist_wal_op(PortableWalOp::Put {
+                    cf: cf as u8,
+                    key: key.to_vec(),
+                    value: value.to_vec(),
+                })
             }
             #[cfg(feature = "rocksdb")]
             Inner::Rocks(db) => {
@@ -245,7 +275,10 @@ impl StateStore {
                     .map_err(|_| StateError::Storage("lock poisoned".into()))?;
                 guard.remove(&(cf as u8, key.to_vec()));
                 drop(guard);
-                self.flush_portable()
+                self.persist_wal_op(PortableWalOp::Delete {
+                    cf: cf as u8,
+                    key: key.to_vec(),
+                })
             }
             #[cfg(feature = "rocksdb")]
             Inner::Rocks(db) => {
@@ -413,6 +446,7 @@ impl StateStore {
     pub fn write_batch(&self, batch: WriteBatch) -> Result<(), StateError> {
         match &self.inner {
             Inner::Memory(map) => {
+                let wal_ops: Vec<PortableWalOp> = batch.ops.iter().map(write_op_to_wal).collect();
                 let mut guard = map
                     .lock()
                     .map_err(|_| StateError::Storage("lock poisoned".into()))?;
@@ -427,7 +461,7 @@ impl StateStore {
                     }
                 }
                 drop(guard);
-                self.flush_portable()
+                self.persist_wal_op(PortableWalOp::Batch { ops: wal_ops })
             }
             #[cfg(feature = "rocksdb")]
             Inner::Rocks(db) => {
@@ -530,8 +564,23 @@ impl StateStore {
         }
     }
 
-    fn flush_portable(&self) -> Result<(), StateError> {
-        let Some(path) = self.persist.as_ref() else {
+    fn persist_wal_op(&self, op: PortableWalOp) -> Result<(), StateError> {
+        let Some(persist) = self.persist.as_ref() else {
+            return Ok(());
+        };
+        let mut wal = persist
+            .wal
+            .lock()
+            .map_err(|_| StateError::Storage("lock poisoned".into()))?;
+        wal.append(&op)?;
+        if wal.ops_since_checkpoint >= DEFAULT_CHECKPOINT_EVERY {
+            self.checkpoint_locked(&mut wal)?;
+        }
+        Ok(())
+    }
+
+    fn checkpoint_locked(&self, wal: &mut PortableWalWriter) -> Result<(), StateError> {
+        let Some(persist) = self.persist.as_ref() else {
             return Ok(());
         };
         let Inner::Memory(map) = &self.inner else {
@@ -540,7 +589,9 @@ impl StateStore {
         let guard = map
             .lock()
             .map_err(|_| StateError::Storage("lock poisoned".into()))?;
-        write_portable_snapshot(path, &guard)
+        write_portable_snapshot(&persist.snapshot, &guard)?;
+        drop(guard);
+        wal.truncate()
     }
 }
 
@@ -603,11 +654,44 @@ struct PortableRow {
 
 type MemStoreMap = BTreeMap<(u8, Vec<u8>), Vec<u8>>;
 
+fn write_op_to_wal(op: &WriteOp) -> PortableWalOp {
+    match op {
+        WriteOp::Put(cf, key, value) => PortableWalOp::Put {
+            cf: *cf as u8,
+            key: key.clone(),
+            value: value.clone(),
+        },
+        WriteOp::Delete(cf, key) => PortableWalOp::Delete {
+            cf: *cf as u8,
+            key: key.clone(),
+        },
+    }
+}
+
+fn apply_wal_op(map: &mut MemStoreMap, op: &PortableWalOp) {
+    match op {
+        PortableWalOp::Put { cf, key, value } => {
+            map.insert((*cf, key.clone()), value.clone());
+        }
+        PortableWalOp::Delete { cf, key } => {
+            map.remove(&(*cf, key.clone()));
+        }
+        PortableWalOp::Batch { ops } => {
+            for inner in ops {
+                apply_wal_op(map, inner);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::columns::meta_keys;
+    use crate::portable_wal::WAL_MAGIC;
     use std::sync::Arc;
+
+    const WAL_MAGIC_LEN: u64 = WAL_MAGIC.len() as u64;
 
     #[test]
     fn cow_overlay_isolates_writes() {
@@ -720,6 +804,82 @@ mod tests {
             Some(b"1".to_vec())
         );
         assert!(dir.path().join("portable").join("state.bin").is_file());
+        assert!(dir.path().join("portable").join("state.wal").is_file());
+    }
+
+    #[test]
+    fn portable_wal_avoids_rewriting_snapshot_on_each_put() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::open_portable(dir.path()).unwrap();
+        let snapshot = dir.path().join("portable").join("state.bin");
+        let wal = dir.path().join("portable").join("state.wal");
+        let before = std::fs::metadata(&snapshot).unwrap().len();
+        for i in 0u8..8 {
+            store
+                .put_cf(ColumnFamily::Utxo, &[i], &[i.wrapping_add(1)])
+                .unwrap();
+        }
+        let after = std::fs::metadata(&snapshot).unwrap().len();
+        assert_eq!(
+            after, before,
+            "high-churn puts must append WAL, not rewrite AGORAP01"
+        );
+        assert!(std::fs::metadata(&wal).unwrap().len() > WAL_MAGIC_LEN);
+        drop(store);
+        let reopened = StateStore::open_portable(dir.path()).unwrap();
+        for i in 0u8..8 {
+            assert_eq!(
+                reopened.get_cf(ColumnFamily::Utxo, &[i]).unwrap(),
+                Some(vec![i.wrapping_add(1)])
+            );
+        }
+    }
+
+    #[test]
+    fn portable_wal_torn_tail_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let store = StateStore::open_portable(dir.path()).unwrap();
+            store.put_cf(ColumnFamily::Meta, b"keep", b"yes").unwrap();
+        }
+        let wal = dir.path().join("portable").join("state.wal");
+        let mut bytes = std::fs::read(&wal).unwrap();
+        bytes.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+        std::fs::write(&wal, bytes).unwrap();
+        let store = StateStore::open_portable(dir.path()).unwrap();
+        assert_eq!(
+            store.get_cf(ColumnFamily::Meta, b"keep").unwrap(),
+            Some(b"yes".to_vec())
+        );
+    }
+
+    #[test]
+    fn portable_wal_checkpoints_and_truncates() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = StateStore::open_portable(dir.path()).unwrap();
+        let wal = dir.path().join("portable").join("state.wal");
+        for i in 0u16..64 {
+            store
+                .put_cf(ColumnFamily::Utxo, &i.to_le_bytes(), &[1])
+                .unwrap();
+        }
+        let wal_len = std::fs::metadata(&wal).unwrap().len();
+        assert_eq!(
+            wal_len, WAL_MAGIC_LEN,
+            "checkpoint must truncate the WAL to magic"
+        );
+        store
+            .put_cf(ColumnFamily::Utxo, &64u16.to_le_bytes(), &[1])
+            .unwrap();
+        assert!(std::fs::metadata(&wal).unwrap().len() > WAL_MAGIC_LEN);
+        drop(store);
+        let reopened = StateStore::open_portable(dir.path()).unwrap();
+        assert_eq!(
+            reopened
+                .get_cf(ColumnFamily::Utxo, &64u16.to_le_bytes())
+                .unwrap(),
+            Some(vec![1])
+        );
     }
 
     #[test]

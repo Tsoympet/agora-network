@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use agora_types::{
     resolve_drc_account_sequence, sequence_signals_rbf, AccountTransfer, Address, Block,
@@ -46,7 +47,7 @@ mod treasury_lane;
 mod trust_line_lane;
 #[path = "vesting_lane.rs"]
 mod vesting_lane;
-pub use persist::mempool_persist_path;
+pub use persist::{mempool_persist_path, mempool_wal_path};
 
 /// Default cap on how many transfer txs a mining template pulls from the pool.
 pub const DEFAULT_TEMPLATE_TX_LIMIT: usize = 128;
@@ -156,6 +157,7 @@ pub struct Mempool {
     reserved_accounts: HashSet<(NativeAssetId, Address)>,
     max_size: usize,
     persist_path: Option<PathBuf>,
+    persist_wal: Option<Mutex<persist::MempoolWalMeta>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,6 +252,7 @@ impl Mempool {
             reserved_accounts: HashSet::new(),
             max_size,
             persist_path: None,
+            persist_wal: None,
         }
     }
 
