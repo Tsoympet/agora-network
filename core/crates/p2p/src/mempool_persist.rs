@@ -55,6 +55,12 @@ pub(crate) struct KvPersist {
     live: Mutex<HashMap<Hash, u32>>,
 }
 
+impl std::fmt::Debug for KvPersist {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KvPersist").finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct MempoolWalMeta {
     file: File,
