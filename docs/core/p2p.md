@@ -101,11 +101,14 @@ supply. On block admit, `evict_for_block` drops included operations and releases
 reservations.
 
 `--no-default-features` nodes persist admitted envelopes to
-`$AGORA_DATA/portable/mempool.bin` (`AGORAMP1`, sibling of the portable
-state snapshot). Reservations are rebuilt by re-admit on open. Compact
-gossip inflates UTXO and typed short-ids from that restored pool. This is
-a local Experimental datadir file, not RocksDB and not a public-testnet
-durability claim. In-memory tests and COW overlays stay ephemeral.
+`$AGORA_DATA/portable/mempool.wal` (`AGORAW01`) and periodically compact
+into `$AGORA_DATA/portable/mempool.bin` (`AGORAMP1`). High-churn admits
+append one framed upsert instead of rewriting the snapshot; evicts and
+every 32 upserts take a tmp+rename checkpoint. Reservations are rebuilt
+by re-admit on open. Compact gossip inflates UTXO and typed short-ids
+from that restored pool. This is a local Experimental datadir file, not
+RocksDB and not a public-testnet durability claim. In-memory tests and
+COW overlays stay ephemeral.
 
 Typed consensus lanes append `NetworkMessage` discriminants. Protocol v25
 adds `DataCommitment` (33); v26 adds `OvlRawExecution` (34) for version-2
