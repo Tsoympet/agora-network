@@ -6,9 +6,7 @@
 use std::sync::{Arc, Mutex};
 
 use agora_crypto::{sign_transaction, KeyPair};
-#[cfg(feature = "rocksdb")]
-use agora_p2p::MempoolKv;
-use agora_p2p::{mempool_persist_path, Mempool};
+use agora_p2p::{mempool_persist_path, Mempool, MempoolKv};
 use agora_rpc::RpcBackend;
 use agora_state_machine::{GenesisBuilder, StateStore};
 use agora_types::{Amount, Hash, OutPoint, Transaction, TxIn, TxOut};
@@ -93,6 +91,31 @@ fn pending_tlt_survives_reopen_and_rpc_lookup() {
     assert_eq!(mempool.len(), 1);
     assert_eq!(mempool[0].tx_id, id);
     assert_eq!(mempool[0].fee, Some(4));
+}
+
+#[test]
+fn pending_tlt_survives_store_mempool_cf_reopen() {
+    use crate::mempool_kv::StoreMempoolKv;
+
+    let tx = signed_spend();
+    let id = tx.tx_id();
+    let store = Arc::new(StateStore::open_in_memory());
+    {
+        let kv: Arc<dyn MempoolKv> = Arc::new(StoreMempoolKv(store.clone()));
+        let mut pool = Mempool::open_persistent_kv(kv, 16).unwrap();
+        pool.admit_priced(tx.clone(), 4).unwrap();
+    }
+    let kv: Arc<dyn MempoolKv> = Arc::new(StoreMempoolKv(store.clone()));
+    let pool = Mempool::open_persistent_kv(kv, 16).unwrap();
+    assert!(pool.contains(&id));
+    assert_eq!(pool.fee_of(&id), Some(4));
+    assert_eq!(
+        store
+            .scan_prefix(agora_state_machine::ColumnFamily::Mempool, &[])
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[cfg(feature = "rocksdb")]

@@ -6,13 +6,20 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use agora_p2p::{mempool_persist_path, Mempool, MempoolKv, P2pError};
-use agora_state_machine::{ColumnFamily, StateStore};
+use agora_p2p::{mempool_persist_path, Mempool};
+#[cfg(any(feature = "rocksdb", test))]
+use agora_p2p::{MempoolKv, P2pError};
+#[cfg(any(feature = "rocksdb", test))]
+use agora_state_machine::ColumnFamily;
+use agora_state_machine::StateStore;
+#[cfg(any(feature = "rocksdb", test))]
 use agora_types::Hash;
 use tracing::warn;
 
+#[cfg(any(feature = "rocksdb", test))]
 pub(crate) struct StoreMempoolKv(pub Arc<StateStore>);
 
+#[cfg(any(feature = "rocksdb", test))]
 impl MempoolKv for StoreMempoolKv {
     fn put(&self, id: &Hash, payload: &[u8]) -> Result<(), P2pError> {
         self.0
