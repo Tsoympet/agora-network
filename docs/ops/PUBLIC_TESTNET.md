@@ -47,8 +47,9 @@ Recorded on this host (2026-10-10), `agora-node --no-default-features`
 `libstdc++` headers are missing and `rust-randomx` / default
 `rocksdb+randomx` do not compile). Subsequent `--no-default-features`
 boots persist `$AGORA_DATA/portable/state.bin` / `state.wal` and
-`$AGORA_DATA/portable/mempool.bin` / `mempool.wal` (not RocksDB;
-Experimental local datadir only, not a public-testnet durability claim):
+`$AGORA_DATA/portable/mempool.bin` / `mempool.wal`. Default-features
+nodes persist pending envelopes in RocksDB `cf_mempool` instead.
+Neither path is a public-testnet durability claim:
 
 | Step | Result |
 | --- | --- |

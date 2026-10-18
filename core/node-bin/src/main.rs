@@ -9,6 +9,7 @@ mod backend;
 mod civic;
 mod genesis_cli;
 mod http;
+mod mempool_kv;
 mod schema_cli;
 mod startup;
 mod storage_policy;
@@ -54,6 +55,7 @@ use crate::{
         NodeBackendConfig,
     },
     http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig},
+    mempool_kv::open_boot_mempool,
     startup::{p2p_identity_path, prepare_legacy_datadir, prepare_trident_datadir},
     storage_policy::StoragePolicy,
 };
@@ -652,19 +654,7 @@ async fn main() {
         hot_window = storage.hot_window,
         "state store opened"
     );
-    let mempool_path = agora_p2p::mempool_persist_path(&data_dir);
-    let mempool = Arc::new(Mutex::new(
-        Mempool::open_persistent(&mempool_path, 10_000).unwrap_or_else(|err| {
-            warn!(
-                error = %err,
-                path = %mempool_path.display(),
-                "portable mempool snapshot rejected; starting empty"
-            );
-            let mut pool = Mempool::new(10_000);
-            pool.set_persist_path(&mempool_path);
-            pool
-        }),
-    ));
+    let mempool = Arc::new(Mutex::new(open_boot_mempool(&store, &data_dir)));
 
     let mut seeder_book = net_cfg.dns_seeder_url.as_ref().map(|url| {
         SeederBook::new(

@@ -2,7 +2,7 @@
 
 Applies consensus-ordered blocks to durable storage.
 
-## Column families (5)
+## Column families (5 consensus + local mempool)
 
 | CF | Name | Purpose |
 | --- | --- | --- |
@@ -11,6 +11,7 @@ Applies consensus-ordered blocks to durable storage.
 | Archival | `cf_archival` | Long-term block payloads (optional via `AGORA_ARCHIVAL`) |
 | Meta | `cf_meta` | Genesis/policy, account modules, DA indexes/nonces, supply, tips — never pruned |
 | UTXO | `cf_utxo` | Spendable outputs keyed by outpoint — never pruned |
+| Mempool | `cf_mempool` | Local pending envelopes for default-features nodes. Not consensus, not in the state root, not a public-testnet durability claim. `--no-default-features` still uses `$path/portable/mempool.bin` / `mempool.wal`. |
 
 Logical `StateZone::{Hot,Warm,Archival}` map onto the first three CFs.
 
@@ -160,7 +161,7 @@ is a misconfigured signing context, not a fee-policy placeholder.
 ## Storage backends
 
 - [`StateStore::open_in_memory`] — ephemeral map for unit tests / portable CI
-- [`StateStore::open(path)`] — **RocksDB** when built with `--features rocksdb` (enabled by default on `agora-node`); otherwise a portable snapshot at `$path/portable/state.bin` (`AGORAP01`) plus an append-only `$path/portable/state.wal` (`AGORAW01`) so `--no-default-features` nodes keep UTXO, headers, orphans, and Block 0 across restart without rewriting the snapshot on every put. Periodic tmp+rename checkpoints compact the WAL. [`StateStore::open_portable`] is always available for that path. The same portable directory holds `$path/portable/mempool.bin` / `mempool.wal` so pending TLT and lane envelopes survive process exit. These files are not RocksDB and are not a public-testnet durability claim.
+- [`StateStore::open(path)`] — **RocksDB** when built with `--features rocksdb` (enabled by default on `agora-node`); otherwise a portable snapshot at `$path/portable/state.bin` (`AGORAP01`) plus an append-only `$path/portable/state.wal` (`AGORAW01`) so `--no-default-features` nodes keep UTXO, headers, orphans, and Block 0 across restart without rewriting the snapshot on every put. Periodic tmp+rename checkpoints compact the WAL. [`StateStore::open_portable`] is always available for that path. Default-features nodes persist pending envelopes in `cf_mempool`. `--no-default-features` keeps `$path/portable/mempool.bin` / `mempool.wal`. Neither path is a public-testnet durability claim.
 
 `agora-node` defaults to RocksDB under `AGORA_DATA` (default
 `data/agora-node`). On boot it opens and verifies storage through

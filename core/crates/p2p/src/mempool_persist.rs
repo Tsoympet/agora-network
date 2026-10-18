@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use agora_types::{
     AccountTransfer, DataCommitmentAuthorization, DrcAccountPolicyTx, DrcCheckCancelTx,
@@ -41,6 +41,24 @@ pub fn mempool_persist_path(data_dir: impl AsRef<Path>) -> PathBuf {
 /// `$data_dir/portable/mempool.wal` — append-only upserts between checkpoints.
 pub fn mempool_wal_path(data_dir: impl AsRef<Path>) -> PathBuf {
     mempool_persist_path(data_dir).with_extension("wal")
+}
+
+/// Durable pending-envelope backend used by default-features RocksDB nodes.
+pub trait MempoolKv: Send + Sync {
+    fn put(&self, id: &Hash, payload: &[u8]) -> Result<(), P2pError>;
+    fn delete(&self, id: &Hash) -> Result<(), P2pError>;
+    fn load_all(&self) -> Result<Vec<Vec<u8>>, P2pError>;
+}
+
+pub(crate) struct KvPersist {
+    backend: Arc<dyn MempoolKv>,
+    live: Mutex<HashMap<Hash, u32>>,
+}
+
+impl std::fmt::Debug for KvPersist {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KvPersist").finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug)]
@@ -196,9 +214,41 @@ impl Mempool {
         Ok(pool)
     }
 
+    /// Restore pending envelopes from a KV backend (RocksDB `cf_mempool`).
+    pub fn open_persistent_kv(kv: Arc<dyn MempoolKv>, max_size: usize) -> Result<Self, P2pError> {
+        let mut pool = Self::new(max_size);
+        for payload in kv.load_all()? {
+            match DurableEnvelope::try_from_slice(&payload) {
+                Ok(env) => apply_mempool_wal_op(&mut pool, MempoolWalOp::Upsert(env)),
+                Err(err) => warn!(error = %err, "skipping undecodable mempool CF envelope"),
+            }
+        }
+        let live = fingerprints(&pool.snapshot());
+        pool.persist_kv = Some(KvPersist {
+            backend: kv,
+            live: Mutex::new(live),
+        });
+        Ok(pool)
+    }
+
+    pub fn set_persist_kv(&mut self, kv: Arc<dyn MempoolKv>) {
+        self.persist_path = None;
+        self.persist_wal = None;
+        // Empty live so the next flush writes every current envelope.
+        self.persist_kv = Some(KvPersist {
+            backend: kv,
+            live: Mutex::new(HashMap::new()),
+        });
+    }
+
+    pub fn flush_persist(&self) {
+        self.persist_best_effort();
+    }
+
     pub fn set_persist_path(&mut self, path: impl AsRef<Path>) {
         let path = path.as_ref().to_path_buf();
         let wal_path = path.with_extension("wal");
+        self.persist_kv = None;
         self.persist_path = Some(path);
         self.persist_wal = open_mempool_wal(&wal_path).ok().map(|file| {
             Mutex::new(MempoolWalMeta {
@@ -210,6 +260,9 @@ impl Mempool {
     }
 
     pub(crate) fn persist_best_effort(&self) {
+        if self.persist_kv_best_effort() {
+            return;
+        }
         let Some(path) = self.persist_path.as_ref() else {
             return;
         };
@@ -356,6 +409,49 @@ impl Mempool {
             treasuries: self.treasury_disbursements.values().cloned().collect(),
             vestings: self.vesting_unlocks.values().cloned().collect(),
         }
+    }
+
+    fn persist_kv_best_effort(&self) -> bool {
+        let Some(persist) = self.persist_kv.as_ref() else {
+            return false;
+        };
+        let snap = self.snapshot();
+        let current = indexed_envelopes(&snap);
+        let mut live = match persist.live.lock() {
+            Ok(guard) => guard,
+            Err(_) => return true,
+        };
+        let removed: Vec<Hash> = live
+            .keys()
+            .filter(|id| !current.contains_key(*id))
+            .copied()
+            .collect();
+        for id in removed {
+            if let Err(err) = persist.backend.delete(&id) {
+                warn!(error = %err, "durable mempool CF delete failed");
+                return true;
+            }
+            live.remove(&id);
+        }
+        for (id, env) in &current {
+            let fp = envelope_fp(env);
+            if live.get(id) == Some(&fp) {
+                continue;
+            }
+            let payload = match borsh::to_vec(env) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    warn!(error = %err, "durable mempool CF encode failed");
+                    return true;
+                }
+            };
+            if let Err(err) = persist.backend.put(id, &payload) {
+                warn!(error = %err, "durable mempool CF put failed");
+                return true;
+            }
+            live.insert(*id, fp);
+        }
+        true
     }
 }
 
@@ -1185,6 +1281,134 @@ mod tests {
             Err(P2pError::Decode(msg)) => assert!(msg.contains("AGORAMP1")),
             Err(other) => panic!("unexpected {other}"),
             Ok(_) => panic!("expected truncated snapshot to fail"),
+        }
+    }
+
+    #[derive(Default)]
+    struct MemoryKv(Mutex<HashMap<Hash, Vec<u8>>>);
+
+    impl MempoolKv for MemoryKv {
+        fn put(&self, id: &Hash, payload: &[u8]) -> Result<(), P2pError> {
+            self.0.lock().unwrap().insert(*id, payload.to_vec());
+            Ok(())
+        }
+
+        fn delete(&self, id: &Hash) -> Result<(), P2pError> {
+            self.0.lock().unwrap().remove(id);
+            Ok(())
+        }
+
+        fn load_all(&self) -> Result<Vec<Vec<u8>>, P2pError> {
+            Ok(self.0.lock().unwrap().values().cloned().collect())
+        }
+    }
+
+    #[test]
+    fn mempool_kv_survives_reopen_and_evict() {
+        let kv = Arc::new(MemoryKv::default());
+        let first = signed_spend(0, 1);
+        let second = signed_spend(1, 2);
+        let first_id = first.tx_id();
+        let second_id = second.tx_id();
+        {
+            let mut pool = Mempool::open_persistent_kv(kv.clone(), 16).unwrap();
+            pool.admit_priced(first.clone(), 3).unwrap();
+            pool.admit_priced(second.clone(), 4).unwrap();
+            assert_eq!(kv.0.lock().unwrap().len(), 2);
+        }
+        let mut pool = Mempool::open_persistent_kv(kv.clone(), 16).unwrap();
+        assert!(pool.contains(&first_id));
+        assert!(pool.contains(&second_id));
+        assert_eq!(pool.fee_of(&second_id), Some(4));
+
+        let mut block = agora_types::Block::utxo(
+            agora_types::BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 1,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![first.clone()],
+        );
+        block.header.tx_root = block.compute_body_root();
+        pool.evict_for_block(&block);
+        drop(pool);
+        let restored = Mempool::open_persistent_kv(kv, 16).unwrap();
+        assert!(!restored.contains(&first_id));
+        assert!(restored.contains(&second_id));
+    }
+
+    #[test]
+    fn mempool_kv_inflates_compact_after_reopen() {
+        use crate::ibd::short_ids_for_block;
+        use crate::typed_compact::COMPACT_LANE_ACCOUNT;
+        use crate::NetworkMessage;
+        use agora_types::{AccountTransfer, Address, BlockHeader, NativeAssetId};
+
+        let kv = Arc::new(MemoryKv::default());
+        let tx = signed_spend(1, 2);
+        let account = AccountTransfer::unsigned_with_fee(
+            NativeAssetId::OVL,
+            Address::ZERO,
+            Address([1; 20]),
+            Amount::from_base_units(2),
+            Amount::from_base_units(1),
+            0,
+        );
+        {
+            let mut pool = Mempool::open_persistent_kv(kv.clone(), 16).unwrap();
+            pool.admit_priced(tx.clone(), 3).unwrap();
+            pool.admit_account(account.clone()).unwrap();
+        }
+        let pool = Mempool::open_persistent_kv(kv, 16).unwrap();
+
+        let mut utxo = agora_types::Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 4,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![tx.clone()],
+        );
+        utxo.header.tx_root = agora_types::Block::compute_tx_root(&utxo.transactions);
+        match NetworkMessage::compact_from_block(&utxo) {
+            NetworkMessage::CompactBlock { header, short_ids } => {
+                assert_eq!(short_ids, short_ids_for_block(&utxo));
+                let rebuilt = pool.inflate_compact_block(header, &short_ids).unwrap();
+                assert_eq!(rebuilt.transactions, vec![tx.clone()]);
+            }
+            other => panic!("expected UTXO CompactBlock, got {other:?}"),
+        }
+
+        let mut typed = agora_types::Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![Hash::ZERO],
+                timestamp_ms: 5,
+                bits: 1,
+                nonce: 0,
+                tx_root: Hash::ZERO,
+            },
+            vec![tx.clone()],
+        );
+        typed.account_transfers.push(account.clone());
+        typed.header.tx_root = typed.compute_body_root();
+        match NetworkMessage::compact_from_block(&typed) {
+            NetworkMessage::TypedCompactBlock(body) => {
+                assert!(body
+                    .lanes
+                    .iter()
+                    .any(|lane| lane.kind == COMPACT_LANE_ACCOUNT));
+                let rebuilt = pool.inflate_typed_compact(body).unwrap();
+                assert_eq!(rebuilt.transactions, vec![tx]);
+                assert_eq!(rebuilt.account_transfers, vec![account]);
+            }
+            other => panic!("expected TypedCompactBlock, got {other:?}"),
         }
     }
 }

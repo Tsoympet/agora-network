@@ -1,6 +1,7 @@
 /// Physical RocksDB / store column families used by the state machine.
 ///
-/// Roadmap calls for five CFs: three zones plus metadata and UTXO index.
+/// Consensus uses five CFs (zones + meta + UTXO). `Mempool` is a sixth local
+/// family for pending envelopes and is not part of the state root.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum ColumnFamily {
@@ -14,15 +15,18 @@ pub enum ColumnFamily {
     Meta = 3,
     /// Spendable UTXO set keyed by outpoint.
     Utxo = 4,
+    /// Local pending mempool envelopes. Not consensus; not in the state root.
+    Mempool = 5,
 }
 
 impl ColumnFamily {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Hot,
         Self::Warm,
         Self::Archival,
         Self::Meta,
         Self::Utxo,
+        Self::Mempool,
     ];
 
     pub fn name(self) -> &'static str {
@@ -32,6 +36,7 @@ impl ColumnFamily {
             Self::Archival => "cf_archival",
             Self::Meta => "cf_meta",
             Self::Utxo => "cf_utxo",
+            Self::Mempool => "cf_mempool",
         }
     }
 }
