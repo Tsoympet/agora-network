@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn five_column_families_roundtrip() {
+    fn all_column_families_roundtrip() {
         let store = StateStore::open_in_memory();
         for cf in ColumnFamily::ALL {
             let key = format!("k-{}", cf.name());
@@ -768,6 +768,37 @@ mod tests {
                     .unwrap(),
                 Some(vec![7u8; 32])
             );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(feature = "rocksdb")]
+    #[test]
+    fn rocksdb_mempool_cf_persists_across_reopen() {
+        let dir = std::env::temp_dir().join(format!(
+            "agora-rocksdb-mempool-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let key = [0x11u8; 32];
+        {
+            let store = StateStore::open(&dir).unwrap();
+            store
+                .put_cf(ColumnFamily::Mempool, &key, b"pending-envelope")
+                .unwrap();
+        }
+        {
+            let store = StateStore::open(&dir).unwrap();
+            assert_eq!(
+                store.get_cf(ColumnFamily::Mempool, &key).unwrap(),
+                Some(b"pending-envelope".to_vec())
+            );
+            let scanned = store.scan_prefix(ColumnFamily::Mempool, &[]).unwrap();
+            assert_eq!(scanned, vec![(key.to_vec(), b"pending-envelope".to_vec())]);
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

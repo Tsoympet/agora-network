@@ -47,7 +47,7 @@ mod treasury_lane;
 mod trust_line_lane;
 #[path = "vesting_lane.rs"]
 mod vesting_lane;
-pub use persist::{mempool_persist_path, mempool_wal_path};
+pub use persist::{mempool_persist_path, mempool_wal_path, MempoolKv};
 
 /// Default cap on how many transfer txs a mining template pulls from the pool.
 pub const DEFAULT_TEMPLATE_TX_LIMIT: usize = 128;
@@ -158,6 +158,7 @@ pub struct Mempool {
     max_size: usize,
     persist_path: Option<PathBuf>,
     persist_wal: Option<Mutex<persist::MempoolWalMeta>>,
+    persist_kv: Option<persist::KvPersist>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,6 +254,7 @@ impl Mempool {
             max_size,
             persist_path: None,
             persist_wal: None,
+            persist_kv: None,
         }
     }
 

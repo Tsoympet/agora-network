@@ -1,7 +1,8 @@
 //! Persistent state application for consensus-ordered blocks.
 //!
-//! Five column families (hot / warm / archival / meta / utxo) keep tip validation
-//! off cold compaction paths while fixing genesis supply caps in `meta`.
+//! Five consensus column families (hot / warm / archival / meta / utxo) keep
+//! tip validation off cold compaction paths while fixing genesis supply caps
+//! in `meta`. A sixth local `cf_mempool` holds pending envelopes.
 
 #![cfg_attr(test, allow(clippy::too_many_arguments))]
 

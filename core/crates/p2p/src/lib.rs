@@ -40,7 +40,7 @@ pub use identity::{load_or_generate_identity, save_identity};
 pub use libp2p::PeerId;
 pub use limits::{connection_limits_behaviour, connection_limits_for_max_peers};
 pub use mempool::{
-    mempool_persist_path, mempool_wal_path, Mempool, DEFAULT_MIN_RELAY_FEE,
+    mempool_persist_path, mempool_wal_path, Mempool, MempoolKv, DEFAULT_MIN_RELAY_FEE,
     DEFAULT_TEMPLATE_TX_LIMIT, TLT_RBF_MAX_REPLACEMENTS, TLT_RBF_MIN_FEE_INCREASE,
 };
 pub use messages::NetworkMessage;
