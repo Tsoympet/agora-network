@@ -2165,6 +2165,7 @@ mod tests {
         ));
     }
 
+    #[test]
     fn drc_payment_queries_serialize_exact_receipts_and_isolate_invoices() {
         let payment = DrcPaymentTx::unsigned_v2(
             Address([1; 20]),
