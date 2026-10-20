@@ -1997,6 +1997,7 @@ mod tests {
             vesting_unlocks: Vec::new(),
         };
         let mined_id = mined.id();
+        let mined_tx_root = mined.header.tx_root;
         rpc.backend_mut().insert_block(mined);
 
         let confirmed = rpc.handle(RpcRequest {
@@ -2013,11 +2014,11 @@ mod tests {
         assert_eq!(confirmed_res["merkle_proof"]["tx_id"], json!(tx_id));
         assert_eq!(
             confirmed_res["merkle_proof"]["tx_merkle_root"],
-            json!(mined.header.tx_root.to_hex())
+            json!(mined_tx_root.to_hex())
         );
         assert_eq!(
             confirmed_res["merkle_proof"]["header_tx_root"],
-            json!(mined.header.tx_root.to_hex())
+            json!(mined_tx_root.to_hex())
         );
         assert_eq!(
             confirmed_res["merkle_proof"]["header_binds_tx_merkle"],
@@ -2092,7 +2093,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn get_transaction_serves_pairwise_merkle_proof_for_indexed_leaves() {
         use agora_types::{tlt_tx_merkle_root, verify_tlt_tx_merkle, TltTxMerkleProof};
         let first = Transaction::unsigned(
@@ -2128,7 +2128,7 @@ mod tests {
         );
         let mut backend = InMemoryBackend::new();
         backend.insert_block(block);
-        let rpc = RpcDispatcher::new(backend);
+        let mut rpc = RpcDispatcher::new(backend);
         let result = rpc
             .handle(RpcRequest {
                 id: Some(json!(1)),
