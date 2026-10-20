@@ -102,7 +102,9 @@ reservations.
 
 Default-features (`rocksdb`) nodes persist admitted envelopes in the
 existing node DB `cf_mempool` column family (per-id put/delete; RocksDB
-is the WAL). `--no-default-features` nodes persist to
+is the WAL). A first-boot migration copies leftover
+`mempool.bin` / `mempool.wal` into that CF and then deletes the portable
+files so the CF is the only source of truth. `--no-default-features` nodes persist to
 `$AGORA_DATA/portable/mempool.wal` (`AGORAW01`) and periodically compact
 into `$AGORA_DATA/portable/mempool.bin` (`AGORAMP1`). High-churn admits
 append one framed upsert instead of rewriting the snapshot; evicts and
