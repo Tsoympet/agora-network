@@ -27,6 +27,7 @@ export {
   type LightMempool,
   type LightMempoolEntry,
   type LightNodeInfo,
+  type LightTltMerkleProof,
   type LightTxLookup,
   type LightTxOut,
   type LightTxStatus,
@@ -71,9 +72,12 @@ export {
   type TltSpendCoin,
 } from "./coinselect";
 export {
+  inclusionFromRpcProof,
   proveTltTxMerkle,
   tltTxMerkleRoot,
+  verifyRpcTltMerkleProof,
   verifyTltTxMerkle,
+  type RpcTltMerkleProof,
   type TltTxMerkleProof,
 } from "./tltMerkle";
 export {

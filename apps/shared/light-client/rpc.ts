@@ -100,6 +100,15 @@ export type SubmitTxResult = {
 
 export type LightTxStatus = "pending" | "confirmed" | "unknown";
 
+export type LightTltMerkleProof = {
+  index: number;
+  tx_id: string;
+  siblings: string[];
+  tx_merkle_root: string;
+  header_tx_root: string;
+  header_binds_tx_merkle: boolean;
+};
+
 export type LightTxLookup = {
   tx_id: string;
   status: LightTxStatus;
@@ -109,6 +118,8 @@ export type LightTxLookup = {
   /** Blue-score / tip-depth confirmations when confirmed. */
   confirmations: number | null;
   transaction: LightTx | null;
+  /** Pairwise TLT inclusion when the tx is indexed in a stored block. */
+  merkle_proof?: LightTltMerkleProof | null;
 };
 
 export type LightMempoolEntry = {

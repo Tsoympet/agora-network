@@ -8,14 +8,15 @@ use agora_governance::{
     CivicSnapshot, ProposalKind, TopicCategory, VoteChoice,
 };
 use agora_types::{
-    AccountTransfer, Address, Amount, Block, BlockHeader, DataCommitmentAuthorization,
-    DataCommitmentSource, DrcAcceptedOperationReceipt, DrcAccountPolicy, DrcAccountPolicyTx,
-    DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx, DrcDepositPreauthTx, DrcEscrowCancelTx,
-    DrcEscrowCreateTx, DrcEscrowFinishTx, DrcIssuedTransferTx, DrcLedgerObjectDescriptor,
-    DrcLedgerObjectKind, DrcLedgerObjectPage, DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx,
-    DrcPaymentChannelCreateTx, DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx,
-    DrcRegularKeyTx, DrcSignerListTx, DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OutPoint,
-    OvlExecutionTx, TltCovenantTx, Transaction, TxOut,
+    prove_tlt_tx_merkle, tlt_tx_merkle_root, AccountTransfer, Address, Amount, Block, BlockHeader,
+    DataCommitmentAuthorization, DataCommitmentSource, DrcAcceptedOperationReceipt,
+    DrcAccountPolicy, DrcAccountPolicyTx, DrcCheckCancelTx, DrcCheckCashTx, DrcCheckCreateTx,
+    DrcDepositPreauthTx, DrcEscrowCancelTx, DrcEscrowCreateTx, DrcEscrowFinishTx,
+    DrcIssuedTransferTx, DrcLedgerObjectDescriptor, DrcLedgerObjectKind, DrcLedgerObjectPage,
+    DrcPaymentChannelClaimTx, DrcPaymentChannelCloseTx, DrcPaymentChannelCreateTx,
+    DrcPaymentChannelFundTx, DrcPaymentReceipt, DrcPaymentTx, DrcRegularKeyTx, DrcSignerListTx,
+    DrcTicketCreateTx, DrcTrustLineSetTx, Hash, OutPoint, OvlExecutionTx, TltCovenantTx,
+    Transaction, TxOut,
 };
 use serde_json::{json, Value};
 
@@ -63,6 +64,37 @@ impl TxStatus {
     }
 }
 
+/// Pairwise TLT inclusion proof served with a block-indexed `agora_getTransaction`.
+///
+/// `tx_merkle_root` is always [`tlt_tx_merkle_root`] over the block's UTXO ids.
+/// `header_tx_root` is the committed header field; it equals the Merkle root only
+/// for UTXO-only bodies. Light clients verify the siblings against
+/// `tx_merkle_root` and treat `header_binds_tx_merkle` as the UTXO-only bind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TltInclusionProof {
+    pub index: u32,
+    pub tx_id: Hash,
+    pub siblings: Vec<Hash>,
+    pub tx_merkle_root: Hash,
+    pub header_tx_root: Hash,
+    pub header_binds_tx_merkle: bool,
+}
+
+/// Build the inclusion proof for `transactions[index]` when that leaf exists.
+pub fn tlt_inclusion_from_block(block: &Block, index: usize) -> Option<TltInclusionProof> {
+    let ids: Vec<Hash> = block.transactions.iter().map(Transaction::tx_id).collect();
+    let proof = prove_tlt_tx_merkle(&ids, index)?;
+    let tx_merkle_root = tlt_tx_merkle_root(&ids);
+    Some(TltInclusionProof {
+        index: proof.index,
+        tx_id: proof.tx_id,
+        siblings: proof.siblings,
+        tx_merkle_root,
+        header_tx_root: block.header.tx_root,
+        header_binds_tx_merkle: block.header.tx_root == tx_merkle_root,
+    })
+}
+
 /// Result of looking up a transaction by id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TxLookup {
@@ -76,6 +108,8 @@ pub struct TxLookup {
     /// Explicit acceptance status (`Accepted` / `ConflictLost` / …). Never infer from color alone.
     pub acceptance: Option<String>,
     pub transaction: Option<Transaction>,
+    /// Present when the tx is indexed in a stored block (confirmed or orphaned).
+    pub merkle_proof: Option<TltInclusionProof>,
 }
 
 /// Mempool / confirmed / missing status for `agora_getTltCovenant`.
@@ -260,6 +294,7 @@ impl TxLookup {
             confirmations: None,
             acceptance: None,
             transaction: None,
+            merkle_proof: None,
         }
     }
 
@@ -273,6 +308,7 @@ impl TxLookup {
             confirmations: None,
             acceptance: None,
             transaction: Some(tx),
+            merkle_proof: None,
         }
     }
 
@@ -286,6 +322,7 @@ impl TxLookup {
             confirmations: Some(confirmations.max(1)),
             acceptance: Some("Accepted".into()),
             transaction: Some(tx),
+            merkle_proof: None,
         }
     }
 
@@ -299,11 +336,21 @@ impl TxLookup {
             confirmations: None,
             acceptance: None,
             transaction: Some(tx),
+            merkle_proof: None,
         }
     }
 
     pub fn with_acceptance(mut self, acceptance: impl Into<String>) -> Self {
         self.acceptance = Some(acceptance.into());
+        self
+    }
+
+    /// Attach the pairwise TLT proof from the storing block. No-op when the
+    /// lookup has no index or the leaf is missing (pending / unknown).
+    pub fn with_block_merkle(mut self, block: &Block) -> Self {
+        if let Some(index) = self.index {
+            self.merkle_proof = tlt_inclusion_from_block(block, index as usize);
+        }
         self
     }
 }
@@ -827,13 +874,14 @@ impl RpcBackend for InMemoryBackend {
                 if let Some(tx) = block.transactions.get(index as usize) {
                     // In-memory backend: tip distance via ancestor walk when possible.
                     return match self.tip_confirmations(&block_id) {
-                        Some(confirmations) => Ok(TxLookup::confirmed(
-                            tx.clone(),
-                            block_id,
-                            index,
-                            confirmations,
-                        )),
-                        None => Ok(TxLookup::orphaned(tx.clone(), block_id, index)),
+                        Some(confirmations) => {
+                            Ok(
+                                TxLookup::confirmed(tx.clone(), block_id, index, confirmations)
+                                    .with_block_merkle(block),
+                            )
+                        }
+                        None => Ok(TxLookup::orphaned(tx.clone(), block_id, index)
+                            .with_block_merkle(block)),
                     };
                 }
             }
@@ -2035,4 +2083,74 @@ impl RpcBackend for InMemoryBackend {
 
 fn map_gov(err: agora_governance::GovernanceError) -> RpcError {
     RpcError::Rejected(err.to_string())
+}
+
+#[cfg(test)]
+mod merkle_proof_tests {
+    use super::*;
+    use agora_types::{verify_tlt_tx_merkle, BlockHeader};
+
+    fn utxo(nonce: u64) -> Transaction {
+        Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(nonce + 1),
+                address: Address::ZERO,
+            }],
+            nonce,
+        )
+    }
+
+    #[test]
+    fn two_tx_proof_verifies_and_binds_utxo_header() {
+        let txs = vec![utxo(1), utxo(2)];
+        let merkle = tlt_tx_merkle_root(&txs.iter().map(Transaction::tx_id).collect::<Vec<_>>());
+        let block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: merkle,
+            },
+            txs,
+        );
+        let proof = tlt_inclusion_from_block(&block, 1).expect("leaf 1");
+        assert_eq!(proof.index, 1);
+        assert_eq!(proof.tx_id, block.transactions[1].tx_id());
+        assert_eq!(proof.tx_merkle_root, merkle);
+        assert!(proof.header_binds_tx_merkle);
+        assert!(verify_tlt_tx_merkle(
+            &proof.tx_merkle_root,
+            &agora_types::TltTxMerkleProof {
+                index: proof.index,
+                tx_id: proof.tx_id,
+                siblings: proof.siblings.clone(),
+            }
+        ));
+        assert!(tlt_inclusion_from_block(&block, 2).is_none());
+    }
+
+    #[test]
+    fn wrapped_header_does_not_bind_utxo_merkle() {
+        let txs = vec![utxo(3)];
+        let merkle = tlt_tx_merkle_root(&[txs[0].tx_id()]);
+        let block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 0,
+                tx_root: Hash([9; 32]),
+            },
+            txs,
+        );
+        let proof = tlt_inclusion_from_block(&block, 0).expect("leaf 0");
+        assert_eq!(proof.tx_merkle_root, merkle);
+        assert_eq!(proof.header_tx_root, Hash([9; 32]));
+        assert!(!proof.header_binds_tx_merkle);
+    }
 }

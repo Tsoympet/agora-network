@@ -27,6 +27,10 @@ const info = await client.getNodeInfo();
 // later: stop();
 ```
 
+`agora_getTransaction` returns a pairwise TLT `merkle_proof` when the tx is
+indexed in a stored block. Verify with `verifyRpcTltMerkleProof` (siblings
+against `tx_merkle_root`; header bind only when `header_binds_tx_merkle`).
+
 RPC methods: `agora_getDagTips`, `agora_getBlock`, `agora_getTransaction`,
 `agora_getMempool`, `agora_getNodeInfo`, `agora_getBalance`,
 `agora_getAccountBalances`, `agora_getTltCovenant`, `agora_getDrcOffer`,
