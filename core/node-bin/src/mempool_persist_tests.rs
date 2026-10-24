@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 
 use agora_crypto::{sign_transaction, KeyPair};
-use agora_p2p::{mempool_persist_path, Mempool, MempoolKv};
+use agora_p2p::{mempool_persist_path, mempool_wal_path, Mempool, MempoolKv};
 use agora_rpc::RpcBackend;
 use agora_state_machine::{GenesisBuilder, StateStore};
 use agora_types::{Amount, Hash, OutPoint, Transaction, TxIn, TxOut};
@@ -118,6 +118,112 @@ fn pending_tlt_survives_store_mempool_cf_reopen() {
     );
 }
 
+#[test]
+fn successful_cf_migration_deletes_portable_files() {
+    use crate::mempool_kv::{migrate_portable_into_kv, StoreMempoolKv};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = mempool_persist_path(dir.path());
+    let wal = mempool_wal_path(dir.path());
+    let tx = signed_spend();
+    let id = tx.tx_id();
+    {
+        let mut pool = Mempool::open_persistent(&path, 16).unwrap();
+        pool.admit_priced(tx, 4).unwrap();
+    }
+    assert!(path.exists() || wal.exists());
+
+    let store = Arc::new(StateStore::open_in_memory());
+    let kv: Arc<dyn MempoolKv> = Arc::new(StoreMempoolKv(store.clone()));
+    let empty = Mempool::open_persistent_kv(kv.clone(), 16).unwrap();
+    let pool = migrate_portable_into_kv(empty, kv, dir.path());
+    assert!(pool.contains(&id));
+    assert!(
+        !path.exists(),
+        "snapshot must be removed after CF migration"
+    );
+    assert!(!wal.exists(), "WAL must be removed after CF migration");
+    assert!(!path.with_extension("bin.tmp").exists());
+
+    let restored =
+        Mempool::open_persistent_kv(Arc::new(StoreMempoolKv(store.clone())), 16).unwrap();
+    assert!(restored.contains(&id));
+    assert_eq!(
+        store
+            .scan_prefix(agora_state_machine::ColumnFamily::Mempool, &[])
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn rejected_portable_migration_keeps_files() {
+    use crate::mempool_kv::{migrate_portable_into_kv, StoreMempoolKv};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = mempool_persist_path(dir.path());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"NOPE").unwrap();
+
+    let store = Arc::new(StateStore::open_in_memory());
+    let kv: Arc<dyn MempoolKv> = Arc::new(StoreMempoolKv(store));
+    let empty = Mempool::open_persistent_kv(kv.clone(), 16).unwrap();
+    let pool = migrate_portable_into_kv(empty, kv, dir.path());
+    assert!(pool.is_empty());
+    assert!(
+        path.exists(),
+        "corrupt portable snapshot must remain for retry"
+    );
+}
+
+#[test]
+fn portable_store_and_mempool_survive_process_exit_reopen() {
+    use agora_p2p::{short_ids_for_block, NetworkMessage};
+    use agora_state_machine::ColumnFamily;
+    use agora_types::BlockHeader;
+
+    let dir = tempfile::tempdir().unwrap();
+    let tx = signed_spend();
+    let id = tx.tx_id();
+    {
+        let store = StateStore::open_portable(dir.path()).unwrap();
+        store.put_cf(ColumnFamily::Meta, b"keep", b"yes").unwrap();
+        let mut pool = Mempool::open_persistent(mempool_persist_path(dir.path()), 16).unwrap();
+        pool.admit_priced(tx.clone(), 4).unwrap();
+    }
+
+    let store = StateStore::open_portable(dir.path()).unwrap();
+    assert_eq!(
+        store.get_cf(ColumnFamily::Meta, b"keep").unwrap(),
+        Some(b"yes".to_vec())
+    );
+    let pool = Mempool::open_persistent(mempool_persist_path(dir.path()), 16).unwrap();
+    assert!(pool.contains(&id));
+    assert_eq!(pool.fee_of(&id), Some(4));
+
+    let mut utxo = agora_types::Block::utxo(
+        BlockHeader {
+            version: 1,
+            parents: vec![Hash::ZERO],
+            timestamp_ms: 9,
+            bits: 1,
+            nonce: 0,
+            tx_root: Hash::ZERO,
+        },
+        vec![tx.clone()],
+    );
+    utxo.header.tx_root = agora_types::Block::compute_tx_root(&utxo.transactions);
+    match NetworkMessage::compact_from_block(&utxo) {
+        NetworkMessage::CompactBlock { header, short_ids } => {
+            assert_eq!(short_ids, short_ids_for_block(&utxo));
+            let rebuilt = pool.inflate_compact_block(header, &short_ids).unwrap();
+            assert_eq!(rebuilt.transactions, vec![tx]);
+        }
+        other => panic!("expected UTXO CompactBlock, got {other:?}"),
+    }
+}
+
 #[cfg(feature = "rocksdb")]
 #[test]
 fn pending_tlt_survives_rocksdb_cf_reopen_and_inflates_compact() {
@@ -190,6 +296,14 @@ fn rocksdb_boot_migrates_portable_then_uses_cf() {
         let store = Arc::new(StateStore::open(dir.path()).unwrap());
         let pool = open_boot_mempool(&store, dir.path());
         assert!(pool.contains(&id));
+        assert!(
+            !path.exists(),
+            "portable snapshot deleted after CF migration"
+        );
+        assert!(
+            !mempool_wal_path(dir.path()).exists(),
+            "portable WAL deleted after CF migration"
+        );
     }
     let store = Arc::new(StateStore::open(dir.path()).unwrap());
     let pool = open_boot_mempool(&store, dir.path());

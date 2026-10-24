@@ -4,8 +4,12 @@
 //! a public-testnet durability claim.
 
 use std::path::Path;
+#[cfg(any(feature = "rocksdb", test))]
+use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(any(feature = "rocksdb", test))]
+use agora_p2p::mempool_wal_path;
 use agora_p2p::{mempool_persist_path, Mempool};
 #[cfg(any(feature = "rocksdb", test))]
 use agora_p2p::{MempoolKv, P2pError};
@@ -70,6 +74,33 @@ fn open_portable_mempool(data_dir: &Path) -> Mempool {
     })
 }
 
+#[cfg(any(feature = "rocksdb", test))]
+fn portable_mempool_paths(data_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let snapshot = mempool_persist_path(data_dir);
+    let wal = mempool_wal_path(data_dir);
+    let tmp = snapshot.with_extension("bin.tmp");
+    (snapshot, wal, tmp)
+}
+
+#[cfg(any(feature = "rocksdb", test))]
+fn portable_mempool_files_present(data_dir: &Path) -> bool {
+    let (snapshot, wal, tmp) = portable_mempool_paths(data_dir);
+    snapshot.exists() || wal.exists() || tmp.exists()
+}
+
+/// Drop leftover portable files once `cf_mempool` holds the migrated pool.
+#[cfg(any(feature = "rocksdb", test))]
+fn remove_portable_mempool_files(data_dir: &Path) {
+    let (snapshot, wal, tmp) = portable_mempool_paths(data_dir);
+    for path in [snapshot, wal, tmp] {
+        if path.exists() {
+            if let Err(err) = std::fs::remove_file(&path) {
+                warn!(error = %err, path = %path.display(), "failed to remove portable mempool file after CF migration");
+            }
+        }
+    }
+}
+
 #[cfg(feature = "rocksdb")]
 fn open_rocks_mempool(store: &Arc<StateStore>, data_dir: &Path) -> Mempool {
     let kv: Arc<dyn MempoolKv> = Arc::new(StoreMempoolKv(Arc::clone(store)));
@@ -85,25 +116,26 @@ fn open_rocks_mempool(store: &Arc<StateStore>, data_dir: &Path) -> Mempool {
     }
 }
 
-#[cfg(feature = "rocksdb")]
-fn migrate_portable_into_kv(empty_cf: Mempool, kv: Arc<dyn MempoolKv>, data_dir: &Path) -> Mempool {
-    let path = mempool_persist_path(data_dir);
-    if !path.exists() && !path.with_extension("wal").exists() {
+#[cfg(any(feature = "rocksdb", test))]
+pub(crate) fn migrate_portable_into_kv(
+    empty_cf: Mempool,
+    kv: Arc<dyn MempoolKv>,
+    data_dir: &Path,
+) -> Mempool {
+    if !portable_mempool_files_present(data_dir) {
         return empty_cf;
     }
-    match Mempool::open_persistent(&path, 10_000) {
-        Ok(mut migrated) => {
-            migrated.set_persist_kv(kv);
-            migrated.flush_persist();
-            migrated
-        }
-        Err(err) => {
-            warn!(
-                error = %err,
-                path = %path.display(),
-                "portable mempool migration skipped; using empty CF"
-            );
-            empty_cf
-        }
+    // Reuse the portable opener so default-features clippy sees it live.
+    let mut migrated = open_portable_mempool(data_dir);
+    if migrated.is_empty() {
+        warn!("portable mempool migration produced an empty pool; keeping files");
+        return empty_cf;
     }
+    migrated.set_persist_kv(kv);
+    migrated.flush_persist();
+    if migrated.is_empty() {
+        return empty_cf;
+    }
+    remove_portable_mempool_files(data_dir);
+    migrated
 }

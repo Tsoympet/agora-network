@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   shortAddress,
+  verifyRpcTltMerkleProof,
   watchTransaction,
   type LightTxLookup,
 } from "../../../shared/light-client";
@@ -220,6 +221,24 @@ export function TxLookup() {
                   {result.index != null ? (
                     <span className="text-mist"> · index {result.index}</span>
                   ) : null}
+                </dd>
+              </div>
+            ) : null}
+            {result.merkle_proof ? (
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                <dt className="text-mist">merkle</dt>
+                <dd className="text-[var(--agora-ink)]">
+                  {verifyRpcTltMerkleProof(result.merkle_proof)
+                    ? "verified"
+                    : "invalid"}
+                  <span className="text-mist">
+                    {" "}
+                    · {result.merkle_proof.siblings.length} sibling
+                    {result.merkle_proof.siblings.length === 1 ? "" : "s"}
+                    {result.merkle_proof.header_binds_tx_merkle
+                      ? " · header binds"
+                      : " · body wrap"}
+                  </span>
                 </dd>
               </div>
             ) : null}

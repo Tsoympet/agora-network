@@ -104,6 +104,55 @@ export function tridentLightState(input: {
  * Check TLT inclusion and report Trident finality from supplied stake totals.
  * Pass `headerTxRoot` only for UTXO-only blocks, where it equals the tx Merkle root.
  */
+export type RpcTltMerkleProof = {
+  index: number;
+  tx_id: string;
+  siblings: string[];
+  tx_merkle_root: string;
+  header_tx_root: string;
+  header_binds_tx_merkle: boolean;
+};
+
+function hexToBytes(hex: string): Uint8Array {
+  const s = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex;
+  if (s.length % 2 !== 0) throw new Error("invalid hex");
+  const out = new Uint8Array(s.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = Number.parseInt(s.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+/** Convert the `agora_getTransaction.merkle_proof` object into a verifier proof. */
+export function inclusionFromRpcProof(proof: RpcTltMerkleProof): TltTxMerkleProof {
+  const txId = hexToBytes(proof.tx_id);
+  if (txId.length !== 32) throw new Error("merkle proof tx_id must be 32 bytes");
+  return {
+    index: proof.index,
+    txId,
+    siblings: proof.siblings.map((sibling) => {
+      const bytes = hexToBytes(sibling);
+      if (bytes.length !== 32) throw new Error("merkle sibling must be 32 bytes");
+      return bytes;
+    }),
+  };
+}
+
+/**
+ * Verify the served pairwise proof against `tx_merkle_root`.
+ * When `header_binds_tx_merkle` is true, also require header == merkle root.
+ */
+export function verifyRpcTltMerkleProof(proof: RpcTltMerkleProof): boolean {
+  const root = hexToBytes(proof.tx_merkle_root);
+  if (root.length !== 32) return false;
+  const inclusion = inclusionFromRpcProof(proof);
+  if (!verifyTltTxMerkle(root, inclusion)) return false;
+  if (!proof.header_binds_tx_merkle) return true;
+  const header = hexToBytes(proof.header_tx_root);
+  if (header.length !== root.length) return false;
+  return header.every((byte, i) => byte === root[i]);
+}
+
 export function verifyTridentLight(input: {
   txMerkleRoot: Uint8Array;
   inclusion: TltTxMerkleProof;

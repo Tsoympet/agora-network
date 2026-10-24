@@ -1107,6 +1107,18 @@ fn tx_lookup_to_json(lookup: &crate::backend::TxLookup) -> Value {
         "confirmations": lookup.confirmations,
         "acceptance": lookup.acceptance,
         "transaction": lookup.transaction.as_ref().map(tx_to_explorer_json),
+        "merkle_proof": lookup.merkle_proof.as_ref().map(tlt_inclusion_to_json),
+    })
+}
+
+fn tlt_inclusion_to_json(proof: &crate::backend::TltInclusionProof) -> Value {
+    json!({
+        "index": proof.index,
+        "tx_id": proof.tx_id.to_hex(),
+        "siblings": proof.siblings.iter().map(|h| h.to_hex()).collect::<Vec<_>>(),
+        "tx_merkle_root": proof.tx_merkle_root.to_hex(),
+        "header_tx_root": proof.header_tx_root.to_hex(),
+        "header_binds_tx_merkle": proof.header_binds_tx_merkle,
     })
 }
 
@@ -1889,6 +1901,7 @@ mod tests {
         let pending_res = pending.result.unwrap();
         assert_eq!(pending_res["status"], json!("pending"));
         assert!(pending_res["transaction"].is_object());
+        assert!(pending_res["merkle_proof"].is_null());
 
         let pool = rpc.handle(RpcRequest {
             id: Some(json!(311)),
@@ -1933,7 +1946,9 @@ mod tests {
             method: "agora_getTransaction".into(),
             params: json!({"tx_id": Hash::ZERO.to_hex()}),
         });
-        assert_eq!(unknown.result.unwrap()["status"], json!("unknown"));
+        let unknown_res = unknown.result.unwrap();
+        assert_eq!(unknown_res["status"], json!("unknown"));
+        assert!(unknown_res["merkle_proof"].is_null());
 
         let mined = Block {
             header: BlockHeader {
@@ -1982,6 +1997,7 @@ mod tests {
             vesting_unlocks: Vec::new(),
         };
         let mined_id = mined.id();
+        let mined_tx_root = mined.header.tx_root;
         rpc.backend_mut().insert_block(mined);
 
         let confirmed = rpc.handle(RpcRequest {
@@ -1994,6 +2010,20 @@ mod tests {
         assert_eq!(confirmed_res["block_id"], json!(mined_id.to_hex()));
         assert_eq!(confirmed_res["index"], json!(0));
         assert_eq!(confirmed_res["confirmations"], json!(1));
+        assert_eq!(confirmed_res["merkle_proof"]["index"], json!(0));
+        assert_eq!(confirmed_res["merkle_proof"]["tx_id"], json!(tx_id));
+        assert_eq!(
+            confirmed_res["merkle_proof"]["tx_merkle_root"],
+            json!(mined_tx_root.to_hex())
+        );
+        assert_eq!(
+            confirmed_res["merkle_proof"]["header_tx_root"],
+            json!(mined_tx_root.to_hex())
+        );
+        assert_eq!(
+            confirmed_res["merkle_proof"]["header_binds_tx_merkle"],
+            json!(true)
+        );
 
         // Child tip → parent tx gains a confirmation.
         let child = Block {
@@ -2060,6 +2090,79 @@ mod tests {
         assert!(result["header"]["parents"].as_array().unwrap().is_empty());
         assert_eq!(result["tx_count"], json!(0));
         assert!(result["transactions"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn get_transaction_serves_pairwise_merkle_proof_for_indexed_leaves() {
+        use agora_types::{tlt_tx_merkle_root, verify_tlt_tx_merkle, TltTxMerkleProof};
+        let first = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(1),
+                address: Address::ZERO,
+            }],
+            1,
+        );
+        let second = Transaction::unsigned(
+            1,
+            vec![],
+            vec![TxOut {
+                value: Amount::from_base_units(2),
+                address: Address::ZERO,
+            }],
+            2,
+        );
+        let txs = vec![first.clone(), second.clone()];
+        let merkle = tlt_tx_merkle_root(&txs.iter().map(Transaction::tx_id).collect::<Vec<_>>());
+        let block = Block::utxo(
+            BlockHeader {
+                version: 1,
+                parents: vec![],
+                timestamp_ms: 1,
+                bits: 0,
+                nonce: 1,
+                tx_root: merkle,
+            },
+            txs,
+        );
+        let mut backend = InMemoryBackend::new();
+        backend.insert_block(block);
+        let mut rpc = RpcDispatcher::new(backend);
+        let result = rpc
+            .handle(RpcRequest {
+                id: Some(json!(1)),
+                method: "agora_getTransaction".into(),
+                params: json!({ "tx_id": second.tx_id().to_hex() }),
+            })
+            .result
+            .unwrap();
+        assert_eq!(result["status"], json!("confirmed"));
+        assert_eq!(result["index"], json!(1));
+        assert_eq!(
+            result["merkle_proof"]["tx_id"],
+            json!(second.tx_id().to_hex())
+        );
+        assert_eq!(
+            result["merkle_proof"]["tx_merkle_root"],
+            json!(merkle.to_hex())
+        );
+        assert_eq!(
+            result["merkle_proof"]["siblings"],
+            json!([first.tx_id().to_hex()])
+        );
+        assert_eq!(
+            result["merkle_proof"]["header_binds_tx_merkle"],
+            json!(true)
+        );
+        assert!(verify_tlt_tx_merkle(
+            &merkle,
+            &TltTxMerkleProof {
+                index: 1,
+                tx_id: second.tx_id(),
+                siblings: vec![first.tx_id()],
+            }
+        ));
     }
 
     #[test]
