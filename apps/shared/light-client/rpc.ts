@@ -511,6 +511,14 @@ export type LightClient = {
     issuer: string;
     currency: unknown;
   }) => Promise<unknown>;
+  getDrcIssuerLiability: (args: {
+    issuer: string;
+    currency: unknown;
+  }) => Promise<unknown>;
+  getDrcIssuedAssetPolicy: (args: {
+    issuer: string;
+    currency: unknown;
+  }) => Promise<unknown>;
   getDrcPayment: (paymentId: string) => Promise<unknown>;
   getDrcPaymentByInvoice: (args: {
     recipient: string;
@@ -836,6 +844,16 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getDrcTrustLine: (args) =>
       call("agora_getDrcTrustLine", {
         holder: args.holder,
+        issuer: args.issuer,
+        currency: args.currency,
+      }),
+    getDrcIssuerLiability: (args) =>
+      call("agora_getDrcIssuerLiability", {
+        issuer: args.issuer,
+        currency: args.currency,
+      }),
+    getDrcIssuedAssetPolicy: (args) =>
+      call("agora_getDrcIssuedAssetPolicy", {
         issuer: args.issuer,
         currency: args.currency,
       }),
