@@ -172,6 +172,8 @@ export function ProtocolLanes() {
       ["TLT covenant", client.getTltCovenant(raw)],
       ["DRC offer", client.getDrcOffer(raw)],
       ["DRC payment", client.getDrcPayment(raw)],
+      ["DRC operation receipt", client.getDrcOperation(raw)],
+      ["DRC transaction receipt", client.getDrcTransaction(raw)],
       ["DRC escrow", client.getDrcEscrow(raw)],
       ["DRC escrow receipt", client.getDrcEscrowReceipt(raw)],
       ["DRC check", client.getDrcCheck(raw)],
