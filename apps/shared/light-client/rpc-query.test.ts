@@ -99,6 +99,7 @@ try {
   await client.getValidator("OVL", "agoradev1qqqq");
   await client.submitStakeTx({ version: 1, kind: "Bond" });
   await client.depositProposal(4, 10);
+  await client.fundAddress("agoradev1qqqq", 5);
   await client.openProposalVoting(4, 9);
   await client.tallyProposal(4);
   await client.enterProposalTimelock(4);
@@ -167,6 +168,7 @@ try {
       "agora_getValidator",
       "agora_submitStakeTx",
       "agora_depositProposal",
+      "agora_fundAddress",
       "agora_openProposalVoting",
       "agora_tallyProposal",
       "agora_enterProposalTimelock",
@@ -231,10 +233,11 @@ try {
   assert.deepEqual(calls[54].params, { asset: "OVL", operator: "agoradev1qqqq" });
   assert.deepEqual(calls[55].params, { stake_tx: { version: 1, kind: "Bond" } });
   assert.deepEqual(calls[56].params, { id: 4, amount: 10 });
-  assert.deepEqual(calls[57].params, { id: 4, slot: 9 });
-  assert.deepEqual(calls[59].params, { id: 4, slot: 0 });
-  assert.deepEqual(calls[61].params, { id: 4, who: "agoradev1qqqq" });
-  assert.deepEqual(calls[63].params, {
+  assert.deepEqual(calls[57].params, { address: "agoradev1qqqq", amount: 5 });
+  assert.deepEqual(calls[58].params, { id: 4, slot: 9 });
+  assert.deepEqual(calls[60].params, { id: 4, slot: 0 });
+  assert.deepEqual(calls[62].params, { id: 4, who: "agoradev1qqqq" });
+  assert.deepEqual(calls[64].params, {
     author: "agoradev1qqqq",
     title: "t",
     body: "b",

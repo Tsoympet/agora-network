@@ -643,6 +643,11 @@ export type LightClient = {
     kind: unknown;
     slot?: number;
   }) => Promise<{ proposal_id: number }>;
+  /** Dev/test faucet; the node requires the RPC token (`rpcToken`). */
+  fundAddress: (address: string, amount: number) => Promise<{
+    address: string;
+    balance: number;
+  }>;
   depositProposal: (id: number, amount: number) => Promise<unknown>;
   openProposalVoting: (id: number, slot?: number) => Promise<unknown>;
   tallyProposal: (id: number) => Promise<unknown>;
@@ -1115,6 +1120,8 @@ export function createLightClient(config: LightClientConfig): LightClient {
         kind: args.kind,
         slot: args.slot ?? 0,
       }),
+    fundAddress: (address, amount) =>
+      call("agora_fundAddress", { address, amount }),
     depositProposal: (id, amount) =>
       call("agora_depositProposal", { id, amount }),
     openProposalVoting: (id, slot = 0) =>
