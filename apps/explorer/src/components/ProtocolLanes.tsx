@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import type {
   LightAccountBalances,
   LightDrcOfferPage,
+  LightValidator,
   RpcStatus,
 } from "../../../shared/light-client";
 import { getClient, rpcUrl } from "../lib/rpc";
@@ -84,6 +85,12 @@ export function ProtocolLanes() {
   const [claimHit, setClaimHit] = useState<unknown>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimBusy, setClaimBusy] = useState(false);
+
+  const [validatorAsset, setValidatorAsset] = useState<"OVL" | "DRC">("OVL");
+  const [validatorOperator, setValidatorOperator] = useState("");
+  const [validatorHit, setValidatorHit] = useState<LightValidator | null>(null);
+  const [validatorError, setValidatorError] = useState<string | null>(null);
+  const [validatorBusy, setValidatorBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -285,6 +292,26 @@ export function ProtocolLanes() {
       setClaimError(err instanceof Error ? err.message : "claim verify failed");
     } finally {
       setClaimBusy(false);
+    }
+  }
+
+  async function onValidator(e: FormEvent) {
+    e.preventDefault();
+    const operator = validatorOperator.trim();
+    if (!operator) {
+      setValidatorError("Operator Bech32m or 40-hex is required.");
+      setValidatorHit(null);
+      return;
+    }
+    setValidatorBusy(true);
+    setValidatorError(null);
+    setValidatorHit(null);
+    try {
+      setValidatorHit(await client.getValidator(validatorAsset, operator));
+    } catch (err) {
+      setValidatorError(err instanceof Error ? err.message : "validator lookup failed");
+    } finally {
+      setValidatorBusy(false);
     }
   }
 
@@ -630,6 +657,71 @@ export function ProtocolLanes() {
                 : lookupStatus(claimHit) ?? "result"}
             </span>
           </p>
+        ) : null}
+      </form>
+
+      <form onSubmit={onValidator} className="mt-12 flex flex-col gap-4">
+        <p className="agora-eyebrow">Validator lookup</p>
+        <p className="text-sm text-mist">
+          Read-only OVL / DRC operator record. Bonding stays in wallets —
+          keys never leave the device.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Stake asset</span>
+            <select
+              value={validatorAsset}
+              onChange={(e) =>
+                setValidatorAsset(e.target.value as "OVL" | "DRC")
+              }
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            >
+              <option value="OVL">OVL</option>
+              <option value="DRC">DRC</option>
+            </select>
+          </label>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Operator</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="Bech32m or 40-hex"
+              value={validatorOperator}
+              onChange={(e) => setValidatorOperator(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+        </div>
+        <button
+          type="submit"
+          disabled={validatorBusy || !validatorOperator.trim()}
+          className="agora-btn agora-btn-primary self-start disabled:opacity-50"
+        >
+          {validatorBusy ? "Looking up…" : "agora_getValidator"}
+        </button>
+        {validatorError ? (
+          <p className="text-sm text-[var(--agora-danger)]">{validatorError}</p>
+        ) : null}
+        {validatorHit ? (
+          <dl className="grid grid-cols-2 gap-3 font-mono text-sm">
+            <div>
+              <dt className="text-mist">status</dt>
+              <dd className="text-[var(--agora-cyan)]">{validatorHit.status}</dd>
+            </div>
+            <div>
+              <dt className="text-mist">commission</dt>
+              <dd>{validatorHit.commission_bps} bps</dd>
+            </div>
+            <div>
+              <dt className="text-mist">self bond</dt>
+              <dd>{formatAmount(validatorHit.self_bond)}</dd>
+            </div>
+            <div>
+              <dt className="text-mist">delegated</dt>
+              <dd>{formatAmount(validatorHit.delegated)}</dd>
+            </div>
+          </dl>
         ) : null}
       </form>
 

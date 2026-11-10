@@ -94,6 +94,10 @@ try {
   await client.getDrcIssuedAssetPolicyReceipt("ab".repeat(32));
   await client.getDrcTrustLineIssuerControlReceipt("cd".repeat(32));
   await client.getDrcIssuedClawbackReceipt("ef".repeat(32));
+  await client.getDrcIssuerLiability({ issuer: "agoradev1qqqq", currency: "USD" });
+  await client.getDrcIssuedAssetPolicy({ issuer: "agoradev1qqqq", currency: "USD" });
+  await client.getValidator("OVL", "agoradev1qqqq");
+  await client.submitStakeTx({ version: 1, kind: "Bond" });
 
   assert.deepEqual(
     calls.map((call) => call.method),
@@ -150,6 +154,10 @@ try {
       "agora_getDrcIssuedAssetPolicyReceipt",
       "agora_getDrcTrustLineIssuerControlReceipt",
       "agora_getDrcIssuedClawbackReceipt",
+      "agora_getDrcIssuerLiability",
+      "agora_getDrcIssuedAssetPolicy",
+      "agora_getValidator",
+      "agora_submitStakeTx",
     ],
   );
   assert.deepEqual(calls[0].params, { address: "agoradev1qqqq" });
@@ -202,6 +210,10 @@ try {
   });
   assert.deepEqual(calls[48].params, { transfer_tx_id: "99".repeat(32) });
   assert.deepEqual(calls[51].params, { clawback_tx_id: "ef".repeat(32) });
+  assert.deepEqual(calls[52].params, { issuer: "agoradev1qqqq", currency: "USD" });
+  assert.deepEqual(calls[53].params, { issuer: "agoradev1qqqq", currency: "USD" });
+  assert.deepEqual(calls[54].params, { asset: "OVL", operator: "agoradev1qqqq" });
+  assert.deepEqual(calls[55].params, { stake_tx: { version: 1, kind: "Bond" } });
   console.log("light-client query wrappers ok");
 } finally {
   globalThis.fetch = originalFetch;

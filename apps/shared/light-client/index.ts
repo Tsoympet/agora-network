@@ -34,6 +34,7 @@ export {
   type LightUtxo,
   type LightUtxoSet,
   type LightRewardPool,
+  type LightValidator,
   type LightValidatorSet,
   type NativeAssetTicker,
   type RpcStatus,
@@ -226,6 +227,16 @@ export {
   encodeVestingUnlockBody,
   sendVestingUnlock,
 } from "./typed-lanes-vesting";
+export {
+  STAKE_OP_KINDS,
+  STAKE_TX_DOMAIN,
+  STAKE_TX_VERSION,
+  buildSignedStakeTx,
+  encodeStakeTxBody,
+  sendStakeTx,
+  stakeKindMeta,
+  type StakeOpKindName,
+} from "./typed-lanes-stake";
 export {
   RAW_EVM_DEV_CHAIN_ID,
   RAW_EVM_KEY_SPLIT,

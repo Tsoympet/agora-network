@@ -202,6 +202,17 @@ export type LightValidatorSet = {
   }>;
 };
 
+export type LightValidator = {
+  asset: "OVL" | "DRC";
+  operator: string;
+  withdrawal: string;
+  self_bond: LightAmount;
+  delegated: LightAmount;
+  commission_bps: number;
+  status: string;
+  jailed_until_epoch: number;
+};
+
 export type LightRewardPool = {
   asset: "OVL" | "DRC";
   amount: LightAmount;
@@ -384,6 +395,10 @@ export type LightClient = {
     asset: "OVL" | "DRC",
     epoch?: number,
   ) => Promise<LightValidatorSet>;
+  getValidator: (
+    asset: "OVL" | "DRC",
+    operator: string,
+  ) => Promise<LightValidator>;
   getRewardPool: (asset: "OVL" | "DRC") => Promise<LightRewardPool>;
   getNativeAssetSupply: (
     asset: NativeAssetTicker,
@@ -496,6 +511,14 @@ export type LightClient = {
     issuer: string;
     currency: unknown;
   }) => Promise<unknown>;
+  getDrcIssuerLiability: (args: {
+    issuer: string;
+    currency: unknown;
+  }) => Promise<unknown>;
+  getDrcIssuedAssetPolicy: (args: {
+    issuer: string;
+    currency: unknown;
+  }) => Promise<unknown>;
   getDrcPayment: (paymentId: string) => Promise<unknown>;
   getDrcPaymentByInvoice: (args: {
     recipient: string;
@@ -590,6 +613,16 @@ export type LightClient = {
   submitVestingUnlock: (unlock: unknown) => Promise<{
     unlock_id: string;
   }>;
+  submitStakeTx: (tx: unknown) => Promise<{
+    stake_tx_id: string;
+    kind: string;
+    asset: string;
+    actor: string;
+    validator: string;
+    amount: number;
+    nonce: number;
+    path: string;
+  }>;
   getConstitution: () => Promise<LightConstitution>;
   getGovernance: () => Promise<LightGovernance>;
   listProposals: (limit?: number) => Promise<LightProposalList>;
@@ -670,6 +703,8 @@ export function createLightClient(config: LightClientConfig): LightClient {
         asset,
         ...(epoch === undefined ? {} : { epoch }),
       }),
+    getValidator: (asset, operator) =>
+      call<LightValidator>("agora_getValidator", { asset, operator }),
     getRewardPool: (asset) =>
       call<LightRewardPool>("agora_getRewardPool", { asset }),
     getNativeAssetSupply: (asset) =>
@@ -809,6 +844,16 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getDrcTrustLine: (args) =>
       call("agora_getDrcTrustLine", {
         holder: args.holder,
+        issuer: args.issuer,
+        currency: args.currency,
+      }),
+    getDrcIssuerLiability: (args) =>
+      call("agora_getDrcIssuerLiability", {
+        issuer: args.issuer,
+        currency: args.currency,
+      }),
+    getDrcIssuedAssetPolicy: (args) =>
+      call("agora_getDrcIssuedAssetPolicy", {
         issuer: args.issuer,
         currency: args.currency,
       }),
@@ -1016,6 +1061,17 @@ export function createLightClient(config: LightClientConfig): LightClient {
       }),
     submitVestingUnlock: (unlock) =>
       call<{ unlock_id: string }>("agora_submitVestingUnlock", { unlock }),
+    submitStakeTx: (tx) =>
+      call<{
+        stake_tx_id: string;
+        kind: string;
+        asset: string;
+        actor: string;
+        validator: string;
+        amount: number;
+        nonce: number;
+        path: string;
+      }>("agora_submitStakeTx", { stake_tx: tx }),
     getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
     getGovernance: () => call<LightGovernance>("agora_getGovernance", []),
     listProposals: (limit = 64) =>
