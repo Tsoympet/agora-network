@@ -643,6 +643,20 @@ export type LightClient = {
     kind: unknown;
     slot?: number;
   }) => Promise<{ proposal_id: number }>;
+  depositProposal: (id: number, amount: number) => Promise<unknown>;
+  openProposalVoting: (id: number, slot?: number) => Promise<unknown>;
+  tallyProposal: (id: number) => Promise<unknown>;
+  enterProposalTimelock: (id: number, slot?: number) => Promise<unknown>;
+  executeProposal: (id: number, slot?: number) => Promise<unknown>;
+  sponsorProposal: (id: number, who: string) => Promise<unknown>;
+  assentProposal: (id: number, who: string) => Promise<unknown>;
+  postForumTopic: (args: {
+    author: string;
+    title: string;
+    body: string;
+    category?: string;
+    slot?: number;
+  }) => Promise<unknown>;
   ackConstitution: (address: string, slot?: number) => Promise<{
     address: string;
     constitution_id: string;
@@ -1099,6 +1113,25 @@ export function createLightClient(config: LightClientConfig): LightClient {
         title: args.title,
         summary: args.summary,
         kind: args.kind,
+        slot: args.slot ?? 0,
+      }),
+    depositProposal: (id, amount) =>
+      call("agora_depositProposal", { id, amount }),
+    openProposalVoting: (id, slot = 0) =>
+      call("agora_openProposalVoting", { id, slot }),
+    tallyProposal: (id) => call("agora_tallyProposal", { id }),
+    enterProposalTimelock: (id, slot = 0) =>
+      call("agora_enterProposalTimelock", { id, slot }),
+    executeProposal: (id, slot = 0) =>
+      call("agora_executeProposal", { id, slot }),
+    sponsorProposal: (id, who) => call("agora_sponsorProposal", { id, who }),
+    assentProposal: (id, who) => call("agora_assentProposal", { id, who }),
+    postForumTopic: (args) =>
+      call("agora_postForumTopic", {
+        author: args.author,
+        title: args.title,
+        body: args.body,
+        category: args.category ?? "discussion",
         slot: args.slot ?? 0,
       }),
     ackConstitution: (address, slot = 0) =>
