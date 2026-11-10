@@ -98,6 +98,15 @@ try {
   await client.getDrcIssuedAssetPolicy({ issuer: "agoradev1qqqq", currency: "USD" });
   await client.getValidator("OVL", "agoradev1qqqq");
   await client.submitStakeTx({ version: 1, kind: "Bond" });
+  await client.depositProposal(4, 10);
+  await client.fundAddress("agoradev1qqqq", 5);
+  await client.openProposalVoting(4, 9);
+  await client.tallyProposal(4);
+  await client.enterProposalTimelock(4);
+  await client.executeProposal(4, 12);
+  await client.sponsorProposal(4, "agoradev1qqqq");
+  await client.assentProposal(4, "agoradev1qqqq");
+  await client.postForumTopic({ author: "agoradev1qqqq", title: "t", body: "b" });
 
   assert.deepEqual(
     calls.map((call) => call.method),
@@ -158,6 +167,15 @@ try {
       "agora_getDrcIssuedAssetPolicy",
       "agora_getValidator",
       "agora_submitStakeTx",
+      "agora_depositProposal",
+      "agora_fundAddress",
+      "agora_openProposalVoting",
+      "agora_tallyProposal",
+      "agora_enterProposalTimelock",
+      "agora_executeProposal",
+      "agora_sponsorProposal",
+      "agora_assentProposal",
+      "agora_postForumTopic",
     ],
   );
   assert.deepEqual(calls[0].params, { address: "agoradev1qqqq" });
@@ -214,6 +232,18 @@ try {
   assert.deepEqual(calls[53].params, { issuer: "agoradev1qqqq", currency: "USD" });
   assert.deepEqual(calls[54].params, { asset: "OVL", operator: "agoradev1qqqq" });
   assert.deepEqual(calls[55].params, { stake_tx: { version: 1, kind: "Bond" } });
+  assert.deepEqual(calls[56].params, { id: 4, amount: 10 });
+  assert.deepEqual(calls[57].params, { address: "agoradev1qqqq", amount: 5 });
+  assert.deepEqual(calls[58].params, { id: 4, slot: 9 });
+  assert.deepEqual(calls[60].params, { id: 4, slot: 0 });
+  assert.deepEqual(calls[62].params, { id: 4, who: "agoradev1qqqq" });
+  assert.deepEqual(calls[64].params, {
+    author: "agoradev1qqqq",
+    title: "t",
+    body: "b",
+    category: "discussion",
+    slot: 0,
+  });
   console.log("light-client query wrappers ok");
 } finally {
   globalThis.fetch = originalFetch;
