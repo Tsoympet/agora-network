@@ -3,7 +3,7 @@
 use agora_types::{
     script_p2pkh, AccountTransfer, Address, Amount, DrcBookAsset, DrcOfferCancelTx,
     DrcOfferCreateTx, DrcPaymentTx, Hash, IssuedAssetId, IssuedCurrencyCode, NativeAssetId,
-    OutPoint, OvlExecutionTx, TltCovenantInput, TltCovenantOutput, TltCovenantTx,
+    OutPoint, OvlExecutionTx, SignedStakeTx, TltCovenantInput, TltCovenantOutput, TltCovenantTx,
     DRC_OFFER_CANCEL_TX_VERSION, DRC_OFFER_CREATE_TX_VERSION, TLT_COVENANT_TX_VERSION,
     TLT_SEQUENCE_FINAL,
 };
@@ -445,4 +445,27 @@ fn hub_grant_mission_signing_bytes_are_locked() {
         hex::encode(mission.signing_bytes_bound("agora-testnet-1", &genesis())),
         "1d00000061676f72612d6d697373696f6e2d726567697374726174696f6e2d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01000000010101010101010101010101010101010101010102050000000000000003030303030303030303030303030303030303030303030303030303030303030000000000000000"
     );
+}
+
+#[test]
+fn stake_tx_v1_bond_signing_bytes_are_locked() {
+    let tx = SignedStakeTx::unsigned_bond(
+        NativeAssetId::OVL,
+        addr(1),
+        10,
+        vec![0x02; 33],
+        addr(2),
+        100,
+        7,
+    );
+    assert_eq!(
+        hex::encode(tx.signing_bytes_bound("agora-testnet-1", &genesis())),
+        "1900000061676f72612d74726964656e742d7374616b652d74782d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef010000000100010101010101010101010101010101010101010101010101010101010101010101010101010101010a00000000000000210000000202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202640000000000000000000000000000000000000000000000000000000000000000000700000000000000"
+    );
+    let json = serde_json::to_value(&tx).unwrap();
+    assert_eq!(json["asset"], "OVL");
+    assert_eq!(json["kind"], "Bond");
+    assert_eq!(json["amount"], 10);
+    assert_eq!(json["actor"].as_array().unwrap().len(), 20);
+    assert_eq!(json["consensus_pubkey"].as_array().unwrap().len(), 33);
 }

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import type {
   LightAccountBalances,
   LightDrcOfferPage,
+  LightValidator,
   RpcStatus,
 } from "../../../shared/light-client";
 import { getClient, rpcUrl } from "../lib/rpc";
@@ -85,6 +86,21 @@ export function ProtocolLanes() {
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimBusy, setClaimBusy] = useState(false);
 
+  const [issuedIssuer, setIssuedIssuer] = useState("");
+  const [issuedCurrency, setIssuedCurrency] = useState("");
+  const [issuedHit, setIssuedHit] = useState<{
+    liability: unknown;
+    policy: unknown;
+  } | null>(null);
+  const [issuedError, setIssuedError] = useState<string | null>(null);
+  const [issuedBusy, setIssuedBusy] = useState(false);
+
+  const [validatorAsset, setValidatorAsset] = useState<"OVL" | "DRC">("OVL");
+  const [validatorOperator, setValidatorOperator] = useState("");
+  const [validatorHit, setValidatorHit] = useState<LightValidator | null>(null);
+  const [validatorError, setValidatorError] = useState<string | null>(null);
+  const [validatorBusy, setValidatorBusy] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     async function loadEth() {
@@ -156,6 +172,8 @@ export function ProtocolLanes() {
       ["TLT covenant", client.getTltCovenant(raw)],
       ["DRC offer", client.getDrcOffer(raw)],
       ["DRC payment", client.getDrcPayment(raw)],
+      ["DRC operation receipt", client.getDrcOperation(raw)],
+      ["DRC transaction receipt", client.getDrcTransaction(raw)],
       ["DRC escrow", client.getDrcEscrow(raw)],
       ["DRC escrow receipt", client.getDrcEscrowReceipt(raw)],
       ["DRC check", client.getDrcCheck(raw)],
@@ -285,6 +303,51 @@ export function ProtocolLanes() {
       setClaimError(err instanceof Error ? err.message : "claim verify failed");
     } finally {
       setClaimBusy(false);
+    }
+  }
+
+  async function onValidator(e: FormEvent) {
+    e.preventDefault();
+    const operator = validatorOperator.trim();
+    if (!operator) {
+      setValidatorError("Operator Bech32m or 40-hex is required.");
+      setValidatorHit(null);
+      return;
+    }
+    setValidatorBusy(true);
+    setValidatorError(null);
+    setValidatorHit(null);
+    try {
+      setValidatorHit(await client.getValidator(validatorAsset, operator));
+    } catch (err) {
+      setValidatorError(err instanceof Error ? err.message : "validator lookup failed");
+    } finally {
+      setValidatorBusy(false);
+    }
+  }
+
+  async function onIssued(e: FormEvent) {
+    e.preventDefault();
+    const issuer = issuedIssuer.trim();
+    const currency = issuedCurrency.trim();
+    if (!issuer || !currency) {
+      setIssuedError("Issuer and uppercase currency (or 40-hex) are required.");
+      setIssuedHit(null);
+      return;
+    }
+    setIssuedBusy(true);
+    setIssuedError(null);
+    setIssuedHit(null);
+    try {
+      const [liability, policy] = await Promise.all([
+        client.getDrcIssuerLiability({ issuer, currency }),
+        client.getDrcIssuedAssetPolicy({ issuer, currency }),
+      ]);
+      setIssuedHit({ liability, policy });
+    } catch (err) {
+      setIssuedError(err instanceof Error ? err.message : "issued asset lookup failed");
+    } finally {
+      setIssuedBusy(false);
     }
   }
 
@@ -630,6 +693,127 @@ export function ProtocolLanes() {
                 : lookupStatus(claimHit) ?? "result"}
             </span>
           </p>
+        ) : null}
+      </form>
+
+      <form onSubmit={onValidator} className="mt-12 flex flex-col gap-4">
+        <p className="agora-eyebrow">Validator lookup</p>
+        <p className="text-sm text-mist">
+          Read-only OVL / DRC operator record. Bonding stays in wallets —
+          keys never leave the device.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Stake asset</span>
+            <select
+              value={validatorAsset}
+              onChange={(e) =>
+                setValidatorAsset(e.target.value as "OVL" | "DRC")
+              }
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            >
+              <option value="OVL">OVL</option>
+              <option value="DRC">DRC</option>
+            </select>
+          </label>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Operator</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="Bech32m or 40-hex"
+              value={validatorOperator}
+              onChange={(e) => setValidatorOperator(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+        </div>
+        <button
+          type="submit"
+          disabled={validatorBusy || !validatorOperator.trim()}
+          className="agora-btn agora-btn-primary self-start disabled:opacity-50"
+        >
+          {validatorBusy ? "Looking up…" : "agora_getValidator"}
+        </button>
+        {validatorError ? (
+          <p className="text-sm text-[var(--agora-danger)]">{validatorError}</p>
+        ) : null}
+        {validatorHit ? (
+          <dl className="grid grid-cols-2 gap-3 font-mono text-sm">
+            <div>
+              <dt className="text-mist">status</dt>
+              <dd className="text-[var(--agora-cyan)]">{validatorHit.status}</dd>
+            </div>
+            <div>
+              <dt className="text-mist">commission</dt>
+              <dd>{validatorHit.commission_bps} bps</dd>
+            </div>
+            <div>
+              <dt className="text-mist">self bond</dt>
+              <dd>{formatAmount(validatorHit.self_bond)}</dd>
+            </div>
+            <div>
+              <dt className="text-mist">delegated</dt>
+              <dd>{formatAmount(validatorHit.delegated)}</dd>
+            </div>
+          </dl>
+        ) : null}
+      </form>
+
+      <form onSubmit={onIssued} className="mt-12 flex flex-col gap-4">
+        <p className="agora-eyebrow">DRC issued asset</p>
+        <p className="text-sm text-mist">
+          Read-only issuer liability and issued-asset policy. Issuer controls
+          are signed in wallets — keys never leave the device.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Issuer</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="Bech32m or 40-hex"
+              value={issuedIssuer}
+              onChange={(e) => setIssuedIssuer(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Currency</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="USD or 40-hex"
+              value={issuedCurrency}
+              onChange={(e) => setIssuedCurrency(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+        </div>
+        <button
+          type="submit"
+          disabled={issuedBusy || !issuedIssuer.trim() || !issuedCurrency.trim()}
+          className="agora-btn agora-btn-primary self-start disabled:opacity-50"
+        >
+          {issuedBusy ? "Looking up…" : "agora_getDrcIssuerLiability + Policy"}
+        </button>
+        {issuedError ? (
+          <p className="text-sm text-[var(--agora-danger)]">{issuedError}</p>
+        ) : null}
+        {issuedHit ? (
+          <div className="grid gap-3 font-mono text-sm">
+            <div>
+              <p className="text-mist">issuer liability</p>
+              <pre className="overflow-x-auto">{JSON.stringify(issuedHit.liability, null, 2)}</pre>
+            </div>
+            <div>
+              <p className="text-mist">issued asset policy</p>
+              <pre className="overflow-x-auto">{JSON.stringify(issuedHit.policy, null, 2)}</pre>
+            </div>
+          </div>
         ) : null}
       </form>
 

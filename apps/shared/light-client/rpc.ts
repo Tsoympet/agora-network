@@ -202,6 +202,17 @@ export type LightValidatorSet = {
   }>;
 };
 
+export type LightValidator = {
+  asset: "OVL" | "DRC";
+  operator: string;
+  withdrawal: string;
+  self_bond: LightAmount;
+  delegated: LightAmount;
+  commission_bps: number;
+  status: string;
+  jailed_until_epoch: number;
+};
+
 export type LightRewardPool = {
   asset: "OVL" | "DRC";
   amount: LightAmount;
@@ -384,6 +395,10 @@ export type LightClient = {
     asset: "OVL" | "DRC",
     epoch?: number,
   ) => Promise<LightValidatorSet>;
+  getValidator: (
+    asset: "OVL" | "DRC",
+    operator: string,
+  ) => Promise<LightValidator>;
   getRewardPool: (asset: "OVL" | "DRC") => Promise<LightRewardPool>;
   getNativeAssetSupply: (
     asset: NativeAssetTicker,
@@ -496,6 +511,14 @@ export type LightClient = {
     issuer: string;
     currency: unknown;
   }) => Promise<unknown>;
+  getDrcIssuerLiability: (args: {
+    issuer: string;
+    currency: unknown;
+  }) => Promise<unknown>;
+  getDrcIssuedAssetPolicy: (args: {
+    issuer: string;
+    currency: unknown;
+  }) => Promise<unknown>;
   getDrcPayment: (paymentId: string) => Promise<unknown>;
   getDrcPaymentByInvoice: (args: {
     recipient: string;
@@ -590,6 +613,16 @@ export type LightClient = {
   submitVestingUnlock: (unlock: unknown) => Promise<{
     unlock_id: string;
   }>;
+  submitStakeTx: (tx: unknown) => Promise<{
+    stake_tx_id: string;
+    kind: string;
+    asset: string;
+    actor: string;
+    validator: string;
+    amount: number;
+    nonce: number;
+    path: string;
+  }>;
   getConstitution: () => Promise<LightConstitution>;
   getGovernance: () => Promise<LightGovernance>;
   listProposals: (limit?: number) => Promise<LightProposalList>;
@@ -610,6 +643,25 @@ export type LightClient = {
     kind: unknown;
     slot?: number;
   }) => Promise<{ proposal_id: number }>;
+  /** Dev/test faucet; the node requires the RPC token (`rpcToken`). */
+  fundAddress: (address: string, amount: number) => Promise<{
+    address: string;
+    balance: number;
+  }>;
+  depositProposal: (id: number, amount: number) => Promise<unknown>;
+  openProposalVoting: (id: number, slot?: number) => Promise<unknown>;
+  tallyProposal: (id: number) => Promise<unknown>;
+  enterProposalTimelock: (id: number, slot?: number) => Promise<unknown>;
+  executeProposal: (id: number, slot?: number) => Promise<unknown>;
+  sponsorProposal: (id: number, who: string) => Promise<unknown>;
+  assentProposal: (id: number, who: string) => Promise<unknown>;
+  postForumTopic: (args: {
+    author: string;
+    title: string;
+    body: string;
+    category?: string;
+    slot?: number;
+  }) => Promise<unknown>;
   ackConstitution: (address: string, slot?: number) => Promise<{
     address: string;
     constitution_id: string;
@@ -670,6 +722,8 @@ export function createLightClient(config: LightClientConfig): LightClient {
         asset,
         ...(epoch === undefined ? {} : { epoch }),
       }),
+    getValidator: (asset, operator) =>
+      call<LightValidator>("agora_getValidator", { asset, operator }),
     getRewardPool: (asset) =>
       call<LightRewardPool>("agora_getRewardPool", { asset }),
     getNativeAssetSupply: (asset) =>
@@ -809,6 +863,16 @@ export function createLightClient(config: LightClientConfig): LightClient {
     getDrcTrustLine: (args) =>
       call("agora_getDrcTrustLine", {
         holder: args.holder,
+        issuer: args.issuer,
+        currency: args.currency,
+      }),
+    getDrcIssuerLiability: (args) =>
+      call("agora_getDrcIssuerLiability", {
+        issuer: args.issuer,
+        currency: args.currency,
+      }),
+    getDrcIssuedAssetPolicy: (args) =>
+      call("agora_getDrcIssuedAssetPolicy", {
         issuer: args.issuer,
         currency: args.currency,
       }),
@@ -1016,6 +1080,17 @@ export function createLightClient(config: LightClientConfig): LightClient {
       }),
     submitVestingUnlock: (unlock) =>
       call<{ unlock_id: string }>("agora_submitVestingUnlock", { unlock }),
+    submitStakeTx: (tx) =>
+      call<{
+        stake_tx_id: string;
+        kind: string;
+        asset: string;
+        actor: string;
+        validator: string;
+        amount: number;
+        nonce: number;
+        path: string;
+      }>("agora_submitStakeTx", { stake_tx: tx }),
     getConstitution: () => call<LightConstitution>("agora_getConstitution", []),
     getGovernance: () => call<LightGovernance>("agora_getGovernance", []),
     listProposals: (limit = 64) =>
@@ -1043,6 +1118,27 @@ export function createLightClient(config: LightClientConfig): LightClient {
         title: args.title,
         summary: args.summary,
         kind: args.kind,
+        slot: args.slot ?? 0,
+      }),
+    fundAddress: (address, amount) =>
+      call("agora_fundAddress", { address, amount }),
+    depositProposal: (id, amount) =>
+      call("agora_depositProposal", { id, amount }),
+    openProposalVoting: (id, slot = 0) =>
+      call("agora_openProposalVoting", { id, slot }),
+    tallyProposal: (id) => call("agora_tallyProposal", { id }),
+    enterProposalTimelock: (id, slot = 0) =>
+      call("agora_enterProposalTimelock", { id, slot }),
+    executeProposal: (id, slot = 0) =>
+      call("agora_executeProposal", { id, slot }),
+    sponsorProposal: (id, who) => call("agora_sponsorProposal", { id, who }),
+    assentProposal: (id, who) => call("agora_assentProposal", { id, who }),
+    postForumTopic: (args) =>
+      call("agora_postForumTopic", {
+        author: args.author,
+        title: args.title,
+        body: args.body,
+        category: args.category ?? "discussion",
         slot: args.slot ?? 0,
       }),
     ackConstitution: (address, slot = 0) =>

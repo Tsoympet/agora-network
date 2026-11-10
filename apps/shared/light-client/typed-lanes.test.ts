@@ -34,6 +34,14 @@ import {
   CHECKPOINT_ATTESTATION_DOMAIN,
   encodeCheckpointSigningBytes,
 } from "./typed-lanes-finality.ts";
+import {
+  STAKE_OP_KINDS,
+  STAKE_TX_DOMAIN,
+  buildSignedStakeTx,
+  encodeStakeTxBody,
+  sendStakeTx,
+} from "./typed-lanes-stake.ts";
+import * as secp from "@noble/secp256k1";
 import { accountFromSecretHex } from "./wallet.ts";
 import {
   DRC_ACCOUNT_POLICY_ACTIONS,
@@ -590,6 +598,31 @@ lock(
   ),
   "1700000061676f72612d76657374696e672d756e6c6f636b2d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0100000001020202020202020202020202020202020202020203030303030303030303030303030303030303030303030303030303030303030a000000000000000000000000000000",
 );
+lock(
+  "stake_tx_v1_bond",
+  encodeBoundEnvelope(
+    STAKE_TX_DOMAIN,
+    CHAIN,
+    GENESIS,
+    encodeStakeTxBody({
+      version: 1,
+      asset: "OVL",
+      kind: "Bond",
+      actor: addr(1),
+      validator: addr(1),
+      amount: 10,
+      consensusPubkey: new Uint8Array(33).fill(0x02),
+      withdrawal: addr(2),
+      commissionBps: 100,
+      metadataHash: hash(0),
+      nonce: 7,
+    }),
+  ),
+  "1900000061676f72612d74726964656e742d7374616b652d74782d76310f00000061676f72612d746573746e65742d310123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef010000000100010101010101010101010101010101010101010101010101010101010101010101010101010101010a00000000000000210000000202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202640000000000000000000000000000000000000000000000000000000000000000000700000000000000",
+);
+assert.equal(STAKE_OP_KINDS.length, 4);
+assert.equal(STAKE_OP_KINDS[0].needsBondFields, true);
+assert.equal(STAKE_OP_KINDS[1].needsValidator, true);
 
 assert.equal(DRC_WALLET_FAMILY_LANES.length, 18);
 assert.equal(drcFamilyNeedsAmount("drc-channel-claim"), true);
@@ -630,5 +663,72 @@ assert.equal(
   experimentalTlt.addressBech32,
   "agoratest1e2eqe8pw7w094srjmulracnh7qn8xz9k4z8234",
 );
+
+{
+  const mnemonic =
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+  const bond = await buildSignedStakeTx({
+    mnemonic,
+    network: "testnet",
+    genesisHash: GENESIS,
+    chainId: CHAIN,
+    asset: "OVL",
+    kind: "Bond",
+    amount: 10,
+    commissionBps: 100,
+    nonce: 3,
+  });
+  const stakeTx = bond.tx as {
+    public_key: number[];
+    signature: number[];
+    consensus_pubkey: number[];
+    actor: number[];
+    validator: number[];
+  };
+  assert.equal(stakeTx.signature.length, 64);
+  assert.deepEqual(stakeTx.consensus_pubkey, stakeTx.public_key);
+  assert.deepEqual(stakeTx.actor, stakeTx.validator);
+  assert.ok(
+    secp.verify(
+      Uint8Array.from(stakeTx.signature),
+      sha256(bond.signingBytes),
+      Uint8Array.from(stakeTx.public_key),
+    ),
+  );
+  await assert.rejects(
+    buildSignedStakeTx({
+      mnemonic,
+      genesisHash: GENESIS,
+      asset: "OVL",
+      kind: "Delegate",
+      amount: 1,
+      nonce: 0,
+    }),
+    /validator/,
+  );
+
+  const rpcCalls: Array<{ method: string; params: unknown }> = [];
+  const mockClient = {
+    getNodeInfo: async () => ({
+      genesis_hash: GENESIS,
+      chain_id: CHAIN,
+      network: "testnet",
+    }),
+    getAccountBalances: async () => ({ ovl: { nonce: 5 }, drc: { nonce: 0 } }),
+    submitStakeTx: async (tx: unknown) => {
+      rpcCalls.push({ method: "agora_submitStakeTx", params: tx });
+      return { stake_tx_id: "ab".repeat(32) };
+    },
+  };
+  const sent = await sendStakeTx(mockClient as never, {
+    mnemonic,
+    network: "testnet",
+    asset: "OVL",
+    kind: "UnbondSelf",
+  });
+  assert.equal(sent.id, "ab".repeat(32));
+  assert.equal((sent.built.tx as { nonce: number }).nonce, 5);
+  assert.equal(rpcCalls.length, 1);
+}
 
 console.log("typed-lane Borsh preimages match agora-types");
