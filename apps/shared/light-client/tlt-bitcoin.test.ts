@@ -6,8 +6,10 @@ import assert from "node:assert/strict";
 
 import { selectTltCoins } from "./coinselect.ts";
 import {
+  inclusionFromRpcProof,
   proveTltTxMerkle,
   tltTxMerkleRoot,
+  verifyRpcTltMerkleProof,
   verifyTltTxMerkle,
   verifyTridentLight,
 } from "./tltMerkle.ts";
@@ -73,6 +75,40 @@ assert.throws(() =>
     drcSigned: 3n,
     drcActive: 3n,
   }),
+);
+
+function hex32(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+const served = proveTltTxMerkle(leaves, 1);
+assert.ok(served);
+const rpcProof = {
+  index: served.index,
+  tx_id: hex32(served.txId),
+  siblings: served.siblings.map(hex32),
+  tx_merkle_root: hex32(root),
+  header_tx_root: hex32(root),
+  header_binds_tx_merkle: true,
+};
+assert.equal(verifyRpcTltMerkleProof(rpcProof), true);
+assert.deepEqual(inclusionFromRpcProof(rpcProof).txId, served.txId);
+assert.equal(
+  verifyRpcTltMerkleProof({
+    ...rpcProof,
+    header_tx_root: hex32(new Uint8Array(32).fill(9)),
+  }),
+  false,
+);
+assert.equal(
+  verifyRpcTltMerkleProof({
+    ...rpcProof,
+    header_tx_root: hex32(new Uint8Array(32).fill(9)),
+    header_binds_tx_merkle: false,
+  }),
+  true,
 );
 
 console.log("tlt bitcoin light-client vectors ok");

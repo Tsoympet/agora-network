@@ -47,7 +47,15 @@ After a block is admitted locally, `agora-node` gossips:
    still issues GetBlock.
 2. `BlockAnnounce { hash }` — hash-only tip signal
 
-Receivers try `reconstruct_compact_block` against the local mempool. On miss (or hash-only announce without a body), they request the body from the announcing peer over the network-scoped **`/agora/<network>/getblock/1`** protocol (libp2p request-response, CBOR). `PendingFetches` dedupes in-flight hashes. If request-response fails, the node falls back to gossip `GetBlock` / `Block`.
+Receivers inflate `CompactBlock` / `TypedCompactBlock` from the local
+mempool (`Mempool::inflate_compact_block` / `inflate_typed_compact`) under
+one lock. After a `--no-default-features` reopen, short-ids must resolve
+from `$AGORA_DATA/portable/mempool.bin` so a restart does not force
+GetBlock by itself. On miss (or hash-only announce without a body), they
+request the body from the announcing peer over the network-scoped
+**`/agora/<network>/getblock/1`** protocol (libp2p request-response, CBOR).
+`PendingFetches` dedupes in-flight hashes. If request-response fails, the
+node falls back to gossip `GetBlock` / `Block`.
 
 ### Orphan pool (multi-hop IBD)
 
@@ -66,6 +74,7 @@ Empty-tx templates reconstruct immediately (no mempool lookup).
 | Test | Covers |
 | --- | --- |
 | `compact_block_ibd` | gossip announce / compact wire path |
+| `mempool::persist::compact_inflate_survives_portable_reopen` | UTXO + typed compact inflate after portable mempool reopen |
 | `getblock_request_response` | direct getblock roundtrip |
 | `getheaders_request_response` | locator → headers RR |
 | `topics` unit tests | `dev` vs `testnet` topic / protocol isolation |
@@ -91,11 +100,18 @@ pool; accepted DRC typed-operation fees increment committed lifetime burned
 supply. On block admit, `evict_for_block` drops included operations and releases
 reservations.
 
-`--no-default-features` nodes persist admitted envelopes to
-`$AGORA_DATA/portable/mempool.bin` (`AGORAMP1`, sibling of the portable
-state snapshot). Reservations are rebuilt by re-admit on open. This is a
-local Experimental datadir file, not RocksDB and not a public-testnet
-durability claim. In-memory tests and COW overlays stay ephemeral.
+Default-features (`rocksdb`) nodes persist admitted envelopes in the
+existing node DB `cf_mempool` column family (per-id put/delete; RocksDB
+is the WAL). A first-boot migration copies leftover
+`mempool.bin` / `mempool.wal` into that CF and then deletes the portable
+files so the CF is the only source of truth. `--no-default-features` nodes persist to
+`$AGORA_DATA/portable/mempool.wal` (`AGORAW01`) and periodically compact
+into `$AGORA_DATA/portable/mempool.bin` (`AGORAMP1`). High-churn admits
+append one framed upsert instead of rewriting the snapshot; evicts and
+every 32 upserts take a tmp+rename checkpoint. Reservations are rebuilt
+by re-admit on open. Compact gossip inflates UTXO and typed short-ids
+from that restored pool. Neither path is a public-testnet durability
+claim. In-memory tests and COW overlays stay ephemeral.
 
 Typed consensus lanes append `NetworkMessage` discriminants. Protocol v25
 adds `DataCommitment` (33); v26 adds `OvlRawExecution` (34) for version-2

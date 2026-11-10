@@ -100,6 +100,15 @@ export type SubmitTxResult = {
 
 export type LightTxStatus = "pending" | "confirmed" | "unknown";
 
+export type LightTltMerkleProof = {
+  index: number;
+  tx_id: string;
+  siblings: string[];
+  tx_merkle_root: string;
+  header_tx_root: string;
+  header_binds_tx_merkle: boolean;
+};
+
 export type LightTxLookup = {
   tx_id: string;
   status: LightTxStatus;
@@ -109,6 +118,8 @@ export type LightTxLookup = {
   /** Blue-score / tip-depth confirmations when confirmed. */
   confirmations: number | null;
   transaction: LightTx | null;
+  /** Pairwise TLT inclusion when the tx is indexed in a stored block. */
+  merkle_proof?: LightTltMerkleProof | null;
 };
 
 export type LightMempoolEntry = {
@@ -485,6 +496,34 @@ export type LightClient = {
     issuer: string;
     currency: unknown;
   }) => Promise<unknown>;
+  getDrcPayment: (paymentId: string) => Promise<unknown>;
+  getDrcPaymentByInvoice: (args: {
+    recipient: string;
+    invoice_id: string;
+  }) => Promise<unknown>;
+  getDrcPaymentChannel: (channelId: string) => Promise<unknown>;
+  getDrcPaymentChannelReceipt: (channelId: string) => Promise<unknown>;
+  getDrcPaymentChannelFundEvent: (fundTxId: string) => Promise<unknown>;
+  getDrcPaymentChannelClaimEvent: (claimTxId: string) => Promise<unknown>;
+  getDrcPaymentChannelScheduleEvent: (closeTxId: string) => Promise<unknown>;
+  verifyDrcPaymentChannelClaim: (args: {
+    channel_id: string;
+    cumulative_authorized: number | string;
+    channel_claim_signature: string;
+  }) => Promise<unknown>;
+  getDrcAccountPolicy: (account: string) => Promise<unknown>;
+  getDrcAccountKeys: (account: string) => Promise<unknown>;
+  getDrcAccountSignerList: (account: string) => Promise<unknown>;
+  getDrcDepositPreauth: (args: {
+    owner: string;
+    authorized_source: string;
+  }) => Promise<unknown>;
+  getDrcEscrowReceipt: (escrowId: string) => Promise<unknown>;
+  getDrcCheckReceipt: (checkId: string) => Promise<unknown>;
+  getDrcIssuedTransferReceipt: (transferTxId: string) => Promise<unknown>;
+  getDrcIssuedAssetPolicyReceipt: (policySetTxId: string) => Promise<unknown>;
+  getDrcTrustLineIssuerControlReceipt: (controlTxId: string) => Promise<unknown>;
+  getDrcIssuedClawbackReceipt: (clawbackTxId: string) => Promise<unknown>;
   getEthChainId: () => Promise<unknown>;
   getEthBlockNumber: () => Promise<unknown>;
   getEthBalance: (address: string, blockTag?: string) => Promise<unknown>;
@@ -772,6 +811,62 @@ export function createLightClient(config: LightClientConfig): LightClient {
         holder: args.holder,
         issuer: args.issuer,
         currency: args.currency,
+      }),
+    getDrcPayment: (paymentId) =>
+      call("agora_getDrcPayment", { payment_id: paymentId }),
+    getDrcPaymentByInvoice: (args) =>
+      call("agora_getDrcPaymentByInvoice", {
+        recipient: args.recipient,
+        invoice_id: args.invoice_id,
+      }),
+    getDrcPaymentChannel: (channelId) =>
+      call("agora_getDrcPaymentChannel", { channel_id: channelId }),
+    getDrcPaymentChannelReceipt: (channelId) =>
+      call("agora_getDrcPaymentChannelReceipt", { channel_id: channelId }),
+    getDrcPaymentChannelFundEvent: (fundTxId) =>
+      call("agora_getDrcPaymentChannelFundEvent", { fund_tx_id: fundTxId }),
+    getDrcPaymentChannelClaimEvent: (claimTxId) =>
+      call("agora_getDrcPaymentChannelClaimEvent", { claim_tx_id: claimTxId }),
+    getDrcPaymentChannelScheduleEvent: (closeTxId) =>
+      call("agora_getDrcPaymentChannelScheduleEvent", {
+        close_tx_id: closeTxId,
+      }),
+    verifyDrcPaymentChannelClaim: (args) =>
+      call("agora_verifyDrcPaymentChannelClaim", {
+        channel_id: args.channel_id,
+        cumulative_authorized: args.cumulative_authorized,
+        channel_claim_signature: args.channel_claim_signature,
+      }),
+    getDrcAccountPolicy: (account) =>
+      call("agora_getDrcAccountPolicy", { account }),
+    getDrcAccountKeys: (account) =>
+      call("agora_getDrcAccountKeys", { account }),
+    getDrcAccountSignerList: (account) =>
+      call("agora_getDrcAccountSignerList", { account }),
+    getDrcDepositPreauth: (args) =>
+      call("agora_getDrcDepositPreauth", {
+        owner: args.owner,
+        authorized_source: args.authorized_source,
+      }),
+    getDrcEscrowReceipt: (escrowId) =>
+      call("agora_getDrcEscrowReceipt", { escrow_id: escrowId }),
+    getDrcCheckReceipt: (checkId) =>
+      call("agora_getDrcCheckReceipt", { check_id: checkId }),
+    getDrcIssuedTransferReceipt: (transferTxId) =>
+      call("agora_getDrcIssuedTransferReceipt", {
+        transfer_tx_id: transferTxId,
+      }),
+    getDrcIssuedAssetPolicyReceipt: (policySetTxId) =>
+      call("agora_getDrcIssuedAssetPolicyReceipt", {
+        policy_set_tx_id: policySetTxId,
+      }),
+    getDrcTrustLineIssuerControlReceipt: (controlTxId) =>
+      call("agora_getDrcTrustLineIssuerControlReceipt", {
+        control_tx_id: controlTxId,
+      }),
+    getDrcIssuedClawbackReceipt: (clawbackTxId) =>
+      call("agora_getDrcIssuedClawbackReceipt", {
+        clawback_tx_id: clawbackTxId,
       }),
     getEthChainId: () => call("eth_chainId", []),
     getEthBlockNumber: () => call("eth_blockNumber", []),

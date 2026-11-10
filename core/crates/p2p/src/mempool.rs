@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use agora_types::{
     resolve_drc_account_sequence, sequence_signals_rbf, AccountTransfer, Address, Block,
@@ -46,7 +47,7 @@ mod treasury_lane;
 mod trust_line_lane;
 #[path = "vesting_lane.rs"]
 mod vesting_lane;
-pub use persist::mempool_persist_path;
+pub use persist::{mempool_persist_path, mempool_wal_path, MempoolKv};
 
 /// Default cap on how many transfer txs a mining template pulls from the pool.
 pub const DEFAULT_TEMPLATE_TX_LIMIT: usize = 128;
@@ -156,6 +157,8 @@ pub struct Mempool {
     reserved_accounts: HashSet<(NativeAssetId, Address)>,
     max_size: usize,
     persist_path: Option<PathBuf>,
+    persist_wal: Option<Mutex<persist::MempoolWalMeta>>,
+    persist_kv: Option<persist::KvPersist>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,6 +253,8 @@ impl Mempool {
             reserved_accounts: HashSet::new(),
             max_size,
             persist_path: None,
+            persist_wal: None,
+            persist_kv: None,
         }
     }
 
@@ -1708,6 +1713,30 @@ impl Mempool {
                 .map(Item::Vesting),
             _ => None,
         }
+    }
+
+    /// Inflate a UTXO `CompactBlock` from envelopes in this pool.
+    ///
+    /// After a portable reopen the same short-ids must resolve here so a peer
+    /// does not fall back to GetBlock solely because the process restarted.
+    pub fn inflate_compact_block(
+        &self,
+        header: agora_types::BlockHeader,
+        short_ids: &[[u8; 8]],
+    ) -> Result<Block, crate::ibd::ReconstructError> {
+        crate::ibd::reconstruct_compact_block(header, short_ids, |sid| {
+            self.get_by_short_id(sid).cloned()
+        })
+    }
+
+    /// Inflate a `TypedCompactBlock` from envelopes in this pool.
+    pub fn inflate_typed_compact(
+        &self,
+        body: crate::typed_compact::TypedCompactBody,
+    ) -> Result<Block, crate::ibd::ReconstructError> {
+        crate::typed_compact::reconstruct_typed_compact(body, |kind, sid| {
+            self.clone_typed_lane_item(kind, sid)
+        })
     }
 
     pub fn remove(&mut self, tx_id: &Hash) -> Option<Transaction> {

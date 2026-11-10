@@ -27,10 +27,19 @@ const info = await client.getNodeInfo();
 // later: stop();
 ```
 
+`agora_getTransaction` returns a pairwise TLT `merkle_proof` when the tx is
+indexed in a stored block. Verify with `verifyRpcTltMerkleProof` (siblings
+against `tx_merkle_root`; header bind only when `header_binds_tx_merkle`).
+
 RPC methods: `agora_getDagTips`, `agora_getBlock`, `agora_getTransaction`,
 `agora_getMempool`, `agora_getNodeInfo`, `agora_getBalance`,
 `agora_getAccountBalances`, `agora_getTltCovenant`, `agora_getDrcOffer`,
 `agora_getDrcAccountOffers`, `agora_getDrcBookOffers`, `agora_getDrcEscrow`,
+`agora_getDrcPayment`, `agora_getDrcPaymentByInvoice`,
+`agora_getDrcPaymentChannel` / receipt / fund-claim-schedule events,
+`agora_verifyDrcPaymentChannelClaim`, `agora_getDrcAccountPolicy`,
+`agora_getDrcAccountKeys`, `agora_getDrcAccountSignerList`,
+`agora_getDrcDepositPreauth`, issued-control receipts,
 `eth_chainId`, `eth_blockNumber`, `eth_getBalance`, `agora_getUtxos`,
 `agora_submitTransaction`, `agora_submitTltCovenant`,
 `agora_submitAccountTransfer`, `agora_submitOvlExecution`,

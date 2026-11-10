@@ -28,6 +28,7 @@ function hasLivePayload(value: unknown): boolean {
   if (Array.isArray(record.offers) && record.offers.length > 0) return true;
   if (Array.isArray(record.objects) && record.objects.length > 0) return true;
   if (record.object != null || record.authorization != null) return true;
+  if (record.receipt != null || record.policy != null) return true;
   return false;
 }
 
@@ -45,6 +46,9 @@ export function ProtocolLanes() {
     null,
   );
   const [accountObjects, setAccountObjects] = useState<unknown>(null);
+  const [accountPolicy, setAccountPolicy] = useState<unknown>(null);
+  const [accountKeys, setAccountKeys] = useState<unknown>(null);
+  const [accountSignerList, setAccountSignerList] = useState<unknown>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
 
@@ -61,6 +65,25 @@ export function ProtocolLanes() {
   const [bookPage, setBookPage] = useState<LightDrcOfferPage | null>(null);
   const [bookError, setBookError] = useState<string | null>(null);
   const [bookBusy, setBookBusy] = useState(false);
+
+  const [invoiceRecipient, setInvoiceRecipient] = useState("");
+  const [invoiceId, setInvoiceId] = useState("");
+  const [invoiceHit, setInvoiceHit] = useState<unknown>(null);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
+
+  const [preauthOwner, setPreauthOwner] = useState("");
+  const [preauthSource, setPreauthSource] = useState("");
+  const [preauthHit, setPreauthHit] = useState<unknown>(null);
+  const [preauthError, setPreauthError] = useState<string | null>(null);
+  const [preauthBusy, setPreauthBusy] = useState(false);
+
+  const [claimChannel, setClaimChannel] = useState("");
+  const [claimAmount, setClaimAmount] = useState("");
+  const [claimSignature, setClaimSignature] = useState("");
+  const [claimHit, setClaimHit] = useState<unknown>(null);
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const [claimBusy, setClaimBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,15 +115,25 @@ export function ProtocolLanes() {
     setBalances(null);
     setAccountOffers(null);
     setAccountObjects(null);
+    setAccountPolicy(null);
+    setAccountKeys(null);
+    setAccountSignerList(null);
     try {
       const next = await client.getAccountBalances(account.trim());
       setBalances(next);
-      const [offers, objects] = await Promise.all([
-        client.getDrcAccountOffers({ account: account.trim(), limit: 16 }),
-        client.getDrcAccountObjects({ account: account.trim() }),
+      const owner = account.trim();
+      const [offers, objects, policy, keys, signers] = await Promise.all([
+        client.getDrcAccountOffers({ account: owner, limit: 16 }),
+        client.getDrcAccountObjects({ account: owner }),
+        client.getDrcAccountPolicy(owner),
+        client.getDrcAccountKeys(owner),
+        client.getDrcAccountSignerList(owner),
       ]);
       setAccountOffers(offers);
       setAccountObjects(objects);
+      setAccountPolicy(policy);
+      setAccountKeys(keys);
+      setAccountSignerList(signers);
     } catch (err) {
       setAccountError(err instanceof Error ? err.message : "account lookup failed");
     } finally {
@@ -122,8 +155,32 @@ export function ProtocolLanes() {
     const queries: Array<[string, Promise<unknown>]> = [
       ["TLT covenant", client.getTltCovenant(raw)],
       ["DRC offer", client.getDrcOffer(raw)],
+      ["DRC payment", client.getDrcPayment(raw)],
       ["DRC escrow", client.getDrcEscrow(raw)],
+      ["DRC escrow receipt", client.getDrcEscrowReceipt(raw)],
       ["DRC check", client.getDrcCheck(raw)],
+      ["DRC check receipt", client.getDrcCheckReceipt(raw)],
+      ["DRC payment channel", client.getDrcPaymentChannel(raw)],
+      ["DRC channel receipt", client.getDrcPaymentChannelReceipt(raw)],
+      ["DRC channel fund event", client.getDrcPaymentChannelFundEvent(raw)],
+      ["DRC channel claim event", client.getDrcPaymentChannelClaimEvent(raw)],
+      [
+        "DRC channel schedule event",
+        client.getDrcPaymentChannelScheduleEvent(raw),
+      ],
+      [
+        "DRC issued transfer receipt",
+        client.getDrcIssuedTransferReceipt(raw),
+      ],
+      [
+        "DRC issued-asset policy receipt",
+        client.getDrcIssuedAssetPolicyReceipt(raw),
+      ],
+      [
+        "DRC issuer-control receipt",
+        client.getDrcTrustLineIssuerControlReceipt(raw),
+      ],
+      ["DRC clawback receipt", client.getDrcIssuedClawbackReceipt(raw)],
       ["DRC ledger object", client.getDrcObject(raw)],
       ["DA commitment", client.getDataCommitment({ authorization_id: raw })],
       ["Passport attestation", client.getPassportAttestation(raw)],
@@ -149,6 +206,86 @@ export function ProtocolLanes() {
       setLaneError("No live typed-lane object for that id on this node.");
     }
     setLaneBusy(false);
+  }
+
+  async function onInvoice(e: FormEvent) {
+    e.preventDefault();
+    const recipient = invoiceRecipient.trim();
+    const id = invoiceId.trim();
+    if (!recipient || !HEX64.test(id)) {
+      setInvoiceError("Recipient plus a 64-hex invoice id are required.");
+      setInvoiceHit(null);
+      return;
+    }
+    setInvoiceBusy(true);
+    setInvoiceError(null);
+    setInvoiceHit(null);
+    try {
+      setInvoiceHit(
+        await client.getDrcPaymentByInvoice({
+          recipient,
+          invoice_id: id,
+        }),
+      );
+    } catch (err) {
+      setInvoiceError(err instanceof Error ? err.message : "invoice lookup failed");
+    } finally {
+      setInvoiceBusy(false);
+    }
+  }
+
+  async function onPreauth(e: FormEvent) {
+    e.preventDefault();
+    const owner = preauthOwner.trim();
+    const source = preauthSource.trim();
+    if (!owner || !source) {
+      setPreauthError("Owner and authorized source are required.");
+      setPreauthHit(null);
+      return;
+    }
+    setPreauthBusy(true);
+    setPreauthError(null);
+    setPreauthHit(null);
+    try {
+      setPreauthHit(
+        await client.getDrcDepositPreauth({
+          owner,
+          authorized_source: source,
+        }),
+      );
+    } catch (err) {
+      setPreauthError(err instanceof Error ? err.message : "preauth lookup failed");
+    } finally {
+      setPreauthBusy(false);
+    }
+  }
+
+  async function onVerifyClaim(e: FormEvent) {
+    e.preventDefault();
+    const channel = claimChannel.trim();
+    const amount = Number(claimAmount.trim());
+    const signature = claimSignature.trim();
+    if (!HEX64.test(channel) || !Number.isFinite(amount) || !signature) {
+      setClaimError("Channel id, amount, and claim-signature hex are required.");
+      setClaimHit(null);
+      return;
+    }
+    setClaimBusy(true);
+    setClaimError(null);
+    setClaimHit(null);
+    try {
+      setClaimHit(
+        await client.verifyDrcPaymentChannelClaim({
+          channel_id: channel,
+          cumulative_authorized: amount,
+          channel_claim_signature: signature,
+        }),
+      );
+    } catch (err) {
+      setClaimError(err instanceof Error ? err.message : "claim verify failed");
+    } finally {
+      setClaimBusy(false);
+    }
   }
 
   async function onBook(e: FormEvent) {
@@ -192,10 +329,11 @@ export function ProtocolLanes() {
             TLT · DRC · OVL reads
           </h2>
           <p className="agora-lede mt-4">
-            Experimental queries for native balances, every wired typed-lane
-            id, DRC account objects, and the native DEX book. Compact gossip
-            still uses the full body for every non-UTXO lane. Explorer never
-            signs.
+            Experimental queries for native balances, DRC account policy/keys,
+            every wired typed-lane id (including payments, channels, and
+            issued-control receipts), invoice lookup, and off-ledger claim
+            verify. Compact gossip still uses the full body for every non-UTXO
+            lane. Explorer never signs.
           </p>
         </div>
         <p className="font-mono text-xs text-mist opacity-80">{rpcUrl()}</p>
@@ -276,6 +414,18 @@ export function ProtocolLanes() {
                     : "—"}
                 </dd>
               </div>
+              <div>
+                <dt className="text-mist">account policy</dt>
+                <dd>{lookupStatus(accountPolicy) ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-mist">account keys</dt>
+                <dd>{lookupStatus(accountKeys) ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-mist">signer list</dt>
+                <dd>{lookupStatus(accountSignerList) ?? "—"}</dd>
+              </div>
             </dl>
           ) : null}
         </form>
@@ -284,8 +434,9 @@ export function ProtocolLanes() {
       <form onSubmit={onLane} className="mt-10 flex flex-col gap-4 md:flex-row md:items-end">
         <label className="flex min-w-0 flex-1 flex-col gap-2">
           <span className="text-sm text-mist">
-            Typed-lane id (covenant, offer, escrow, check, DA, passport, hub,
-            grant, mission, treasury, vesting)
+            Typed-lane id (payment, channel, receipts, covenant, offer,
+            escrow, check, DA, passport, hub, grant, mission, treasury,
+            vesting)
           </span>
           <input
             type="text"
@@ -314,6 +465,173 @@ export function ProtocolLanes() {
           <span className="text-[var(--agora-cyan)]">{hit.status}</span>
         </p>
       ))}
+
+      <div className="mt-12 grid gap-8 lg:grid-cols-2">
+        <form onSubmit={onInvoice} className="flex min-w-0 flex-col gap-3">
+          <p className="agora-eyebrow">DRC payment by invoice</p>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Recipient</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="Bech32m or 40-hex"
+              value={invoiceRecipient}
+              onChange={(e) => setInvoiceRecipient(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Invoice id</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="64 hex characters"
+              value={invoiceId}
+              onChange={(e) => setInvoiceId(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={invoiceBusy || !invoiceRecipient.trim() || !invoiceId.trim()}
+            className="agora-btn agora-btn-primary self-start disabled:opacity-50"
+          >
+            {invoiceBusy ? "Looking up…" : "agora_getDrcPaymentByInvoice"}
+          </button>
+          {invoiceError ? (
+            <p className="text-sm text-[var(--agora-danger)]">{invoiceError}</p>
+          ) : null}
+          {invoiceHit ? (
+            <p className="font-mono text-sm">
+              invoice{" "}
+              <span className="text-[var(--agora-cyan)]">
+                {(invoiceHit as { status?: string }).status ?? "result"}
+              </span>
+            </p>
+          ) : null}
+        </form>
+
+        <form onSubmit={onPreauth} className="flex min-w-0 flex-col gap-3">
+          <p className="agora-eyebrow">DRC deposit preauth</p>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Owner</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="Bech32m or 40-hex"
+              value={preauthOwner}
+              onChange={(e) => setPreauthOwner(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Authorized source</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="Bech32m or 40-hex"
+              value={preauthSource}
+              onChange={(e) => setPreauthSource(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={preauthBusy || !preauthOwner.trim() || !preauthSource.trim()}
+            className="agora-btn agora-btn-primary self-start disabled:opacity-50"
+          >
+            {preauthBusy ? "Looking up…" : "agora_getDrcDepositPreauth"}
+          </button>
+          {preauthError ? (
+            <p className="text-sm text-[var(--agora-danger)]">{preauthError}</p>
+          ) : null}
+          {preauthHit ? (
+            <p className="font-mono text-sm">
+              preauth{" "}
+              <span className="text-[var(--agora-cyan)]">
+                {(preauthHit as { status?: string }).status ?? "result"}
+              </span>
+            </p>
+          ) : null}
+        </form>
+      </div>
+
+      <form onSubmit={onVerifyClaim} className="mt-12 flex flex-col gap-3">
+        <p className="agora-eyebrow">Verify channel claim</p>
+        <p className="text-sm text-mist">
+          Pure verification of a supplied cumulative claim signature against a
+          live channel. No private keys leave the device; explorer never signs.
+        </p>
+        <div className="grid gap-4 md:grid-cols-3">
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Channel id</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="64 hex characters"
+              value={claimChannel}
+              onChange={(e) => setClaimChannel(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Cumulative authorized</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="amount"
+              value={claimAmount}
+              onChange={(e) => setClaimAmount(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="text-sm text-mist">Claim signature hex</span>
+            <input
+              type="text"
+              spellCheck={false}
+              autoComplete="off"
+              placeholder="secp256k1 signature hex"
+              value={claimSignature}
+              onChange={(e) => setClaimSignature(e.target.value)}
+              className="w-full border border-[var(--agora-line)] bg-[rgba(14,16,20,0.55)] px-4 py-3 font-mono text-sm text-[var(--agora-ink)] outline-none focus:border-[var(--agora-gold)]"
+            />
+          </label>
+        </div>
+        <button
+          type="submit"
+          disabled={
+            claimBusy ||
+            !claimChannel.trim() ||
+            !claimAmount.trim() ||
+            !claimSignature.trim()
+          }
+          className="agora-btn agora-btn-primary self-start disabled:opacity-50"
+        >
+          {claimBusy ? "Verifying…" : "agora_verifyDrcPaymentChannelClaim"}
+        </button>
+        {claimError ? (
+          <p className="text-sm text-[var(--agora-danger)]">{claimError}</p>
+        ) : null}
+        {claimHit ? (
+          <p className="font-mono text-sm">
+            claim{" "}
+            <span className="text-[var(--agora-cyan)]">
+              {typeof claimHit === "object" &&
+              claimHit !== null &&
+              (claimHit as { valid?: unknown }).valid === true
+                ? "valid"
+                : lookupStatus(claimHit) ?? "result"}
+            </span>
+          </p>
+        ) : null}
+      </form>
 
       <form onSubmit={onBook} className="mt-12 flex flex-col gap-4">
         <p className="agora-eyebrow">DRC native DEX book</p>

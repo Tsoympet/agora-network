@@ -9,6 +9,7 @@ mod backend;
 mod civic;
 mod genesis_cli;
 mod http;
+mod mempool_kv;
 mod schema_cli;
 mod startup;
 mod storage_policy;
@@ -25,10 +26,9 @@ use std::{
 use agora_consensus::PowAlgorithm;
 use agora_p2p::{
     dial_addr, drain_orphans_after, fetch_seeder_peers_best_effort, load_or_generate_identity,
-    merge_bootstrap_peers, reconstruct_compact_block, reconstruct_typed_compact,
-    validate_header_chain, FetchReason, GetHeadersRequest, Mempool, NetworkConfig, NetworkEvent,
-    NetworkHandle, NetworkMessage, NetworkNode, OrphanPool, PeerId, PendingFetches,
-    ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
+    merge_bootstrap_peers, validate_header_chain, FetchReason, GetHeadersRequest, Mempool,
+    NetworkConfig, NetworkEvent, NetworkHandle, NetworkMessage, NetworkNode, OrphanPool, PeerId,
+    PendingFetches, ReconstructError, SeederBook, MAX_HEADERS_PER_RESPONSE,
 };
 use agora_rpc::RpcDispatcher;
 use agora_state_machine::{
@@ -55,6 +55,7 @@ use crate::{
         NodeBackendConfig,
     },
     http::{enforce_rpc_bind_policy, serve_rpc, RpcHttpConfig},
+    mempool_kv::open_boot_mempool,
     startup::{p2p_identity_path, prepare_legacy_datadir, prepare_trident_datadir},
     storage_policy::StoragePolicy,
 };
@@ -653,19 +654,7 @@ async fn main() {
         hot_window = storage.hot_window,
         "state store opened"
     );
-    let mempool_path = agora_p2p::mempool_persist_path(&data_dir);
-    let mempool = Arc::new(Mutex::new(
-        Mempool::open_persistent(&mempool_path, 10_000).unwrap_or_else(|err| {
-            warn!(
-                error = %err,
-                path = %mempool_path.display(),
-                "portable mempool snapshot rejected; starting empty"
-            );
-            let mut pool = Mempool::new(10_000);
-            pool.set_persist_path(&mempool_path);
-            pool
-        }),
-    ));
+    let mempool = Arc::new(Mutex::new(open_boot_mempool(&store, &data_dir)));
 
     let mut seeder_book = net_cfg.dns_seeder_url.as_ref().map(|url| {
         SeederBook::new(
@@ -1003,13 +992,11 @@ async fn main() {
                             pending.complete(&hash);
                             continue;
                         }
-                        let lookup = |sid: &[u8; 8]| {
-                            mempool
-                                .lock()
-                                .ok()
-                                .and_then(|pool| pool.get_by_short_id(sid).cloned())
+                        let reconstructed = match mempool.lock() {
+                            Ok(pool) => pool.inflate_compact_block(header, &short_ids),
+                            Err(_) => Err(ReconstructError::MissingShortIds(short_ids.len())),
                         };
-                        match reconstruct_compact_block(header, &short_ids, lookup) {
+                        match reconstructed {
                             Ok(block) => {
                                 pending.complete(&hash);
                                 if relay_drop_stale_parents(&chain, &block) {
@@ -1093,13 +1080,11 @@ async fn main() {
                             pending.complete(&hash);
                             continue;
                         }
-                        let lookup = |kind: u8, sid: &[u8; 8]| {
-                            mempool
-                                .lock()
-                                .ok()
-                                .and_then(|pool| pool.clone_typed_lane_item(kind, sid))
+                        let reconstructed = match mempool.lock() {
+                            Ok(pool) => pool.inflate_typed_compact(body),
+                            Err(_) => Err(ReconstructError::MissingShortIds(1)),
                         };
-                        match reconstruct_typed_compact(body, lookup) {
+                        match reconstructed {
                             Ok(block) => {
                                 pending.complete(&hash);
                                 if relay_drop_stale_parents(&chain, &block) {

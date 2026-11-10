@@ -8,7 +8,7 @@ Access layer for wallets, explorer, faucet, and CEX gateways.
 | --- | --- |
 | `agora_getDagTips` | Current DAG tips (hex hashes) |
 | `agora_getBlock` | Block by hash |
-| `agora_getTransaction` | Lookup by `tx_id`: `pending` (mempool) / `confirmed` (indexed) / `unknown` |
+| `agora_getTransaction` | Lookup by `tx_id`: `pending` (mempool) / `confirmed` (indexed) / `unknown`. Indexed results include a pairwise TLT `merkle_proof` (`tx_merkle_root`, siblings, `header_binds_tx_merkle`) |
 | `agora_getMempool` | Pending pool snapshot (`count` + fee-ordered `transactions`, optional `limit`) |
 | `agora_getNodeInfo` | Operator snapshot: peer id, connected peers, tips, mempool, PoW, archival / hot window, `min_relay_fee` |
 | `agora_estimateFee` | `{ min_relay_fee, suggested_fee }` for wallet coin selection |

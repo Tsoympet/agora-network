@@ -1611,22 +1611,23 @@ impl RpcBackend for NodeBackend {
                 if let Some(status) = acceptance {
                     if !status.is_accepted() {
                         return Ok(TxLookup::orphaned(tx.clone(), block_id, index)
-                            .with_acceptance(status.as_str()));
+                            .with_acceptance(status.as_str())
+                            .with_block_merkle(&block));
                     }
                     return Ok(
                         TxLookup::confirmed(tx.clone(), block_id, index, confirmations)
-                            .with_acceptance(status.as_str()),
+                            .with_acceptance(status.as_str())
+                            .with_block_merkle(&block),
                     );
                 }
-                Ok(TxLookup::confirmed(
-                    tx.clone(),
-                    block_id,
-                    index,
-                    confirmations,
-                ))
+                Ok(
+                    TxLookup::confirmed(tx.clone(), block_id, index, confirmations)
+                        .with_block_merkle(&block),
+                )
             }
             None => {
-                let mut lookup = TxLookup::orphaned(tx.clone(), block_id, index);
+                let mut lookup =
+                    TxLookup::orphaned(tx.clone(), block_id, index).with_block_merkle(&block);
                 if let Some(status) = acceptance {
                     lookup.acceptance = Some(status.as_str().into());
                 }
@@ -3811,7 +3812,7 @@ mod tests {
         credit_account_into, put_burned_supply_into, put_issued_supply_into, ColumnFamily,
         GenesisBuilder, WriteBatch,
     };
-    use agora_types::{Address, Block, OutPoint, TxIn, TxOut};
+    use agora_types::{verify_tlt_tx_merkle, Address, Block, OutPoint, TxIn, TxOut};
     use borsh::BorshDeserialize;
 
     const PHRASE: &str =
@@ -4980,6 +4981,18 @@ mod tests {
         assert_eq!(confirmed.acceptance.as_deref(), Some("Accepted"));
         assert_eq!(confirmed.block_id, Some(block_id));
         assert_eq!(confirmed.index, Some(1));
+        let proof = confirmed.merkle_proof.expect("indexed TLT proof");
+        assert_eq!(proof.tx_id, tx_id);
+        assert_eq!(proof.index, 1);
+        assert!(proof.header_binds_tx_merkle);
+        assert!(verify_tlt_tx_merkle(
+            &proof.tx_merkle_root,
+            &agora_types::TltTxMerkleProof {
+                index: proof.index,
+                tx_id: proof.tx_id,
+                siblings: proof.siblings.clone(),
+            }
+        ));
     }
 
     #[test]
