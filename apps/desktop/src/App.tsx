@@ -30,6 +30,9 @@ import {
   sendOvlExecution,
   type DrcAccountPolicyAction,
   type DrcWalletFamilyLane,
+  sendStakeTx,
+  STAKE_OP_KINDS,
+  type StakeOpKindName,
   sendTltCovenant,
   sendTransfer,
   shortAddress,
@@ -110,12 +113,15 @@ export function App() {
     | "tlt-covenant"
     | "ovl"
     | "ovl-exec"
+    | "ovl-stake"
     | "drc"
     | "drc-offer"
     | "drc-offer-cancel"
     | "drc-ticket"
+    | "drc-stake"
     | DrcWalletFamilyLane
   >("tlt");
+  const [stakeKind, setStakeKind] = useState<StakeOpKindName>("Bond");
   const [offerIssuer, setOfferIssuer] = useState("");
   const [offerCurrency, setOfferCurrency] = useState("USD");
   const [offerGets, setOfferGets] = useState("1");
@@ -368,16 +374,19 @@ export function App() {
     }
     const amt = Number(amount);
     const feeN = Number(fee);
+    const stakeLane = sendLane === "ovl-stake" || sendLane === "drc-stake";
+    const stakeMeta = STAKE_OP_KINDS.find((entry) => entry.id === stakeKind);
     const amountOptional =
       sendLane === "drc-offer-cancel" ||
       sendLane === "drc-ticket" ||
       (DRC_WALLET_FAMILY_LANES.some((lane) => lane.id === sendLane) &&
-        !drcFamilyNeedsAmount(sendLane));
+        !drcFamilyNeedsAmount(sendLane)) ||
+      (stakeLane && stakeMeta && !stakeMeta.needsAmount);
     if (!amountOptional && (!Number.isFinite(amt) || amt <= 0)) {
       setSendError("Amount must be a positive number");
       return;
     }
-    if (!Number.isFinite(feeN) || feeN < 1) {
+    if (!stakeLane && (!Number.isFinite(feeN) || feeN < 1)) {
       setSendError("Fee must be ≥ 1 (min relay)");
       return;
     }
@@ -461,6 +470,25 @@ export function App() {
         const { id: submitted, built } = await sendDrcOfferCancel(client, {
           ...common,
           offerId: offerId.trim(),
+        });
+        id = submitted;
+        fromBech32 = built.fromBech32;
+        fromHex = built.from;
+      } else if (sendLane === "ovl-stake" || sendLane === "drc-stake") {
+        if (stakeKind === "Delegate" && !toAddress.trim()) {
+          throw new Error("Delegate requires a validator address");
+        }
+        const { id: submitted, built } = await sendStakeTx(client, {
+          mnemonic,
+          network: walletNetwork,
+          asset: sendLane === "ovl-stake" ? "OVL" : "DRC",
+          kind: stakeKind,
+          amount: Number.isFinite(amt) ? Math.floor(amt) : 0,
+          validatorAddress: stakeKind === "Delegate" ? toAddress.trim() : undefined,
+          withdrawalAddress:
+            stakeKind === "Bond" && toAddress.trim() ? toAddress.trim() : undefined,
+          consensusPubkeyHex: extraHex.trim() || undefined,
+          commissionBps: Math.floor(Number(quorum) || 0),
         });
         id = submitted;
         fromBech32 = built.fromBech32;
@@ -959,10 +987,12 @@ export function App() {
             <option value="tlt-covenant">TLT covenant P2PKH</option>
             <option value="ovl">OVL account transfer</option>
             <option value="ovl-exec">OVL execution v1</option>
+            <option value="ovl-stake">OVL stake</option>
             <option value="drc">DRC payment v4</option>
             <option value="drc-offer">DRC offer create</option>
             <option value="drc-offer-cancel">DRC offer cancel</option>
             <option value="drc-ticket">DRC ticket create</option>
+            <option value="drc-stake">DRC stake</option>
             {DRC_WALLET_FAMILY_LANES.filter((lane) => lane.id !== "drc-ticket").map(
               (lane) => (
                 <option key={lane.id} value={lane.id}>
@@ -971,7 +1001,57 @@ export function App() {
               ),
             )}
           </select>
-          {sendLane === "drc-offer-cancel" || drcFamilyNeedsObjectId(sendLane) ? (
+          {sendLane === "ovl-stake" || sendLane === "drc-stake" ? (
+            <>
+              <select
+                value={stakeKind}
+                onChange={(e) => setStakeKind(e.target.value as StakeOpKindName)}
+                aria-label="Stake operation"
+                style={fieldStyle}
+              >
+                {STAKE_OP_KINDS.map((kind) => (
+                  <option key={kind.id} value={kind.id}>
+                    {kind.label}
+                  </option>
+                ))}
+              </select>
+              {stakeKind === "Delegate" || stakeKind === "Bond" ? (
+                <input
+                  value={toAddress}
+                  onChange={(e) => setToAddress(e.target.value)}
+                  placeholder={
+                    stakeKind === "Bond"
+                      ? "withdrawal (optional, default self)"
+                      : "validator Bech32m or 40-hex"
+                  }
+                  aria-label={stakeKind === "Bond" ? "Withdrawal address" : "Validator address"}
+                  spellCheck={false}
+                  disabled={!networkReady}
+                  style={fieldStyle}
+                />
+              ) : null}
+              {stakeKind === "Bond" ? (
+                <>
+                  <input
+                    value={extraHex}
+                    onChange={(e) => setExtraHex(e.target.value)}
+                    placeholder="consensus pubkey (optional compressed secp256k1 hex)"
+                    aria-label="Consensus public key"
+                    spellCheck={false}
+                    style={fieldStyle}
+                  />
+                  <input
+                    value={quorum}
+                    onChange={(e) => setQuorum(e.target.value)}
+                    placeholder="commission bps (0-10000)"
+                    aria-label="Commission basis points"
+                    inputMode="numeric"
+                    style={fieldStyle}
+                  />
+                </>
+              ) : null}
+            </>
+          ) : sendLane === "drc-offer-cancel" || drcFamilyNeedsObjectId(sendLane) ? (
             <input
               value={offerId}
               onChange={(e) => setOfferId(e.target.value)}
