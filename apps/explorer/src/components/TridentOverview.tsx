@@ -3,6 +3,7 @@ import type {
   LightAmount,
   LightCommunityRegistry,
   LightFinality,
+  LightNativeAssetSupply,
   LightProtocolTreasuries,
   LightRewardPool,
   LightValidatorSet,
@@ -44,6 +45,7 @@ type Snapshot = {
   finality: LightFinality | null;
   validators: Partial<Record<"OVL" | "DRC", LightValidatorSet>>;
   rewards: Partial<Record<"OVL" | "DRC", LightRewardPool>>;
+  supply: Partial<Record<NativeAssetTicker, LightNativeAssetSupply>>;
   treasuries: LightProtocolTreasuries | null;
   community: LightCommunityRegistry | null;
 };
@@ -97,6 +99,9 @@ export function TridentOverview() {
           client.getRewardPool("DRC"),
           client.getProtocolTreasuries(),
           client.getCommunityRegistry(24),
+          client.getNativeAssetSupply("TLT"),
+          client.getNativeAssetSupply("OVL"),
+          client.getNativeAssetSupply("DRC"),
         ] as const);
         if (cancelled) return;
 
@@ -117,6 +122,11 @@ export function TridentOverview() {
           },
           treasuries: value<LightProtocolTreasuries>(5),
           community: value<LightCommunityRegistry>(6),
+          supply: {
+            TLT: value<LightNativeAssetSupply>(7) ?? undefined,
+            OVL: value<LightNativeAssetSupply>(8) ?? undefined,
+            DRC: value<LightNativeAssetSupply>(9) ?? undefined,
+          },
         });
         const failed = requests.filter((result) => result.status === "rejected").length;
         setUnavailable(failed);
@@ -221,6 +231,18 @@ export function TridentOverview() {
                     {formatAmount(
                       asset.ticker === "TLT" ? treasury?.balance : reward?.amount,
                     )}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-mist">net supply</dt>
+                  <dd className="mt-1 text-[var(--agora-ink)]">
+                    {formatAmount(snapshot?.supply[asset.ticker]?.net_supply)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-mist">burned</dt>
+                  <dd className="mt-1 text-[var(--agora-ink)]">
+                    {formatAmount(snapshot?.supply[asset.ticker]?.burned_supply)}
                   </dd>
                 </div>
               </dl>

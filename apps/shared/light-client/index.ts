@@ -33,6 +33,7 @@ export {
   type LightTxStatus,
   type LightUtxo,
   type LightUtxoSet,
+  type LightNativeAssetSupply,
   type LightRewardPool,
   type LightValidator,
   type LightValidatorSet,
